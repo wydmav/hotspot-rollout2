@@ -1,0 +1,6 @@
+{
+  "name": "T-Connect Cloud Controller",
+  "description": "Multi-tenant cloud controller and monetization engine for MikroTik hotspots across Hotspots, Communities, Transit, Stadiums, and Parks with Lesotho payment gateways.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

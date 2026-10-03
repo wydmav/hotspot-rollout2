@@ -1,0 +1,31 @@
+# ==============================================================================
+# T-Connect Cloud Controller — Caddy Reverse Proxy with Automatic HTTPS
+# Replace {$DOMAIN:localhost} with your actual domain (e.g. hotspot.mycompany.co.ls)
+# ==============================================================================
+
+{$DOMAIN:localhost} {
+    # Automatic HTTPS via Let's Encrypt / ZeroSSL
+    encode zstd gzip
+
+    # Proxy all traffic to the Node.js / Express backend container
+    reverse_proxy app:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Security Headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}
