@@ -608,23 +608,25 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
   // Storage helper: Load config for a scope (ensuring M10, M60, M280 baseline denominations)
   const loadScopeConfig = (scope: VerticalType): ScopePortalConfig => {
-    try {
-      const stored = localStorage.getItem(`tconnect_portal_scope_${scope}`);
-      if (stored) {
-        const parsed: ScopePortalConfig = JSON.parse(stored);
-        // Ensure baseline denominations M10 (Daily), M60 (Weekly), M280 (Monthly) are seeded
-        const has10 = parsed.plans?.some((p) => p.price === 10);
-        const has60 = parsed.plans?.some((p) => p.price === 60);
-        const has280 = parsed.plans?.some((p) => p.price === 280);
-        if (!has10 || !has60 || !has280) {
-          parsed.plans = DEFAULT_SCOPE_CONFIGS[scope].plans;
-          try {
-            localStorage.setItem(`tconnect_portal_scope_${scope}`, JSON.stringify(parsed));
-          } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(`tconnect_portal_scope_${scope}`);
+        if (stored) {
+          const parsed: ScopePortalConfig = JSON.parse(stored);
+          // Ensure baseline denominations M10 (Daily), M60 (Weekly), M280 (Monthly) are seeded
+          const has10 = parsed.plans?.some((p) => p.price === 10);
+          const has60 = parsed.plans?.some((p) => p.price === 60);
+          const has280 = parsed.plans?.some((p) => p.price === 280);
+          if (!has10 || !has60 || !has280) {
+            parsed.plans = DEFAULT_SCOPE_CONFIGS[scope].plans;
+            try {
+              window.localStorage.setItem(`tconnect_portal_scope_${scope}`, JSON.stringify(parsed));
+            } catch {}
+          }
+          return parsed;
         }
-        return parsed;
-      }
-    } catch {}
+      } catch {}
+    }
     return DEFAULT_SCOPE_CONFIGS[scope];
   };
 
@@ -670,9 +672,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       ...prev,
       [updated.scope]: updated,
     }));
-    try {
-      localStorage.setItem(`tconnect_portal_scope_${updated.scope}`, JSON.stringify(updated));
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(`tconnect_portal_scope_${updated.scope}`, JSON.stringify(updated));
+      } catch {}
+    }
     setSavedToast(`Saved ${updated.scopeLabel} portal profile!`);
     setTimeout(() => setSavedToast(null), 2500);
   };

@@ -109,6 +109,7 @@ export default function App() {
     storage.deleteRouter(routerId);
     showToast('Router removed and tunnel keys revoked.');
     if (isSupabaseConnected) {
+      supabaseService.deleteRouterFromSupabase(routerId);
       supabaseService.syncRoutersToSupabase(storage.getState().routers);
     }
   };
@@ -127,8 +128,11 @@ export default function App() {
 
   // Plan & Voucher Handlers
   const handleCreatePlan = (planData: any) => {
-    storage.createPlan(planData);
+    const created = storage.createPlan(planData);
     showToast('New hotspot plan saved with exact speed & device quotas.');
+    if (isSupabaseConnected && created) {
+      supabaseService.syncPlanToSupabase(created);
+    }
   };
 
   const handleGenerateBatch = (planId: string, count: number) => {

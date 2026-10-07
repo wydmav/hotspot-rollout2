@@ -78,6 +78,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
   const handleSyncAll = async () => {
     setIsSyncing(true);
     const state = storage.getState();
+    await supabaseService.syncPlansToSupabase(state.plans);
     await supabaseService.syncRoutersToSupabase(state.routers);
     for (const v of state.vouchers.slice(0, 50)) {
       await supabaseService.syncVoucherToSupabase(v);
@@ -88,7 +89,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
     setIsSyncing(false);
     setConnectionStatus({
       success: true,
-      message: 'All routers, vouchers, and transactions synchronized to Supabase PostgreSQL tables.'
+      message: 'All plans, routers, vouchers, and transactions synchronized to Supabase PostgreSQL tables.'
     });
   };
 

@@ -250,25 +250,38 @@ class StorageService {
   constructor() {
     this.state = this.loadInitialState();
     this.checkVoucherStock();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_KEY && e.newValue) {
+          try {
+            this.state = JSON.parse(e.newValue);
+            this.notify();
+          } catch {}
+        }
+      });
+    }
   }
 
   private loadInitialState() {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.plans) {
-          const has10 = parsed.plans.some((p: HotspotPlan) => p.price === 10);
-          const has60 = parsed.plans.some((p: HotspotPlan) => p.price === 60);
-          const has280 = parsed.plans.some((p: HotspotPlan) => p.price === 280);
-          if (!has10 || !has60 || !has280) {
-            parsed.plans = STARTER_PLANS;
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.plans) {
+            const has10 = parsed.plans.some((p: HotspotPlan) => p.price === 10);
+            const has60 = parsed.plans.some((p: HotspotPlan) => p.price === 60);
+            const has280 = parsed.plans.some((p: HotspotPlan) => p.price === 280);
+            if (!has10 || !has60 || !has280) {
+              parsed.plans = STARTER_PLANS;
+            }
           }
+          return parsed;
         }
-        return parsed;
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
     // Clean scratch state: 0 routers, 0 vouchers, 0 transactions, clean unconfigured gateways
     return {
@@ -285,10 +298,12 @@ class StorageService {
   }
 
   private saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-    } catch (e) {
-      console.error('Failed to save state to localStorage', e);
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      } catch (e) {
+        // quiet fallback
+      }
     }
     this.notify();
   }
@@ -330,16 +345,16 @@ class StorageService {
     transactions?: PaymentTransaction[];
     plans?: HotspotPlan[];
   }) {
-    if (data.routers && data.routers.length > 0) {
+    if (data.routers !== undefined) {
       this.state.routers = data.routers;
     }
-    if (data.vouchers && data.vouchers.length > 0) {
+    if (data.vouchers !== undefined) {
       this.state.vouchers = data.vouchers;
     }
-    if (data.transactions && data.transactions.length > 0) {
+    if (data.transactions !== undefined) {
       this.state.transactions = data.transactions;
     }
-    if (data.plans && data.plans.length > 0) {
+    if (data.plans !== undefined && data.plans.length > 0) {
       this.state.plans = data.plans;
     }
     this.saveState();
@@ -980,20 +995,24 @@ class StorageService {
   }
 
   getVoucherLowThreshold(): number {
-    try {
-      const stored = localStorage.getItem('tconnect_voucher_threshold');
-      if (stored) {
-        const val = parseInt(stored, 10);
-        if (!isNaN(val) && val >= 0) return val;
-      }
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem('tconnect_voucher_threshold');
+        if (stored) {
+          const val = parseInt(stored, 10);
+          if (!isNaN(val) && val >= 0) return val;
+        }
+      } catch {}
+    }
     return 5;
   }
 
   setVoucherLowThreshold(threshold: number): void {
-    try {
-      localStorage.setItem('tconnect_voucher_threshold', threshold.toString());
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem('tconnect_voucher_threshold', threshold.toString());
+      } catch {}
+    }
     this.checkVoucherStock(threshold);
   }
 

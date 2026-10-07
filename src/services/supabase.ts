@@ -390,10 +390,12 @@ class SupabaseService {
   }
 
   private loadConfig(): SupabaseConfig {
-    try {
-      const stored = localStorage.getItem(SUPABASE_CONFIG_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(SUPABASE_CONFIG_KEY);
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
 
     return {
       url: (import.meta as any).env?.VITE_SUPABASE_URL || '',
@@ -425,17 +427,21 @@ class SupabaseService {
       anonKey: anonKey.trim(),
       isConnected: false
     };
-    try {
-      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+      } catch {}
+    }
     this.initClient();
   }
 
   disconnect() {
     this.config.isConnected = false;
-    try {
-      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
-    } catch {}
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+      } catch {}
+    }
   }
 
   isConfigured(): boolean {
@@ -460,7 +466,9 @@ class SupabaseService {
         if (error.code === '42P01') {
           this.config.isConnected = true;
           this.config.lastConnectedAt = new Date().toISOString();
-          localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+          if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+            window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+          }
           return {
             success: true,
             latencyMs,
@@ -472,7 +480,9 @@ class SupabaseService {
 
       this.config.isConnected = true;
       this.config.lastConnectedAt = new Date().toISOString();
-      localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+      }
 
       return {
         success: true,
@@ -672,6 +682,85 @@ class SupabaseService {
       return true;
     } catch (e) {
       console.warn('Supabase sync transaction error:', e);
+      return false;
+    }
+  }
+
+  async syncPlanToSupabase(plan: HotspotPlan): Promise<boolean> {
+    if (!this.client || !this.config.isConnected) return false;
+    try {
+      await this.client.from('plans').upsert({
+        id: plan.id,
+        name: plan.name,
+        vertical: plan.vertical,
+        price: plan.price,
+        currency: plan.currency || 'M',
+        duration_seconds: plan.durationSeconds,
+        duration_label: plan.durationLabel,
+        data_cap_mb: plan.dataCapMb || null,
+        download_speed_mbps: plan.downloadSpeedMbps,
+        upload_speed_mbps: plan.uploadSpeedMbps,
+        device_limit: plan.deviceLimit,
+        burst_download_mbps: plan.burstDownloadMbps || null,
+        burst_upload_mbps: plan.burstUploadMbps || null,
+        fair_use_threshold_mb: plan.fairUseThresholdMb || null,
+        fair_use_download_mbps: plan.fairUseDownloadMbps || null,
+        is_popular: plan.isPopular || false
+      }, { onConflict: 'id' });
+      return true;
+    } catch (e) {
+      console.warn('Supabase sync plan error:', e);
+      return false;
+    }
+  }
+
+  async syncPlansToSupabase(plans: HotspotPlan[]): Promise<boolean> {
+    if (!this.client || !this.config.isConnected) return false;
+    try {
+      const records = plans.map(p => ({
+        id: p.id,
+        name: p.name,
+        vertical: p.vertical,
+        price: p.price,
+        currency: p.currency || 'M',
+        duration_seconds: p.durationSeconds,
+        duration_label: p.durationLabel,
+        data_cap_mb: p.dataCapMb || null,
+        download_speed_mbps: p.downloadSpeedMbps,
+        upload_speed_mbps: p.uploadSpeedMbps,
+        device_limit: p.deviceLimit,
+        burst_download_mbps: p.burstDownloadMbps || null,
+        burst_upload_mbps: p.burstUploadMbps || null,
+        fair_use_threshold_mb: p.fairUseThresholdMb || null,
+        fair_use_download_mbps: p.fairUseDownloadMbps || null,
+        is_popular: p.isPopular || false
+      }));
+      await this.client.from('plans').upsert(records, { onConflict: 'id' });
+      return true;
+    } catch (e) {
+      console.warn('Supabase sync plans error:', e);
+      return false;
+    }
+  }
+
+  async deleteRouterFromSupabase(routerId: string): Promise<boolean> {
+    if (!this.client || !this.config.isConnected) return false;
+    try {
+      await this.client.from('routers').delete().eq('id', routerId);
+      return true;
+    } catch (e) {
+      console.warn('Supabase delete router error:', e);
+      return false;
+    }
+  }
+
+  async deletePlanFromSupabase(planId: string): Promise<boolean> {
+    if (!this.client || !this.config.isConnected) return false;
+    try {
+      await this.client.from('plans').delete().eq('id', planId);
+      return true;
+    } catch (e) {
+      console.warn('Supabase delete plan error:', e);
       return false;
     }
   }

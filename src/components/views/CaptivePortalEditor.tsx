@@ -165,10 +165,12 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
       onSaveConfig(config);
     }
     // Also persist to localStorage for instant reload permanence
-    try {
-      localStorage.setItem('tconnect_portal_editor_config', JSON.stringify(config));
-    } catch {
-      // ignore storage errors
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem('tconnect_portal_editor_config', JSON.stringify(config));
+      } catch {
+        // ignore storage errors
+      }
     }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);

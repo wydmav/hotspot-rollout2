@@ -228,7 +228,7 @@ const LESOTHO_HUBS: RegionNode[] = [
 
 export interface MappedRegionNode extends RegionNode {
   assignedRouters: RouterDevice[];
-  status: 'online' | 'pending' | 'offline' | 'demo_ready';
+  status: 'online' | 'pending' | 'offline' | 'unbound';
   activeSessions: number;
   isFreeMode: boolean;
   hasSolar: boolean;
@@ -264,10 +264,10 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
       const hasSolar = matchedRouters.some((r) => r.solarTelemetry && r.solarTelemetry.batteryPercent > 0);
       const hasFailover = matchedRouters.some((r) => r.wanFailoverEnabled);
 
-      const nodeStatus: 'online' | 'pending' | 'offline' | 'demo_ready' = 
+      const nodeStatus: 'online' | 'pending' | 'offline' | 'unbound' = 
         matchedRouters.length > 0
           ? (hasOnline ? 'online' : hasPending ? 'pending' : 'offline')
-          : 'demo_ready';
+          : 'unbound';
 
       const node: MappedRegionNode = {
         ...hub,
@@ -538,7 +538,8 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
             <div className="absolute inset-0 pointer-events-none p-6">
               {filteredHubs.map((hub) => {
                 const isSelected = selectedHub?.id === hub.id;
-                const isOnline = hub.status === 'online' || hub.status === 'demo_ready';
+                const isOnline = hub.status === 'online';
+                const isUnbound = hub.status === 'unbound';
                 const hasVouchers = hub.activeSessions > 0;
 
                 return (
@@ -572,6 +573,8 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                             ? 'bg-[#f05e17] border-white scale-125 z-30 shadow-[#f05e17]/50'
                             : isOnline
                             ? 'bg-[#0f172a] border-emerald-400 text-emerald-400 group-hover:scale-110 group-hover:border-white'
+                            : isUnbound
+                            ? 'bg-[#090d16] border-slate-700/80 text-slate-500 group-hover:border-slate-500'
                             : 'bg-[#1e293b] border-amber-400 text-amber-400'
                         }`}
                       >
@@ -580,7 +583,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                         ) : hub.category === 'transit' ? (
                           <span className="text-[11px] leading-none">🚌</span>
                         ) : (
-                          <MapPin className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-emerald-400'}`} />
+                          <MapPin className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : isOnline ? 'text-emerald-400' : 'text-slate-500'}`} />
                         )}
 
                         {/* Top Mini Badge for Active Sessions */}
@@ -622,6 +625,10 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                 <span className="text-white">Selected Hub</span>
               </span>
               <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-600 border border-slate-500" />
+                <span>Unbound Point (0 Nodes)</span>
+              </span>
+              <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span>Solar Off-Grid Node</span>
               </span>
@@ -651,10 +658,22 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                     </h3>
                   </div>
 
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>ONLINE</span>
-                  </span>
+                  {selectedHub.assignedRouters.length > 0 && selectedHub.status === 'online' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>ONLINE</span>
+                    </span>
+                  ) : selectedHub.assignedRouters.length > 0 ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                      <AlertTriangle className="w-3 h-3" />
+                      <span>{selectedHub.status.toUpperCase()}</span>
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1 shrink-0">
+                      <Radio className="w-3 h-3" />
+                      <span>UNBOUND (0 NODES)</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* GPS Coordinates & Uplink Info */}
@@ -685,7 +704,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                   <div className="p-2.5 bg-[#121829] rounded-lg border border-[#1f283d]">
                     <div className="text-[10px] text-slate-400">Active Subscribers</div>
                     <div className="text-lg font-black text-emerald-400 mt-0.5">
-                      {selectedHub.activeSessions > 0 ? selectedHub.activeSessions : 8}
+                      {selectedHub.activeSessions}
                     </div>
                   </div>
 

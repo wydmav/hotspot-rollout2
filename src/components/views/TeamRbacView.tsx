@@ -56,11 +56,12 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
     setSelectedSites([]);
   };
 
-  const handleCopyInviteLink = (email: string) => {
-    const inviteUrl = `https://app.tconnect.co.ls/invites/accept?token=inv_tok_${Math.random().toString(36).substring(2, 10)}&email=${encodeURIComponent(email)}`;
+  const handleCopyInviteLink = (email: string, role?: string) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
+    const inviteUrl = `${origin}/#invite?token=inv_tok_${Math.random().toString(36).substring(2, 10)}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedInviteUrl(email);
-    setTimeout(() => setCopiedInviteUrl(null), 2000);
+    setTimeout(() => setCopiedInviteUrl(null), 2500);
   };
 
   const filteredAuditLogs = auditLogs.filter(log => {
@@ -197,7 +198,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                       <div className="flex items-center justify-end gap-2">
                         {member.status === 'invited' && (
                           <button
-                            onClick={() => handleCopyInviteLink(member.email)}
+                            onClick={() => handleCopyInviteLink(member.email, member.role)}
                             className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300"
                           >
                             {copiedInviteUrl === member.email ? 'Link Copied!' : 'Copy Invite Link'}
