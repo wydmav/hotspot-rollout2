@@ -6,6 +6,7 @@ import { RouterOSRenderer } from './src/services/routerosRenderer.js';
 import { WALLED_GARDEN_DOMAINS } from './src/services/storage.js';
 
 dotenv.config();
+process.env.DISABLE_HMR = 'true';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,6 +41,12 @@ app.get('/api/health', (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     environment: isProd ? 'production' : 'development'
   });
+});
+
+// Direct Production Archive Download for VPS Deployment
+app.get('/api/download/bundle.tar.gz', (req: Request, res: Response) => {
+  const archivePath = path.resolve(__dirname, 'tconnect-production-vps.tar.gz');
+  res.download(archivePath, 'tconnect-production-vps.tar.gz');
 });
 
 // -----------------------------------------------------------------------------
@@ -370,7 +377,8 @@ async function startServer() {
     const vite = await createViteServer({
       server: { 
         middlewareMode: true,
-        hmr: false 
+        hmr: false,
+        ws: false
       },
       appType: 'spa'
     });

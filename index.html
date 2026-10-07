@@ -14,6 +14,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // Gracefully ignore WebSocket transport errors in cloud dev sandbox
+      window.addEventListener('error', function(event) {
+        var msg = event && event.message ? String(event.message) : '';
+        var file = event && event.filename ? String(event.filename) : '';
+        if (msg.includes('WebSocket') || msg.includes('createWebSocketModuleRunnerTransport') || file.includes('@vite/client')) {
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          if (event.preventDefault) event.preventDefault();
+          return true;
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event && event.reason ? String(event.reason) : '';
+        if (reason.includes('WebSocket') || reason.includes('createWebSocketModuleRunnerTransport')) {
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          if (event.preventDefault) event.preventDefault();
+        }
+      }, true);
+    </script>
   </head>
   <body class="bg-[#0b0f19] text-slate-100 antialiased selection:bg-[#f05e17] selection:text-white">
     <div id="root"></div>
