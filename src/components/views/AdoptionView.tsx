@@ -22,7 +22,7 @@ import { WALLED_GARDEN_DOMAINS } from '../../services/storage';
 interface AdoptionViewProps {
   routers: RouterDevice[];
   onAdoptRouter: (routerId: string) => void;
-  onAddRouter: (router: any) => RouterDevice;
+  onAddRouter: (router: any) => RouterDevice | undefined;
   onDeleteRouter: (routerId: string) => void;
   selectedVertical: VerticalType | 'all';
 }
@@ -132,10 +132,12 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       firmware: newRosVersion === 'v7' ? '7.15.2' : '6.49.10'
     });
 
-    setSelectedRouter(created);
-    setShowAddModal(false);
-    setNewName('');
-    setNewSiteName('');
+    if (created) {
+      setSelectedRouter(created);
+      setShowAddModal(false);
+      setNewName('');
+      setNewSiteName('');
+    }
   };
 
   const runTerminalAdoptionSimulation = () => {

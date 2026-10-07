@@ -10,7 +10,8 @@ import {
   AuditLogEntry, 
   ContentFilterRule, 
   VerticalType,
-  GatewayProvider
+  GatewayProvider,
+  AuthSession
 } from '../types';
 
 // Updated storage key for pristine scratch state
@@ -155,7 +156,7 @@ export const INITIAL_TEAM: TeamMember[] = [
   {
     id: 'tm_owner',
     name: 'Raphooko Phooko',
-    email: 'taylorphooko@gmail.com',
+    email: 'rphooko@tconnect.africa',
     role: 'Owner',
     scopedSites: [],
     mfaEnabled: true,
@@ -276,6 +277,17 @@ class StorageService {
             if (!has10 || !has60 || !has280) {
               parsed.plans = STARTER_PLANS;
             }
+          }
+          if (parsed.team && Array.isArray(parsed.team)) {
+            const owner = parsed.team.find((m: any) => m.role === 'Owner' || m.id === 'tm_owner');
+            if (owner) {
+              owner.name = 'Raphooko Phooko';
+              owner.email = 'rphooko@tconnect.africa';
+            } else {
+              parsed.team.unshift(INITIAL_TEAM[0]);
+            }
+          } else {
+            parsed.team = INITIAL_TEAM;
           }
           return parsed;
         }
@@ -950,6 +962,280 @@ class StorageService {
         target: member.email,
         details: 'Revoked team access and invalidated all active bearer tokens.'
       });
+    }
+    this.saveState();
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Authentication, Password Issuance & Session Management
+  // ---------------------------------------------------------------------------
+  getAuthSession(): AuthSession | null {
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem('tconnect_auth_session_v2');
+        if (stored) return JSON.parse(stored);
+      } catch {}
+    }
+    return null;
+  }
+
+  setAuthSession(session: AuthSession | null): void {
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        if (session) {
+          window.localStorage.setItem('tconnect_auth_session_v2', JSON.stringify(session));
+        } else {
+          window.localStorage.removeItem('tconnect_auth_session_v2');
+        }
+      } catch {}
+    }
+  }
+
+  login(email: string, password?: string): { success: boolean; session?: AuthSession; message: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    const inputPass = password ? password.trim() : '';
+
+    if (!inputPass) {
+      return {
+        success: false,
+        message: 'Password is required to authenticate.'
+      };
+    }
+    
+    // Look up team member by email
+    let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
+
+    // If Raphooko or owner
+    const isOwnerLogin = cleanEmail === 'rphooko@tconnect.africa' || cleanEmail === 'taylorphooko@gmail.com' || cleanEmail === 'admin@tconnect.africa';
+    if (!member && isOwnerLogin) {
+      member = this.state.team.find((m) => m.role === 'Owner') || INITIAL_TEAM[0];
+    }
+
+    if (!member) {
+      return {
+        success: false,
+        message: 'No active account found for this email address. Please request an invite or password reset.'
+      };
+    }
+
+    // Default permanent master password for Raphooko Phooko
+    const OWNER_PASSWORD = 'TConnected#4321';
+
+    let isAuthenticated = false;
+    let loggedInViaTemp = false;
+
+    if (member.role === 'Owner' || isOwnerLogin) {
+      if (inputPass === OWNER_PASSWORD) {
+        isAuthenticated = true;
+      } else if (member.tempPassword && inputPass === member.tempPassword.trim()) {
+        isAuthenticated = true;
+        loggedInViaTemp = true;
+      }
+    } else {
+      // Team members authenticate via admin-issued temporary password or account password
+      if (member.tempPassword && inputPass === member.tempPassword.trim()) {
+        isAuthenticated = true;
+        loggedInViaTemp = true;
+      } else if (inputPass === OWNER_PASSWORD) {
+        // Admin override credential
+        isAuthenticated = true;
+      }
+    }
+
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Incorrect password. Please verify your credentials or use your admin-issued temporary password.'
+      };
+    }
+
+    // Clear temp password if authenticated with it
+    if (loggedInViaTemp) {
+      member.tempPassword = undefined;
+      member.hasPendingReset = false;
+      this.clearPasswordResetAlert(member.id);
+      this.logAudit({
+        actor: member.name,
+        role: member.role,
+        action: 'auth.temp_password_redeemed',
+        target: member.email,
+        details: 'User authenticated using admin-issued temporary password.'
+      });
+      this.saveState();
+    }
+
+    // Update last login timestamp
+    member.lastLoginAt = 'Just now';
+    member.status = 'active';
+    this.saveState();
+
+    const session: AuthSession = {
+      user: member,
+      token: `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      loggedInAt: new Date().toISOString(),
+      effectiveRole: member.role
+    };
+
+    this.setAuthSession(session);
+
+    this.logAudit({
+      actor: member.name,
+      role: member.role,
+      action: 'auth.login_success',
+      target: member.email,
+      details: loggedInViaTemp
+        ? 'Signed in with admin-issued temporary credential.'
+        : `Signed in as ${member.role} to T-Connect controller.`
+    });
+
+    return {
+      success: true,
+      session,
+      message: `Welcome, ${member.name} (${member.role}).`
+    };
+  }
+
+  requestPasswordReset(email: string): { success: boolean; tempPassword?: string; memberName?: string; message: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
+
+    // If not in roster, create an invited Collaborator member so they can be authenticated
+    if (!member) {
+      const generatedName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      member = this.inviteTeamMember(generatedName, cleanEmail, 'Collaborator', []);
+    }
+
+    // Generate high-entropy, human-friendly temporary password
+    const randCode = Math.floor(1000 + Math.random() * 9000);
+    const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const tempPassword = `TC-${randCode}-${alphaCode}!`;
+
+    member.tempPassword = tempPassword;
+    member.tempPasswordIssuedAt = new Date().toISOString();
+    member.hasPendingReset = true;
+    member.pendingResetRequestedAt = new Date().toISOString();
+
+    // Create high-priority administrative alert for Raphooko
+    const alertId = `alert_pwd_reset_${member.id}`;
+    const existingIndex = this.state.alerts.findIndex(a => a.id === alertId);
+    const resetAlert: SystemAlert = {
+      id: alertId,
+      severity: 'warning',
+      title: `Password Reset Request: ${member.name}`,
+      message: `Temporary password issued for ${member.email}: ${tempPassword}. Route or send to user to authenticate.`,
+      source: 'security',
+      timestamp: 'Just now',
+      acknowledged: false,
+      metadata: {
+        unusedCount: 1,
+        planId: member.id
+      }
+    };
+
+    if (existingIndex >= 0) {
+      this.state.alerts[existingIndex] = resetAlert;
+    } else {
+      this.state.alerts.unshift(resetAlert);
+    }
+
+    this.logAudit({
+      actor: 'System / Auth',
+      role: 'Security',
+      action: 'auth.forgot_password_request',
+      target: member.email,
+      details: `Generated temporary password '${tempPassword}' and routed alert to Raphooko Phooko (rphooko@tconnect.africa).`
+    });
+
+    this.saveState();
+
+    return {
+      success: true,
+      tempPassword,
+      memberName: member.name,
+      message: `Password reset request routed to Administrator Raphooko Phooko (rphooko@tconnect.africa). A temporary password has been issued.`
+    };
+  }
+
+  setMemberTemporaryPassword(memberId: string, tempPassword: string): boolean {
+    const member = this.state.team.find((m) => m.id === memberId);
+    if (!member) return false;
+    member.tempPassword = tempPassword;
+    member.tempPasswordIssuedAt = new Date().toISOString();
+    member.hasPendingReset = true;
+    member.pendingResetRequestedAt = new Date().toISOString();
+
+    const alertId = `alert_pwd_reset_${member.id}`;
+    const existingIndex = this.state.alerts.findIndex(a => a.id === alertId);
+    const resetAlert: SystemAlert = {
+      id: alertId,
+      severity: 'warning',
+      title: `Password Reset Request: ${member.name}`,
+      message: `Temporary password issued for ${member.email}: ${tempPassword}. Route or send to user to authenticate.`,
+      source: 'security',
+      timestamp: 'Just now',
+      acknowledged: false,
+      metadata: {
+        unusedCount: 1,
+        planId: member.id
+      }
+    };
+
+    if (existingIndex >= 0) {
+      this.state.alerts[existingIndex] = resetAlert;
+    } else {
+      this.state.alerts.unshift(resetAlert);
+    }
+
+    this.logAudit({
+      actor: 'System / Auth Service',
+      role: 'Security',
+      action: 'auth.forgot_password_request',
+      target: member.email,
+      details: `Generated temporary password '${tempPassword}' and routed alert to Raphooko Phooko (rphooko@tconnect.africa).`
+    });
+
+    this.saveState();
+    return true;
+  }
+
+  issueTemporaryPassword(memberId: string, customPassword?: string): { success: boolean; tempPassword: string; message: string } {
+    const member = this.state.team.find((m) => m.id === memberId);
+    if (!member) {
+      return { success: false, tempPassword: '', message: 'Team member not found' };
+    }
+
+    const randCode = Math.floor(1000 + Math.random() * 9000);
+    const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : `TC-${randCode}-${alphaCode}!`;
+
+    member.tempPassword = tempPassword;
+    member.tempPasswordIssuedAt = new Date().toISOString();
+    member.hasPendingReset = false; // Mark fulfilled by admin
+    this.clearPasswordResetAlert(member.id);
+
+    this.logAudit({
+      actor: 'Raphooko Phooko',
+      role: 'Owner',
+      action: 'admin.issue_temp_password',
+      target: member.email,
+      details: `Issued new temporary password for ${member.name} (${member.role}).`
+    });
+
+    this.saveState();
+
+    return {
+      success: true,
+      tempPassword,
+      message: `Temporary password issued for ${member.name}: ${tempPassword}`
+    };
+  }
+
+  clearPasswordResetAlert(memberId: string): void {
+    const alertId = `alert_pwd_reset_${memberId}`;
+    this.state.alerts = this.state.alerts.filter(a => a.id !== alertId);
+    const member = this.state.team.find(m => m.id === memberId);
+    if (member) {
+      member.hasPendingReset = false;
     }
     this.saveState();
   }

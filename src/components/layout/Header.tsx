@@ -15,8 +15,9 @@ import {
   SlidersHorizontal,
   Sparkles
 } from 'lucide-react';
-import { SystemAlert, PaymentTransaction } from '../../types';
+import { SystemAlert, PaymentTransaction, TeamMember } from '../../types';
 import { ExportService } from '../../services/exportService';
+import { UserMenuDropdown } from './UserMenuDropdown';
 
 interface HeaderProps {
   currentTab: string;
@@ -39,6 +40,12 @@ interface HeaderProps {
   onUpdateVoucherThreshold?: (threshold: number) => void;
   onTriggerBackgroundCheck?: () => void;
   onQuickRestock?: (count?: number) => void;
+  currentUser?: TeamMember;
+  effectiveRole?: TeamMember['role'];
+  onRolePreviewChange?: (role: TeamMember['role']) => void;
+  onSignOut?: () => void;
+  teamMembersCount?: number;
+  pendingResetCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -62,6 +69,22 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateVoucherThreshold,
   onTriggerBackgroundCheck,
   onQuickRestock,
+  currentUser = {
+    id: 'tm_owner',
+    name: 'Raphooko Phooko',
+    email: 'rphooko@tconnect.africa',
+    role: 'Owner',
+    scopedSites: [],
+    mfaEnabled: true,
+    status: 'active',
+    invitedAt: '2026-10-02',
+    lastLoginAt: 'Just now'
+  },
+  effectiveRole = 'Owner',
+  onRolePreviewChange = () => {},
+  onSignOut = () => {},
+  teamMembersCount = 1,
+  pendingResetCount = 0,
 }) => {
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
   const [showVoucherPopover, setShowVoucherPopover] = useState(false);
@@ -462,15 +485,19 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* User Lockup */}
-        <div className="flex items-center gap-2 pl-2 border-l border-[#232d42]">
-          <div className="w-8 h-8 rounded-lg bg-[#232d42] flex items-center justify-center text-xs font-bold text-white border border-[#334155]">
-            RP
-          </div>
-          <div className="hidden xl:block text-left">
-            <p className="text-xs font-bold text-white leading-tight">Raphooko Phooko</p>
-            <p className="text-[10px] text-slate-400 font-mono">Owner · MFA Verified</p>
-          </div>
+        {/* User Account & Role Dropdown Menu */}
+        <div className="pl-2 border-l border-[#232d42]">
+          <UserMenuDropdown
+            currentUser={currentUser}
+            effectiveRole={effectiveRole}
+            onRolePreviewChange={onRolePreviewChange}
+            onNavigateTab={onNavigateTab || (() => {})}
+            onSignOut={onSignOut}
+            teamMembersCount={teamMembersCount}
+            pendingResetCount={pendingResetCount}
+            biometricActive={biometricActive}
+            onOpenBiometrics={onOpenBiometrics}
+          />
         </div>
       </div>
     </header>

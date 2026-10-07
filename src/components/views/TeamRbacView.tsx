@@ -22,6 +22,7 @@ interface TeamRbacViewProps {
   onInviteMember: (name: string, email: string, role: TeamMember['role'], scopedSites: string[]) => void;
   onUpdateRole: (memberId: string, role: TeamMember['role'], scopedSites?: string[]) => void;
   onDeleteMember: (memberId: string) => void;
+  onIssuePassword?: (memberId: string, customPass?: string) => void;
 }
 
 export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
@@ -31,10 +32,16 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
   onInviteMember,
   onUpdateRole,
   onDeleteMember,
+  onIssuePassword,
 }) => {
   const [activeTab, setActiveTab] = useState<'members' | 'matrix' | 'audit'>('members');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [copiedInviteUrl, setCopiedInviteUrl] = useState<string | null>(null);
+
+  // Password Issuance Modal State
+  const [passwordModalMember, setPasswordModalMember] = useState<TeamMember | null>(null);
+  const [issuedTempPass, setIssuedTempPass] = useState<string>('');
+  const [copiedTempPass, setCopiedTempPass] = useState<boolean>(false);
 
   // Invite Form
   const [inviteName, setInviteName] = useState('');
@@ -186,26 +193,61 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        member.status === 'active'
-                          ? 'bg-emerald-500/10 text-emerald-400'
-                          : 'bg-amber-500/10 text-amber-400'
-                      }`}>
-                        {member.status.toUpperCase()}
-                      </span>
+                      <div className="flex flex-col gap-1 items-start">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          member.status === 'active'
+                            ? 'bg-emerald-500/10 text-emerald-400'
+                            : 'bg-amber-500/10 text-amber-400'
+                        }`}>
+                          {member.status.toUpperCase()}
+                        </span>
+                        {member.hasPendingReset && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                            RESET REQUESTED
+                          </span>
+                        )}
+                        {member.tempPassword && !member.hasPendingReset && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                            <Key className="w-2.5 h-2.5" />
+                            TEMP PASS ACTIVE
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Issue Temporary Password Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rand = `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
+                            setIssuedTempPass(member.tempPassword || rand);
+                            setPasswordModalMember(member);
+                          }}
+                          className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors flex items-center gap-1 ${
+                            member.hasPendingReset
+                              ? 'bg-[#f05e17] hover:bg-[#d94c0b] text-white border-transparent shadow-sm'
+                              : 'bg-[#161d31] hover:bg-[#202942] border-[#232d42] text-slate-300 hover:text-white'
+                          }`}
+                          title="Issue or Re-issue Temporary Password"
+                        >
+                          <Key className="w-3 h-3 text-[#f05e17] group-hover:text-white" />
+                          <span>{member.hasPendingReset ? 'Resolve Reset' : 'Issue Password'}</span>
+                        </button>
+
                         {member.status === 'invited' && (
                           <button
+                            type="button"
                             onClick={() => handleCopyInviteLink(member.email, member.role)}
                             className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300"
                           >
-                            {copiedInviteUrl === member.email ? 'Link Copied!' : 'Copy Invite Link'}
+                            {copiedInviteUrl === member.email ? 'Copied!' : 'Copy Link'}
                           </button>
                         )}
                         {member.role !== 'Owner' && (
                           <button
+                            type="button"
                             onClick={() => onDeleteMember(member.id)}
                             className="text-slate-500 hover:text-rose-400 p-1"
                             title="Revoke Member Access"
@@ -401,6 +443,114 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Issue Temporary Password Modal */}
+      {passwordModalMember && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl font-mono text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2 text-white font-bold">
+                <Key className="w-4 h-4 text-[#f05e17]" />
+                <span>Issue Temporary Password</span>
+              </div>
+              <button 
+                onClick={() => setPasswordModalMember(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Target Member Info */}
+            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] flex items-center justify-between">
+              <div>
+                <div className="font-bold text-white text-sm">{passwordModalMember.name}</div>
+                <div className="text-[11px] text-slate-400">{passwordModalMember.email}</div>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/10 text-[#f05e17] border border-[#f05e17]/30">
+                {passwordModalMember.role}
+              </span>
+            </div>
+
+            {passwordModalMember.hasPendingReset && (
+              <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-300 text-[11px]">
+                This user requested a password reset on the login screen. Issuing a new password fulfills this request.
+              </div>
+            )}
+
+            {/* Temporary Password Field & Copy */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] text-slate-400">Temporary Authentication Password</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={issuedTempPass}
+                  onChange={(e) => setIssuedTempPass(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#232d42] rounded-lg text-[#f05e17] font-bold tracking-wider text-sm focus:outline-none focus:border-[#f05e17]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
+                    setIssuedTempPass(next);
+                  }}
+                  className="px-2.5 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg text-xs"
+                  title="Generate another password"
+                >
+                  Regen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(issuedTempPass);
+                    setCopiedTempPass(true);
+                    setTimeout(() => setCopiedTempPass(false), 2000);
+                  }}
+                  className="px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 rounded-lg text-xs flex items-center gap-1"
+                >
+                  {copiedTempPass ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedTempPass ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Direct Email Link */}
+            <div className="pt-1">
+              <a
+                href={`mailto:${passwordModalMember.email}?subject=Your%20T-Connect%20Controller%20Temporary%20Password&body=Hi%20${encodeURIComponent(passwordModalMember.name)},%0A%0AYour%20temporary%20password%20for%20the%20T-Connect%20Cloud%20Controller%20is:%0A%0A${encodeURIComponent(issuedTempPass)}%0A%0APlease%20sign%20in%20with%20your%20email%20and%20this%20temporary%20password.%0A%0ARegards,%0ARaphooko%20Phooko`}
+                className="text-[11px] text-[#f05e17] hover:underline flex items-center gap-1.5"
+              >
+                <span>Compose Email Dispatch to User</span>
+                <span className="text-slate-500">({passwordModalMember.email})</span>
+              </a>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPasswordModalMember(null)}
+                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onIssuePassword) {
+                    onIssuePassword(passwordModalMember.id, issuedTempPass);
+                  }
+                  setPasswordModalMember(null);
+                }}
+                className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save &amp; Activate Password</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

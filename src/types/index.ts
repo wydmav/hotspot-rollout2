@@ -201,6 +201,17 @@ export interface TeamMember {
   status: 'active' | 'invited' | 'expired';
   invitedAt: string;
   lastLoginAt?: string;
+  tempPassword?: string;
+  tempPasswordIssuedAt?: string;
+  hasPendingReset?: boolean;
+  pendingResetRequestedAt?: string;
+}
+
+export interface AuthSession {
+  user: TeamMember;
+  token: string;
+  loggedInAt: string;
+  effectiveRole: TeamMember['role'];
 }
 
 export interface AuditLogEntry {

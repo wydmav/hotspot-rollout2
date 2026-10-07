@@ -36,6 +36,7 @@ interface NetworkSecurityViewProps {
   onOpenDatabaseModal: () => void;
   isSupabaseConnected: boolean;
   onToggleRouterFreeMode?: (routerId: string | 'all', enabled: boolean) => void;
+  onIssuePassword?: (memberId: string, customPass?: string) => void;
 }
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
@@ -150,6 +151,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           onInviteMember={props.onInviteMember}
           onUpdateRole={props.onUpdateRole}
           onDeleteMember={props.onDeleteMember}
+          onIssuePassword={props.onIssuePassword}
         />
       )}
 

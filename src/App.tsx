@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { storage } from './services/storage';
 import { supabaseService } from './services/supabase';
-import { VerticalType, GatewayProvider } from './types';
+import { VerticalType, GatewayProvider, AuthSession, TeamMember, Voucher, RouterDevice } from './types';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
@@ -14,10 +14,16 @@ import { AdoptionView } from './components/views/AdoptionView';
 import { BillingView } from './components/views/BillingView';
 import { NetworkSecurityView } from './components/views/NetworkSecurityView';
 import { DatabaseModal } from './components/common/DatabaseModal';
-import { Fingerprint, CheckCircle2, ShieldCheck, Database } from 'lucide-react';
+import { LoginView } from './components/auth/LoginView';
+import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye } from 'lucide-react';
 
 export default function App() {
   const [state, setState] = useState(() => storage.getState());
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() => storage.getAuthSession());
+  const [effectiveRole, setEffectiveRole] = useState<TeamMember['role']>(() => {
+    const s = storage.getAuthSession();
+    return s ? s.effectiveRole : 'Owner';
+  });
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedVertical, setSelectedVertical] = useState<VerticalType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,8 +93,23 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const checkPermission = (action: string, description: string): boolean => {
+    if (effectiveRole === 'Viewer') {
+      showToast(`Viewer Access: Read-only mode prevents ${description.toLowerCase()}.`);
+      return false;
+    }
+    if (effectiveRole === 'Collaborator') {
+      if (['delete_router', 'toggle_gateway', 'update_credentials', 'delete_member', 'toggle_freemode'].includes(action)) {
+        showToast(`Collaborator Access: Administrative rights required to ${description.toLowerCase()}.`);
+        return false;
+      }
+    }
+    return true;
+  };
+
   // Router Handlers
   const handleAdoptRouter = (routerId: string) => {
+    if (!checkPermission('adopt_router', 'Adopting router')) return;
     storage.adoptRouter(routerId);
     showToast('Router adopted successfully! WireGuard tunnel online.');
     if (isSupabaseConnected) {
@@ -97,6 +118,7 @@ export default function App() {
   };
 
   const handleAddRouter = (routerData: any) => {
+    if (!checkPermission('add_router', 'Adding new router node')) return;
     const created = storage.addRouter(routerData);
     showToast(`Added ${created.name}. One-liner script ready for terminal import.`);
     if (isSupabaseConnected) {
@@ -106,6 +128,7 @@ export default function App() {
   };
 
   const handleDeleteRouter = (routerId: string) => {
+    if (!checkPermission('delete_router', 'Revoking router and tunnel keys')) return;
     storage.deleteRouter(routerId);
     showToast('Router removed and tunnel keys revoked.');
     if (isSupabaseConnected) {
@@ -115,6 +138,7 @@ export default function App() {
   };
 
   const handleToggleRouterFreeMode = (routerId: string | 'all', enabled: boolean) => {
+    if (!checkPermission('toggle_freemode', 'Toggling fleet free mode')) return;
     storage.toggleRouterFreeMode(routerId, enabled);
     showToast(
       routerId === 'all'
@@ -128,6 +152,7 @@ export default function App() {
 
   // Plan & Voucher Handlers
   const handleCreatePlan = (planData: any) => {
+    if (!checkPermission('create_plan', 'Saving new pricing plan')) return;
     const created = storage.createPlan(planData);
     showToast('New hotspot plan saved with exact speed & device quotas.');
     if (isSupabaseConnected && created) {
@@ -135,7 +160,8 @@ export default function App() {
     }
   };
 
-  const handleGenerateBatch = (planId: string, count: number) => {
+  const handleGenerateBatch = (planId: string, count: number): Voucher[] => {
+    if (!checkPermission('generate_vouchers', 'Generating voucher batches')) return [];
     const generated = storage.generateVoucherBatch(planId, count);
     showToast(`Generated batch of ${count} single-use vouchers. CSV downloaded.`);
     if (isSupabaseConnected) {
@@ -170,6 +196,9 @@ export default function App() {
   };
 
   const handleToggleGatewayLive = (provider: GatewayProvider, setLive: boolean) => {
+    if (!checkPermission('toggle_gateway', 'Toggling gateway live production mode')) {
+      return { success: false, message: 'Administrative permission required' };
+    }
     const res = storage.toggleGatewayLive(provider, setLive);
     if (res.success) {
       showToast(`Gateway status changed to ${setLive ? 'LIVE' : 'SANDBOX'}.`);
@@ -180,6 +209,7 @@ export default function App() {
   };
 
   const handleUpdateGatewayCredentials = (provider: GatewayProvider, updates: any) => {
+    if (!checkPermission('update_credentials', 'Modifying merchant gateway credentials')) return;
     storage.updateGatewayCredentials(provider, updates);
     showToast('Gateway merchant credentials updated.');
   };
@@ -202,18 +232,29 @@ export default function App() {
 
   // Team & Content Filters
   const handleInviteMember = (name: string, email: string, role: any, scopedSites: string[]) => {
+    if (!checkPermission('invite_member', 'Inviting team members')) return;
     storage.inviteTeamMember(name, email, role, scopedSites);
     showToast(`Single-use invitation generated for ${email}.`);
   };
 
   const handleUpdateMemberRole = (memberId: string, role: any, scopedSites?: string[]) => {
+    if (!checkPermission('update_role', 'Updating member roles')) return;
     storage.updateMemberRole(memberId, role, scopedSites);
     showToast('Member permissions updated and effective immediately.');
   };
 
   const handleDeleteMember = (memberId: string) => {
+    if (!checkPermission('delete_member', 'Revoking member credentials')) return;
     storage.deleteTeamMember(memberId);
     showToast('Team member access revoked.');
+  };
+
+  const handleIssuePassword = (memberId: string, customPass?: string) => {
+    if (!checkPermission('issue_password', 'Issuing temporary password')) return;
+    const res = storage.issueTemporaryPassword(memberId, customPass);
+    if (res.success) {
+      showToast(res.message);
+    }
   };
 
   const handleToggleFilter = (ruleId: string, enabled: boolean) => {
@@ -263,6 +304,20 @@ export default function App() {
   const activeSessions = state.routers.reduce((acc, curr) => acc + curr.activeSessions, 0);
   const unusedVoucherCount = state.vouchers.filter(v => v.status === 'active').length;
 
+  // Enforce full-screen authentication gate before dashboard entry
+  if (!authSession) {
+    return (
+      <LoginView
+        onLoginSuccess={(session) => {
+          setAuthSession(session);
+          setEffectiveRole(session.effectiveRole);
+          showToast(`Welcome back, ${session.user.name}! Authenticated as ${session.user.role}.`);
+        }}
+        teamMembers={state.team}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans">
       {/* Streamlined 4-Section Sidebar Navigation */}
@@ -301,7 +356,41 @@ export default function App() {
           onUpdateVoucherThreshold={handleUpdateVoucherThreshold}
           onTriggerBackgroundCheck={handleTriggerVoucherCheck}
           onQuickRestock={handleQuickRestock}
+          currentUser={authSession.user}
+          effectiveRole={effectiveRole}
+          onRolePreviewChange={(role) => {
+            setEffectiveRole(role);
+            showToast(`Switched active preview role to: ${role}`);
+          }}
+          onSignOut={() => {
+            storage.setAuthSession(null);
+            setAuthSession(null);
+            showToast('Signed out of session.');
+          }}
+          teamMembersCount={state.team.length}
+          pendingResetCount={state.team.filter((m) => m.hasPendingReset).length}
         />
+
+        {/* Role Preview Active Banner */}
+        {effectiveRole !== authSession.user.role && (
+          <div className="bg-[#f05e17]/10 border-b border-[#f05e17]/30 px-5 py-2 flex items-center justify-between font-mono text-xs text-white">
+            <div className="flex items-center gap-2">
+              <Eye className="w-4 h-4 text-[#f05e17] shrink-0" />
+              <span>
+                <strong>Role Preview Active:</strong> Inspecting interface as <strong className="text-[#f05e17]">{effectiveRole}</strong>.
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setEffectiveRole(authSession.user.role);
+                showToast(`Restored role to ${authSession.user.role}.`);
+              }}
+              className="text-[11px] underline text-[#f05e17] hover:text-white"
+            >
+              Revert to {authSession.user.role}
+            </button>
+          </div>
+        )}
 
         {/* Scrollable Viewport */}
         <main className="flex-1 overflow-y-auto p-5 lg:p-7 space-y-6">
@@ -380,6 +469,7 @@ export default function App() {
               onOpenDatabaseModal={() => setShowDatabaseModal(true)}
               isSupabaseConnected={isSupabaseConnected}
               onToggleRouterFreeMode={handleToggleRouterFreeMode}
+              onIssuePassword={handleIssuePassword}
             />
           )}
         </main>
