@@ -35,6 +35,7 @@ interface NetworkSecurityViewProps {
   onDeleteMember: (memberId: string) => void;
   onOpenDatabaseModal: () => void;
   isSupabaseConnected: boolean;
+  onToggleRouterFreeMode?: (routerId: string | 'all', enabled: boolean) => void;
 }
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
@@ -114,9 +115,12 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
       {activeSubTab === 'portal' && (
         <CaptivePortalView
           plans={props.plans}
+          routers={props.routers}
+          onToggleRouterFreeMode={props.onToggleRouterFreeMode}
           onProcessPayment={props.onProcessPayment}
           onRedeemVoucher={props.onRedeemVoucher}
           currency={props.currency}
+          selectedVertical={props.selectedVertical}
         />
       )}
 

@@ -1,138 +1,159 @@
-# T-Connect Cloud Controller — Contabo VPS Deployment & Router Adoption Guide
+# T-Connect Cloud Controller — VPS Deployment & First Router Adoption Guide
 
-This guide walks you through deploying **T-Connect** to your **Contabo VPS (Ubuntu LTS)** using Docker Compose with automatic Let's Encrypt HTTPS, and testing with a physical MikroTik router.
+Complete guide for deploying **T-Connect** to your **VPS (Ubuntu 22.04 / 24.04 LTS)** using Docker Compose with automatic Let's Encrypt HTTPS (Caddy), syncing to GitHub, and adopting your first live MikroTik router via an encrypted WireGuard tunnel.
 
 ---
 
-## 1. Push Code to GitHub
+## 1. Sync & Push Code to GitHub
 
-From your local machine or workspace:
+Your codebase has already been initialized on the `main` branch with all files committed cleanly.
+
+To link and push to your GitHub repository:
 
 ```bash
-git init
-git add .
-git commit -m "feat: complete T-Connect multi-tenant cloud controller with Supabase ledger and MikroTik adoption"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/tconnect-controller.git
+# Add your GitHub remote repository (replace with your repo URL)
+git remote add origin https://github.com/YOUR_USERNAME/tconnect.git
+
+# Push the main branch to GitHub
 git push -u origin main
 ```
 
 ---
 
-## 2. Server Preparation (Contabo Ubuntu LTS)
+## 2. Deploy to VPS (Option A: Direct Tarball Upload - Fastest)
 
-SSH into your Contabo VPS:
+A self-contained production bundle `tconnect-production-vps.tar.gz` (463 KB) has been built and packaged in the root directory.
 
+### Step 2.1: Upload Archive to VPS
+From your terminal:
+```bash
+scp tconnect-production-vps.tar.gz root@YOUR_VPS_IP:/opt/
+```
+
+### Step 2.2: Extract on VPS
+SSH into your VPS:
 ```bash
 ssh root@YOUR_VPS_IP
-```
 
-### Install Docker & Docker Compose:
-
-```bash
-apt update && apt upgrade -y
-apt install -y curl git ufw fail2ban
-
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-
-# Enable Docker on boot
-systemctl enable docker
-systemctl start docker
-```
-
-### Configure Firewall (UFW):
-
-```bash
-ufw allow 22/tcp      # SSH
-ufw allow 80/tcp      # HTTP (Let's Encrypt challenge)
-ufw allow 443/tcp     # HTTPS
-ufw allow 51820/udp   # WireGuard VPN Tunnel
-ufw enable
+mkdir -p /opt/tconnect
+tar -xzf /opt/tconnect-production-vps.tar.gz -C /opt/tconnect
+cd /opt/tconnect
 ```
 
 ---
 
-## 3. Clone & Deploy T-Connect
+## 2. Deploy to VPS (Option B: Clone from GitHub)
+
+Alternatively, if you pushed to GitHub:
+```bash
+ssh root@YOUR_VPS_IP
+git clone https://github.com/YOUR_USERNAME/tconnect.git /opt/tconnect
+cd /opt/tconnect
+```
+
+---
+
+## 3. Server Preparation & Docker Setup (Ubuntu LTS)
+
+On your VPS terminal:
 
 ```bash
-# Clone your repository
-git clone https://github.com/YOUR_USERNAME/tconnect-controller.git /opt/tconnect
+# Update packages
+apt update && apt upgrade -y
+apt install -y curl ufw wireguard
+
+# Install Docker & Compose (if not already installed)
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# Configure Host Firewall (UFW)
+ufw allow 22/tcp      # SSH
+ufw allow 80/tcp      # HTTP (Let's Encrypt ACME)
+ufw allow 443/tcp     # HTTPS (Web app & RFC 8910 Captive Portal)
+ufw allow 51820/udp   # WireGuard Encrypted Router Overlay
+ufw --force enable
+```
+
+---
+
+## 4. Configure Production Environment & Start Stack
+
+```bash
 cd /opt/tconnect
 
-# Copy example environment configuration
-cp .env.example .env
+# Copy production template
+cp .env.production.example .env
+
+# Edit environment variables
 nano .env
 ```
 
-Set your configuration in `.env`:
+Ensure your `.env` has:
 ```env
 DOMAIN=hotspot.yourdomain.co.ls
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
-RADIUS_SECRET=your-secure-radius-secret
-ROUTER_API_PASSWORD=your-secure-routeros-password
+PORT=3000
+VITE_CONTROLLER_DOMAIN=hotspot.yourdomain.co.ls
+VITE_CURRENCY=M
+RADIUS_SECRET=radsec_tconnect_lesotho_99120
+ROUTER_API_PASSWORD=tc_pass_crypto_random_32char
 ```
+*(Note: If you do not have a domain yet, set `DOMAIN=YOUR_VPS_IP` and Caddy will serve over HTTP, or access directly via `http://YOUR_VPS_IP:3000`).*
 
-*(Note: If you are testing directly on your VPS IP without a domain yet, set `DOMAIN=YOUR_VPS_IP` and use `http://YOUR_VPS_IP:3000`)*
-
-### Start the Stack:
-
+### Start Containers:
 ```bash
 docker compose up -d --build
 ```
 
-Check running containers:
+### Verify Running Services:
 ```bash
 docker compose ps
-docker compose logs -f app
+docker compose logs -f
 ```
 
 ---
 
-## 4. Test With a Physical MikroTik Router
+## 5. Adopting Your First Live MikroTik Router
 
-1. Open your browser and go to `https://hotspot.yourdomain.co.ls` (or `http://YOUR_VPS_IP:3000`).
-2. Navigate to **Routers & Adoption** in the sidebar.
-3. Click **+ Add Router to Fleet** and enter:
-   * **Name**: e.g., `hAP-ax3-Main-Cafe`
-   * **Site Location**: e.g., `Pioneer Mall Maseru`
-   * **Hardware Model**: Select your model (e.g., `MikroTik hAP ax³ (v7)` or `RB4011 (v6)`)
-   * **RouterOS Version**: `v7` or `v6`
-4. The system will generate your custom **One-Line RouterOS Script**:
-   * It will show your VPS host endpoint (`YOUR_VPS_IP:3000` or your domain).
-   * Click **Copy Script**.
-5. Connect to your MikroTik router via **Winbox**:
-   * Click **New Terminal**.
-   * Paste the script and press Enter.
+### Step 5.1: Generate One-Liner Adoption Script
+1. Open your browser and navigate to `https://hotspot.yourdomain.co.ls` (or `http://YOUR_VPS_IP:3000`).
+2. In the sidebar, click **Routers & Adoption**.
+3. Click **+ Add Router to Fleet**.
+4. Fill in the details:
+   - **Router Name:** e.g. `hAP-ax3-Pioneer-Cafe`
+   - **Vertical / Venue:** e.g. `Public Hotspots` (or `Villages`, `Municipal Parks`, `Buses & Transit`, `Stadiums`)
+   - **Site Location:** e.g. `Pioneer Mall, Maseru`
+   - **Hardware Model:** Select your model (e.g., `hAP ax³`, `hEX S`, `RB4011`, etc.)
+   - **RouterOS Version:** `RouterOS v7` (Recommended) or `v6`
+5. Click **Generate Adoption Script** and copy the one-liner command:
+   ```routeros
+   /tool fetch url="https://hotspot.yourdomain.co.ls/api/devices/rt_pioneer_cafe/adopt.rsc" mode=https keep-result=yes dst-path="tconnect-adopt.rsc"; /import file-name="tconnect-adopt.rsc"; /file remove [find name="tconnect-adopt.rsc"]
+   ```
 
-### What Happens Automatically on the Router:
-1. **Connectivity Check**: Tests DNS resolution or IP reachability to your VPS.
-2. **Device Mode Verification**: Confirms `/system/device-mode` allows fetch.
-3. **One-Time Fetch**: Downloads the encrypted `.rsc` configuration payload from your VPS via `/api/devices/:id/adopt.rsc`.
-4. **Automated Provisioning**: Configures:
-   * Encrypted **WireGuard management tunnel** back to your VPS (never exposing Winbox/API to the public WAN).
-   * **Captive portal profiles** and FreeRADIUS authentication on port 1812/1813.
-   * **Walled Garden** entries for Lesotho payment gateways (EcoCash, MyWallet, OTTvoucher, xPayments) and captive portal detection endpoints (Apple, Android, Windows).
-   * **DNS Sinkhole** redirecting port 53 queries through the local content filter.
-5. **Self-Cleaning**: Deletes the temporary `.rsc` file immediately after importing.
-6. **Controller Handshake**: The router reports online status to your dashboard!
+### Step 5.2: Execute on MikroTik Router
+1. Open **WinBox** and connect to your MikroTik router (via MAC or IP).
+2. Click **New Terminal** in the left menu.
+3. Paste the one-liner script and press **Enter**.
 
----
+### Step 5.3: What the Script Provisions Automatically:
+- **WireGuard Management VPN (`wg-tconnect`):** Establishes a tunnel to `10.99.0.1` at your VPS. The router receives internal IP `10.99.1.50`. WinBox and API are bound only to the WireGuard interface, never exposed to the public WAN.
+- **Captive Portal Walled Garden:** Whitelists Lesotho gateways (EcoCash `ecocash.co.ls`, OTT Voucher `portal.ottlesotho.com`), DNS servers, and RFC 8910 Apple/Android/Windows detection endpoints.
+- **FreeRADIUS Client:** Configures AAA accounting on port 1812/1813 with the shared `RADIUS_SECRET`.
+- **Telemetry Scheduler:** Creates a 30-second heartbeat script reporting CPU, memory, uptime, and active subscriber sessions back to your VPS dashboard at `/api/devices/:id/heartbeat`.
 
-## 5. Testing Vouchers & Captive Portal
-
-1. In the T-Connect dashboard, go to **Billing & Vouchers > Plans & Vouchers**.
-2. Click **Issue Single Voucher** on the Day Pass plan.
-3. Switch to **Network & Security > Captive Portal**.
-4. In the simulated captive portal login screen, enter the voucher code and click **Connect to Internet**.
-5. Watch the active session instantly appear in the **Active Subscriber Session Ledger** on the **Fleet Overview** dashboard!
+### Step 5.4: Confirm Online Status
+Return to the T-Connect dashboard. Your router will show green **ONLINE** status with live CPU load, firmware version, and session counters.
 
 ---
 
-## 6. Supabase Database Verification
+## 6. Testing Guest Connect & Payment Gateways
 
-1. Click **Connect Supabase** in the top header.
-2. Run the SQL schema from the **SQL Schema (DDL)** tab in your Supabase SQL Editor.
-3. Paste your Supabase Project URL and Anon API Key.
-4. Click **Connect & Verify Database**. All new routers, vouchers, and transactions will sync live to your remote PostgreSQL ledger.
+1. Connect a phone or laptop to the MikroTik Wi-Fi SSID (e.g. `T-Connect Hotspot`).
+2. The OS Captive Network Assistant (CNA) immediately pops up with the customized captive portal for the assigned venue scope.
+3. Select a plan:
+   - **M10** — Daily Pass (24 Hours)
+   - **M60** — Weekly Pass (7 Days)
+   - **M280** — Monthly Pass (30 Days)
+4. Choose payment:
+   - **EcoCash:** Enter Lesotho phone (`+266 5xxx xxxx`) to receive *151# STK Push prompt.
+   - **OTT Voucher:** Enter 12-digit digital voucher PIN purchased at Shoprite or retail merchant.
+5. Upon successful authorization, the device is granted full internet access, and the transaction is recorded in the live ledger.

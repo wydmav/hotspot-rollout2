@@ -34,6 +34,14 @@ export interface RouterDevice {
   lastHeartbeat: string;
   firmware: string;
   activeSessions: number;
+  freeModeEnabled?: boolean;
+  wan1Interface?: string;
+  wan1Name?: string;
+  wan2Interface?: string;
+  wan2Name?: string;
+  wanFailoverEnabled?: boolean;
+  activeWan?: 'wan1' | 'wan2';
+  lastFailoverEvent?: string;
   token?: string;
   tokenExpiresAt?: string;
   adoptedAt?: string;
@@ -125,6 +133,10 @@ export interface GatewayConfig {
   status: 'operational' | 'degraded' | 'not_configured' | 'testing';
   apiKey: string;
   apiSecret: string;
+  apiPassword?: string;
+  username?: string;
+  endpointUrl?: string;
+  bearerToken?: string;
   merchantId: string;
   webhookSecret: string;
   webhookUrl: string;
@@ -168,9 +180,14 @@ export interface SystemAlert {
   severity: 'critical' | 'warning' | 'info';
   title: string;
   message: string;
-  source: 'gateway' | 'router' | 'radius' | 'security' | 'solar';
+  source: 'gateway' | 'router' | 'radius' | 'security' | 'solar' | 'voucher';
   timestamp: string;
   acknowledged: boolean;
+  metadata?: {
+    unusedCount?: number;
+    threshold?: number;
+    planId?: string;
+  };
 }
 
 export interface TeamMember {
@@ -214,4 +231,53 @@ export interface CustomDomainOverride {
   action: 'block' | 'allow';
   reason: string;
   createdAt: string;
+}
+
+export interface ScopePlan {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  durationLabel: string;
+  durationSeconds: number;
+  downloadSpeedMbps: number;
+  uploadSpeedMbps: number;
+  burstDownloadMbps?: number;
+  deviceLimit: number;
+  enabled: boolean;
+  isPopular?: boolean;
+  badge?: string;
+}
+
+export interface ScopePortalConfig {
+  scope: VerticalType;
+  scopeLabel: string;
+  scopeIcon: string;
+  scopeDescription: string;
+  bgImage: string;
+  bgDarken: number; // 0 - 80
+  glassOpacity: number; // 20 - 100
+  cardPlacement: 'top' | 'center' | 'bottom';
+  cardWidth: 'compact' | 'normal' | 'wide' | 'full';
+  accentColor: string;
+  // Content & Branding
+  brandTitle: string;
+  tagline: string;
+  welcomeHeadline: string;
+  termsEnabled: boolean;
+  termsText: string;
+  // Guest fields
+  collectName: boolean;
+  collectPhone: boolean;
+  collectEmail: boolean;
+  collectGender: boolean;
+  collectDob: boolean;
+  defaultCountryCode: string;
+  // Auth & Access
+  allowFreeAccess: boolean;
+  freeAccessDurationMinutes: number;
+  allowVoucherCode: boolean;
+  allowOnlinePayment: boolean;
+  // Scope-specific plans & pricing
+  plans: ScopePlan[];
 }

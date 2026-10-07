@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Ticket, 
   Plus, 
@@ -10,7 +10,11 @@ import {
   Search,
   CheckCircle2,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  RefreshCw,
+  SlidersHorizontal,
+  Layers
 } from 'lucide-react';
 import { HotspotPlan, Voucher, VerticalType } from '../../types';
 import { ExportService } from '../../services/exportService';
@@ -23,6 +27,9 @@ interface PlansVouchersViewProps {
   onRedeemVoucher: (code: string, mac: string, hostname?: string) => any;
   selectedVertical: VerticalType | 'all';
   currency: string;
+  voucherThreshold?: number;
+  onUpdateVoucherThreshold?: (threshold: number) => void;
+  onTriggerVoucherCheck?: () => void;
 }
 
 export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
@@ -33,11 +40,20 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   onRedeemVoucher,
   selectedVertical,
   currency,
+  voucherThreshold = 5,
+  onUpdateVoucherThreshold,
+  onTriggerVoucherCheck,
 }) => {
   const [selectedPlanForBatch, setSelectedPlanForBatch] = useState<string>(plans[0]?.id || '');
   const [batchCount, setBatchCount] = useState<number>(5);
   const [voucherSearch, setVoucherSearch] = useState('');
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
+  const [localThreshold, setLocalThreshold] = useState<number>(voucherThreshold);
+  const [isAuditing, setIsAuditing] = useState(false);
+
+  useEffect(() => {
+    setLocalThreshold(voucherThreshold);
+  }, [voucherThreshold]);
 
   // Concurrency tester state
   const [testCode, setTestCode] = useState('');
@@ -211,6 +227,148 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           </div>
         ))}
       </div>
+
+      {/* ======================================================= */}
+      {/* VOUCHER INVENTORY STATUS & BACKGROUND SENTINEL CONTROL  */}
+      {/* ======================================================= */}
+      {(() => {
+        const activeCount = vouchers.filter((v) => v.status === 'active').length;
+        const usedCount = vouchers.filter((v) => v.status === 'used').length;
+        const expiredCount = vouchers.filter((v) => v.status === 'expired').length;
+        const isLow = activeCount <= localThreshold;
+        const isDepleted = activeCount === 0;
+
+        return (
+          <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2 rounded-lg ${isLow ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                  {isLow ? <AlertTriangle className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white font-mono flex items-center gap-2">
+                    VOUCHER INVENTORY &amp; BACKGROUND SENTINEL
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-normal">
+                      Background Check: Every 15s
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Automated background check alerts the top Header when unused stock falls below threshold
+                  </p>
+                </div>
+              </div>
+
+              {/* Threshold Controller & Manual Audit */}
+              <div className="flex items-center gap-2 self-start sm:self-auto font-mono text-xs">
+                {onUpdateVoucherThreshold && (
+                  <div className="flex items-center gap-1.5 bg-[#161d31] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-[#f05e17]" />
+                    <span className="text-[11px] text-slate-400">Threshold:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={localThreshold}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        if (!isNaN(val) && val >= 0) {
+                          setLocalThreshold(val);
+                          onUpdateVoucherThreshold(val);
+                        }
+                      }}
+                      className="w-12 bg-[#0b0f19] border border-[#232d42] rounded px-1.5 py-0.5 text-center text-white font-bold"
+                    />
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    setIsAuditing(true);
+                    if (onTriggerVoucherCheck) onTriggerVoucherCheck();
+                    setTimeout(() => setIsAuditing(false), 600);
+                  }}
+                  disabled={isAuditing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded-lg text-slate-200 transition-colors"
+                  title="Run background inventory audit now"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isAuditing ? 'animate-spin text-[#f05e17]' : 'text-slate-400'}`} />
+                  <span>{isAuditing ? 'Auditing...' : 'Audit Stock'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Metric KPI Chips */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+              <div className={`p-3 rounded-lg border ${
+                isDepleted 
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' 
+                  : isLow 
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
+                  : 'bg-[#161d31] border-[#232d42] text-slate-200'
+              }`}>
+                <div className="text-[11px] text-slate-400 mb-1 flex items-center justify-between">
+                  <span>Unused Stock</span>
+                  {isLow && (
+                    <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold">
+                      LOW
+                    </span>
+                  )}
+                </div>
+                <div className="text-xl font-bold flex items-baseline gap-1.5">
+                  <span>{activeCount}</span>
+                  <span className="text-[11px] text-slate-500 font-normal">tokens</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+                <div className="text-[11px] text-slate-400 mb-1">Active Threshold</div>
+                <div className="text-xl font-bold flex items-baseline gap-1.5 text-slate-200">
+                  <span>{localThreshold}</span>
+                  <span className="text-[11px] text-slate-500 font-normal">trigger limit</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+                <div className="text-[11px] text-slate-400 mb-1">Redeemed / Used</div>
+                <div className="text-xl font-bold flex items-baseline gap-1.5 text-cyan-400">
+                  <span>{usedCount}</span>
+                  <span className="text-[11px] text-slate-500 font-normal">sessions</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+                <div className="text-[11px] text-slate-400 mb-1">Expired / Revoked</div>
+                <div className="text-xl font-bold flex items-baseline gap-1.5 text-slate-400">
+                  <span>{expiredCount}</span>
+                  <span className="text-[11px] text-slate-500 font-normal">vouchers</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Low Voucher Balance Warning Banner if low */}
+            {isLow && (
+              <div className={`p-3 rounded-lg border flex items-start gap-3 ${
+                isDepleted 
+                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-200' 
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              }`}>
+                <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${isDepleted ? 'text-rose-400' : 'text-amber-400'}`} />
+                <div className="space-y-1 text-xs">
+                  <p className="font-bold">
+                    {isDepleted
+                      ? 'Critical Depletion: 0 unused vouchers remaining in inventory!'
+                      : `Low Voucher Balance Alert: Only ${activeCount} unused voucher${activeCount === 1 ? '' : 's'} remaining.`}
+                  </p>
+                  <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                    The background daemon has triggered an active &quot;Low Voucher Balance&quot; alert in the top Header navigation.
+                    Generate a new batch using the generator below to restock inventory and maintain continuous captive portal operation.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Batch Voucher Generator & Concurrency Verification Box */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

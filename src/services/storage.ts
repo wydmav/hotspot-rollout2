@@ -18,22 +18,58 @@ const STORAGE_KEY = 'tconnect_controller_scratch_state_v4';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
-    id: 'plan_m10_24h',
-    name: 'Day Pass (Standard)',
+    id: 'plan_daily_m10',
+    name: 'Daily Pass',
     vertical: 'hotspot',
     price: 10,
     currency: 'M',
     durationSeconds: 86400, // 24 Hours
     durationLabel: '24 Hours',
     dataCapMb: null, // Unlimited
-    downloadSpeedMbps: 4.0,
-    uploadSpeedMbps: 2.0,
+    downloadSpeedMbps: 5.0,
+    uploadSpeedMbps: 2.5,
     deviceLimit: 2,
-    burstDownloadMbps: 8.0,
-    burstUploadMbps: 4.0,
+    burstDownloadMbps: 10.0,
+    burstUploadMbps: 5.0,
     fairUseThresholdMb: 5000,
     fairUseDownloadMbps: 1.0,
+    isPopular: false
+  },
+  {
+    id: 'plan_weekly_m60',
+    name: 'Weekly Pass',
+    vertical: 'hotspot',
+    price: 60,
+    currency: 'M',
+    durationSeconds: 604800, // 7 Days
+    durationLabel: '7 Days',
+    dataCapMb: null, // Unlimited
+    downloadSpeedMbps: 6.0,
+    uploadSpeedMbps: 3.0,
+    deviceLimit: 2,
+    burstDownloadMbps: 12.0,
+    burstUploadMbps: 6.0,
+    fairUseThresholdMb: 25000,
+    fairUseDownloadMbps: 1.5,
     isPopular: true
+  },
+  {
+    id: 'plan_monthly_m280',
+    name: 'Monthly Pass',
+    vertical: 'hotspot',
+    price: 280,
+    currency: 'M',
+    durationSeconds: 2592000, // 30 Days
+    durationLabel: '30 Days',
+    dataCapMb: null, // Unlimited
+    downloadSpeedMbps: 8.0,
+    uploadSpeedMbps: 4.0,
+    deviceLimit: 3,
+    burstDownloadMbps: 15.0,
+    burstUploadMbps: 8.0,
+    fairUseThresholdMb: 100000,
+    fairUseDownloadMbps: 2.0,
+    isPopular: false
   }
 ];
 
@@ -48,6 +84,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     status: 'not_configured',
     apiKey: '',
     apiSecret: '',
+    bearerToken: '',
     merchantId: '',
     webhookSecret: '',
     webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/ecocash',
@@ -65,6 +102,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     status: 'not_configured',
     apiKey: '',
     apiSecret: '',
+    bearerToken: '',
     merchantId: '',
     webhookSecret: '',
     webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/mywallet',
@@ -74,15 +112,19 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   },
   {
     provider: 'ottvoucher',
-    name: 'OTTvoucher API',
-    subtitle: 'Digital PIN & Retail Voucher Token Redemption',
+    name: 'OTTvoucher Lesotho',
+    subtitle: 'Digital PIN & Retail Voucher Token Redemption (portal.ottlesotho.com)',
     currency: 'M',
     isLive: false,
     isSandbox: true,
     status: 'not_configured',
     apiKey: '',
     apiSecret: '',
-    merchantId: '',
+    apiPassword: '',
+    username: 'TCONNECTLES1',
+    endpointUrl: 'https://portal.ottlesotho.com',
+    bearerToken: '',
+    merchantId: 'TCONNECTLES1',
     webhookSecret: '',
     webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/ottvoucher',
     successRate24h: 0,
@@ -99,6 +141,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     status: 'not_configured',
     apiKey: '',
     apiSecret: '',
+    bearerToken: '',
     merchantId: '',
     webhookSecret: '',
     webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/xpayments',
@@ -163,8 +206,12 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
 
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers
+  'portal.ottlesotho.com',
+  'ottlesotho.com',
   'api.ottvoucher.com',
   'ottvoucher.com',
+  'callpay.com',
+  'vouchers.ott-mobile.com',
   'api.ecocash.co.ls',
   'ecocash.co.ls',
   'api.mywallet.co.ls',
@@ -202,13 +249,23 @@ class StorageService {
 
   constructor() {
     this.state = this.loadInitialState();
+    this.checkVoucherStock();
   }
 
   private loadInitialState() {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (parsed.plans) {
+          const has10 = parsed.plans.some((p: HotspotPlan) => p.price === 10);
+          const has60 = parsed.plans.some((p: HotspotPlan) => p.price === 60);
+          const has280 = parsed.plans.some((p: HotspotPlan) => p.price === 280);
+          if (!has10 || !has60 || !has280) {
+            parsed.plans = STARTER_PLANS;
+          }
+        }
+        return parsed;
       }
     } catch {
       // ignore
@@ -286,6 +343,7 @@ class StorageService {
       this.state.plans = data.plans;
     }
     this.saveState();
+    this.checkVoucherStock();
   }
 
   // Router Methods
@@ -361,6 +419,32 @@ class StorageService {
     this.saveState();
   }
 
+  toggleRouterFreeMode(routerId: string | 'all', enabled: boolean) {
+    if (routerId === 'all') {
+      this.state.routers = this.state.routers.map(r => ({ ...r, freeModeEnabled: enabled }));
+      this.logAudit({
+        actor: 'Admin',
+        role: 'Owner',
+        action: 'router.free_mode',
+        target: 'Fleet All Routers',
+        details: `Set global free mode to ${enabled ? 'ENABLED' : 'DISABLED'}`
+      });
+    } else {
+      this.state.routers = this.state.routers.map(r => r.id === routerId ? ({ ...r, freeModeEnabled: enabled }) : r);
+      const target = this.state.routers.find(r => r.id === routerId);
+      if (target) {
+        this.logAudit({
+          actor: 'Admin',
+          role: 'Owner',
+          action: 'router.free_mode',
+          target: target.name,
+          details: `Set free access mode to ${enabled ? 'ENABLED' : 'DISABLED'}`
+        });
+      }
+    }
+    this.saveState();
+  }
+
   // Plan & Voucher Methods
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
     const newPlan: HotspotPlan = {
@@ -416,6 +500,7 @@ class StorageService {
       details: `Generated ${count} single-use vouchers with exact entitlement (${plan.currency}${plan.price} / ${plan.durationLabel}).`
     });
     this.saveState();
+    this.checkVoucherStock();
     return newVouchers;
   }
 
@@ -507,6 +592,7 @@ class StorageService {
     });
 
     this.saveState();
+    this.checkVoucherStock();
 
     return {
       success: true,
@@ -646,9 +732,46 @@ class StorageService {
     this.saveState();
   }
 
-  processLivePayment(provider: GatewayProvider, planId: string, phoneNumber?: string, ottPin?: string) {
+  processLivePayment(
+    provider: GatewayProvider, 
+    planId: string, 
+    phoneNumber?: string, 
+    ottPin?: string,
+    planOverride?: Partial<HotspotPlan>
+  ) {
     const gw = this.state.gateways.find((g) => g.provider === provider);
-    const plan = this.state.plans.find((p) => p.id === planId) || this.state.plans[0];
+    let plan = this.state.plans.find((p) => p.id === planId);
+
+    // Dynamic resolution if from scoped portal builders or custom pricing
+    if (!plan && planOverride && typeof planOverride.price === 'number') {
+      plan = {
+        id: planId,
+        name: planOverride.name || (planOverride.price === 10 ? 'Daily Pass' : planOverride.price === 60 ? 'Weekly Pass' : 'Monthly Pass'),
+        vertical: planOverride.vertical || 'hotspot',
+        price: planOverride.price,
+        currency: planOverride.currency || 'M',
+        durationSeconds: planOverride.durationSeconds || (planOverride.price === 10 ? 86400 : planOverride.price === 60 ? 604800 : 2592000),
+        durationLabel: planOverride.durationLabel || (planOverride.price === 10 ? '24 Hours' : planOverride.price === 60 ? '7 Days' : '30 Days'),
+        dataCapMb: null,
+        downloadSpeedMbps: planOverride.downloadSpeedMbps || 5.0,
+        uploadSpeedMbps: planOverride.uploadSpeedMbps || 2.5,
+        deviceLimit: planOverride.deviceLimit || 2,
+        burstDownloadMbps: 10.0,
+        burstUploadMbps: 5.0,
+        fairUseThresholdMb: 5000,
+        fairUseDownloadMbps: 1.0,
+        isPopular: planOverride.price === 60,
+      };
+    } else if (!plan) {
+      if (planId.includes('monthly') || planId.includes('280') || planId.includes('30d')) {
+        plan = this.state.plans.find(p => p.price === 280) || this.state.plans[0];
+      } else if (planId.includes('weekly') || planId.includes('60') || planId.includes('7d')) {
+        plan = this.state.plans.find(p => p.price === 60) || this.state.plans[0];
+      } else {
+        plan = this.state.plans.find(p => p.price === 10) || this.state.plans[0];
+      }
+    }
+
     if (!gw || !plan) throw new Error('Invalid gateway or plan');
 
     const txRef = `${provider.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
@@ -716,6 +839,7 @@ class StorageService {
     });
 
     this.saveState();
+    this.checkVoucherStock();
 
     return {
       success: true,
@@ -846,6 +970,131 @@ class StorageService {
     this.state.auditLogs.unshift(newLog);
     if (this.state.auditLogs.length > 200) {
       this.state.auditLogs.pop();
+    }
+  }
+
+  private lastVoucherCheckAt: string = new Date().toISOString();
+
+  getLastVoucherCheckAt(): string {
+    return this.lastVoucherCheckAt;
+  }
+
+  getVoucherLowThreshold(): number {
+    try {
+      const stored = localStorage.getItem('tconnect_voucher_threshold');
+      if (stored) {
+        const val = parseInt(stored, 10);
+        if (!isNaN(val) && val >= 0) return val;
+      }
+    } catch {}
+    return 5;
+  }
+
+  setVoucherLowThreshold(threshold: number): void {
+    try {
+      localStorage.setItem('tconnect_voucher_threshold', threshold.toString());
+    } catch {}
+    this.checkVoucherStock(threshold);
+  }
+
+  checkVoucherStock(customThreshold?: number): { 
+    unusedCount: number; 
+    threshold: number; 
+    isLow: boolean; 
+    isCritical: boolean;
+    triggeredAlert: boolean;
+    scannedAt: string;
+  } {
+    this.lastVoucherCheckAt = new Date().toISOString();
+
+    // 1. Audit active vouchers and expire any that have timed out
+    const nowTime = Date.now();
+    let expiredAny = false;
+    this.state.vouchers.forEach((v) => {
+      if (v.status === 'active') {
+        if (v.firstUsedAt) {
+          const expTime = new Date(v.firstUsedAt).getTime() + v.durationSeconds * 1000;
+          if (nowTime > expTime) {
+            v.status = 'expired';
+            expiredAny = true;
+          }
+        } else if (v.expiresAt && new Date(v.expiresAt).getTime() < nowTime) {
+          v.status = 'expired';
+          expiredAny = true;
+        }
+      }
+    });
+
+    if (expiredAny) {
+      this.saveState();
+    }
+
+    const threshold = customThreshold !== undefined ? customThreshold : this.getVoucherLowThreshold();
+    const activeVouchers = this.state.vouchers.filter((v) => v.status === 'active');
+    const unusedCount = activeVouchers.length;
+    const alertId = 'alert_low_voucher_stock';
+    const existingAlertIndex = this.state.alerts.findIndex((a) => a.id === alertId);
+
+    // If remaining unused voucher stock falls below or equal to threshold
+    if (unusedCount <= threshold) {
+      const isCritical = unusedCount === 0;
+      const severity = isCritical ? 'critical' : 'warning';
+      const title = isCritical ? 'Critical: Voucher Inventory Depleted' : 'Low Voucher Balance';
+      const message = isCritical
+        ? `No unused vouchers remaining in inventory (0 active). Captive portal guest signups will fail until new vouchers are generated or imported.`
+        : `Low Voucher Stock Alert: Only ${unusedCount} unused voucher${unusedCount === 1 ? '' : 's'} remaining in inventory (configured threshold is ${threshold}). Please replenish your voucher stock to ensure continuous hotspot service.`;
+
+      if (existingAlertIndex >= 0) {
+        const existing = this.state.alerts[existingAlertIndex];
+        // If count has changed or threshold has changed or alert was unacknowledged
+        if (!existing.acknowledged || existing.metadata?.unusedCount !== unusedCount || existing.metadata?.threshold !== threshold) {
+          this.state.alerts[existingAlertIndex] = {
+            ...existing,
+            severity,
+            title,
+            message,
+            timestamp: 'Just now',
+            acknowledged: false, // Re-surface alert if stock drops further or threshold changed
+            metadata: { unusedCount, threshold }
+          };
+          this.saveState();
+        }
+      } else {
+        const newAlert: SystemAlert = {
+          id: alertId,
+          severity,
+          title,
+          message,
+          source: 'voucher',
+          timestamp: 'Just now',
+          acknowledged: false,
+          metadata: { unusedCount, threshold }
+        };
+        this.state.alerts.unshift(newAlert);
+        this.saveState();
+      }
+      return { 
+        unusedCount, 
+        threshold, 
+        isLow: true, 
+        isCritical,
+        triggeredAlert: true,
+        scannedAt: this.lastVoucherCheckAt
+      };
+    } else {
+      // Stock is healthy above threshold; auto-resolve the alert if present
+      if (existingAlertIndex >= 0) {
+        this.state.alerts = this.state.alerts.filter((a) => a.id !== alertId);
+        this.saveState();
+      }
+      return { 
+        unusedCount, 
+        threshold, 
+        isLow: false, 
+        isCritical: false,
+        triggeredAlert: false,
+        scannedAt: this.lastVoucherCheckAt
+      };
     }
   }
 

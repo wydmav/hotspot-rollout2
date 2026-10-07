@@ -2,41 +2,56 @@ import React from 'react';
 import { GatewayProvider } from '../../types';
 
 export const OttVoucherLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="120" height="120" rx="24" fill="#0066CC" />
-    <path d="M25 45H95V75H25V45Z" rx="8" fill="#FFFFFF" fillOpacity="0.15" stroke="#FFFFFF" strokeWidth="4" strokeDasharray="6 4"/>
-    <circle cx="25" cy="60" r="10" fill="#0066CC"/>
-    <circle cx="95" cy="60" r="10" fill="#0066CC"/>
-    <path d="M42 52L48 68H54L60 52H55L51 63L47 52H42Z" fill="#FFA500"/>
-    <circle cx="68" cy="60" r="4" fill="#FFFFFF"/>
-    <circle cx="78" cy="60" r="4" fill="#FFFFFF"/>
+  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="80" rx="14" fill="#00438F" />
+    {/* OTT Voucher Ticket Notch Graphic */}
+    <path d="M12 28C18 28 22 34 22 40C22 46 18 52 12 52V28Z" fill="#0b0f19" />
+    <path d="M188 28C182 28 178 34 178 40C178 46 182 52 188 52V28Z" fill="#0b0f19" />
+    {/* OTT Brand Mark */}
+    <rect x="36" y="22" width="36" height="36" rx="8" fill="#F8B100" />
+    <text x="54" y="47" fontFamily="sans-serif" fontWeight="900" fontSize="22" fill="#00438F" textAnchor="middle">O</text>
+    {/* Wordmark */}
+    <text x="86" y="40" fontFamily="sans-serif" fontWeight="900" fontSize="20" fill="#FFFFFF" letterSpacing="1">OTT</text>
+    <text x="86" y="55" fontFamily="sans-serif" fontWeight="700" fontSize="12" fill="#F8B100" letterSpacing="2">VOUCHER</text>
   </svg>
 );
 
 export const EcoCashLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="120" height="120" rx="24" fill="#003399" />
-    <circle cx="60" cy="60" r="38" fill="#0080FF" fillOpacity="0.3"/>
-    <path d="M45 42C45 42 68 38 74 52C80 66 56 68 76 78" stroke="#FFCC00" strokeWidth="8" strokeLinecap="round"/>
-    <circle cx="46" cy="74" r="7" fill="#FFFFFF"/>
+  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="80" rx="14" fill="#002D72" />
+    {/* Econet Telecom Blue Accent Arc */}
+    <circle cx="48" cy="40" r="22" fill="#0066CC" fillOpacity="0.5"/>
+    <circle cx="48" cy="40" r="16" fill="#F37023" />
+    <path d="M42 40C42 36.6863 44.6863 34 48 34C51.3137 34 54 36.6863 54 40H42Z" fill="#FFFFFF"/>
+    <circle cx="48" cy="45" r="3" fill="#FFFFFF"/>
+    {/* EcoCash Text */}
+    <text x="82" y="38" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">EcoCash</text>
+    <text x="82" y="54" fontFamily="sans-serif" fontWeight="700" fontSize="11" fill="#F37023" letterSpacing="1">ECONET LESOTHO</text>
   </svg>
 );
 
 export const MyWalletLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="120" height="120" rx="24" fill="#E60000" />
-    <circle cx="60" cy="60" r="34" fill="#FFFFFF" />
-    <path d="M48 60C48 53.3726 53.3726 48 60 48C66.6274 48 72 53.3726 72 60C72 66.6274 66.6274 72 60 72" fill="#E60000" />
-    <circle cx="60" cy="60" r="6" fill="#FFFFFF" />
+  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="80" rx="14" fill="#E60000" />
+    {/* Vodacom / M-Pesa Icon */}
+    <circle cx="46" cy="40" r="18" fill="#FFFFFF" />
+    <path d="M46 29C40 29 35 34 35 40C35 46 40 51 46 51C52 51 57 46 57 40C57 34 52 29 46 29ZM46 48C42 48 38 44 38 40C38 36 42 32 46 32C50 32 54 36 54 40C54 44 50 48 46 48Z" fill="#E60000"/>
+    <circle cx="46" cy="38" r="4" fill="#E60000"/>
+    {/* MyWallet Text */}
+    <text x="76" y="38" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">MyWallet</text>
+    <text x="76" y="54" fontFamily="sans-serif" fontWeight="700" fontSize="11" fill="#FFE5E5" letterSpacing="1">VODACOM M-PESA</text>
   </svg>
 );
 
 export const XpaymentsLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="120" height="120" rx="24" fill="#0F172A" />
-    <path d="M34 34L60 62L86 34" stroke="#10B981" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M86 86L60 58L34 86" stroke="#06B6D4" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round"/>
-    <circle cx="60" cy="60" r="5" fill="#FFFFFF"/>
+  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="80" rx="14" fill="#0B132B" />
+    {/* Chevron Logo */}
+    <path d="M30 26L48 44L66 26" stroke="#10B981" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M66 54L48 36L30 54" stroke="#06B6D4" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+    {/* xPayments Text */}
+    <text x="80" y="38" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">xPayments</text>
+    <text x="80" y="54" fontFamily="sans-serif" fontWeight="700" fontSize="11" fill="#10B981" letterSpacing="1">PAYLESOTHO HUB</text>
   </svg>
 );
 

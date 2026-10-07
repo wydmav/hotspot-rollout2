@@ -41,6 +41,18 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [isSimulatingAdoption, setIsSimulatingAdoption] = useState(false);
   const [simulationStep, setSimulationStep] = useState<string>('');
 
+  // Port & Bridge Management State
+  const [selectedExtraPort, setSelectedExtraPort] = useState('ether3');
+  const [selectedBridgeName, setSelectedBridgeName] = useState('mkcontroller-bridge');
+  const [copiedBridgeCmd, setCopiedBridgeCmd] = useState(false);
+
+  // Automated WAN Failover State (MKController Feature)
+  const [wan1Port, setWan1Port] = useState('ether1');
+  const [wan2Port, setWan2Port] = useState('ether2');
+  const [canaryCheckHost, setCanaryCheckHost] = useState('1.1.1.1');
+  const [copiedFailoverScript, setCopiedFailoverScript] = useState(false);
+  const [simulatedFailoverActive, setSimulatedFailoverActive] = useState(false);
+
   // Add Router Form State
   const [newName, setNewName] = useState('');
   const [newVertical, setNewVertical] = useState<VerticalType>('hotspot');
@@ -358,6 +370,209 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
                 <div className="p-3 bg-[#080b12] rounded-lg border border-[#1b233a] font-mono text-[11px] text-slate-400 max-h-60 overflow-y-auto whitespace-pre leading-relaxed">
                   {provisioningScript}
+                </div>
+              </div>
+
+              {/* ======================================================= */}
+              {/* SECTION: PORT 1 WAN (STARLINK) & BRIDGE PORTS MANAGER    */}
+              {/* ======================================================= */}
+              <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4 font-mono text-xs">
+                <div className="flex items-center justify-between border-b border-[#1b233a] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-cyan-400" />
+                    <span className="font-extrabold text-white uppercase tracking-wider">
+                      Port 1 WAN (Starlink) &amp; Hotspot Bridge Ports
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                    hAP ax³ Ready
+                  </span>
+                </div>
+
+                <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-2 text-[11px]">
+                  <div className="flex items-center gap-2 text-white font-bold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Port 1 (<code className="text-cyan-300">ether1</code>) is Primary WAN</span>
+                  </div>
+                  <p className="text-slate-400 leading-relaxed">
+                    Connect your <strong>Starlink Dishy / Ethernet Adapter</strong> into <strong>Port 1</strong>. It automatically runs a DHCP client, captures your Starlink public/CGNAT IP, and acts as the default gateway.
+                  </p>
+                </div>
+
+                {/* Bridge Extra Ports Generator */}
+                <div className="space-y-3 pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-slate-300 font-bold">Bridge Extra Ports for Hotspot Clients / Access Points:</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-[10px]">Bridge Name:</span>
+                      <select
+                        value={selectedBridgeName}
+                        onChange={(e) => setSelectedBridgeName(e.target.value)}
+                        className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white text-xs"
+                      >
+                        <option value="mkcontroller-bridge">mkcontroller-bridge (Standard)</option>
+                        <option value="tconnect-bridge">tconnect-bridge</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-400 text-[11px]">Select Extra Port:</span>
+                    {(['ether2', 'ether3', 'ether4', 'ether5', 'wifi1', 'wifi2', 'sfp-sfpplus1'] as const).map((port) => (
+                      <button
+                        key={port}
+                        type="button"
+                        onClick={() => setSelectedExtraPort(port)}
+                        className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
+                          selectedExtraPort === port
+                            ? 'bg-[#f05e17] border-[#f05e17] text-white'
+                            : 'bg-[#161d31] border-[#232d42] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {port}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Generated Bridge Port Command */}
+                  <div className="p-3 bg-[#080b12] rounded-xl border border-[#1b233a] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[10px]">RouterOS Terminal Command to Bridge {selectedExtraPort}:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(
+                            RouterOSRenderer.renderBridgePortCommand(selectedBridgeName, selectedExtraPort)
+                          );
+                          setCopiedBridgeCmd(true);
+                          setTimeout(() => setCopiedBridgeCmd(false), 2000);
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-0.5 bg-[#161d31] hover:bg-[#232d42] border border-[#232d42] text-[11px] text-white rounded transition-colors"
+                      >
+                        {copiedBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedBridgeCmd ? 'Copied!' : 'Copy Bridge Command'}</span>
+                      </button>
+                    </div>
+                    <pre className="text-emerald-400 font-mono text-xs select-all whitespace-pre-wrap">
+                      {RouterOSRenderer.renderBridgePortCommand(selectedBridgeName, selectedExtraPort)}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* ======================================================= */}
+              {/* SECTION: AUTOMATED WAN FAILOVER (MKCONTROLLER FEATURE)  */}
+              {/* ======================================================= */}
+              <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4 font-mono text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1b233a] pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Radio className="w-4 h-4 text-amber-400" />
+                      <span className="font-extrabold text-white uppercase tracking-wider">
+                        MikroTik Automated WAN Failover
+                      </span>
+                      <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
+                        MKController Spec
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-[11px] mt-0.5">
+                      Recursive routing with canary host ping checking for Starlink + LTE / Fiber multi-WAN redundancy
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSimulatedFailoverActive(!simulatedFailoverActive)}
+                      className={`px-3 py-1 rounded text-xs font-bold border transition-colors ${
+                        simulatedFailoverActive
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                          : 'bg-[#161d31] border-[#232d42] text-slate-300 hover:text-white'
+                      }`}
+                      title="Test how failover event reflects in controller"
+                    >
+                      {simulatedFailoverActive ? 'Simulated: WAN2 Active' : 'Simulate Starlink Drop'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const script = RouterOSRenderer.renderWanFailoverScript({
+                          wan1: wan1Port,
+                          wan2: wan2Port,
+                          checkHost: canaryCheckHost,
+                          hubDomain: controllerHost,
+                          routerId: selectedRouter.id,
+                        });
+                        navigator.clipboard.writeText(script);
+                        setCopiedFailoverScript(true);
+                        setTimeout(() => setCopiedFailoverScript(false), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg transition-colors shadow-sm"
+                    >
+                      {copiedFailoverScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedFailoverScript ? 'Copied Failover!' : 'Copy Failover Script'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Visual Failover Route Architecture */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                  <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-emerald-400 font-bold">WAN1 (Primary): Starlink LEO</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        !simulatedFailoverActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'
+                      }`}>
+                        {!simulatedFailoverActive ? 'ROUTE ACTIVE (Dist 1)' : 'STANDBY / DOWN'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300">Port: <code className="text-white bg-black/40 px-1 rounded">{wan1Port}</code></div>
+                    <div className="text-slate-400">Canary Target: <code className="text-cyan-300">{canaryCheckHost}</code> (Cloudflare DNS)</div>
+                    <p className="text-slate-400 text-[10px] leading-relaxed pt-1 border-t border-slate-700/50">
+                      Even if Starlink Ethernet cable is UP, if satellite signal drops, recursive route detects packet loss in &lt; 3s.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-400 font-bold">WAN2 (Backup): LTE / Fiber</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        simulatedFailoverActive ? 'bg-amber-500/20 text-amber-300 animate-pulse' : 'bg-slate-700 text-slate-400'
+                      }`}>
+                        {simulatedFailoverActive ? 'FAILOVER ENGAGED (Dist 2)' : 'STANDBY READY'}
+                      </span>
+                    </div>
+                    <div className="text-slate-300">Port: <code className="text-white bg-black/40 px-1 rounded">{wan2Port}</code></div>
+                    <div className="text-slate-400">Failover Mode: Instant Automatic Hot-Swap</div>
+                    <p className="text-slate-400 text-[10px] leading-relaxed pt-1 border-t border-slate-700/50">
+                      Takes over hotspot clients immediately. As soon as Starlink recovers, traffic gracefully fails back to Starlink!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Inspectable Failover Script Box */}
+                <div className="p-3 bg-[#080b12] rounded-xl border border-[#1b233a] space-y-2">
+                  <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                    <span>RouterOS v7 Recursive Routing &amp; Netwatch Sentinel Script:</span>
+                    <a
+                      href="https://mkcontroller.com/docs/management/features/mikrotik-wan-failover-with-mkcontroller/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-400 hover:underline flex items-center gap-1"
+                    >
+                      <span>MKController Doc Spec &rarr;</span>
+                    </a>
+                  </div>
+                  <pre className="text-cyan-300 font-mono text-[11px] select-all whitespace-pre leading-relaxed max-h-48 overflow-y-auto">
+                    {RouterOSRenderer.renderWanFailoverScript({
+                      wan1: wan1Port,
+                      wan2: wan2Port,
+                      checkHost: canaryCheckHost,
+                      hubDomain: controllerHost,
+                      routerId: selectedRouter.id,
+                    })}
+                  </pre>
                 </div>
               </div>
             </>

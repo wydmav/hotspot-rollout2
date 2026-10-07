@@ -20,6 +20,9 @@ interface BillingViewProps {
   onToggleLive: (provider: GatewayProvider, setLive: boolean) => any;
   onUpdateCredentials: (provider: GatewayProvider, updates: Partial<GatewayConfig>) => void;
   onRecheckStatus: (txId: string) => any;
+  voucherThreshold?: number;
+  onUpdateVoucherThreshold?: (threshold: number) => void;
+  onTriggerVoucherCheck?: () => void;
 }
 
 export const BillingView: React.FC<BillingViewProps> = (props) => {
@@ -70,6 +73,9 @@ export const BillingView: React.FC<BillingViewProps> = (props) => {
           onRedeemVoucher={props.onRedeemVoucher}
           selectedVertical={props.selectedVertical}
           currency={props.currency}
+          voucherThreshold={props.voucherThreshold}
+          onUpdateVoucherThreshold={props.onUpdateVoucherThreshold}
+          onTriggerVoucherCheck={props.onTriggerVoucherCheck}
         />
       )}
 

@@ -16,6 +16,7 @@ import {
   Database
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType } from '../../types';
+import { RegionalFleetMap } from './RegionalFleetMap';
 
 interface DashboardViewProps {
   routers: RouterDevice[];
@@ -37,6 +38,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   currency,
 }) => {
   // Widget customization state
+  const [showMapWidget, setShowMapWidget] = useState(true);
   const [showSolarWidget, setShowSolarWidget] = useState(true);
   const [showTransitWidget, setShowTransitWidget] = useState(true);
   const [showWaveChart, setShowWaveChart] = useState(true);
@@ -99,6 +101,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-xs font-mono text-slate-300">
             <SlidersHorizontal className="w-3.5 h-3.5 text-[#f05e17]" />
             <span className="text-[11px] text-slate-400">Widgets:</span>
+            <label className="flex items-center gap-1 cursor-pointer hover:text-white">
+              <input 
+                type="checkbox" 
+                checked={showMapWidget} 
+                onChange={(e) => setShowMapWidget(e.target.checked)} 
+                className="rounded accent-[#f05e17] w-3 h-3"
+              />
+              <span className="text-[11px]">Map</span>
+            </label>
             <label className="flex items-center gap-1 cursor-pointer hover:text-white">
               <input 
                 type="checkbox" 
@@ -236,6 +247,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="text-[11px] text-slate-500 font-mono mt-1">WireGuard tunnels active</p>
         </div>
       </div>
+
+      {/* Regional Hotspot Distribution & Physical Fleet Map (Static Pins & Geo Visualization) */}
+      {showMapWidget && (
+        <RegionalFleetMap
+          routers={filteredRouters}
+          onNavigateTab={onNavigateTab}
+        />
+      )}
 
       {/* 24-Hour Multi-Vertical Traffic Wave Spectrum */}
       {showWaveChart && (

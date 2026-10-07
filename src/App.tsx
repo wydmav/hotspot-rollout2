@@ -28,6 +28,7 @@ export default function App() {
     return supabaseService.getConfig().isConnected;
   });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [voucherThreshold, setVoucherThreshold] = useState<number>(() => storage.getVoucherLowThreshold());
 
   // Subscribe to reactive storage mutations
   useEffect(() => {
@@ -38,6 +39,48 @@ export default function App() {
       unsubscribe();
     };
   }, []);
+
+  // Background Sentinel Daemon: Continually audits voucher inventory against threshold every 15s
+  useEffect(() => {
+    // Initial stock verification on mount
+    storage.checkVoucherStock();
+
+    const intervalId = setInterval(() => {
+      storage.checkVoucherStock();
+    }, 15000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  // Subscribe to Supabase Realtime WebSocket changes across ALL tables
+  useEffect(() => {
+    if (!isSupabaseConnected) return;
+
+    const unsubscribeRealtime = supabaseService.subscribeToAllRealtime({
+      onRouterChange: async () => {
+        const data = await supabaseService.pullFromSupabase();
+        if (data?.routers) storage.loadFromSupabase({ routers: data.routers });
+      },
+      onVoucherChange: async () => {
+        const data = await supabaseService.pullFromSupabase();
+        if (data?.vouchers) storage.loadFromSupabase({ vouchers: data.vouchers });
+      },
+      onTransactionChange: async () => {
+        const data = await supabaseService.pullFromSupabase();
+        if (data?.transactions) storage.loadFromSupabase({ transactions: data.transactions });
+      },
+      onPlanChange: async () => {
+        const data = await supabaseService.pullFromSupabase();
+        if (data?.plans) storage.loadFromSupabase({ plans: data.plans });
+      },
+    });
+
+    return () => {
+      unsubscribeRealtime();
+    };
+  }, [isSupabaseConnected]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -65,6 +108,18 @@ export default function App() {
   const handleDeleteRouter = (routerId: string) => {
     storage.deleteRouter(routerId);
     showToast('Router removed and tunnel keys revoked.');
+    if (isSupabaseConnected) {
+      supabaseService.syncRoutersToSupabase(storage.getState().routers);
+    }
+  };
+
+  const handleToggleRouterFreeMode = (routerId: string | 'all', enabled: boolean) => {
+    storage.toggleRouterFreeMode(routerId, enabled);
+    showToast(
+      routerId === 'all'
+        ? `Global fleet Free Mode ${enabled ? 'ACTIVATED (All routers free)' : 'DEACTIVATED'}.`
+        : `Router Free Mode ${enabled ? 'ACTIVATED' : 'DEACTIVATED'}.`
+    );
     if (isSupabaseConnected) {
       supabaseService.syncRoutersToSupabase(storage.getState().routers);
     }
@@ -125,8 +180,8 @@ export default function App() {
     showToast('Gateway merchant credentials updated.');
   };
 
-  const handleProcessLivePayment = (provider: GatewayProvider, planId: string, phone?: string, ottPin?: string) => {
-    const res = storage.processLivePayment(provider, planId, phone, ottPin);
+  const handleProcessLivePayment = (provider: GatewayProvider, planId: string, phone?: string, ottPin?: string, planOverride?: any) => {
+    const res = storage.processLivePayment(provider, planId, phone, ottPin, planOverride);
     showToast(`Payment successful! Issued voucher ${res.voucher.code}`);
     if (isSupabaseConnected) {
       supabaseService.syncTransactionToSupabase(res.transaction);
@@ -167,11 +222,42 @@ export default function App() {
     showToast('Anomaly alert dismissed.');
   };
 
+  // Voucher Stock Sentinel & Background Check Handlers
+  const handleUpdateVoucherThreshold = (threshold: number) => {
+    storage.setVoucherLowThreshold(threshold);
+    setVoucherThreshold(threshold);
+    const check = storage.checkVoucherStock(threshold);
+    showToast(`Voucher warning threshold updated to ${threshold} vouchers.`);
+  };
+
+  const handleTriggerVoucherCheck = () => {
+    const res = storage.checkVoucherStock();
+    if (res.isLow) {
+      showToast(`⚠️ Low Voucher Balance: ${res.unusedCount} unused vouchers left (Threshold: ${res.threshold}).`);
+    } else {
+      showToast(`✅ Voucher Stock Healthy: ${res.unusedCount} unused vouchers available (Threshold: ${res.threshold}).`);
+    }
+  };
+
+  const handleQuickRestock = (count = 5) => {
+    const defaultPlan = state.plans[0];
+    if (!defaultPlan) {
+      showToast('Please configure a hotspot plan in Billing first.');
+      return;
+    }
+    const generated = storage.generateVoucherBatch(defaultPlan.id, count);
+    showToast(`Replenished voucher pool with ${count} new vouchers for ${defaultPlan.name}.`);
+    if (isSupabaseConnected) {
+      generated.forEach((v) => supabaseService.syncVoucherToSupabase(v));
+    }
+  };
+
   const onlineRouters = state.routers.filter(r => r.status === 'online').length;
   const totalRevenue = state.transactions
     .filter(t => t.status === 'completed')
     .reduce((acc, curr) => acc + curr.amount, 0);
   const activeSessions = state.routers.reduce((acc, curr) => acc + curr.activeSessions, 0);
+  const unusedVoucherCount = state.vouchers.filter(v => v.status === 'active').length;
 
   return (
     <div className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans">
@@ -205,6 +291,12 @@ export default function App() {
           onSearchChange={setSearchQuery}
           isSupabaseConnected={isSupabaseConnected}
           onOpenDatabaseModal={() => setShowDatabaseModal(true)}
+          onNavigateTab={setCurrentTab}
+          unusedVoucherCount={unusedVoucherCount}
+          voucherThreshold={voucherThreshold}
+          onUpdateVoucherThreshold={handleUpdateVoucherThreshold}
+          onTriggerBackgroundCheck={handleTriggerVoucherCheck}
+          onQuickRestock={handleQuickRestock}
         />
 
         {/* Scrollable Viewport */}
@@ -256,6 +348,9 @@ export default function App() {
               onToggleLive={handleToggleGatewayLive}
               onUpdateCredentials={handleUpdateGatewayCredentials}
               onRecheckStatus={handleRecheckPaymentStatus}
+              voucherThreshold={voucherThreshold}
+              onUpdateVoucherThreshold={handleUpdateVoucherThreshold}
+              onTriggerVoucherCheck={handleTriggerVoucherCheck}
             />
           )}
 
@@ -280,6 +375,7 @@ export default function App() {
               onDeleteMember={handleDeleteMember}
               onOpenDatabaseModal={() => setShowDatabaseModal(true)}
               isSupabaseConnected={isSupabaseConnected}
+              onToggleRouterFreeMode={handleToggleRouterFreeMode}
             />
           )}
         </main>

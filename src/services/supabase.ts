@@ -367,6 +367,17 @@ CREATE INDEX IF NOT EXISTS idx_voucher_devices_mac ON public.voucher_devices(vou
 CREATE INDEX IF NOT EXISTS idx_transactions_operator ON public.transactions(operator_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_ref ON public.transactions(transaction_ref);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_operator ON public.audit_logs(operator_id, created_at DESC);
+
+-- 9. SUPABASE REALTIME REPLICATION (INSTANT WEBSOCKET SYNCHRONIZATION)
+-- Broadcasts all inserts, updates, and deletes to every connected browser & router
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+END $$;
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.routers, public.vouchers, public.voucher_devices, public.transactions, public.plans, public.sites, public.audit_logs;
 `;
 
 class SupabaseService {
@@ -662,6 +673,70 @@ class SupabaseService {
     } catch (e) {
       console.warn('Supabase sync transaction error:', e);
       return false;
+    }
+  }
+
+  /**
+   * Subscribes to Supabase Realtime WebSocket changes across ALL tables
+   * Ensures routers, vouchers, transactions, and plans update instantly everywhere!
+   */
+  subscribeToAllRealtime(callbacks: {
+    onRouterChange?: (payload: any) => void;
+    onVoucherChange?: (payload: any) => void;
+    onTransactionChange?: (payload: any) => void;
+    onPlanChange?: (payload: any) => void;
+  }) {
+    if (!this.client || !this.config.isConnected) {
+      return () => {};
+    }
+
+    try {
+      const channel = this.client
+        .channel('tconnect-realtime-global')
+        .on(
+          'postgres_changes' as any,
+          { event: '*', schema: 'public', table: 'routers' },
+          (payload: any) => {
+            console.log('[Supabase Realtime] Router modified:', payload);
+            callbacks.onRouterChange?.(payload);
+          }
+        )
+        .on(
+          'postgres_changes' as any,
+          { event: '*', schema: 'public', table: 'vouchers' },
+          (payload: any) => {
+            console.log('[Supabase Realtime] Voucher modified:', payload);
+            callbacks.onVoucherChange?.(payload);
+          }
+        )
+        .on(
+          'postgres_changes' as any,
+          { event: '*', schema: 'public', table: 'transactions' },
+          (payload: any) => {
+            console.log('[Supabase Realtime] Transaction created/updated:', payload);
+            callbacks.onTransactionChange?.(payload);
+          }
+        )
+        .on(
+          'postgres_changes' as any,
+          { event: '*', schema: 'public', table: 'plans' },
+          (payload: any) => {
+            console.log('[Supabase Realtime] Plan modified:', payload);
+            callbacks.onPlanChange?.(payload);
+          }
+        )
+        .subscribe((status) => {
+          console.log('[Supabase Realtime Channel Status]:', status);
+        });
+
+      return () => {
+        if (this.client) {
+          this.client.removeChannel(channel);
+        }
+      };
+    } catch (err) {
+      console.warn('Failed to establish Realtime subscription:', err);
+      return () => {};
     }
   }
 }
