@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Users, 
+  UserPlus,
   ShieldCheck, 
   LogOut, 
   ChevronDown, 
@@ -33,6 +34,7 @@ interface UserMenuDropdownProps {
   pendingResetCount: number;
   biometricActive?: boolean;
   onOpenBiometrics?: () => void;
+  onOpenInviteTeammates?: () => void;
 }
 
 export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
@@ -45,6 +47,7 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
   pendingResetCount,
   biometricActive = true,
   onOpenBiometrics,
+  onOpenInviteTeammates,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -287,6 +290,34 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
                   </span>
                 )}
               </div>
+            </button>
+
+            {/* 3. Invite Teammates (instant onboarding & role assignment) */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setIsOpen(false);
+                if (onOpenInviteTeammates) {
+                  onOpenInviteTeammates();
+                } else {
+                  onNavigateTab('network');
+                }
+              }}
+              className="w-full px-3 py-2 rounded-lg bg-[#121829] hover:bg-[#1a233a] border border-[#1f283d] text-left flex items-center justify-between text-slate-200 hover:text-white transition-colors group cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <UserPlus className="w-4 h-4 text-[#f05e17] group-hover:scale-110 transition-transform" />
+                <div>
+                  <span className="font-bold block text-white flex items-center gap-1.5">
+                    Invite Teammates
+                  </span>
+                  <span className="text-[10px] text-slate-400 block font-normal">Instant link &amp; role dispatch</span>
+                </div>
+              </div>
+              <span className="text-[10px] text-[#f05e17] font-bold px-1.5 py-0.5 rounded bg-[#f05e17]/10 border border-[#f05e17]/25 flex items-center gap-1">
+                + Invite
+              </span>
             </button>
 
             {/* Hardware Biometrics / Passkey Item (if handler provided) */}

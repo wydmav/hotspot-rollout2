@@ -46,6 +46,7 @@ interface HeaderProps {
   onSignOut?: () => void;
   teamMembersCount?: number;
   pendingResetCount?: number;
+  onOpenInviteTeammates?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -85,6 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSignOut = () => {},
   teamMembersCount = 1,
   pendingResetCount = 0,
+  onOpenInviteTeammates,
 }) => {
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
   const [showVoucherPopover, setShowVoucherPopover] = useState(false);
@@ -497,6 +499,7 @@ export const Header: React.FC<HeaderProps> = ({
             pendingResetCount={pendingResetCount}
             biometricActive={biometricActive}
             onOpenBiometrics={onOpenBiometrics}
+            onOpenInviteTeammates={onOpenInviteTeammates}
           />
         </div>
       </div>

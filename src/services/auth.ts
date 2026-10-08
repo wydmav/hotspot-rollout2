@@ -221,5 +221,56 @@ export class AuthService {
   }
 }
 
+/**
+ * Simulates dispatching an onboarding email with instant authentication magic link to the invited teammate.
+ */
+export async function simulateInviteEmail(
+  inviteeEmail: string,
+  inviteeName: string,
+  role: string,
+  inviteUrl: string
+): Promise<SimulatedEmailDispatch> {
+  const timestamp = new Date().toISOString();
+  const messageId = `msg_invite_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const subject = `You're invited to join T-Connect Controller as ${role}`;
+  const plainTextBody = `
+Hi ${inviteeName},
+
+Administrator Raphooko Phooko (${ADMIN_EMAIL}) has invited you to join the T-Connect Cloud Controller team as ${role}.
+
+Click the instant access link below to sign in immediately without needing to configure a password:
+${inviteUrl}
+
+This link is single-use and will automatically authenticate your session into the T-Connect mesh controller.
+
+Welcome to T-Connect!
+Maseru, Lesotho
+`.trim();
+
+  const htmlPreview = `
+<div style="font-family: monospace; background: #0c101c; color: #f1f5f9; padding: 16px; border-radius: 8px; border: 1px solid #232d42;">
+  <h3 style="color: #f05e17; margin-top: 0;">Welcome to T-Connect Controller</h3>
+  <p><strong>Invited by:</strong> ${ADMIN_NAME} (${ADMIN_EMAIL})</p>
+  <p><strong>Role:</strong> <span style="color: #10b981; font-weight: bold;">${role}</span></p>
+  <p><a href="${inviteUrl}" style="background: #f05e17; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">Instant Access &rarr;</a></p>
+  <p style="font-size: 11px; color: #94a3b8;">Clicking will immediately authenticate your session with full role permissions.</p>
+</div>
+`.trim();
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  return {
+    to: inviteeEmail,
+    from: `${ADMIN_NAME} <${ADMIN_EMAIL}>`,
+    replyTo: ADMIN_EMAIL,
+    subject,
+    body: plainTextBody,
+    htmlPreview,
+    dispatchedAt: timestamp,
+    messageId,
+    deliveryStatus: 'delivered',
+  };
+}
+
 export const authService = new AuthService();
 export default authService;

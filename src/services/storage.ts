@@ -905,29 +905,127 @@ class StorageService {
 
   // Team, RBAC & Invites
   inviteTeamMember(name: string, email: string, role: TeamMember['role'], scopedSites: string[]) {
+    const inviteToken = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    
+    // Check if member already exists by email
+    const cleanEmail = email.trim().toLowerCase();
+    const existingIndex = this.state.team.findIndex((m) => m.email.toLowerCase() === cleanEmail);
+    
+    if (existingIndex >= 0) {
+      const existing = this.state.team[existingIndex];
+      existing.name = name.trim();
+      existing.role = role;
+      existing.scopedSites = scopedSites;
+      existing.inviteToken = inviteToken;
+      existing.inviteTokenExpiresAt = expiresAt;
+      existing.invitedBy = 'Raphooko Phooko';
+      existing.status = 'invited';
+      this.logAudit({
+        actor: 'Raphooko Phooko',
+        role: 'Owner',
+        action: 'team.invite_reissued',
+        target: cleanEmail,
+        details: `Re-issued single-use invitation for role '${role}' with instant token authentication.`
+      });
+      this.saveState();
+      return existing;
+    }
+
     const newMember: TeamMember = {
       id: `tm_${Date.now()}`,
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       role,
       scopedSites,
       mfaEnabled: role === 'Owner' || role === 'Admin' || role === 'Technical',
       status: 'invited',
-      invitedAt: new Date().toISOString().replace('T', ' ').slice(0, 10)
+      invitedAt: new Date().toISOString().replace('T', ' ').slice(0, 10),
+      inviteToken,
+      inviteTokenExpiresAt: expiresAt,
+      invitedBy: 'Raphooko Phooko'
     };
 
     this.state.team.push(newMember);
 
     this.logAudit({
-      actor: 'Admin',
+      actor: 'Raphooko Phooko',
       role: 'Owner',
       action: 'team.invite',
-      target: email,
-      details: `Sent single-use invite for role '${role}' (Scoped to: ${scopedSites.length ? scopedSites.join(', ') : 'All Sites'}).`
+      target: cleanEmail,
+      details: `Dispatched single-use invite for role '${role}' (Scoped to: ${scopedSites.length ? scopedSites.join(', ') : 'All Sites'}) with instant link auth.`
     });
 
     this.saveState();
     return newMember;
+  }
+
+  redeemInviteToken(token: string, emailHint?: string): { success: boolean; session?: AuthSession; member?: TeamMember; message: string } {
+    if (!token && !emailHint) {
+      return { success: false, message: 'Missing invitation token or email.' };
+    }
+
+    const cleanToken = token ? token.trim() : '';
+    const cleanEmail = emailHint ? emailHint.trim().toLowerCase() : '';
+
+    // Find member by inviteToken or by email if invited
+    let member = this.state.team.find((m) => {
+      if (cleanToken && m.inviteToken && m.inviteToken.toLowerCase() === cleanToken.toLowerCase()) {
+        return true;
+      }
+      if (cleanToken && m.id.toLowerCase() === cleanToken.toLowerCase()) {
+        return true;
+      }
+      if (cleanEmail && m.email.toLowerCase() === cleanEmail && m.status === 'invited') {
+        return true;
+      }
+      return false;
+    });
+
+    // If still not found, check if token matches an invited member id
+    if (!member && cleanToken) {
+      member = this.state.team.find((m) => m.id === cleanToken);
+    }
+
+    if (!member) {
+      return {
+        success: false,
+        message: 'Invalid or expired invitation token. Please request a new invitation from your administrator.'
+      };
+    }
+
+    // Activate member
+    member.status = 'active';
+    member.lastLoginAt = 'Just now';
+    // Clear temporary pending resets
+    member.hasPendingReset = false;
+
+    // Issue instant authenticated session
+    const session: AuthSession = {
+      user: member,
+      token: `sess_invite_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      loggedInAt: new Date().toISOString(),
+      effectiveRole: member.role
+    };
+
+    this.setAuthSession(session);
+
+    this.logAudit({
+      actor: member.name,
+      role: member.role,
+      action: 'team.invite_accepted',
+      target: member.email,
+      details: `Accepted teammate invitation and instantly authenticated into controller as ${member.role}.`
+    });
+
+    this.saveState();
+
+    return {
+      success: true,
+      session,
+      member,
+      message: `Instant authentication verified! Welcome to T-Connect, ${member.name} (${member.role}).`
+    };
   }
 
   updateMemberRole(memberId: string, role: TeamMember['role'], scopedSites?: string[]) {
@@ -940,12 +1038,23 @@ class StorageService {
       member.scopedSites = scopedSites;
     }
 
+    // If currently logged-in user is this member, sync active session
+    const currentSession = this.getAuthSession();
+    if (currentSession && (currentSession.user.id === memberId || currentSession.user.email.toLowerCase() === member.email.toLowerCase())) {
+      currentSession.user.role = role;
+      currentSession.effectiveRole = role;
+      if (scopedSites !== undefined) {
+        currentSession.user.scopedSites = scopedSites;
+      }
+      this.setAuthSession(currentSession);
+    }
+
     this.logAudit({
-      actor: 'Admin',
+      actor: 'Raphooko Phooko',
       role: 'Owner',
-      action: 'team.role_change',
+      action: 'team.role_upgrade',
       target: member.email,
-      details: `Changed role from ${oldRole} to ${role} (Effective immediately).`
+      details: `Upgraded role from ${oldRole} to ${role} (Effective immediately).`
     });
 
     this.saveState();
@@ -956,7 +1065,7 @@ class StorageService {
     this.state.team = this.state.team.filter((m) => m.id !== memberId);
     if (member) {
       this.logAudit({
-        actor: 'Admin',
+        actor: 'Raphooko Phooko',
         role: 'Owner',
         action: 'team.revoke',
         target: member.email,

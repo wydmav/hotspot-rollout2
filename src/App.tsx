@@ -15,7 +15,8 @@ import { BillingView } from './components/views/BillingView';
 import { NetworkSecurityView } from './components/views/NetworkSecurityView';
 import { DatabaseModal } from './components/common/DatabaseModal';
 import { LoginView } from './components/auth/LoginView';
-import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye } from 'lucide-react';
+import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight } from 'lucide-react';
+import { simulateInviteEmail } from './services/auth';
 
 export default function App() {
   const [state, setState] = useState(() => storage.getState());
@@ -35,6 +36,15 @@ export default function App() {
   });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [voucherThreshold, setVoucherThreshold] = useState<number>(() => storage.getVoucherLowThreshold());
+
+  // Global Invite Modal State (Triggered from User Profile dropdown or Team view)
+  const [isGlobalInviteModalOpen, setIsGlobalInviteModalOpen] = useState(false);
+  const [globalInviteName, setGlobalInviteName] = useState('');
+  const [globalInviteEmail, setGlobalInviteEmail] = useState('');
+  const [globalInviteRole, setGlobalInviteRole] = useState<TeamMember['role']>('Collaborator');
+  const [globalInviteSites, setGlobalInviteSites] = useState<string[]>([]);
+  const [recentlyInvitedTeammate, setRecentlyInvitedTeammate] = useState<{ member: TeamMember; inviteUrl: string } | null>(null);
+  const [copiedGlobalInviteUrl, setCopiedGlobalInviteUrl] = useState(false);
 
   // Subscribe to reactive storage mutations
   useEffect(() => {
@@ -87,6 +97,47 @@ export default function App() {
       unsubscribeRealtime();
     };
   }, [isSupabaseConnected]);
+
+  // Instant Link-Based Authentication Listener for Email Invites
+  useEffect(() => {
+    const handleUrlAuth = () => {
+      if (typeof window === 'undefined') return;
+      const hash = window.location.hash;
+      const search = window.location.search;
+
+      let token = '';
+      let emailHint = '';
+
+      if (hash.startsWith('#invite') || hash.includes('token=')) {
+        const tokenMatch = hash.match(/token=([^&]+)/);
+        const emailMatch = hash.match(/email=([^&]+)/);
+        if (tokenMatch) token = decodeURIComponent(tokenMatch[1]);
+        if (emailMatch) emailHint = decodeURIComponent(emailMatch[1]);
+      } else if (search.includes('token=') || search.includes('invite=')) {
+        const params = new URLSearchParams(search);
+        token = params.get('token') || params.get('invite') || '';
+        emailHint = params.get('email') || '';
+      }
+
+      if (token || (emailHint && hash.startsWith('#invite'))) {
+        const res = storage.redeemInviteToken(token, emailHint);
+        if (res.success && res.session) {
+          setAuthSession(res.session);
+          setEffectiveRole(res.session.user.role);
+          showToast(res.message);
+          window.history.replaceState(null, '', window.location.pathname);
+        } else if (token) {
+          showToast(res.message);
+        }
+      }
+    };
+
+    handleUrlAuth();
+    window.addEventListener('hashchange', handleUrlAuth);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlAuth);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -232,15 +283,29 @@ export default function App() {
 
   // Team & Content Filters
   const handleInviteMember = (name: string, email: string, role: any, scopedSites: string[]) => {
-    if (!checkPermission('invite_member', 'Inviting team members')) return;
-    storage.inviteTeamMember(name, email, role, scopedSites);
-    showToast(`Single-use invitation generated for ${email}.`);
+    if (!checkPermission('invite_member', 'Inviting team members')) return null;
+    const member = storage.inviteTeamMember(name, email, role, scopedSites);
+    showToast(`Single-use invitation generated for ${email}. Instant access link active.`);
+    return member;
   };
 
   const handleUpdateMemberRole = (memberId: string, role: any, scopedSites?: string[]) => {
-    if (!checkPermission('update_role', 'Updating member roles')) return;
+    const isAdminOrOwner = 
+      authSession?.user?.email.toLowerCase() === 'rphooko@tconnect.africa' || 
+      effectiveRole === 'Owner' || 
+      effectiveRole === 'Admin';
+    if (!isAdminOrOwner && !checkPermission('update_role', 'Updating member roles')) return;
+
     storage.updateMemberRole(memberId, role, scopedSites);
-    showToast('Member permissions updated and effective immediately.');
+    const updated = storage.getState().team.find((m) => m.id === memberId);
+    showToast(`Upgraded role to ${role} for ${updated?.name || 'team member'} (Effective immediately).`);
+
+    // Sync active session if the current user was updated
+    const currentSession = storage.getAuthSession();
+    if (currentSession && (currentSession.user.id === memberId || currentSession.user.email.toLowerCase() === updated?.email.toLowerCase())) {
+      setAuthSession({ ...currentSession });
+      setEffectiveRole(currentSession.effectiveRole);
+    }
   };
 
   const handleDeleteMember = (memberId: string) => {
@@ -369,6 +434,7 @@ export default function App() {
           }}
           teamMembersCount={state.team.length}
           pendingResetCount={state.team.filter((m) => m.hasPendingReset).length}
+          onOpenInviteTeammates={() => setIsGlobalInviteModalOpen(true)}
         />
 
         {/* Role Preview Active Banner */}
@@ -470,6 +536,7 @@ export default function App() {
               isSupabaseConnected={isSupabaseConnected}
               onToggleRouterFreeMode={handleToggleRouterFreeMode}
               onIssuePassword={handleIssuePassword}
+              currentUser={authSession.user}
             />
           )}
         </main>
@@ -524,6 +591,240 @@ export default function App() {
                 className="px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 font-mono text-xs rounded-lg"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Teammate Invitation Modal (Accessible from Header Dropdown) */}
+      {isGlobalInviteModalOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <UserPlus className="w-4 h-4 text-[#f05e17]" />
+                <span>Invite Teammate to T-Connect</span>
+              </div>
+              <button 
+                onClick={() => setIsGlobalInviteModalOpen(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!globalInviteName.trim() || !globalInviteEmail.trim()) return;
+
+                const name = globalInviteName.trim();
+                const email = globalInviteEmail.trim();
+                const member = handleInviteMember(name, email, globalInviteRole, globalInviteSites);
+                
+                if (member) {
+                  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
+                  const inviteUrl = `${origin}/#invite?token=${member.inviteToken || member.id}&email=${encodeURIComponent(member.email)}&role=${encodeURIComponent(member.role)}`;
+                  setRecentlyInvitedTeammate({ member, inviteUrl });
+                  simulateInviteEmail(member.email, member.name, member.role, inviteUrl).catch(() => {});
+                }
+
+                setIsGlobalInviteModalOpen(false);
+                setGlobalInviteName('');
+                setGlobalInviteEmail('');
+                setGlobalInviteSites([]);
+              }}
+              className="space-y-3.5"
+            >
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={globalInviteName}
+                  onChange={(e) => setGlobalInviteName(e.target.value)}
+                  placeholder="e.g. Lineo Letsie"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Teammate Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={globalInviteEmail}
+                  onChange={(e) => setGlobalInviteEmail(e.target.value)}
+                  placeholder="colleague@domain.ls"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  A single-use instant authentication token will be linked to this email.
+                </span>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Role Assignment</label>
+                <select
+                  value={globalInviteRole}
+                  onChange={(e) => setGlobalInviteRole(e.target.value as TeamMember['role'])}
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                >
+                  <option value="Admin">Admin (Full Site Configuration &amp; Billing)</option>
+                  <option value="Technical">Technical (MikroTik Router &amp; WireGuard Only)</option>
+                  <option value="Collaborator">Collaborator (Voucher Generation Only)</option>
+                  <option value="Viewer">Viewer (Read-Only Dashboard)</option>
+                  <option value="Owner">Owner (Super Admin Controller Authority)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Location Scoping (Leave unchecked for All)</label>
+                <div className="space-y-1 max-h-28 overflow-y-auto p-2 bg-[#161d31] rounded-lg border border-[#232d42]">
+                  {Array.from(new Set(state.routers.map(r => r.siteName))).map((site) => (
+                    <label key={site} className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                      <input
+                        type="checkbox"
+                        checked={globalInviteSites.includes(site)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setGlobalInviteSites([...globalInviteSites, site]);
+                          } else {
+                            setGlobalInviteSites(globalInviteSites.filter(s => s !== site));
+                          }
+                        }}
+                        className="rounded accent-[#f05e17] w-3 h-3"
+                      />
+                      <span>{site}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-[#121829] border border-[#1f283d] rounded-lg text-[11px] text-slate-300 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#f05e17] shrink-0" />
+                <span>
+                  Teammate will be automatically authenticated into the controller upon opening the email link.
+                </span>
+              </div>
+
+              <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGlobalInviteModalOpen(false)}
+                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Generate Instant Access Invite</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Recently Invited Teammate Success Modal */}
+      {recentlyInvitedTeammate && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <span>Teammate Invited: Instant Authentication Ready</span>
+              </div>
+              <button 
+                onClick={() => setRecentlyInvitedTeammate(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Member Card */}
+            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-white text-sm">{recentlyInvitedTeammate.member.name}</div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {recentlyInvitedTeammate.member.role}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400">{recentlyInvitedTeammate.member.email}</div>
+              <div className="text-[10px] text-slate-400 pt-1 border-t border-[#1f283d] flex items-center justify-between">
+                <span>Scope: {recentlyInvitedTeammate.member.scopedSites.length ? recentlyInvitedTeammate.member.scopedSites.join(', ') : 'All Locations'}</span>
+                <span className="text-emerald-400 font-bold">Single-Use Token Active</span>
+              </div>
+            </div>
+
+            {/* Magic Link Box */}
+            <div className="space-y-1.5">
+              <label className="text-slate-300 font-bold block flex items-center justify-between">
+                <span>Instant Authentication Magic Link</span>
+                <span className="text-[10px] text-emerald-400 font-normal">No password required</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={recentlyInvitedTeammate.inviteUrl}
+                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#232d42] rounded-lg text-slate-200 font-mono text-xs select-all focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(recentlyInvitedTeammate.inviteUrl);
+                    setCopiedGlobalInviteUrl(true);
+                    setTimeout(() => setCopiedGlobalInviteUrl(false), 2000);
+                  }}
+                  className="px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedGlobalInviteUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedGlobalInviteUrl ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Email Dispatch Action */}
+            <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-white text-xs">Dispatch Email to Teammate</div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  Opens default email client with invitation link from Raphooko Phooko
+                </div>
+              </div>
+              <a
+                href={`mailto:${recentlyInvitedTeammate.member.email}?subject=Invitation%20to%20join%20T-Connect%20Controller%20as%20${recentlyInvitedTeammate.member.role}&body=Hi%20${encodeURIComponent(recentlyInvitedTeammate.member.name)},%0A%0AYou%20have%20been%20invited%20by%20Administrator%20Raphooko%20Phooko%20to%20join%20the%20T-Connect%20Cloud%20Controller%20as%20${recentlyInvitedTeammate.member.role}.%0A%0AClick%20this%20instant%20access%20link%20to%20sign%20in%20immediately:%0A${encodeURIComponent(recentlyInvitedTeammate.inviteUrl)}%0A%0AWelcome%20aboard!%0ARaphooko%20Phooko`}
+                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 hover:text-white rounded-lg font-bold flex items-center gap-1.5 shrink-0"
+              >
+                <Mail className="w-3.5 h-3.5 text-[#f05e17]" />
+                <span>Open Email</span>
+              </a>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="pt-2 border-t border-[#232d42] flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.hash = recentlyInvitedTeammate.inviteUrl.split('#')[1] || '';
+                  setRecentlyInvitedTeammate(null);
+                }}
+                className="text-[11px] text-[#f05e17] hover:underline flex items-center gap-1"
+              >
+                <span>Simulate Instant Login as this Teammate &rarr;</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecentlyInvitedTeammate(null)}
+                className="px-4 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-white font-bold rounded-lg cursor-pointer"
+              >
+                Done
               </button>
             </div>
           </div>

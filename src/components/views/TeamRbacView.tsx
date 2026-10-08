@@ -9,9 +9,14 @@ import {
   Copy, 
   Search, 
   Lock, 
-  FileText,
-  Sliders,
-  CheckCircle2
+  FileText, 
+  Sliders, 
+  CheckCircle2,
+  ArrowUpRight,
+  Mail,
+  ExternalLink,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { TeamMember, AuditLogEntry, RouterDevice } from '../../types';
 
@@ -23,6 +28,7 @@ interface TeamRbacViewProps {
   onUpdateRole: (memberId: string, role: TeamMember['role'], scopedSites?: string[]) => void;
   onDeleteMember: (memberId: string) => void;
   onIssuePassword?: (memberId: string, customPass?: string) => void;
+  currentUser?: TeamMember;
 }
 
 export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
@@ -33,10 +39,20 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
   onUpdateRole,
   onDeleteMember,
   onIssuePassword,
+  currentUser,
 }) => {
   const [activeTab, setActiveTab] = useState<'members' | 'matrix' | 'audit'>('members');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [copiedInviteUrl, setCopiedInviteUrl] = useState<string | null>(null);
+
+  // Upgrade Role Modal State
+  const [upgradeRoleModalMember, setUpgradeRoleModalMember] = useState<TeamMember | null>(null);
+  const [targetUpgradeRole, setTargetUpgradeRole] = useState<TeamMember['role']>('Admin');
+  const [targetUpgradeSites, setTargetUpgradeSites] = useState<string[]>([]);
+
+  // Recently Invited Teammate Modal State
+  const [recentlyInvited, setRecentlyInvited] = useState<{ member: TeamMember; inviteUrl: string } | null>(null);
+  const [copiedRecentlyInvitedUrl, setCopiedRecentlyInvitedUrl] = useState(false);
 
   // Password Issuance Modal State
   const [passwordModalMember, setPasswordModalMember] = useState<TeamMember | null>(null);
@@ -52,20 +68,49 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
 
   const uniqueSites = Array.from(new Set(routers.map(r => r.siteName)));
 
+  const isAdminOrOwner = 
+    !currentUser || 
+    currentUser.role === 'Owner' || 
+    currentUser.role === 'Admin' || 
+    currentUser.email.toLowerCase() === 'rphooko@tconnect.africa';
+
   const handleInviteSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteName.trim() || !inviteEmail.trim()) return;
 
-    onInviteMember(inviteName.trim(), inviteEmail.trim(), inviteRole, selectedSites);
+    const trimmedName = inviteName.trim();
+    const trimmedEmail = inviteEmail.trim();
+    const token = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
+    const inviteUrl = `${origin}/#invite?token=${token}&email=${encodeURIComponent(trimmedEmail)}&role=${encodeURIComponent(inviteRole)}`;
+
+    onInviteMember(trimmedName, trimmedEmail, inviteRole, selectedSites);
+    
+    setRecentlyInvited({
+      member: {
+        id: `tm_${Date.now()}`,
+        name: trimmedName,
+        email: trimmedEmail,
+        role: inviteRole,
+        scopedSites: selectedSites,
+        mfaEnabled: inviteRole === 'Owner' || inviteRole === 'Admin' || inviteRole === 'Technical',
+        status: 'invited',
+        invitedAt: new Date().toISOString().slice(0, 10),
+        inviteToken: token,
+      },
+      inviteUrl
+    });
+
     setShowInviteModal(false);
     setInviteName('');
     setInviteEmail('');
     setSelectedSites([]);
   };
 
-  const handleCopyInviteLink = (email: string, role?: string) => {
+  const handleCopyInviteLink = (email: string, role?: string, token?: string) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
-    const inviteUrl = `${origin}/#invite?token=inv_tok_${Math.random().toString(36).substring(2, 10)}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}`;
+    const resolvedToken = token || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const inviteUrl = `${origin}/#invite?token=${resolvedToken}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedInviteUrl(email);
     setTimeout(() => setCopiedInviteUrl(null), 2500);
@@ -163,9 +208,9 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                     <td className="py-3">
                       <select
                         value={member.role}
-                        disabled={member.role === 'Owner'}
+                        disabled={!isAdminOrOwner && member.role === 'Owner'}
                         onChange={(e) => onUpdateRole(member.id, e.target.value as TeamMember['role'])}
-                        className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white font-mono text-xs focus:outline-none focus:border-[#f05e17] disabled:opacity-60"
+                        className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white font-mono text-xs focus:outline-none focus:border-[#f05e17] disabled:opacity-60 cursor-pointer"
                       >
                         <option value="Owner">Owner</option>
                         <option value="Admin">Admin</option>
@@ -217,6 +262,31 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                     </td>
                     <td className="py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Upgrade Role Button (Admin Action) */}
+                        {isAdminOrOwner && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUpgradeRoleModalMember(member);
+                              setTargetUpgradeRole(
+                                member.role === 'Viewer' 
+                                  ? 'Collaborator' 
+                                  : member.role === 'Collaborator' 
+                                  ? 'Technical' 
+                                  : member.role === 'Technical' 
+                                  ? 'Admin' 
+                                  : 'Owner'
+                              );
+                              setTargetUpgradeSites([...member.scopedSites]);
+                            }}
+                            className="px-2 py-1 rounded text-[11px] font-bold bg-[#161d31] hover:bg-[#202942] border border-[#232d42] hover:border-emerald-500/50 text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                            title={`Upgrade role & privileges for ${member.name}`}
+                          >
+                            <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                            <span>Upgrade</span>
+                          </button>
+                        )}
+
                         {/* Issue Temporary Password Button */}
                         <button
                           type="button"
@@ -225,7 +295,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                             setIssuedTempPass(member.tempPassword || rand);
                             setPasswordModalMember(member);
                           }}
-                          className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors flex items-center gap-1 ${
+                          className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors flex items-center gap-1 cursor-pointer ${
                             member.hasPendingReset
                               ? 'bg-[#f05e17] hover:bg-[#d94c0b] text-white border-transparent shadow-sm'
                               : 'bg-[#161d31] hover:bg-[#202942] border-[#232d42] text-slate-300 hover:text-white'
@@ -239,8 +309,9 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                         {member.status === 'invited' && (
                           <button
                             type="button"
-                            onClick={() => handleCopyInviteLink(member.email, member.role)}
-                            className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300"
+                            onClick={() => handleCopyInviteLink(member.email, member.role, member.inviteToken)}
+                            className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300 hover:text-white cursor-pointer"
+                            title="Copy Instant Magic Login Link"
                           >
                             {copiedInviteUrl === member.email ? 'Copied!' : 'Copy Link'}
                           </button>
@@ -249,7 +320,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onDeleteMember(member.id)}
-                            className="text-slate-500 hover:text-rose-400 p-1"
+                            className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
                             title="Revoke Member Access"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -549,6 +620,248 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>Save &amp; Activate Password</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Admin Upgrade Role & Scopes Modal */}
+      {upgradeRoleModalMember && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <span>Upgrade Teammate Role &amp; Scopes</span>
+              </div>
+              <button 
+                onClick={() => setUpgradeRoleModalMember(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Target Member Header */}
+            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] flex items-center justify-between">
+              <div>
+                <div className="font-bold text-white text-sm">{upgradeRoleModalMember.name}</div>
+                <div className="text-[11px] text-slate-400">{upgradeRoleModalMember.email}</div>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Current Role</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  {upgradeRoleModalMember.role}
+                </span>
+              </div>
+            </div>
+
+            {/* Select Target Role */}
+            <div className="space-y-2">
+              <label className="text-slate-300 font-bold block">
+                Select Elevated Target Role
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {[
+                  {
+                    role: 'Owner' as const,
+                    title: 'Owner',
+                    desc: 'Full root authority. Hardware, billing, keys & team admin.',
+                    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  },
+                  {
+                    role: 'Admin' as const,
+                    title: 'Site Admin',
+                    desc: 'Fleet configs, captive portals, plans, vouchers & gateways.',
+                    badge: 'bg-[#f05e17]/10 text-[#f05e17] border-[#f05e17]/30'
+                  },
+                  {
+                    role: 'Technical' as const,
+                    title: 'Technical Engineer',
+                    desc: 'MikroTik WireGuard, DNS content filters. No billing access.',
+                    badge: 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                  },
+                  {
+                    role: 'Collaborator' as const,
+                    title: 'Collaborator',
+                    desc: 'Vouchers & plans only. Router credentials hidden.',
+                    badge: 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                  },
+                  {
+                    role: 'Viewer' as const,
+                    title: 'Read-Only Viewer',
+                    desc: 'Auditor inspection mode. All mutations & deletes blocked.',
+                    badge: 'bg-slate-700/50 text-slate-300 border-slate-600'
+                  }
+                ].map((item) => (
+                  <button
+                    key={item.role}
+                    type="button"
+                    onClick={() => setTargetUpgradeRole(item.role)}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      targetUpgradeRole === item.role
+                        ? 'bg-[#182138] border-[#f05e17] ring-1 ring-[#f05e17] shadow-sm'
+                        : 'bg-[#121829] border-[#1f283d] hover:bg-[#161d31]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-white text-xs">{item.title}</span>
+                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${item.badge}`}>
+                        {item.role}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      {item.desc}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Site Scoping */}
+            <div className="space-y-1.5">
+              <label className="text-slate-300 font-bold block">
+                Location Scoping (Leave unchecked for All Locations)
+              </label>
+              <div className="space-y-1 max-h-28 overflow-y-auto p-2 bg-[#161d31] rounded-lg border border-[#232d42]">
+                {uniqueSites.map((site) => (
+                  <label key={site} className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={targetUpgradeSites.includes(site)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setTargetUpgradeSites([...targetUpgradeSites, site]);
+                        } else {
+                          setTargetUpgradeSites(targetUpgradeSites.filter(s => s !== site));
+                        }
+                      }}
+                      className="rounded accent-[#f05e17] w-3 h-3"
+                    />
+                    <span>{site}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Immediate Effect Notice */}
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 rounded-lg flex items-start gap-2 text-emerald-300 text-[11px]">
+              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                Upgrading <strong>{upgradeRoleModalMember.name}</strong> from <strong>{upgradeRoleModalMember.role}</strong> to <strong className="text-white">{targetUpgradeRole}</strong> takes effect immediately across all active controller sessions without requiring re-invitation.
+              </span>
+            </div>
+
+            {/* Actions */}
+            <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUpgradeRoleModalMember(null)}
+                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateRole(upgradeRoleModalMember.id, targetUpgradeRole, targetUpgradeSites);
+                  setUpgradeRoleModalMember(null);
+                }}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Confirm Role Upgrade &rarr;</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recently Invited Teammate Modal */}
+      {recentlyInvited && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <span>Teammate Invitation Generated &amp; Active!</span>
+              </div>
+              <button 
+                onClick={() => setRecentlyInvited(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Invitee Summary */}
+            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-white text-sm">{recentlyInvited.member.name}</div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {recentlyInvited.member.role}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400">{recentlyInvited.member.email}</div>
+              <div className="text-[10px] text-slate-500 pt-1 border-t border-[#1f283d] flex items-center justify-between">
+                <span>Scope: {recentlyInvited.member.scopedSites.length ? recentlyInvited.member.scopedSites.join(', ') : 'All Sites'}</span>
+                <span className="text-emerald-400 font-bold">Instant Email Authentication Ready</span>
+              </div>
+            </div>
+
+            {/* Magic Link */}
+            <div className="space-y-1.5">
+              <label className="text-slate-300 font-bold block flex items-center justify-between">
+                <span>Instant Authentication Magic Link</span>
+                <span className="text-[10px] text-emerald-400 font-normal">Single-click sign in (No password needed)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={recentlyInvited.inviteUrl}
+                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#232d42] rounded-lg text-slate-300 font-mono text-xs select-all focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(recentlyInvited.inviteUrl);
+                    setCopiedRecentlyInvitedUrl(true);
+                    setTimeout(() => setCopiedRecentlyInvitedUrl(false), 2000);
+                  }}
+                  className="px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedRecentlyInvitedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedRecentlyInvitedUrl ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Email Dispatch Action */}
+            <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-white text-xs">Dispatch Welcome Email to Teammate</div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  Sends invite magic link directly from Raphooko Phooko (rphooko@tconnect.africa)
+                </div>
+              </div>
+              <a
+                href={`mailto:${recentlyInvited.member.email}?subject=Invitation%20to%20join%20T-Connect%20Controller%20as%20${recentlyInvited.member.role}&body=Hi%20${encodeURIComponent(recentlyInvited.member.name)},%0A%0AYou've%20been%20invited%20by%20Administrator%20Raphooko%20Phooko%20to%20join%20the%20T-Connect%20Cloud%20Controller%20team%20as%20${recentlyInvited.member.role}.%0A%0AClick%20this%20instant%20access%20link%20to%20sign%20in%20immediately:%0A${encodeURIComponent(recentlyInvited.inviteUrl)}%0A%0AWelcome%20aboard!%0ARaphooko%20Phooko`}
+                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 hover:text-white rounded-lg font-bold flex items-center gap-1.5 shrink-0"
+              >
+                <Mail className="w-3.5 h-3.5 text-[#f05e17]" />
+                <span>Open Email</span>
+              </a>
+            </div>
+
+            {/* Close */}
+            <div className="pt-2 border-t border-[#232d42] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setRecentlyInvited(null)}
+                className="px-4 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-white font-bold rounded-lg cursor-pointer"
+              >
+                Done
               </button>
             </div>
           </div>

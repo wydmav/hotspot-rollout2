@@ -200,6 +200,9 @@ export interface TeamMember {
   mfaEnabled: boolean;
   status: 'active' | 'invited' | 'expired';
   invitedAt: string;
+  inviteToken?: string;
+  inviteTokenExpiresAt?: string;
+  invitedBy?: string;
   lastLoginAt?: string;
   tempPassword?: string;
   tempPasswordIssuedAt?: string;

@@ -40,20 +40,45 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
   const [forgotStatus, setForgotStatus] = useState<ForgotPasswordResponse | null>(null);
   const [copiedTempPass, setCopiedTempPass] = useState(false);
 
-  // Parse invite/reset URL hash params on mount
+  // Parse invite/reset URL hash params on mount & trigger instant authentication if invite token present
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.hash) {
-      const hash = window.location.hash;
-      if (hash.includes('email=')) {
-        const match = hash.match(/email=([^&]+)/);
-        if (match && match[1]) {
-          const decoded = decodeURIComponent(match[1]);
-          setEmail(decoded);
-          setForgotEmail(decoded);
-        }
-      }
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    const search = window.location.search;
+
+    let token = '';
+    let emailHint = '';
+
+    if (hash.startsWith('#invite') || hash.includes('token=')) {
+      const tokenMatch = hash.match(/token=([^&]+)/);
+      const emailMatch = hash.match(/email=([^&]+)/);
+      if (tokenMatch) token = decodeURIComponent(tokenMatch[1]);
+      if (emailMatch) emailHint = decodeURIComponent(emailMatch[1]);
+    } else if (search.includes('token=') || search.includes('invite=')) {
+      const params = new URLSearchParams(search);
+      token = params.get('token') || params.get('invite') || '';
+      emailHint = params.get('email') || '';
     }
-  }, []);
+
+    if (emailHint) {
+      setEmail(emailHint);
+      setForgotEmail(emailHint);
+    }
+
+    if (token) {
+      setIsLoading(true);
+      setTimeout(() => {
+        const res = storage.redeemInviteToken(token, emailHint);
+        if (res.success && res.session) {
+          window.history.replaceState(null, '', window.location.pathname);
+          onLoginSuccess(res.session);
+        } else {
+          setIsLoading(false);
+          setErrorMsg(res.message);
+        }
+      }, 300);
+    }
+  }, [onLoginSuccess]);
 
   const [showPassword, setShowPassword] = useState(false);
 
