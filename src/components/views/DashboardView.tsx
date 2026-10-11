@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType } from '../../types';
 import { RegionalFleetMap } from './RegionalFleetMap';
+import { TransactionTrendsChart } from './TransactionTrendsChart';
 
 interface DashboardViewProps {
   routers: RouterDevice[];
@@ -38,6 +39,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   currency,
 }) => {
   // Widget customization state
+  const [showTrendsChart, setShowTrendsChart] = useState(true);
   const [showMapWidget, setShowMapWidget] = useState(true);
   const [showSolarWidget, setShowSolarWidget] = useState(true);
   const [showTransitWidget, setShowTransitWidget] = useState(true);
@@ -101,6 +103,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-xs font-mono text-slate-300">
             <SlidersHorizontal className="w-3.5 h-3.5 text-[#f05e17]" />
             <span className="text-[11px] text-slate-400">Widgets:</span>
+            <label className="flex items-center gap-1 cursor-pointer hover:text-white">
+              <input 
+                type="checkbox" 
+                checked={showTrendsChart} 
+                onChange={(e) => setShowTrendsChart(e.target.checked)} 
+                className="rounded accent-[#f05e17] w-3 h-3"
+              />
+              <span className="text-[11px]">Trends</span>
+            </label>
             <label className="flex items-center gap-1 cursor-pointer hover:text-white">
               <input 
                 type="checkbox" 
@@ -247,6 +258,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="text-[11px] text-slate-500 font-mono mt-1">WireGuard tunnels active</p>
         </div>
       </div>
+
+      {/* Daily Transaction Trends & Cumulative Revenue Growth (Recharts Line Chart) */}
+      {showTrendsChart && (
+        <TransactionTrendsChart
+          transactions={filteredTransactions}
+          currency={currency}
+          selectedVertical={selectedVertical}
+          onNavigateTab={onNavigateTab}
+        />
+      )}
 
       {/* Regional Hotspot Distribution & Physical Fleet Map (Static Pins & Geo Visualization) */}
       {showMapWidget && (
