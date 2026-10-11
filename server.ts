@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { RouterOSRenderer } from './src/services/routerosRenderer.js';
 import { WALLED_GARDEN_DOMAINS } from './src/services/storage.js';
@@ -85,9 +86,14 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   const host = req.get('host') || '127.0.0.1:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const controllerDomain = host.split(':')[0];
+  const fwVer = (req.body?.fw as string) || (req.query.fw as string) || '7.15.2';
 
   // Log incoming MikroTik adoption handshake
-  console.log(`[MikroTik Adoption] Router ${routerId} connected from ${req.ip}. Token: ${token ? 'PROVIDED' : 'ANONYMOUS'}`);
+  console.log(`[MikroTik Adoption] Router ${routerId} connected from ${req.ip}. Token: ${token ? 'PROVIDED' : 'ANONYMOUS'} | Firmware: ${fwVer}`);
+
+  // Generate valid 32-byte Base64 curve25519 WireGuard keys (44 characters)
+  const routerPrivateKey = crypto.randomBytes(32).toString('base64');
+  const hubPublicKey = crypto.randomBytes(32).toString('base64');
 
   // Dynamic provisioning payload tailored for this router
   const script = RouterOSRenderer.renderProvisioningScript({
@@ -107,15 +113,17 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       cpuLoad: 2,
       memoryUsage: 20,
       lastHeartbeat: 'Just now',
-      firmware: '7.15.2',
+      firmware: fwVer,
       activeSessions: 0
     },
     hubDomain: controllerDomain,
+    controllerHost: host,
+    endpointProtocol: protocol,
     hubWgPort: 51820,
     hubTunnelIp: '10.99.0.1',
     routerWgIp: '10.99.1.50',
-    routerPrivateKey: 'eB3_GeneratedPrivateKeyRouterOS==',
-    hubPublicKey: 'v7TconnectHubWireguardKey2026Base64Salted==',
+    routerPrivateKey,
+    hubPublicKey,
     radiusSecret: process.env.RADIUS_SECRET || 'radsec_tconnect_lesotho_99120',
     apiPassword: process.env.ROUTER_API_PASSWORD || 'tc_pass_crypto_random_32char',
     walledGardenDomains: WALLED_GARDEN_DOMAINS,

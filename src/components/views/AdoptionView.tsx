@@ -91,12 +91,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   // Generate full provisioning script preview
   const provisioningScript = selectedRouter ? RouterOSRenderer.renderProvisioningScript({
     router: selectedRouter,
-    hubDomain: 'hub.tconnect.co.ls',
+    hubDomain: controllerHost.trim() || 'app.tconnect.co.ls',
+    controllerHost: controllerHost.trim() || 'app.tconnect.co.ls',
+    endpointProtocol,
     hubWgPort: 51820,
     hubTunnelIp: '10.99.0.1',
     routerWgIp: selectedRouter.wireguardIp || '10.99.1.50',
-    routerPrivateKey: 'eB3...[GENERATED_ON_DEVICE_OR_PROVISIONED]...',
-    hubPublicKey: 'v7TconnectHubWireguardKey2026Base64Salted==',
+    routerPrivateKey: 'eB3xK92ZlP4qN7mW1v8Y0sR5tU6iO2aL3cE5jH7kM9g=',
+    hubPublicKey: 'v7Tc0nnectHubWireguardKey2026Base64Salted99=',
     radiusSecret: 'radsec_tconnect_lesotho_99120',
     apiPassword: 'tc_pass_crypto_random_32char',
     walledGardenDomains: WALLED_GARDEN_DOMAINS,
