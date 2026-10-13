@@ -48,11 +48,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Filter based on selected vertical
   const filteredRouters = selectedVertical === 'all' 
     ? routers 
-    : routers.filter(r => r.vertical === selectedVertical);
+    : routers.filter(r => {
+        if (selectedVertical === 'village' || selectedVertical === 'community') {
+          return r.vertical === 'village' || r.vertical === 'community';
+        }
+        return r.vertical === selectedVertical;
+      });
 
   const filteredTransactions = selectedVertical === 'all'
     ? transactions
-    : transactions.filter(t => t.vertical === selectedVertical);
+    : transactions.filter(t => {
+        if (selectedVertical === 'village' || selectedVertical === 'community') {
+          return t.vertical === 'village' || t.vertical === 'community';
+        }
+        return t.vertical === selectedVertical;
+      });
 
   const totalRevenue = filteredTransactions
     .filter(t => t.status === 'completed')
@@ -165,7 +175,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <h2 className="text-lg font-extrabold text-white">Start Building Your Production Hotspot Network</h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Your T-Connect Cloud Controller is ready with a clean database ledger. You can connect your <strong>Supabase PostgreSQL</strong> instance, adopt physical MikroTik routers with one-liner scripts, or test the customer captive portal checkout.
+                Your T-Connect Control Tower is ready with a clean database ledger. You can connect your <strong>Supabase PostgreSQL</strong> instance, adopt physical MikroTik routers with one-liner scripts, or test the customer captive portal checkout.
               </p>
             </div>
 
@@ -255,7 +265,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {onlineRouters > 0 ? `${Math.round((onlineRouters / (filteredRouters.length || 1)) * 100)}% Online` : 'Standby'}
             </span>
           </div>
-          <p className="text-[11px] text-slate-500 font-mono mt-1">WireGuard tunnels active</p>
+          <div className="flex items-center justify-between pt-1.5 border-t border-[#1b233a] text-[10px] font-mono">
+            <span className="text-slate-500">Deadman Watchdog:</span>
+            <button
+              onClick={() => onNavigateTab('fleet')}
+              className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1"
+              title="30s Deadman Watchdog active for Starlink disconnect detection"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              30s Active
+            </button>
+          </div>
         </div>
       </div>
 

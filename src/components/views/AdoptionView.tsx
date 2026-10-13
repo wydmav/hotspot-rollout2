@@ -13,11 +13,31 @@ import {
   Cpu,
   Layers,
   Clock,
-  Wifi
+  Wifi,
+  Monitor,
+  Bell,
+  Activity,
+  Zap,
+  ExternalLink,
+  MoreVertical,
+  Power,
+  SlidersHorizontal,
+  ChevronRight,
+  Filter,
+  AlertTriangle,
+  Tag
 } from 'lucide-react';
 import { RouterDevice, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
-import { WALLED_GARDEN_DOMAINS } from '../../services/storage';
+import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
+import { WebFigLauncherModal } from './WebFigLauncherModal';
+import { AlertSettingsModal } from './AlertSettingsModal';
+import { RemoteTerminalModal } from '../common/RemoteTerminalModal';
+import { RouterContextMenu } from './RouterContextMenu';
+import { RouterAuditModal } from './RouterAuditModal';
+import { RouterActionToolbar } from '../common/RouterActionToolbar';
+import { RouterDetailSlideover } from './RouterDetailSlideover';
+import { auditService } from '../../services/audit';
 
 interface AdoptionViewProps {
   routers: RouterDevice[];
@@ -40,6 +60,33 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSimulatingAdoption, setIsSimulatingAdoption] = useState(false);
   const [simulationStep, setSimulationStep] = useState<string>('');
+  const [webfigModalRouter, setWebfigModalRouter] = useState<RouterDevice | null>(null);
+  const [terminalModalRouter, setTerminalModalRouter] = useState<RouterDevice | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ router: RouterDevice; position: { x: number; y: number } } | null>(null);
+  const [actionToast, setActionToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [isActionPending, setIsActionPending] = useState(false);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [auditModalRouter, setAuditModalRouter] = useState<RouterDevice | null>(null);
+
+  // Detailed Router View Slide-Over State
+  const [slideoverRouter, setSlideoverRouter] = useState<RouterDevice | null>(null);
+  const [isSlideoverOpen, setIsSlideoverOpen] = useState(false);
+
+  // De-adopt / Unbind confirmation modal state
+  const [deadoptModalRouter, setDeadoptModalRouter] = useState<RouterDevice | null>(null);
+  const [copiedDeadoptScript, setCopiedDeadoptScript] = useState(false);
+
+  // Local Vertical Filter (Allows instant switching to bus, hotspot, village/community, stadium, park)
+  const [localVerticalFilter, setLocalVerticalFilter] = useState<VerticalType | 'all'>(selectedVertical);
+
+  // Keep local filter synced if prop changes
+  React.useEffect(() => {
+    if (selectedVertical !== 'all') {
+      setLocalVerticalFilter(selectedVertical);
+    }
+  }, [selectedVertical]);
 
   // Port & Bridge Management State
   const [selectedExtraPort, setSelectedExtraPort] = useState('ether3');
@@ -61,9 +108,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [newRosVersion, setNewRosVersion] = useState<'v7' | 'v6'>('v7');
   const [newMacAddress, setNewMacAddress] = useState('D4:01:C3:AA:BB:CC');
 
-  const filteredRouters = selectedVertical === 'all'
+  const effectiveFilter = localVerticalFilter;
+  const filteredRouters = effectiveFilter === 'all'
     ? routers
-    : routers.filter(r => r.vertical === selectedVertical);
+    : routers.filter(r => {
+        if (effectiveFilter === 'village' || effectiveFilter === 'community') {
+          return r.vertical === 'village' || r.vertical === 'community';
+        }
+        return r.vertical === effectiveFilter;
+      });
 
   // Controller VPS Host Endpoint (Defaults to current browser host or custom VPS IP)
   const [controllerHost, setControllerHost] = useState<string>(() => {
@@ -166,8 +219,129 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     }, 600);
   };
 
+  const triggerToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setActionToast({ message, type });
+    setTimeout(() => {
+      setActionToast(null);
+    }, 4500);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, router: RouterDevice) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedRouter(router);
+    setContextMenu({
+      router,
+      position: { x: e.clientX, y: e.clientY }
+    });
+  };
+
+  const handleThreeDotsClick = (e: React.MouseEvent, router: RouterDevice) => {
+    e.stopPropagation();
+    setSelectedRouter(router);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setContextMenu({
+      router,
+      position: { x: Math.max(16, rect.right - 240), y: rect.bottom + 6 }
+    });
+  };
+
+  const handleRebootRouter = async (router: RouterDevice) => {
+    if (!confirm(`Are you sure you want to reboot "${router.name}"? Active hotspot sessions will temporarily disconnect.`)) {
+      return;
+    }
+    setIsActionPending(true);
+    setActiveAction('reboot');
+    try {
+      const res = await fetch(`/api/devices/${router.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reboot' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        auditService.logRouterReboot(router, {
+          source: 'context_menu',
+          reason: 'Manual reboot initiated from fleet management view'
+        });
+        triggerToast(`Reboot dispatched to ${router.name}. Device restarting...`, 'success');
+      } else {
+        triggerToast(data.message || `Failed to reboot ${router.name}`, 'error');
+      }
+    } catch (err: any) {
+      triggerToast(`Network error: ${err.message}`, 'error');
+    } finally {
+      setIsActionPending(false);
+      setActiveAction(null);
+    }
+  };
+
+  const handleResyncConfig = async (router: RouterDevice) => {
+    setIsActionPending(true);
+    setActiveAction('resync');
+    try {
+      const res = await fetch(`/api/devices/${router.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resync-config' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        auditService.logConfigChange(
+          router,
+          'resync',
+          `WireGuard tunnel keys, RADIUS attributes, and Hotspot Walled Garden rules verified for ${router.name}`
+        );
+        triggerToast(`Config re-sync complete for ${router.name}. WireGuard & Hotspot rules verified.`, 'success');
+      } else {
+        triggerToast(data.message || `Failed to re-sync ${router.name}`, 'error');
+      }
+    } catch (err: any) {
+      triggerToast(`Network error: ${err.message}`, 'error');
+    } finally {
+      setIsActionPending(false);
+      setActiveAction(null);
+    }
+  };
+
+  const handleCopyRouterScript = (router: RouterDevice) => {
+    const script = RouterOSRenderer.renderOneLiner({
+      controllerDomain: controllerHost.trim() || 'app.tconnect.co.ls',
+      endpointProtocol,
+      routerId: router.id,
+      token: router.token || 'tok_live_session',
+      rosVersion: router.rosVersion || 'v7'
+    });
+    navigator.clipboard.writeText(script);
+    triggerToast(`Adoption script copied for ${router.name}!`, 'info');
+  };
+
   return (
     <div className="space-y-6">
+      {/* Toast Notification for Remote Actions */}
+      {actionToast && (
+        <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs font-mono animate-in fade-in duration-150 ${
+          actionToast.type === 'success'
+            ? 'bg-emerald-950/70 border-emerald-500/50 text-emerald-200'
+            : actionToast.type === 'error'
+            ? 'bg-rose-950/70 border-rose-500/50 text-rose-200'
+            : 'bg-sky-950/70 border-sky-500/50 text-sky-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${
+              actionToast.type === 'success' ? 'bg-emerald-400 animate-pulse' : actionToast.type === 'error' ? 'bg-rose-400' : 'bg-sky-400'
+            }`} />
+            <span className="font-bold">{actionToast.message}</span>
+          </div>
+          <button
+            onClick={() => setActionToast(null)}
+            className="text-slate-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Title & Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -177,13 +351,103 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ Add Router to Fleet</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
+          <button
+            onClick={() => setShowAlertModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-rose-500/40 text-rose-300 text-xs font-bold rounded-lg transition-colors shadow-sm"
+            title="Configure 30-second Deadman Watchdog & Browser Push Notifications"
+          >
+            <Bell className="w-4 h-4 text-rose-400 animate-pulse" />
+            <span>Watchdog & Browser Alerts</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 ml-1" />
+          </button>
+
+          <button
+            onClick={() => {
+              setAuditModalRouter(null);
+              setShowAuditModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-lg transition-colors shadow-sm"
+            title="Inspect Historical Audit Trail & Command Logs for All Routers"
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <span>Audit Trail</span>
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Add Router to Fleet</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Vertical Scope Switcher Toolbar */}
+      <div className="bg-[#0f1422] p-3 sm:p-4 rounded-xl border border-[#232d42] space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-white uppercase font-mono tracking-wider">
+              Vertical Scope Filter
+            </span>
+            <span className="text-[11px] text-slate-400 font-mono">
+              ({filteredRouters.length} of {routers.length} routers)
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-slate-400">
+            Select a vertical to inspect routers configured with tailored branding and bandwidth policies:
+          </span>
+        </div>
+
+        {/* Vertical Scope Pills */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#1c2438]">
+          {[
+            { id: 'all', label: 'All Verticals', icon: '🌐', color: 'border-slate-600' },
+            { id: 'hotspot', label: 'Connected Hotspots', icon: '☕', sub: 'Cafes & Retail', color: 'border-amber-500/40 text-amber-300' },
+            { id: 'community', label: 'Villages / Communities', icon: '🏡', sub: 'Solar Mesh', color: 'border-emerald-500/40 text-emerald-300' },
+            { id: 'bus', label: 'Connected Buses', icon: '🚌', sub: 'Transit Wi-Fi', color: 'border-cyan-500/40 text-cyan-300' },
+            { id: 'stadium', label: 'Connected Stadiums', icon: '🏟️', sub: 'Event Core', color: 'border-purple-500/40 text-purple-300' },
+            { id: 'park', label: 'Connected Parks', icon: '🌳', sub: 'Smart Poles', color: 'border-teal-500/40 text-teal-300' },
+          ].map((scope) => {
+            const isActive = localVerticalFilter === scope.id;
+            const count = scope.id === 'all' 
+              ? routers.length 
+              : scope.id === 'community' || scope.id === 'village'
+              ? routers.filter(r => r.vertical === 'community' || r.vertical === 'village').length
+              : routers.filter(r => r.vertical === scope.id).length;
+
+            return (
+              <button
+                key={scope.id}
+                type="button"
+                onClick={() => {
+                  setLocalVerticalFilter(scope.id as any);
+                  const match = routers.find(r => {
+                    if (scope.id === 'all') return true;
+                    if (scope.id === 'community' || scope.id === 'village') return r.vertical === 'community' || r.vertical === 'village';
+                    return r.vertical === scope.id;
+                  });
+                  if (match) setSelectedRouter(match);
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-[#f05e17] text-white shadow-md shadow-[#f05e17]/20 border border-[#f05e17]'
+                    : 'bg-[#161d31] text-slate-300 hover:text-white hover:bg-[#1f2942] border border-[#232d42]'
+                }`}
+              >
+                <span>{scope.icon}</span>
+                <span>{scope.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                  isActive ? 'bg-black/30 text-white font-bold' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Main Split Grid: Router Selector & One-Liner Box */}
@@ -200,31 +464,92 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
               filteredRouters.map((router) => {
                 const isSelected = selectedRouter?.id === router.id;
                 const isOnline = router.status === 'online';
+                const isOffline = router.status === 'offline';
 
                 return (
                   <div
                     key={router.id}
                     onClick={() => setSelectedRouter(router)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-colors text-left ${
+                    onContextMenu={(e) => handleContextMenu(e, router)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors text-left relative ${
                       isSelected
                         ? 'bg-[#1b233a] border-[#f05e17]/60 shadow-sm'
                         : 'bg-[#161d31] border-[#232d42] hover:border-slate-500'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white truncate">{router.name}</span>
-                      <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                        isOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
-                      }`}>
-                        {isOnline ? 'ONLINE' : 'ADOPT PENDING'}
-                      </span>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold text-white truncate flex-1">{router.name}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                          isOnline 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                            : isOffline
+                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30 animate-pulse'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          {isOnline ? 'ONLINE' : isOffline ? 'OFFLINE' : 'PENDING'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleThreeDotsClick(e, router)}
+                          className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors"
+                          title="Open Router Actions Menu"
+                        >
+                          <MoreVertical className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-[11px] text-slate-400 font-mono mt-1 truncate">{router.siteName}</p>
 
+                    {isOffline && (
+                      <p className="text-[10px] text-rose-400 font-mono mt-0.5 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                        Starlink / WAN Cable Disconnected
+                      </p>
+                    )}
+
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mt-2 pt-2 border-t border-[#232d42]">
-                      <span>{router.model.split('(')[0]}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span>{router.model.split('(')[0]}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-bold uppercase text-[9px] border border-slate-700">
+                          {router.vertical === 'bus' ? '🚌 BUS' : router.vertical === 'village' || router.vertical === 'community' ? '🏡 VILLAGE' : router.vertical === 'stadium' ? '🏟️ STADIUM' : router.vertical === 'park' ? '🌳 PARK' : '☕ HOTSPOT'}
+                        </span>
+                      </div>
                       <span className="text-cyan-400 font-bold">{router.rosVersion.toUpperCase()}</span>
+                    </div>
+
+                    {/* Reusable Action Toolbar (Reboot, Sync, Terminal, WebFig, Audit) & Detailed View */}
+                    <div className="mt-2.5 pt-2 border-t border-[#1f273d] flex items-center justify-between gap-1.5">
+                      <RouterActionToolbar
+                        router={router}
+                        variant="minimal"
+                        onOpenTerminal={(r) => setTerminalModalRouter(r)}
+                        onOpenWebfig={(r) => setWebfigModalRouter(r)}
+                        onOpenAudit={(r) => {
+                          setAuditModalRouter(r);
+                          setShowAuditModal(true);
+                        }}
+                        onReboot={(r) => handleRebootRouter(r)}
+                        onResync={(r) => handleResyncConfig(r)}
+                        isPending={isActionPending}
+                        activeAction={activeAction}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSlideoverRouter(router);
+                          setIsSlideoverOpen(true);
+                        }}
+                        className="py-1 px-2 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Open Detailed Inspection Slide-over"
+                      >
+                        <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
+                        <span>Inspect</span>
+                        <ChevronRight className="w-3 h-3 text-indigo-400" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -258,6 +583,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-extrabold text-white">{selectedRouter.name}</h2>
                     <span className="text-xs font-mono text-slate-400">· {selectedRouter.siteName}</span>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                      selectedRouter.status === 'online' 
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                        : selectedRouter.status === 'offline'
+                        ? 'bg-rose-500/10 text-rose-400 border border-rose-500/30 animate-pulse'
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {selectedRouter.status.toUpperCase()}
+                    </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs font-mono text-slate-400 mt-1">
                     <span>MAC: <strong className="text-slate-200">{selectedRouter.macAddress}</strong></span>
@@ -265,10 +599,59 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <span>WireGuard IP: <strong className="text-emerald-400">{selectedRouter.wireguardIp}</strong></span>
                     <span>·</span>
                     <span>OS: <strong className="text-cyan-400">{selectedRouter.rosVersion.toUpperCase()}</strong></span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1.5 bg-[#161d31] px-2 py-0.5 rounded border border-[#232d42]">
+                      <Tag className="w-3 h-3 text-[#f05e17]" />
+                      <span className="text-slate-400">Vertical:</span>
+                      <select
+                        value={selectedRouter.vertical}
+                        onChange={(e) => {
+                          const newVert = e.target.value as VerticalType;
+                          storage.updateRouterVertical(selectedRouter.id, newVert);
+                          triggerToast(`Tagged ${selectedRouter.name} as ${newVert.toUpperCase()} vertical.`, 'success');
+                        }}
+                        className="bg-transparent text-white font-bold cursor-pointer focus:outline-none"
+                      >
+                        <option value="hotspot" className="bg-[#0f1422]">☕ Hotspot</option>
+                        <option value="village" className="bg-[#0f1422]">🏡 Village</option>
+                        <option value="bus" className="bg-[#0f1422]">🚌 Bus</option>
+                        <option value="stadium" className="bg-[#0f1422]">🏟️ Stadium</option>
+                        <option value="park" className="bg-[#0f1422]">🌳 Park</option>
+                      </select>
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Reusable Action Toolbar (Header Variant) */}
+                  <RouterActionToolbar
+                    router={selectedRouter}
+                    variant="header"
+                    onOpenTerminal={(r) => setTerminalModalRouter(r)}
+                    onOpenWebfig={(r) => setWebfigModalRouter(r)}
+                    onOpenAudit={(r) => {
+                      setAuditModalRouter(r);
+                      setShowAuditModal(true);
+                    }}
+                    onReboot={(r) => handleRebootRouter(r)}
+                    onResync={(r) => handleResyncConfig(r)}
+                    isPending={isActionPending}
+                    activeAction={activeAction}
+                  />
+
+                  {/* Detailed Router View Button */}
+                  <button
+                    onClick={() => {
+                      setSlideoverRouter(selectedRouter);
+                      setIsSlideoverOpen(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors font-mono shadow-sm cursor-pointer whitespace-nowrap"
+                    title="Open Comprehensive Router Inspection Slide-over"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span>Detailed View</span>
+                  </button>
+
                   {selectedRouter.status === 'pending_adoption' && (
                     <button
                       onClick={runTerminalAdoptionSimulation}
@@ -276,15 +659,18 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors font-mono shadow-sm"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>{isSimulatingAdoption ? 'Adopting...' : 'Simulate Terminal Run'}</span>
+                      <span>{isSimulatingAdoption ? 'Adopting...' : 'Simulate Run'}</span>
                     </button>
                   )}
+
+                  {/* Complete Platform De-Adoption / Unbind Button */}
                   <button
-                    onClick={() => onDeleteRouter(selectedRouter.id)}
-                    className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                    title="Delete Router"
+                    onClick={() => setDeadoptModalRouter(selectedRouter)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold font-mono transition-colors cursor-pointer"
+                    title="Completely remove & unbind router from platform (Generates clean RouterOS purge script, ready for future re-adoption)"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Remove / De-Adopt</span>
                   </button>
                 </div>
               </div>
@@ -633,8 +1019,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   onChange={(e) => setNewVertical(e.target.value as VerticalType)}
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                 >
-                  <option value="hotspot">☕ Connected Hotspots (Cafes & Retail)</option>
-                  <option value="community">🏡 Connected Communities (Solar Mesh)</option>
+                  <option value="hotspot">☕ Connected Hotspots (Cafes &amp; Retail)</option>
+                  <option value="village">🏡 Connected Villages / Mesh (Rural Solar)</option>
                   <option value="bus">🚌 Connected Buses (Transit Wi-Fi)</option>
                   <option value="stadium">🏟️ Connected Stadiums (Events/VIP)</option>
                   <option value="park">🌳 Connected Parks (Municipal Green Zones)</option>
@@ -714,6 +1100,174 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* In-App WebFig Launcher & Remote Tools Modal */}
+      {webfigModalRouter && (
+        <WebFigLauncherModal
+          router={webfigModalRouter}
+          isOpen={Boolean(webfigModalRouter)}
+          onClose={() => setWebfigModalRouter(null)}
+          onRouterUpdated={() => {}}
+        />
+      )}
+
+      {/* Deadman Watchdog & Email Notification Settings Modal */}
+      <AlertSettingsModal
+        isOpen={showAlertModal}
+        onClose={() => setShowAlertModal(false)}
+      />
+
+      {/* In-App Remote Terminal Modal */}
+      {terminalModalRouter && (
+        <RemoteTerminalModal
+          router={terminalModalRouter}
+          isOpen={Boolean(terminalModalRouter)}
+          onClose={() => setTerminalModalRouter(null)}
+          onRouterRebooted={() => {
+            triggerToast(`${terminalModalRouter.name} is rebooting...`, 'info');
+          }}
+        />
+      )}
+
+      {/* Floating Router Context Menu (Right-Click & Three-Dots) */}
+      {contextMenu && (
+        <RouterContextMenu
+          router={contextMenu.router}
+          position={contextMenu.position}
+          isOpen={Boolean(contextMenu)}
+          onClose={() => setContextMenu(null)}
+          onOpenTerminal={(r) => setTerminalModalRouter(r)}
+          onOpenWebfig={(r) => setWebfigModalRouter(r)}
+          onRebootRouter={(r) => handleRebootRouter(r)}
+          onResyncConfig={(r) => handleResyncConfig(r)}
+          onCopyOneLiner={(r) => handleCopyRouterScript(r)}
+          onDeleteRouter={(id) => {
+            const r = routers.find(item => item.id === id);
+            if (r) {
+              setDeadoptModalRouter(r);
+            } else {
+              onDeleteRouter(id);
+            }
+          }}
+          onOpenAuditModal={(r) => {
+            setAuditModalRouter(r);
+            setShowAuditModal(true);
+          }}
+        />
+      )}
+
+      {/* Historical Router Audit Trail Modal */}
+      <RouterAuditModal
+        isOpen={showAuditModal}
+        onClose={() => setShowAuditModal(false)}
+        router={auditModalRouter}
+        allRouters={routers}
+      />
+
+      {/* Detailed Router View Slide-Over Panel */}
+      <RouterDetailSlideover
+        isOpen={isSlideoverOpen}
+        onClose={() => setIsSlideoverOpen(false)}
+        router={slideoverRouter || selectedRouter}
+        onUpdateVertical={(routerId, vert) => {
+          storage.updateRouterVertical(routerId, vert);
+          triggerToast(`Updated vertical scope to ${vert}.`, 'success');
+        }}
+      />
+      {/* Complete Platform De-Adoption & Unbinding Modal */}
+      {deadoptModalRouter && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-[#0f1422] border border-rose-500/40 rounded-2xl w-full max-w-xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-rose-400" />
+                <h3 className="text-base font-extrabold text-white">
+                  Remove &amp; De-Adopt Router: {deadoptModalRouter.name}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setDeadoptModalRouter(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs font-mono">
+              <div className="p-3 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-1.5 text-rose-200">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>⚠️ Unlinking from Platform:</span>
+                </p>
+                <p className="leading-relaxed text-[11px] text-rose-300">
+                  This will completely remove <strong>{deadoptModalRouter.name}</strong> from the T-Connect cloud platform, revoking its WireGuard tunnel keys, disabling deadman watchdog monitoring, and clearing all server registrations.
+                </p>
+                <p className="leading-relaxed text-[11px] text-slate-300">
+                  <strong>Re-adoption Guaranteed:</strong> The physical MikroTik hardware will remain fully functional and can be re-adopted at any point in the future with a fresh one-liner script.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-slate-300 font-bold text-[11px]">
+                    RouterOS Factory Cleanup Script (Optional — Run on MikroTik):
+                  </span>
+                  <button
+                    onClick={() => {
+                      const cleanScript = RouterOSRenderer.renderDeadoptionScript(deadoptModalRouter);
+                      navigator.clipboard.writeText(cleanScript);
+                      setCopiedDeadoptScript(true);
+                      setTimeout(() => setCopiedDeadoptScript(false), 2500);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-[#1b233a] hover:bg-[#253050] text-cyan-300 border border-cyan-500/40 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                  >
+                    {copiedDeadoptScript ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span className="text-emerald-300">Copied Script!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy Cleanup Script</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <pre className="p-3 bg-[#080b12] border border-[#232d42] rounded-xl text-[10px] text-cyan-300 max-h-40 overflow-y-auto whitespace-pre leading-relaxed font-mono select-all">
+                  {RouterOSRenderer.renderDeadoptionScript(deadoptModalRouter)}
+                </pre>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Pasting this into RouterOS terminal completely purges WireGuard interfaces, RADIUS AAA, netwatch sentinels, and walled garden rules.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-[#232d42] flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDeadoptModalRouter(null)}
+                  className="px-3.5 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = deadoptModalRouter;
+                    setDeadoptModalRouter(null);
+                    await onDeleteRouter(r.id);
+                    triggerToast(`Router "${r.name}" unlinked from platform. Device ready for fresh re-adoption.`, 'success');
+                  }}
+                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Confirm Complete De-Adoption</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

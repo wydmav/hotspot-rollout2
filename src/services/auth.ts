@@ -236,7 +236,7 @@ export async function simulateInviteEmail(
   const plainTextBody = `
 Hi ${inviteeName},
 
-Administrator Raphooko Phooko (${ADMIN_EMAIL}) has invited you to join the T-Connect Cloud Controller team as ${role}.
+Administrator Raphooko Phooko (${ADMIN_EMAIL}) has invited you to join the T-Connect Control Tower team as ${role}.
 
 Click the instant access link below to sign in immediately without needing to configure a password:
 ${inviteUrl}

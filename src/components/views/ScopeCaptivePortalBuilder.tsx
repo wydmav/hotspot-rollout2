@@ -145,6 +145,28 @@ export const SCOPE_WALLPAPERS: Record<VerticalType, Array<{ name: string; url: s
       tag: 'Community'
     }
   ],
+  village: [
+    {
+      name: 'Maloti Mountain Village',
+      url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
+      tag: 'Highlands'
+    },
+    {
+      name: 'Rural Solar Mesh Sunset',
+      url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1200&q=80',
+      tag: 'Solar'
+    },
+    {
+      name: 'Lesotho Mountain Valley',
+      url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+      tag: 'Valley'
+    },
+    {
+      name: 'Sani Pass Rural Highlands',
+      url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80',
+      tag: 'Community'
+    }
+  ],
   park: [
     {
       name: 'Lush Greenery Canopy',
@@ -347,6 +369,78 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
       {
         id: 'cm_monthly_m280',
         name: 'Village 30-Day Household Pass',
+        price: 280,
+        currency: 'M',
+        durationLabel: '30 Days',
+        durationSeconds: 2592000,
+        downloadSpeedMbps: 6.0,
+        uploadSpeedMbps: 3.0,
+        burstDownloadMbps: 12.0,
+        deviceLimit: 4,
+        enabled: true,
+        badge: 'Whole Home'
+      }
+    ]
+  },
+  village: {
+    scope: 'village',
+    scopeLabel: 'Villages & Mesh',
+    scopeIcon: '🏡',
+    scopeDescription: 'Rural solar mesh villages and community estates',
+    bgImage: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
+    bgDarken: 30,
+    glassOpacity: 88,
+    cardPlacement: 'bottom',
+    cardWidth: 'normal',
+    accentColor: '#06b6d4',
+    brandTitle: 'T-CONNECT VILLAGE',
+    tagline: 'SOLAR MESH & VILLAGE WI-FI',
+    welcomeHeadline: 'LUMELANG! KHOKELO EA MOTSE',
+    termsEnabled: true,
+    termsText: 'Amohela Liphelo: Marang-rang a motse a abelanoa ke bohle. Sebelisa marang-rang ka boikarabelo le toka.',
+    collectName: true,
+    collectPhone: true,
+    collectEmail: false,
+    collectGender: false,
+    collectDob: false,
+    defaultCountryCode: '+266',
+    allowFreeAccess: false,
+    freeAccessDurationMinutes: 30,
+    allowVoucherCode: true,
+    allowOnlinePayment: true,
+    plans: [
+      {
+        id: 'vg_daily_m10',
+        name: 'Village 24h Daily Pass',
+        price: 10,
+        currency: 'M',
+        durationLabel: '24 Hours',
+        durationSeconds: 86400,
+        downloadSpeedMbps: 4.0,
+        uploadSpeedMbps: 2.0,
+        burstDownloadMbps: 8.0,
+        deviceLimit: 2,
+        enabled: true,
+        badge: 'Village 24h'
+      },
+      {
+        id: 'vg_weekly_m60',
+        name: 'Village 7-Day Weekly Pass',
+        price: 60,
+        currency: 'M',
+        durationLabel: '7 Days',
+        durationSeconds: 604800,
+        downloadSpeedMbps: 5.0,
+        uploadSpeedMbps: 2.5,
+        burstDownloadMbps: 10.0,
+        deviceLimit: 3,
+        enabled: true,
+        isPopular: true,
+        badge: 'Weekly Village'
+      },
+      {
+        id: 'vg_monthly_m280',
+        name: 'Village Monthly Unlimited',
         price: 280,
         currency: 'M',
         durationLabel: '30 Days',
@@ -631,13 +725,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   };
 
   // Scope configs dictionary
-  const [scopeConfigs, setScopeConfigs] = useState<Record<VerticalType, ScopePortalConfig>>(() => ({
-    hotspot: loadScopeConfig('hotspot'),
-    community: loadScopeConfig('community'),
-    park: loadScopeConfig('park'),
-    bus: loadScopeConfig('bus'),
-    stadium: loadScopeConfig('stadium'),
-  }));
+  const [scopeConfigs, setScopeConfigs] = useState<Record<VerticalType, ScopePortalConfig>>(() => {
+    const commConfig = loadScopeConfig('community');
+    return {
+      hotspot: loadScopeConfig('hotspot'),
+      village: commConfig,
+      community: commConfig,
+      park: loadScopeConfig('park'),
+      bus: loadScopeConfig('bus'),
+      stadium: loadScopeConfig('stadium'),
+    };
+  });
 
   // Active builder configuration (derives from selected scope)
   const currentConfig = scopeConfigs[selectedScope];

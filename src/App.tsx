@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { storage } from './services/storage';
 import { supabaseService } from './services/supabase';
 import { VerticalType, GatewayProvider, AuthSession, TeamMember, Voucher, RouterDevice } from './types';
@@ -17,6 +17,7 @@ import { DatabaseModal } from './components/common/DatabaseModal';
 import { LoginView } from './components/auth/LoginView';
 import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight } from 'lucide-react';
 import { simulateInviteEmail } from './services/auth';
+import { browserNotificationService } from './services/browserNotifications';
 
 export default function App() {
   const [state, setState] = useState(() => storage.getState());
@@ -139,6 +140,189 @@ export default function App() {
     };
   }, []);
 
+  // -----------------------------------------------------------------------------
+  // DEADMAN WATCHDOG SENTINEL (Jitter-Resilient Status Verification)
+  // -----------------------------------------------------------------------------
+  // MikroTik routers transmit heartbeats every 15 seconds.
+  // Brief network jitters (e.g., transient cellular/Starlink latency spikes of 15-25s)
+  // are absorbed by an explicit grace window.
+  // A router is ONLY marked as 'offline' after explicitly detecting >= 30 seconds of
+  // missed heartbeats (at least 2 consecutive missed cycles).
+  const DEADMAN_OFFLINE_THRESHOLD_SECONDS = 30; // Strict 30s threshold
+  const HEARTBEAT_CYCLE_SECONDS = 15;
+
+  // Track verified status & alert debouncing across poll cycles to prevent flapping
+  const watchdogTrackerRef = useRef<Map<string, {
+    consecutiveMisses: number;
+    lastVerifiedOnlineTimestamp: number;
+    lastNotifiedStatus: 'online' | 'offline' | 'pending_adoption';
+    firstMissDetectedAt: number | null;
+  }>>(new Map());
+
+  useEffect(() => {
+    // Sync current router inventory with server-side sentinel map
+    if (state.routers && state.routers.length > 0) {
+      fetch('/api/devices/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routers: state.routers })
+      }).catch(() => {});
+    }
+
+    const pollWatchdog = async () => {
+      try {
+        const res = await fetch('/api/devices/watchdog/status');
+        if (!res.ok) {
+          // If the status API momentarily errors (e.g. client network jitter),
+          // preserve existing router states rather than triggering false positives.
+          return;
+        }
+
+        const data = await res.json();
+        if (!data.routers || !Array.isArray(data.routers)) return;
+
+        const currentRouters = storage.getState().routers;
+        const now = Date.now();
+        const verifiedStatuses: Array<{
+          id: string;
+          status: 'online' | 'offline' | 'pending_adoption';
+          lastHeartbeat?: string;
+          lastHeartbeatTimestamp?: number;
+          missedHeartbeats?: number;
+          offlineSince?: string;
+          offlineReason?: string;
+        }> = [];
+
+        data.routers.forEach((incoming: any) => {
+          const prev = currentRouters.find(r => r.id === incoming.id);
+          if (!prev && !incoming.id) return;
+
+          // Preserve unadopted nodes without tripping deadman alarms
+          if (incoming.status === 'pending_adoption' || prev?.status === 'pending_adoption') {
+            verifiedStatuses.push({
+              id: incoming.id,
+              status: 'pending_adoption',
+              lastHeartbeat: incoming.lastHeartbeat || prev?.lastHeartbeat || 'Pending Adoption',
+              missedHeartbeats: 0
+            });
+            return;
+          }
+
+          // Retrieve or initialize tracking state for this router
+          let tracker = watchdogTrackerRef.current.get(incoming.id);
+          if (!tracker) {
+            tracker = {
+              consecutiveMisses: 0,
+              lastVerifiedOnlineTimestamp: incoming.lastHeartbeatTimestamp || prev?.lastHeartbeatTimestamp || now,
+              lastNotifiedStatus: (prev?.status as any) || (incoming.status as any) || 'online',
+              firstMissDetectedAt: null
+            };
+            watchdogTrackerRef.current.set(incoming.id, tracker);
+          }
+
+          // Calculate exact silence duration in seconds
+          const lastValidHeartbeat = incoming.lastHeartbeatTimestamp 
+            || prev?.lastHeartbeatTimestamp 
+            || tracker.lastVerifiedOnlineTimestamp;
+
+          const calculatedElapsedSeconds = lastValidHeartbeat 
+            ? Math.max(0, Math.round((now - lastValidHeartbeat) / 1000))
+            : (typeof incoming.secondsSinceHeartbeat === 'number' ? incoming.secondsSinceHeartbeat : 999);
+
+          const secondsSilent = typeof incoming.secondsSinceHeartbeat === 'number'
+            ? Math.max(incoming.secondsSinceHeartbeat, calculatedElapsedSeconds)
+            : calculatedElapsedSeconds;
+
+          // -------------------------------------------------------------
+          // ROBUST STATUS VERIFICATION:
+          // Strictly verify 30 seconds of missed heartbeats before marking OFFLINE.
+          // Any silence under 30s is classified as transient network jitter.
+          // -------------------------------------------------------------
+          const isConfirmedOffline = secondsSilent >= DEADMAN_OFFLINE_THRESHOLD_SECONDS;
+
+          if (isConfirmedOffline) {
+            // Heartbeat threshold breached (>= 30 seconds of silence)
+            tracker.consecutiveMisses += 1;
+            if (!tracker.firstMissDetectedAt) {
+              tracker.firstMissDetectedAt = now - (secondsSilent * 1000);
+            }
+
+            const missedBeats = Math.max(
+              incoming.missedBeats || 0,
+              Math.floor(secondsSilent / HEARTBEAT_CYCLE_SECONDS),
+              2
+            );
+            const offlineReason = incoming.offlineReason || 
+              `Deadman Watchdog: Disconnected from Starlink/WAN uplink (${secondsSilent}s without heartbeat >= 30s threshold)`;
+
+            // Trigger notification ONLY upon confirmed transition to avoid duplicate alerts
+            if (tracker.lastNotifiedStatus !== 'offline') {
+              tracker.lastNotifiedStatus = 'offline';
+              browserNotificationService.notifyRouterOffline({
+                id: incoming.id,
+                name: incoming.name || prev?.name || 'MikroTik Router',
+                siteName: incoming.siteName || prev?.siteName || 'Hotspot Site',
+                secondsWithoutHeartbeat: secondsSilent
+              });
+            }
+
+            verifiedStatuses.push({
+              id: incoming.id,
+              status: 'offline',
+              lastHeartbeat: 'Offline',
+              lastHeartbeatTimestamp: lastValidHeartbeat,
+              missedHeartbeats: missedBeats,
+              offlineSince: incoming.offlineSince || prev?.offlineSince || new Date(tracker.firstMissDetectedAt || (now - secondsSilent * 1000)).toISOString(),
+              offlineReason
+            });
+          } else {
+            // Router is healthy or within normal jitter tolerance (<30s).
+            // Prevent false positives: enforce ONLINE state even if backend momentarily reported jitter.
+            const wasPreviouslyOffline = tracker.lastNotifiedStatus === 'offline' || prev?.status === 'offline';
+
+            tracker.lastVerifiedOnlineTimestamp = incoming.lastHeartbeatTimestamp || now;
+            tracker.consecutiveMisses = 0;
+            tracker.firstMissDetectedAt = null;
+
+            // Trigger recovery notification if restoring from a confirmed offline state
+            if (wasPreviouslyOffline) {
+              tracker.lastNotifiedStatus = 'online';
+              browserNotificationService.notifyRouterOnline({
+                id: incoming.id,
+                name: incoming.name || prev?.name || 'MikroTik Router',
+                siteName: incoming.siteName || prev?.siteName || 'Hotspot Site'
+              });
+            } else {
+              tracker.lastNotifiedStatus = 'online';
+            }
+
+            verifiedStatuses.push({
+              id: incoming.id,
+              status: 'online',
+              lastHeartbeat: incoming.lastHeartbeat && incoming.lastHeartbeat !== 'Offline' ? incoming.lastHeartbeat : 'Just now',
+              lastHeartbeatTimestamp: incoming.lastHeartbeatTimestamp || now,
+              missedHeartbeats: 0,
+              offlineSince: undefined,
+              offlineReason: undefined
+            });
+          }
+        });
+
+        // Atomically sync the verified, jitter-filtered statuses to reactive storage
+        if (verifiedStatuses.length > 0) {
+          storage.syncRoutersWithWatchdog(verifiedStatuses);
+        }
+      } catch (err) {
+        // Network fetch exception in browser (e.g. temporary WiFi hiccup on admin dashboard).
+        // Gracefully ignore single failed fetch to prevent false-alarm state churn.
+      }
+    };
+
+    pollWatchdog();
+    const interval = setInterval(pollWatchdog, 5000);
+    return () => clearInterval(interval);
+  }, [state.routers.length]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
@@ -178,10 +362,13 @@ export default function App() {
     return created;
   };
 
-  const handleDeleteRouter = (routerId: string) => {
+  const handleDeleteRouter = async (routerId: string) => {
     if (!checkPermission('delete_router', 'Revoking router and tunnel keys')) return;
+    try {
+      await fetch(`/api/devices/${routerId}`, { method: 'DELETE' });
+    } catch {}
     storage.deleteRouter(routerId);
-    showToast('Router removed and tunnel keys revoked.');
+    showToast('Router unlinked from platform and tunnel keys revoked. Device can now be re-adopted freely.');
     if (isSupabaseConnected) {
       supabaseService.deleteRouterFromSupabase(routerId);
       supabaseService.syncRoutersToSupabase(storage.getState().routers);

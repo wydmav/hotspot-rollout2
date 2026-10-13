@@ -151,7 +151,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
             <div className="text-sm font-black tracking-tight text-white flex items-center gap-2">
               <span>T-CONNECT</span>
               <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[#f05e17]/10 text-[#f05e17] border border-[#f05e17]/30">
-                CLOUD CONTROLLER
+                CONTROL TOWER
               </span>
             </div>
             <div className="text-[11px] text-slate-400 font-mono">

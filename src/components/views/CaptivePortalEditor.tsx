@@ -888,7 +888,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
 
               {/* Footer */}
               <div className="relative z-10 text-center text-[10px] font-mono text-slate-400/80 pt-2">
-                Powered by T-Connect Cloud Controller
+                Powered by T-Connect Control Tower
               </div>
             </div>
           </div>

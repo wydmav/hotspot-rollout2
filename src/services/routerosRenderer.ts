@@ -156,9 +156,9 @@ export class RouterOSRenderer {
       `/ip service`,
       `:do { set telnet disabled=yes } on-error={}`,
       `:do { set ftp disabled=yes } on-error={}`,
-      `:do { set www disabled=yes } on-error={}`,
+      `:do { set www disabled=no address="10.99.0.0/16,192.168.88.0/24,10.0.0.0/8" port=80 } on-error={ :do { set www disabled=no port=80 } on-error={} }`,
+      `:do { set winbox disabled=no address="10.99.0.0/16,192.168.88.0/24,10.0.0.0/8" port=8291 } on-error={ :do { set winbox disabled=no port=8291 } on-error={} }`,
       `:do { set api disabled=yes } on-error={}`,
-      `:do { set winbox address="10.99.0.0/16,192.168.88.0/24" } on-error={}`,
       `:do { set api-ssl address="10.99.0.0/16" port=8729 } on-error={}`,
       ``,
       `# Controller Admin User`,
@@ -167,7 +167,7 @@ export class RouterOSRenderer {
       `/user`,
       `:do { remove [find name="tc_controller"] } on-error={}`,
       `:do { add name="tc_controller" group="tc-agent" password="${apiPassword}" address="10.99.0.0/16" comment="T-Connect Central Controller" } on-error={ :do { add name="tc_controller" group="full" password="${apiPassword}" comment="T-Connect Central Controller" } on-error={} }`,
-      `/log info "T-Connect: [4/7] Management & User security configured."`,
+      `/log info "T-Connect: [4/7] Management & User security configured (WebFig & WinBox active on WireGuard tunnel)."`,
       ``,
       `# 6. Central RADIUS Configuration (Auth + Accounting + Roaming)`,
       `/radius`,
@@ -236,10 +236,10 @@ export class RouterOSRenderer {
       `:do { remove [find comment="tc-failover-sentinel"] } on-error={}`,
       `:do { add host=1.1.1.1 interval=10s timeout=2s down-script="/log warning \\"[T-Connect Failover] Starlink WAN1 failed. Route switched to WAN2 Backup.\\"; :do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/failover?status=FAILOVER_ACTIVE&wan=wan2\\" check-certificate=no keep-result=no } on-error={}" up-script="/log info \\"[T-Connect Failover] Starlink WAN1 online. Primary route restored.\\"; :do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/failover?status=RESTORED&wan=wan1\\" check-certificate=no keep-result=no } on-error={}" comment="tc-failover-sentinel" } on-error={ /log warning "T-Connect: Netwatch sentinel setup note" }`,
       ``,
-      `# 11. Periodic Heartbeat / Telemetry Cron`,
+      `# 11. Fast 15-Second Heartbeat Cron (Enables 30s Deadman Watchdog for Instant Starlink Disconnection Alerts)`,
       `/system scheduler`,
       `:do { remove [find name="tc-heartbeat"] } on-error={}`,
-      `:do { add name="tc-heartbeat" interval=60s on-event=":do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/heartbeat\\" http-method=post http-data=\\"uptime=$[/system resource get uptime]&cpu=$[/system resource get cpu-load]&mem=$[/system resource get free-memory]\\" check-certificate=no keep-result=no } on-error={}" comment="T-Connect Periodic Health Agent" } on-error={}`,
+      `:do { add name="tc-heartbeat" interval=15s on-event=":do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/heartbeat\\" http-method=post http-data=\\"uptime=$[/system resource get uptime]&cpu=$[/system resource get cpu-load]&mem=$[/system resource get free-memory]&sessions=$[/ip hotspot active print count-only]\\" check-certificate=no keep-result=no } on-error={}" comment="T-Connect 15s Health Watchdog Agent" } on-error={}`,
       ``,
       `/log info "T-Connect: [7/7] Device provisioning complete! Controller connected."`
     );
@@ -328,4 +328,95 @@ add host=${checkHost} interval=10s timeout=2s \\
 
     return lines.join('\n');
   }
+
+  /**
+   * Generates direct WebFig management URL for this router
+   */
+  static getWebFigUrl(router: RouterDevice): string {
+    const host = router.wireguardIp || router.publicWanIp || '10.99.1.50';
+    return `http://${host}:80`;
+  }
+
+  /**
+   * Generates WinBox connection parameters
+   */
+  static getWinBoxDetails(router: RouterDevice): { host: string; port: number; user: string } {
+    return {
+      host: router.wireguardIp || router.publicWanIp || '10.99.1.50',
+      port: 8291,
+      user: 'admin'
+    };
+  }
+
+  /**
+   * Generates terminal commands for quick router operations
+   */
+  static renderQuickCommand(action: 'reboot' | 'flush-sessions' | 'ping-uplink' | 'check-hotspot', router?: RouterDevice): string {
+    switch (action) {
+      case 'reboot':
+        return `/system reboot`;
+      case 'flush-sessions':
+        return `/ip hotspot active remove [find]`;
+      case 'ping-uplink':
+        return `/ping 1.1.1.1 count=5`;
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * Generates complete RouterOS cleanup and de-adoption script.
+   * Purges WireGuard tunnels, RADIUS AAA config, walled garden entries,
+   * deadman watchdog scripts, and scheduled telemetry jobs, leaving
+   * the router in a clean state ready for future adoption.
+   */
+  static renderDeadoptionScript(router: RouterDevice): string {
+    return `# ============================================================
+# T-CONNECT MIKROTIK DE-ADOPTION & CLEANUP SCRIPT
+# Target Router: ${router.name} (${router.id})
+# MAC: ${router.macAddress}
+# ============================================================
+# This script completely purges all T-Connect cloud configuration,
+# removing WireGuard tunnels, RADIUS AAA configs, netwatch daemons,
+# and walled-garden DNS rules so the device has zero residual links
+# to the controller, while keeping base LAN/WAN intact.
+# ============================================================
+
+:log warning "[T-Connect] Initiating complete router unbinding & configuration purge...";
+
+# 1. Remove WireGuard Controller Interface & Peers
+:do {
+  /interface wireguard peers remove [find comment~"tconnect"];
+  /interface wireguard remove [find name="wg-tconnect"];
+  /ip address remove [find comment~"tconnect"];
+} on-error={};
+
+# 2. Remove RADIUS Authentication & Hotspot AAA Links
+:do {
+  /radius remove [find comment~"tconnect"];
+  /ip hotspot profile set [find] use-radius=no;
+} on-error={};
+
+# 3. Purge Automated WAN Failover & Netwatch Sentinels
+:do {
+  /tool netwatch remove [find comment~"tc-failover"];
+  /system script remove [find name~"tconnect" or name~"tc-"];
+  /system scheduler remove [find name~"tconnect" or name~"tc-"];
+} on-error={};
+
+# 4. Remove Walled Garden & DNS Static Sinkholes
+:do {
+  /ip hotspot walled-garden remove [find comment~"tconnect"];
+  /ip dns static remove [find comment~"TC-Block" or comment~"tconnect"];
+} on-error={};
+
+# 5. Flush Temporary Provisioning RSC Files
+:do {
+  /file remove [find name~"tc-" and name~".rsc"];
+} on-error={};
+
+:log info "[T-Connect] Router de-adoption complete. Device unlinked from controller.";
+`;
+  }
 }
+

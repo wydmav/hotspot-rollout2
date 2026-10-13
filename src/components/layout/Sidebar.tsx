@@ -78,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <TConnectLogo withBackground />
           <div>
             <span className="text-sm font-extrabold tracking-tight text-white block leading-none">T-CONNECT</span>
-            <span className="text-[9px] tracking-wider font-mono text-[#ff5500] font-semibold">CLOUD CONTROLLER</span>
+            <span className="text-[9px] tracking-wider font-mono text-[#ff5500] font-semibold">CONTROL TOWER</span>
           </div>
         </div>
 

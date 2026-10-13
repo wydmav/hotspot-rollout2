@@ -273,3 +273,38 @@ When deploying to a live production MikroTik and VPS:
 - [ ] **4. Test Voucher**: Redeem a known test voucher PIN on the captive portal page.
 - [ ] **5. RADIUS Authentication**: Verify user MAC is added to `/ip hotspot active` on the MikroTik router.
 - [ ] **6. Audit Log**: Confirm the redeemed voucher reference appears in **T-Connect Dashboard > Payments**.
+
+---
+
+## 8. MikroTik WebFig, WinBox & Real-Time Deadman Watchdog
+
+### 8.1 In-App WebFig vs. WinBox Access
+You do **not** have to rely solely on WinBox or manual terminal commands to configure your routers.
+- **In-App WebFig Launcher**: Accessible directly inside the T-Connect Cloud Controller under the **Fleet** tab. Click **"WebFig & Quick Tools"** or **"Launch WebFig / WinBox"** on any adopted router.
+- **Direct WireGuard Tunnel Address**: WebFig is securely served over the encrypted WireGuard management tunnel at `http://10.99.1.50:80` (or the router's assigned WireGuard tunnel IP). Because WebFig is bound to `10.99.0.0/16` and local LAN `192.168.88.0/24`, it is completely protected from public WAN port-scanners while remaining instantly accessible to administrators.
+- **WinBox Helper**: The modal provides a 1-click WinBox connect string (e.g. `10.99.1.50:8291`) and launch command (`winbox.exe 10.99.1.50:8291 admin`).
+- **Remote Quick Tools**: In the modal, you can run instant operations without logging in manually:
+  - **Ping Uplink Gateway**: Probes `1.1.1.1` to measure Starlink satellite latency and verify DNS reachability.
+  - **Flush Hotspot Sessions**: Removes stale leases and forces fresh RADIUS re-authentication.
+  - **Reboot Router**: Controlled `/system reboot` command over WireGuard.
+  - **Test Starlink Disconnect**: Triggers an immediate simulation test alert to verify email delivery.
+
+### 8.2 Real-Time Starlink Disconnect Detection (30-Second Deadman Watchdog)
+Previously, routers polled every 60 seconds, which meant unplugging a Starlink Dishy cable left the router appearing "online" for several minutes.
+
+The controller now runs a **high-precision 30-Second Deadman Sentinel**:
+1. **15-Second Heartbeat Cadence**: The MikroTik RouterOS scheduler (`tc-heartbeat`) reports telemetry (`uptime`, `cpu`, `memory`, `sessions`) to `/api/devices/:id/heartbeat` every 15 seconds.
+2. **2 Missed Beats Threshold (30s)**: The cloud controller evaluates all registered routers every 5 seconds. If a router is silent for &gt;= 30 seconds (2 missed heartbeats):
+   - The router status flips to **`OFFLINE (STARLINK SEVERED)`**.
+   - An incident log is recorded with the exact timestamp.
+   - An immediate high-priority alert email is dispatched to **`taylorphooko@gmail.com`**.
+3. **Automatic Recovery Notification**: When the Starlink cable is reconnected, the router sends a fresh heartbeat. The controller transitions the status back to **`ONLINE`**, calculates total downtime duration, and emails a recovery confirmation.
+
+### 8.3 Email Notification Configuration
+- **Recipient Email**: `taylorphooko@gmail.com` (configurable in **Fleet > Watchdog & Email Alerts**).
+- **Supported SMTP Gateways**:
+  - Resend (`smtp.resend.com` on port 465)
+  - Custom SMTP / Postmark / SendGrid / AWS SES
+  - Internal simulation logger (logs formatted emails to the UI feed if SMTP credentials are not yet configured in `.env`).
+- **Test Delivery**: Open **Fleet > Watchdog & Email Alerts** and click **"Dispatch Test Alert Email"** to verify instantaneous delivery.
+

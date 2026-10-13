@@ -1169,7 +1169,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
 
                 {/* Bottom Footer Credits */}
                 <div className="relative z-10 text-center text-[10px] font-mono text-slate-400/80 pt-2">
-                  Powered by T-Connect Cloud Controller · Lesotho
+                  Powered by T-Connect Control Tower · Lesotho
                 </div>
               </div>
             </div>

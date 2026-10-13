@@ -1,6 +1,7 @@
 export type VerticalType = 
   | 'hotspot'       // Cafes, retail, co-working
-  | 'community'     // Estates & solar mesh villages
+  | 'village'       // Rural villages, estates & solar mesh
+  | 'community'     // Alias for village mesh deployments
   | 'bus'           // Transit & long-distance coaches
   | 'stadium'       // Arenas, expos & high-density events
   | 'park';         // Municipal green zones, solar smart poles
@@ -45,6 +46,12 @@ export interface RouterDevice {
   token?: string;
   tokenExpiresAt?: string;
   adoptedAt?: string;
+  lastHeartbeatTimestamp?: number;
+  missedHeartbeats?: number;
+  offlineSince?: string;
+  offlineReason?: string;
+  webfigPort?: number;
+  winboxPort?: number;
   solarTelemetry?: {
     batteryPercent: number;
     voltage: number;
@@ -217,6 +224,19 @@ export interface AuthSession {
   effectiveRole: TeamMember['role'];
 }
 
+export type AuditLogCategory = 
+  | 'router_config' 
+  | 'router_reboot' 
+  | 'terminal_command' 
+  | 'router_adoption'
+  | 'router_lifecycle'
+  | 'wan_failover'
+  | 'security' 
+  | 'authentication' 
+  | 'billing' 
+  | 'team'
+  | 'system';
+
 export interface AuditLogEntry {
   id: string;
   actor: string;
@@ -226,6 +246,16 @@ export interface AuditLogEntry {
   details: string;
   ipAddress: string;
   timestamp: string;
+  // Extended audit metadata for router security & accountability
+  category?: AuditLogCategory;
+  routerId?: string;
+  routerName?: string;
+  command?: string;
+  outputPreview?: string;
+  severity?: 'info' | 'warning' | 'critical';
+  status?: 'success' | 'failed' | 'pending';
+  executionTimeMs?: number;
+  metadata?: Record<string, any>;
 }
 
 export interface ContentFilterRule {

@@ -11,7 +11,7 @@ export interface SupabaseConfig {
 }
 
 export const SUPABASE_SQL_MIGRATIONS = `-- ==============================================================================
--- T-CONNECT CLOUD CONTROLLER — PRODUCTION SUPABASE POSTGRESQL SCHEMA
+-- T-CONNECT CONTROL TOWER — PRODUCTION SUPABASE POSTGRESQL SCHEMA
 -- Multi-Tenant Hotspot Management, Financial Ledger, Atomic Vouchers & Audit Log
 -- ==============================================================================
 

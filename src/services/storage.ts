@@ -472,6 +472,135 @@ class StorageService {
     this.saveState();
   }
 
+  updateRouterVertical(routerId: string, vertical: VerticalType) {
+    const target = this.state.routers.find(r => r.id === routerId);
+    if (!target) return;
+    const oldVertical = target.vertical;
+    target.vertical = vertical;
+
+    if (vertical === 'bus' && !target.gpsTelemetry) {
+      target.gpsTelemetry = {
+        latitude: -29.3151,
+        longitude: 27.4869,
+        speedKmh: 68,
+        currentZone: 'A1 Northbound Highway (Maseru - Leribe Corridor)'
+      };
+    } else if ((vertical === 'community' || vertical === 'village' || vertical === 'park') && !target.solarTelemetry) {
+      target.solarTelemetry = {
+        batteryPercent: 94,
+        voltage: 27.4,
+        solarInputWatts: 380,
+        temperatureC: 24
+      };
+    }
+
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      category: 'router_config',
+      action: 'router.vertical_update',
+      target: target.name,
+      routerId: target.id,
+      routerName: target.name,
+      details: `Updated deployment vertical scope from '${oldVertical}' to '${vertical}'.`
+    });
+
+    this.saveState();
+  }
+
+  recordRouterHeartbeat(routerId: string, telemetry: { uptime?: string; cpu?: number; mem?: number; sessions?: number }) {
+    const now = Date.now();
+    this.state.routers = this.state.routers.map(r => {
+      if (r.id === routerId) {
+        return {
+          ...r,
+          status: 'online',
+          uptime: telemetry.uptime || r.uptime,
+          cpuLoad: telemetry.cpu !== undefined ? telemetry.cpu : r.cpuLoad,
+          memoryUsage: telemetry.mem !== undefined ? telemetry.mem : r.memoryUsage,
+          activeSessions: telemetry.sessions !== undefined ? telemetry.sessions : r.activeSessions,
+          lastHeartbeat: 'Just now',
+          lastHeartbeatTimestamp: now,
+          missedHeartbeats: 0,
+          offlineSince: undefined,
+          offlineReason: undefined
+        };
+      }
+      return r;
+    });
+    this.saveState();
+  }
+
+  markRouterOffline(routerId: string, reason = 'Deadman Watchdog (30s timeout exceeded / Starlink disconnected)') {
+    const nowIso = new Date().toISOString();
+    let routerName = routerId;
+    this.state.routers = this.state.routers.map(r => {
+      if (r.id === routerId) {
+        routerName = r.name;
+        return {
+          ...r,
+          status: 'offline',
+          lastHeartbeat: 'Offline',
+          missedHeartbeats: (r.missedHeartbeats || 0) + 1,
+          offlineSince: r.offlineSince || nowIso,
+          offlineReason: reason
+        };
+      }
+      return r;
+    });
+
+    this.logAudit({
+      actor: 'Sentinel',
+      role: 'System',
+      action: 'router.offline',
+      target: routerName,
+      details: reason
+    });
+
+    this.saveState();
+  }
+
+  syncRoutersWithWatchdog(watchdogStatuses: Array<{
+    id: string;
+    status: 'online' | 'offline' | 'pending_adoption';
+    lastHeartbeat?: string;
+    lastHeartbeatTimestamp?: number;
+    missedHeartbeats?: number;
+    offlineSince?: string;
+    offlineReason?: string;
+  }>) {
+    if (!watchdogStatuses || !watchdogStatuses.length) return;
+    let changed = false;
+
+    this.state.routers = this.state.routers.map(r => {
+      const match = watchdogStatuses.find(ws => ws.id === r.id);
+      if (match) {
+        if (
+          r.status !== match.status ||
+          r.missedHeartbeats !== match.missedHeartbeats ||
+          r.offlineSince !== match.offlineSince
+        ) {
+          changed = true;
+          return {
+            ...r,
+            status: match.status,
+            lastHeartbeat: match.lastHeartbeat || r.lastHeartbeat,
+            lastHeartbeatTimestamp: match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp,
+            missedHeartbeats: match.missedHeartbeats,
+            offlineSince: match.status === 'online' ? undefined : (match.offlineSince || r.offlineSince),
+            offlineReason: match.status === 'online' ? undefined : (match.offlineReason || r.offlineReason)
+          };
+        }
+      }
+      return r;
+    });
+
+    if (changed) {
+      this.saveState();
+    }
+  }
+
+
   // Plan & Voucher Methods
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
     const newPlan: HotspotPlan = {
@@ -598,8 +727,8 @@ class StorageService {
       const expDate = new Date(Date.now() + voucher.durationSeconds * 1000);
       voucher.expiresAt = expDate.toISOString().replace('T', ' ').slice(0, 19);
     }
-    voucher.status = 'used';
 
+    // Atomic device registration
     voucher.associatedDevices.push({
       mac: clientMac.toUpperCase(),
       hostname,
@@ -609,6 +738,13 @@ class StorageService {
       bytesIn: 0,
       bytesOut: 0
     });
+
+    // Mark as 'used' when maximum capacity is reached; remains 'active' if slots remain
+    if (voucher.associatedDevices.length >= voucher.deviceLimit) {
+      voucher.status = 'used';
+    } else {
+      voucher.status = 'active';
+    }
 
     this.logAudit({
       actor: clientMac,
@@ -759,17 +895,20 @@ class StorageService {
     this.saveState();
   }
 
-  processLivePayment(
-    provider: GatewayProvider, 
-    planId: string, 
-    phoneNumber?: string, 
+  /**
+   * Initiates an atomic 'pending' transaction prior to remote gateway dispatch.
+   * Prevents race conditions, client double-clicks, and phantom voucher generation.
+   */
+  initiatePendingPayment(
+    provider: GatewayProvider,
+    planId: string,
+    phoneNumber?: string,
     ottPin?: string,
     planOverride?: Partial<HotspotPlan>
   ) {
     const gw = this.state.gateways.find((g) => g.provider === provider);
     let plan = this.state.plans.find((p) => p.id === planId);
 
-    // Dynamic resolution if from scoped portal builders or custom pricing
     if (!plan && planOverride && typeof planOverride.price === 'number') {
       plan = {
         id: planId,
@@ -801,26 +940,28 @@ class StorageService {
 
     if (!gw || !plan) throw new Error('Invalid gateway or plan');
 
+    // Check for identical pending transactions submitted in the last 10 seconds (idempotency guard)
+    const idempotencyKey = `${provider}-${plan.id}-${phoneNumber || ottPin || 'anon'}`;
+    const tenSecsAgo = Date.now() - 10000;
+    const existingPending = this.state.transactions.find(
+      (t) => t.status === 'pending' && 
+             t.provider === provider && 
+             t.planId === plan?.id && 
+             new Date(t.createdAt).getTime() > tenSecsAgo
+    );
+
+    if (existingPending) {
+      return {
+        isDuplicate: true,
+        transaction: existingPending,
+        message: 'A payment is already in flight for this plan. Please wait for completion.'
+      };
+    }
+
     const txRef = `${provider.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-    const voucherCode = `TC-${Math.floor(1000 + Math.random() * 9000)}-${plan.currency}${plan.price}`;
-    const newVoucher: Voucher = {
-      id: `v_${Date.now()}`,
-      code: voucherCode,
-      planId: plan.id,
-      planName: plan.name,
-      price: plan.price,
-      currency: plan.currency,
-      durationSeconds: plan.durationSeconds,
-      deviceLimit: plan.deviceLimit,
-      status: 'active',
-      generatedAt: now,
-      expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
-      associatedDevices: []
-    };
-
-    const newTx: PaymentTransaction = {
+    const pendingTx: PaymentTransaction = {
       id: `tx_${Date.now()}`,
       transactionRef: txRef,
       provider,
@@ -831,47 +972,164 @@ class StorageService {
       planName: plan.name,
       vertical: plan.vertical,
       siteName: 'Customer Portal',
-      voucherCodeIssued: voucherCode,
-      status: 'completed',
+      status: 'pending',
       createdAt: now,
-      completedAt: now,
       debugLogs: {
         requestTimestamp: new Date().toISOString(),
         endpoint: `/api/v1/${provider}/checkout`,
-        httpStatus: 200,
-        signatureVerified: true,
+        httpStatus: 102,
+        signatureVerified: false,
         rawPayload: {
           merchant_id: gw.merchantId || 'MERCHANT_LIVE',
           amount: plan.price,
           currency: plan.currency,
-          customer_ident: phoneNumber || ottPin
+          customer_ident: phoneNumber || ottPin,
+          idempotency_key: idempotencyKey
         },
         rawResponse: {
-          status: 'SUCCESS',
-          receipt: `REC-${Date.now()}`,
-          message: 'Payment captured and recorded in ledger'
+          status: 'PENDING_AUTHORIZATION',
+          message: 'USSD prompt dispatched or voucher PIN verification initiated'
         }
       }
     };
 
-    this.state.vouchers.unshift(newVoucher);
-    this.state.transactions.unshift(newTx);
+    this.state.transactions.unshift(pendingTx);
+    this.saveState();
+
+    return {
+      isDuplicate: false,
+      transaction: pendingTx,
+      plan,
+      gateway: gw
+    };
+  }
+
+  /**
+   * Atomically transitions a pending transaction to 'completed', ensures no duplicate
+   * voucher is created, and sets voucher status to 'active' in a single synchronous commit.
+   */
+  completePendingPayment(txId: string, externalRef?: string, voucherCodeOverride?: string) {
+    const txIndex = this.state.transactions.findIndex((t) => t.id === txId || t.transactionRef === txId);
+    if (txIndex === -1) throw new Error(`Transaction ${txId} not found`);
+
+    const tx = this.state.transactions[txIndex];
+    if (tx.status === 'completed') {
+      // Idempotency: Already completed, return existing issued voucher
+      const existingVoucher = this.state.vouchers.find((v) => v.code === tx.voucherCodeIssued);
+      return {
+        alreadyCompleted: true,
+        transaction: tx,
+        voucher: existingVoucher
+      };
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const plan = this.state.plans.find((p) => p.id === tx.planId) || {
+      id: tx.planId,
+      name: tx.planName,
+      price: tx.amount,
+      currency: tx.currency,
+      durationSeconds: 86400,
+      durationLabel: '24 Hours',
+      deviceLimit: 2,
+      vertical: tx.vertical
+    };
+
+    const voucherCode = voucherCodeOverride || tx.voucherCodeIssued || `TC-${Math.floor(1000 + Math.random() * 9000)}-${tx.currency}${tx.amount}`;
+    
+    // Check if voucher already exists to prevent duplicate insertion
+    let voucher = this.state.vouchers.find((v) => v.code === voucherCode);
+    if (!voucher) {
+      voucher = {
+        id: `v_${Date.now()}`,
+        code: voucherCode,
+        planId: tx.planId,
+        planName: tx.planName,
+        price: tx.amount,
+        currency: tx.currency,
+        durationSeconds: (plan as any).durationSeconds || 86400,
+        deviceLimit: (plan as any).deviceLimit || 2,
+        status: 'active',
+        generatedAt: now,
+        expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
+        associatedDevices: []
+      };
+      this.state.vouchers.unshift(voucher);
+    }
+
+    // Atomic update to transaction
+    tx.status = 'completed';
+    tx.completedAt = now;
+    tx.voucherCodeIssued = voucherCode;
+    if (externalRef) {
+      tx.transactionRef = externalRef;
+    }
+    tx.debugLogs = {
+      ...tx.debugLogs,
+      httpStatus: 200,
+      signatureVerified: true,
+      rawResponse: {
+        status: 'SUCCESS',
+        receipt: externalRef || `REC-${Date.now()}`,
+        message: 'Payment verified upstream and authorized on hotspot'
+      }
+    };
 
     this.logAudit({
-      actor: phoneNumber || 'Guest',
+      actor: tx.phoneNumber || 'Guest',
       role: 'Client',
       action: 'payment.complete',
-      target: txRef,
-      details: `Paid ${plan.currency}${plan.price} via ${gw.name}. Generated voucher ${voucherCode} (${plan.durationLabel}).`
+      target: tx.transactionRef,
+      details: `Atomic commit: Captured ${tx.currency}${tx.amount} via ${tx.provider}. Issued voucher ${voucherCode}.`
     });
 
     this.saveState();
     this.checkVoucherStock();
 
     return {
+      alreadyCompleted: false,
+      transaction: tx,
+      voucher
+    };
+  }
+
+  processLivePayment(
+    provider: GatewayProvider, 
+    planId: string, 
+    phoneNumber?: string, 
+    ottPin?: string,
+    planOverride?: Partial<HotspotPlan>
+  ) {
+    // 1. Atomically initiate pending transaction with idempotency check
+    const pendingResult = this.initiatePendingPayment(provider, planId, phoneNumber, ottPin, planOverride);
+    if (pendingResult.isDuplicate && pendingResult.transaction) {
+      const existingVoucher = this.state.vouchers.find(v => v.code === pendingResult.transaction.voucherCodeIssued);
+      return {
+        success: true,
+        transaction: pendingResult.transaction,
+        voucher: existingVoucher || {
+          id: `v_dup_${Date.now()}`,
+          code: pendingResult.transaction.voucherCodeIssued || 'PENDING',
+          planId,
+          planName: pendingResult.transaction.planName,
+          price: pendingResult.transaction.amount,
+          currency: pendingResult.transaction.currency,
+          durationSeconds: 86400,
+          deviceLimit: 2,
+          status: 'active',
+          generatedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
+          associatedDevices: []
+        }
+      };
+    }
+
+    // 2. Complete payment atomically
+    const completeResult = this.completePendingPayment(pendingResult.transaction.id);
+    return {
       success: true,
-      transaction: newTx,
-      voucher: newVoucher
+      transaction: completeResult.transaction,
+      voucher: completeResult.voucher!
     };
   }
 
@@ -879,14 +1137,8 @@ class StorageService {
     const tx = this.state.transactions.find((t) => t.id === txId);
     if (!tx) return { success: false, message: 'Transaction not found' };
 
-    if (tx.status === 'failed') {
-      tx.status = 'completed';
-      tx.errorMessage = undefined;
-      tx.completedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      if (!tx.voucherCodeIssued) {
-        tx.voucherCodeIssued = `TC-RECON-${Math.floor(1000 + Math.random() * 9000)}`;
-      }
-      this.saveState();
+    if (tx.status === 'pending' || tx.status === 'failed') {
+      const res = this.completePendingPayment(tx.id);
       return {
         success: true,
         reconciled: true,
@@ -1366,21 +1618,32 @@ class StorageService {
   }
 
   // Audit Logging
-  private logAudit(entry: { actor: string; role: string; action: string; target: string; details: string }) {
+  public logAudit(entry: Partial<AuditLogEntry> & { action: string; target: string; details: string; actor?: string; role?: string }) {
     const newLog: AuditLogEntry = {
-      id: `aud_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      actor: entry.actor,
-      role: entry.role,
+      id: entry.id || `aud_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      actor: entry.actor || 'Admin',
+      role: entry.role || 'Owner',
       action: entry.action,
       target: entry.target,
       details: entry.details,
-      ipAddress: '197.234.12.89',
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19)
+      ipAddress: entry.ipAddress || '197.234.12.89',
+      timestamp: entry.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19),
+      category: entry.category,
+      routerId: entry.routerId,
+      routerName: entry.routerName,
+      command: entry.command,
+      outputPreview: entry.outputPreview,
+      severity: entry.severity || 'info',
+      status: entry.status || 'success',
+      executionTimeMs: entry.executionTimeMs,
+      metadata: entry.metadata
     };
     this.state.auditLogs.unshift(newLog);
-    if (this.state.auditLogs.length > 200) {
+    if (this.state.auditLogs.length > 500) {
       this.state.auditLogs.pop();
     }
+    this.saveState();
+    return newLog;
   }
 
   private lastVoucherCheckAt: string = new Date().toISOString();

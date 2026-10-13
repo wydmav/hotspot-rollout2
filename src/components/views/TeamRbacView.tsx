@@ -16,9 +16,11 @@ import {
   Mail,
   ExternalLink,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Download
 } from 'lucide-react';
 import { TeamMember, AuditLogEntry, RouterDevice } from '../../types';
+import { auditService } from '../../services/audit';
 
 interface TeamRbacViewProps {
   team: TeamMember[];
@@ -386,15 +388,27 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
               <p className="text-xs text-slate-400 font-mono">Records all administrative mutations, token generations, and router configurations</p>
             </div>
 
-            <div className="relative w-64">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={auditSearch}
-                onChange={(e) => setAuditSearch(e.target.value)}
-                placeholder="Search audit trail..."
-                className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative w-64">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={auditSearch}
+                  onChange={(e) => setAuditSearch(e.target.value)}
+                  placeholder="Search audit trail..."
+                  className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => auditService.exportToCsv(filteredAuditLogs, `tconnect_audit_trail_${Date.now()}.csv`)}
+                className="flex items-center gap-1.5 px-3 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0"
+                title="Export filtered audit logs as CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-[#f05e17]" />
+                <span>Export CSV</span>
+              </button>
             </div>
           </div>
 
@@ -415,9 +429,26 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                   <tr key={log.id}>
                     <td className="py-2.5 text-slate-400 text-[11px] whitespace-nowrap">{log.timestamp}</td>
                     <td className="py-2.5 font-bold text-white whitespace-nowrap">{log.actor} ({log.role})</td>
-                    <td className="py-2.5 text-[#f05e17] font-semibold whitespace-nowrap">{log.action}</td>
+                    <td className="py-2.5 text-[#f05e17] font-semibold whitespace-nowrap">
+                      {log.category === 'router_reboot' ? (
+                        <span className="text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/30">⚡ router.reboot</span>
+                      ) : log.category === 'terminal_command' ? (
+                        <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">⌘ router.terminal</span>
+                      ) : log.category === 'router_config' ? (
+                        <span className="text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/30">⚙ {log.action}</span>
+                      ) : (
+                        <span>{log.action}</span>
+                      )}
+                    </td>
                     <td className="py-2.5 text-slate-200 whitespace-nowrap">{log.target}</td>
-                    <td className="py-2.5 text-slate-400 max-w-xs truncate">{log.details}</td>
+                    <td className="py-2.5 text-slate-400 max-w-sm truncate">
+                      {log.command ? (
+                        <code className="text-emerald-300 font-bold bg-black/40 px-1.5 py-0.5 rounded mr-1.5">
+                          {log.command}
+                        </code>
+                      ) : null}
+                      <span>{log.details}</span>
+                    </td>
                     <td className="py-2.5 text-right text-slate-500">{log.ipAddress}</td>
                   </tr>
                 ))}
