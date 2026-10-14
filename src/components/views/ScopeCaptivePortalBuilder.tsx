@@ -27,10 +27,13 @@ import {
   ArrowRight, 
   SlidersHorizontal, 
   HelpCircle,
-  Copy
+  Copy,
+  Building2
 } from 'lucide-react';
 import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
+import { storage } from '../../services/storage';
+import { TenantGroupsModal } from './TenantGroupsModal';
 
 // =============================================================================
 // SCOPE DEFINITIONS & METADATA
@@ -755,6 +758,23 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [savedToast, setSavedToast] = useState<string | null>(null);
   const [sessionRemaining, setSessionRemaining] = useState(3600);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // External Client Tenant Group & Dynamic Splash Policy Preview
+  const [previewClientGroupId, setPreviewClientGroupId] = useState<string>('default');
+  const [showTenantModal, setShowTenantModal] = useState(false);
+
+  // Dynamically resolved preview background image based on selected scope, tenant group, or router tag
+  const effectivePreviewBg = React.useMemo(() => {
+    if (previewClientGroupId.startsWith('group:')) {
+      const gid = previewClientGroupId.replace('group:', '');
+      const group = storage.getTenantGroups().find(g => g.id === gid);
+      if (group?.customBgUrl) return group.customBgUrl;
+    } else if (previewClientGroupId.startsWith('router:')) {
+      const rid = previewClientGroupId.replace('router:', '');
+      return storage.resolveRouterSplashBg(rid, currentConfig.bgImage);
+    }
+    return currentConfig.bgImage;
+  }, [previewClientGroupId, currentConfig.bgImage]);
 
   // Update selected plan default whenever scope changes
   useEffect(() => {
@@ -1541,7 +1561,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         {/* =================================================================== */}
         <div className="lg:col-span-5 flex flex-col items-center">
           {/* Emulator Top Controls */}
-          <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-3 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a] font-mono text-xs">
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a] font-mono text-xs">
             {/* Step Selector */}
             <div className="flex items-center gap-1">
               {(['identification', 'plan', 'payment', 'usage'] as const).map((step) => (
@@ -1585,6 +1605,45 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             </div>
           </div>
 
+          {/* External Client Group / Router Dynamic Splash Simulator Scope */}
+          <div className="w-full flex items-center justify-between gap-2 mb-3 bg-[#0d121f] p-2 rounded-xl border border-purple-900/40 text-[11px] font-mono">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Building2 className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="text-slate-400 shrink-0">Splash Scope:</span>
+              <select
+                value={previewClientGroupId}
+                onChange={(e) => setPreviewClientGroupId(e.target.value)}
+                className="bg-[#161d31] text-purple-200 border border-purple-800/60 rounded px-2 py-0.5 font-bold focus:outline-none truncate max-w-[190px] text-xs"
+              >
+                <option value="default">Standard {currentConfig.scopeLabel} Background</option>
+                <optgroup label="External Client Groups (Tenant Brands)">
+                  {storage.getTenantGroups().map((g) => (
+                    <option key={g.id} value={`group:${g.id}`}>
+                      🏢 {g.name} ({g.tag})
+                    </option>
+                  ))}
+                </optgroup>
+                {routers.length > 0 && (
+                  <optgroup label="Adopted Router Devices">
+                    {routers.map((r) => (
+                      <option key={r.id} value={`router:${r.id}`}>
+                        📡 {r.name} ({r.siteName})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowTenantModal(true)}
+              className="px-2 py-0.5 bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-800/60 rounded font-bold shrink-0 text-[10px] cursor-pointer"
+            >
+              Manage Groups
+            </button>
+          </div>
+
           {/* Device Frame */}
           <div
             className={`w-full ${
@@ -1606,7 +1665,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             <div
               className="relative min-h-[560px] p-4 flex flex-col justify-between bg-cover bg-center transition-all duration-300"
               style={{
-                backgroundImage: `url(${currentConfig.bgImage})`,
+                backgroundImage: `url(${effectivePreviewBg})`,
               }}
             >
               {/* Darken Overlay */}
@@ -1973,6 +2032,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           </div>
         </div>
       </div>
+      {/* External Client Groups (Tenant Brands) Modal */}
+      <TenantGroupsModal
+        isOpen={showTenantModal}
+        onClose={() => setShowTenantModal(false)}
+        routers={routers}
+        onGroupsUpdated={() => {
+          setSavedToast('External client groups updated.');
+          setTimeout(() => setSavedToast(null), 2500);
+        }}
+      />
     </div>
   );
 };

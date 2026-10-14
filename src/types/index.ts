@@ -64,6 +64,22 @@ export interface RouterDevice {
     speedKmh: number;
     currentZone: string;
   };
+  // External Client Tenant Group & Splash Customization
+  tenantGroupId?: string;
+  tags?: string[];
+  customBgUrl?: string;
+}
+
+export interface TenantGroup {
+  id: string;
+  name: string;
+  tag: string; // e.g. "client:maluti-resorts"
+  customBgUrl: string;
+  clientContact?: string;
+  accentColor?: string;
+  description?: string;
+  createdAt: string;
+  routerCount?: number;
 }
 
 export interface HotspotPlan {

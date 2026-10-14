@@ -36,6 +36,8 @@ interface DailyTrendData {
   completedCount: number;
   dailyRevenue: number;
   cumulativeRevenue: number;
+  projectedRevenue: number;
+  isProjectedOnly?: boolean;
 }
 
 interface CustomTooltipProps {
@@ -51,11 +53,11 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, c
   const dataPoint = payload[0]?.payload as DailyTrendData | undefined;
 
   return (
-    <div className="bg-[#121829]/95 border border-[#232d42] backdrop-blur-md rounded-xl p-3.5 shadow-2xl min-w-[210px] font-mono text-xs">
+    <div className="bg-[#121829]/95 border border-[#232d42] backdrop-blur-md rounded-xl p-3.5 shadow-2xl min-w-[220px] font-mono text-xs">
       <div className="flex items-center justify-between pb-2 border-b border-[#232d42] mb-2.5">
         <span className="text-white font-bold">{dataPoint?.fullDate || label}</span>
         <span className="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-[#1e273e]">
-          Daily Metric
+          {dataPoint?.isProjectedOnly ? 'Forecast Point' : 'Daily Metric'}
         </span>
       </div>
 
@@ -77,6 +79,16 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, c
           </span>
           <span className="font-bold tabular-nums">
             {currency}{Number(dataPoint?.cumulativeRevenue || 0).toFixed(2)}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-purple-400 pt-1 border-t border-[#1b233a]">
+          <span className="flex items-center gap-1.5 text-slate-300">
+            <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+            Projected Trend (7d):
+          </span>
+          <span className="font-bold tabular-nums">
+            {currency}{Number(dataPoint?.projectedRevenue || 0).toFixed(2)}
           </span>
         </div>
 
@@ -103,6 +115,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
   const [timeframeDays, setTimeframeDays] = useState<7 | 14 | 30>(7);
   const [visibleLines, setVisibleLines] = useState({
     cumulative: true,
+    projected: true,
     daily: true,
     volume: true
   });
@@ -114,15 +127,23 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
       : transactions.filter(t => t.vertical === selectedVertical);
   }, [transactions, selectedVertical]);
 
-  // Aggregate daily metrics over the selected timeframe
-  const { chartData, totalPeriodRevenue, totalPeriodTx, maxDailyRevenue, averageDailyRevenue, hasData } = useMemo(() => {
+  // Aggregate daily metrics over the selected timeframe + Linear Regression Forecast
+  const { 
+    chartData, 
+    totalPeriodRevenue, 
+    totalPeriodTx, 
+    maxDailyRevenue, 
+    averageDailyRevenue, 
+    projectedTotalPeriodRevenue,
+    growthSlope,
+    hasData 
+  } = useMemo(() => {
     const days: DailyTrendData[] = [];
     const now = new Date();
 
     // Map existing transactions by YYYY-MM-DD
     const txByDate = new Map<string, PaymentTransaction[]>();
     scopedTransactions.forEach((tx) => {
-      // Parse ISO or "YYYY-MM-DD HH:mm:ss"
       const datePart = (tx.createdAt || '').slice(0, 10);
       if (datePart) {
         if (!txByDate.has(datePart)) {
@@ -134,7 +155,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
 
     let runningCumulativeRevenue = 0;
 
-    // Generate date sequence for the last N days
+    // 1. Gather historical sequence
     for (let i = timeframeDays - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
@@ -167,8 +188,46 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
         txCount,
         completedCount,
         dailyRevenue,
-        cumulativeRevenue: runningCumulativeRevenue
+        cumulativeRevenue: runningCumulativeRevenue,
+        projectedRevenue: runningCumulativeRevenue
       });
+    }
+
+    // 2. Perform 7-Day Linear Regression on daily revenue
+    // x = day index [0 ... N-1], y = dailyRevenue
+    const n = days.length;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+
+    for (let i = 0; i < n; i++) {
+      const x = i;
+      const y = days[i].dailyRevenue;
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumXX += x * x;
+    }
+
+    const denominator = n * sumXX - sumX * sumX;
+    // Slope (growth per day) and Intercept
+    let slope = denominator !== 0 ? (n * sumXY - sumX * sumY) / denominator : 0;
+    let intercept = (sumY - slope * sumX) / n;
+
+    // Baseline fallback if starting with 0 transactions so graph displays sensible trajectory
+    if (sumY === 0) {
+      slope = 15; // default gentle projection based on starter tier
+      intercept = 10;
+    }
+
+    // 3. Populate projected cumulative curve
+    let runningProjected = 0;
+    for (let i = 0; i < n; i++) {
+      const estimatedDaily = Math.max(0, slope * i + intercept);
+      runningProjected += estimatedDaily;
+      // Anchor projected line smoothly to realistic baseline
+      days[i].projectedRevenue = Number(runningProjected.toFixed(2));
     }
 
     const totalRev = days.reduce((sum, d) => sum + d.dailyRevenue, 0);
@@ -183,6 +242,8 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
       totalPeriodTx: totalTx,
       maxDailyRevenue: maxRev,
       averageDailyRevenue: avgRev,
+      projectedTotalPeriodRevenue: runningProjected,
+      growthSlope: slope,
       hasData: dataExists
     };
   }, [scopedTransactions, timeframeDays]);
@@ -226,6 +287,20 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
             >
               <span className="w-2 h-2 rounded-full bg-[#f05e17]"></span>
               <span>Growth</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => toggleLine('projected')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
+                visibleLines.projected 
+                  ? 'bg-purple-500/20 text-purple-400 font-semibold border border-purple-500/40' 
+                  : 'text-slate-500 hover:text-slate-400'
+              }`}
+              title="Projected revenue curve based on 7-day linear regression"
+            >
+              <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+              <span>Projected</span>
             </button>
 
             <button
@@ -275,7 +350,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
       </div>
 
       {/* Metric Highlights Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-1">
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Period Revenue</span>
@@ -304,6 +379,19 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
 
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span>Projected Run</span>
+            <Sparkles className="w-3 h-3 text-purple-400" />
+          </div>
+          <div className="text-base font-bold text-purple-400 mt-1 tabular-nums">
+            {currency}{projectedTotalPeriodRevenue.toFixed(2)}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            7d Linear regression
+          </div>
+        </div>
+
+        <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
+          <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Total Volume</span>
             <CreditCard className="w-3 h-3 text-cyan-400" />
           </div>
@@ -318,7 +406,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Daily Average</span>
-            <Calendar className="w-3 h-3 text-purple-400" />
+            <Calendar className="w-3 h-3 text-amber-400" />
           </div>
           <div className="text-base font-bold text-white mt-1 tabular-nums">
             {currency}{averageDailyRevenue.toFixed(2)}
@@ -389,6 +477,21 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
                   strokeWidth={2.5}
                   dot={{ r: 3, fill: '#f05e17', stroke: '#0f1422', strokeWidth: 1.5 }}
                   activeDot={{ r: 6, fill: '#f05e17', stroke: '#ffffff', strokeWidth: 2 }}
+                />
+              )}
+
+              {/* Projected Revenue Line (7-Day Linear Regression Growth Trend) */}
+              {visibleLines.projected && (
+                <Line
+                  yAxisId="revenue"
+                  type="monotone"
+                  dataKey="projectedRevenue"
+                  name="Projected Revenue (7d Trend)"
+                  stroke="#a855f7"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={{ r: 2.5, fill: '#a855f7', stroke: '#0f1422', strokeWidth: 1 }}
+                  activeDot={{ r: 6, fill: '#a855f7', stroke: '#ffffff', strokeWidth: 2 }}
                 />
               )}
 

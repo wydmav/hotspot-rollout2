@@ -23,13 +23,15 @@ import {
   Clock,
   HardDrive,
   Info,
-  AlertTriangle
+  AlertTriangle,
+  Building2
 } from 'lucide-react';
 import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
-import { WALLED_GARDEN_DOMAINS } from '../../services/storage';
+import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { CaptivePortalEditor } from './CaptivePortalEditor';
 import { ScopeCaptivePortalBuilder } from './ScopeCaptivePortalBuilder';
+import { TenantGroupsModal } from './TenantGroupsModal';
 
 interface CaptivePortalViewProps {
   plans: HotspotPlan[];
@@ -95,6 +97,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   // Preview simulator step (matches mkcontroller: Identification -> Authentication -> Payment -> Success -> Session Usage)
   const [previewStep, setPreviewStep] = useState<'identification' | 'authentication' | 'payment' | 'success' | 'usage'>('identification');
   const [deviceFrame, setDeviceFrame] = useState<'iphone' | 'android' | 'desktop'>('iphone');
+  const [showTenantModal, setShowTenantModal] = useState(false);
 
   // ---------------------------------------------------------------------------
   // BUILDER SETTINGS (User Collect Data, Authentication, Appearance)
@@ -368,6 +371,18 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
             <Globe className="w-3.5 h-3.5" />
             <span>Walled Garden</span>
           </button>
+
+          <button
+            onClick={() => setShowTenantModal(true)}
+            className="px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-800/60 cursor-pointer shadow-sm"
+            title="External Client Groups (Tenant Brands) Custom Splash Policies"
+          >
+            <Building2 className="w-3.5 h-3.5 text-purple-400" />
+            <span>Client Groups</span>
+            <span className="text-[10px] bg-purple-900/80 text-purple-200 px-1.5 py-0.2 rounded-full font-mono">
+              {storage.getTenantGroups().length}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -532,6 +547,45 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                     </button>
                   ))}
                 </div>
+
+                {/* External Client Groups Wallpaper Presets */}
+                {storage.getTenantGroups().length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-[#1c2438]">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] text-purple-400 font-bold flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-purple-400" />
+                        <span>External Client Wallpapers (Mapped by Router Tag)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowTenantModal(true)}
+                        className="text-[10px] text-purple-300 hover:text-white underline cursor-pointer"
+                      >
+                        Manage Groups
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {storage.getTenantGroups().map((group) => (
+                        <button
+                          key={group.id}
+                          type="button"
+                          onClick={() => setBgImage(group.customBgUrl)}
+                          className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                            bgImage === group.customBgUrl
+                              ? 'border-purple-500 bg-purple-950/60 text-purple-200 font-bold'
+                              : 'border-purple-900/40 bg-[#121626] text-purple-300/80 hover:text-white'
+                          }`}
+                        >
+                          <div className="truncate font-bold flex items-center gap-1">
+                            <Building2 className="w-3 h-3 text-purple-400 shrink-0" />
+                            <span className="truncate">{group.name}</span>
+                          </div>
+                          <div className="text-[9px] text-slate-400 truncate">{group.tag}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Sizing: Card Width (Compact, Normal, Wide, Full) */}
@@ -1353,6 +1407,16 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
           </div>
         </div>
       )}
+
+      {/* External Client Groups (Tenant Brands) Modal */}
+      <TenantGroupsModal
+        isOpen={showTenantModal}
+        onClose={() => setShowTenantModal(false)}
+        routers={routers}
+        onGroupsUpdated={() => {
+          // updates storage
+        }}
+      />
     </div>
   );
 };

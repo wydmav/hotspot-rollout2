@@ -11,7 +11,8 @@ import {
   ContentFilterRule, 
   VerticalType,
   GatewayProvider,
-  AuthSession
+  AuthSession,
+  TenantGroup
 } from '../types';
 
 // Updated storage key for pristine scratch state
@@ -205,6 +206,39 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
   }
 ];
 
+export const STARTER_TENANT_GROUPS: TenantGroup[] = [
+  {
+    id: 'grp_maluti_resorts',
+    name: 'Maluti Mountain Resorts',
+    tag: 'client:maluti-resorts',
+    customBgUrl: 'https://images.unsplash.com/photo-1542314831-c6a4d2720967?auto=format&fit=crop&w=1200&q=80',
+    clientContact: 'hospitality@malutiresorts.co.ls',
+    accentColor: '#3b82f6',
+    description: 'Luxury highlands resort chain with tailored mountain lodge welcome screen.',
+    createdAt: '2026-10-01'
+  },
+  {
+    id: 'grp_cafe_nero',
+    name: 'Café Nero Maseru',
+    tag: 'client:cafe-nero',
+    customBgUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',
+    clientContact: 'gm@cafenero.ls',
+    accentColor: '#f59e0b',
+    description: 'Artisan espresso bars across Pioneer Mall & Maseru Mall.',
+    createdAt: '2026-10-05'
+  },
+  {
+    id: 'grp_lesotho_transit',
+    name: 'Maseru Metro Coaches',
+    tag: 'client:metro-coaches',
+    customBgUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80',
+    clientContact: 'fleet@metrocoaches.co.ls',
+    accentColor: '#10b981',
+    description: 'Inter-district bus fleet with branded transit passenger splash portal.',
+    createdAt: '2026-10-08'
+  }
+];
+
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers
   'portal.ottlesotho.com',
@@ -244,6 +278,7 @@ class StorageService {
     team: TeamMember[];
     auditLogs: AuditLogEntry[];
     contentFilters: ContentFilterRule[];
+    tenantGroups: TenantGroup[];
   };
 
   private listeners: Set<() => void> = new Set();
@@ -289,6 +324,10 @@ class StorageService {
           } else {
             parsed.team = INITIAL_TEAM;
           }
+
+          if (!parsed.tenantGroups || !Array.isArray(parsed.tenantGroups) || parsed.tenantGroups.length === 0) {
+            parsed.tenantGroups = STARTER_TENANT_GROUPS;
+          }
           return parsed;
         }
       } catch {
@@ -306,6 +345,7 @@ class StorageService {
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
+      tenantGroups: STARTER_TENANT_GROUPS
     };
   }
 
@@ -347,6 +387,7 @@ class StorageService {
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
+      tenantGroups: STARTER_TENANT_GROUPS
     };
     this.saveState();
   }
@@ -506,6 +547,162 @@ class StorageService {
     });
 
     this.saveState();
+  }
+
+  // ---------------------------------------------------------------------------
+  // External Client Groups (Tenant Brands) Management
+  // ---------------------------------------------------------------------------
+  getTenantGroups(): TenantGroup[] {
+    const groups = this.state.tenantGroups || STARTER_TENANT_GROUPS;
+    return groups.map(g => ({
+      ...g,
+      routerCount: this.state.routers.filter(r => r.tenantGroupId === g.id || (r.tags && r.tags.includes(g.tag))).length
+    }));
+  }
+
+  createTenantGroup(group: Omit<TenantGroup, 'id' | 'createdAt'>): TenantGroup {
+    const id = `grp_${Date.now()}`;
+    const newGroup: TenantGroup = {
+      ...group,
+      id,
+      createdAt: new Date().toISOString().slice(0, 10),
+      routerCount: 0
+    };
+    if (!this.state.tenantGroups) this.state.tenantGroups = [];
+    this.state.tenantGroups.unshift(newGroup);
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      category: 'security',
+      action: 'tenant.create',
+      target: newGroup.name,
+      details: `Registered external client group '${newGroup.name}' with policy tag '${newGroup.tag}'.`
+    });
+    this.saveState();
+    return newGroup;
+  }
+
+  updateTenantGroup(groupId: string, updates: Partial<TenantGroup>): void {
+    const target = (this.state.tenantGroups || []).find(g => g.id === groupId);
+    if (!target) return;
+    Object.assign(target, updates);
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      category: 'security',
+      action: 'tenant.update',
+      target: target.name,
+      details: `Updated external client tenant group properties & splash wallpaper.`
+    });
+    this.saveState();
+  }
+
+  deleteTenantGroup(groupId: string): void {
+    const target = (this.state.tenantGroups || []).find(g => g.id === groupId);
+    this.state.tenantGroups = (this.state.tenantGroups || []).filter(g => g.id !== groupId);
+    // Unassign routers
+    this.state.routers = this.state.routers.map(r => {
+      if (r.tenantGroupId === groupId) {
+        return { ...r, tenantGroupId: undefined };
+      }
+      return r;
+    });
+    if (target) {
+      this.logAudit({
+        actor: 'Admin',
+        role: 'Owner',
+        category: 'security',
+        action: 'tenant.delete',
+        target: target.name,
+        details: `Deleted external client group '${target.name}'. Unassigned associated routers.`
+      });
+    }
+    this.saveState();
+  }
+
+  assignRouterToTenantGroup(routerId: string, tenantGroupId: string | null): void {
+    const router = this.state.routers.find(r => r.id === routerId);
+    if (!router) return;
+    const prevGroup = (this.state.tenantGroups || []).find(g => g.id === router.tenantGroupId);
+    const newGroup = tenantGroupId ? (this.state.tenantGroups || []).find(g => g.id === tenantGroupId) : null;
+
+    router.tenantGroupId = tenantGroupId || undefined;
+    
+    // Sync tags
+    if (newGroup) {
+      const currentTags = router.tags || [];
+      if (!currentTags.includes(newGroup.tag)) {
+        router.tags = [...currentTags.filter(t => !t.startsWith('client:')), newGroup.tag];
+      }
+    } else {
+      router.tags = (router.tags || []).filter(t => !t.startsWith('client:'));
+    }
+
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      category: 'router_config',
+      action: 'router.tenant_assigned',
+      target: router.name,
+      routerId: router.id,
+      routerName: router.name,
+      details: newGroup
+        ? `Assigned router to external client '${newGroup.name}' (Tag: ${newGroup.tag}).`
+        : `Removed router from external client group '${prevGroup?.name || 'Unknown'}'.`
+    });
+
+    this.saveState();
+  }
+
+  updateRouterTags(routerId: string, tags: string[]): void {
+    const router = this.state.routers.find(r => r.id === routerId);
+    if (!router) return;
+    router.tags = tags;
+    // Auto-link to tenant group if matching tag found
+    const matchingGroup = (this.state.tenantGroups || []).find(g => tags.includes(g.tag));
+    if (matchingGroup) {
+      router.tenantGroupId = matchingGroup.id;
+    }
+    this.saveState();
+  }
+
+  updateRouterCustomBg(routerId: string, customBgUrl: string): void {
+    const router = this.state.routers.find(r => r.id === routerId);
+    if (!router) return;
+    router.customBgUrl = customBgUrl.trim() || undefined;
+    this.saveState();
+  }
+
+  /**
+   * Resolves the effective splash background URL for a given router or tenant group.
+   * Priority: 1. Router direct override -> 2. Tenant Group custom wallpaper -> 3. Default fallback
+   */
+  resolveRouterSplashBg(routerId?: string, fallbackUrl?: string): string {
+    const defaultBg = fallbackUrl || 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80';
+    if (!routerId) return defaultBg;
+
+    const router = this.state.routers.find(r => r.id === routerId);
+    if (!router) return defaultBg;
+
+    if (router.customBgUrl) {
+      return router.customBgUrl;
+    }
+
+    if (router.tenantGroupId) {
+      const group = (this.state.tenantGroups || []).find(g => g.id === router.tenantGroupId);
+      if (group?.customBgUrl) {
+        return group.customBgUrl;
+      }
+    }
+
+    if (router.tags && router.tags.length > 0) {
+      const group = (this.state.tenantGroups || []).find(g => router.tags?.includes(g.tag));
+      if (group?.customBgUrl) {
+        return group.customBgUrl;
+      }
+    }
+
+    return defaultBg;
   }
 
   recordRouterHeartbeat(routerId: string, telemetry: { uptime?: string; cpu?: number; mem?: number; sessions?: number }) {

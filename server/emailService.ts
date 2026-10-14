@@ -112,7 +112,7 @@ class EmailService {
           <div style="background: #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 20px; border-left: 4px solid #ef4444;">
             <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: #ffffff;">Incident Summary:</p>
             <p style="margin: 0; font-size: 14px; color: #cbd5e1; line-height: 1.5;">
-              Router <strong>${router.name}</strong> (${router.id}) at <strong>${router.siteName || 'Hotspot Site'}</strong> stopped communicating with the T-Connect Cloud Controller. Uplink cable (e.g. Starlink terminal, LTE, or POE fiber) may be disconnected or powered off.
+              Router <strong>${router.name}</strong> (${router.id}) at <strong>${router.siteName || 'Hotspot Site'}</strong> stopped communicating with the T-Connect Control Tower. Uplink cable (e.g. Starlink terminal, LTE, or POE fiber) may be disconnected or powered off.
             </p>
           </div>
 
@@ -153,12 +153,12 @@ class EmailService {
           </div>
 
           <div style="text-align: center; margin-top: 24px;">
-            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">Open T-Connect Cloud Controller</a>
+            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">Open T-Connect Control Tower</a>
           </div>
         </div>
 
         <div style="background: #090d16; padding: 16px; text-align: center; border-top: 1px solid #1e293b; font-size: 12px; color: #64748b;">
-          T-Connect Automated Fleet Sentinel • Lesotho Cloud Controller
+          T-Connect Automated Fleet Sentinel • Lesotho Control Tower
         </div>
       </div>
     `;
@@ -224,12 +224,12 @@ class EmailService {
           </table>
 
           <div style="text-align: center; margin-top: 24px;">
-            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">View In Cloud Controller</a>
+            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">View In Control Tower</a>
           </div>
         </div>
 
         <div style="background: #090d16; padding: 16px; text-align: center; border-top: 1px solid #1e293b; font-size: 12px; color: #64748b;">
-          T-Connect Automated Fleet Sentinel • Lesotho Cloud Controller
+          T-Connect Automated Fleet Sentinel • Lesotho Control Tower
         </div>
       </div>
     `;
@@ -259,7 +259,7 @@ class EmailService {
         </div>
         <div style="padding: 24px;">
           <p style="font-size: 14px; line-height: 1.5; color: #cbd5e1;">
-            This is a test notification from the <strong>T-Connect Cloud Controller</strong> deadman watchdog.
+            This is a test notification from the <strong>T-Connect Control Tower</strong> deadman watchdog.
             Router offline and uplink disconnection notifications will be delivered instantly to <strong>${target}</strong> within 30 seconds of an outage.
           </p>
           <div style="background: #1e293b; border-radius: 8px; padding: 16px; margin: 20px 0; font-family: monospace; font-size: 13px; color: #38bdf8;">

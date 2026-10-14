@@ -25,7 +25,8 @@ import {
   ChevronRight,
   Filter,
   AlertTriangle,
-  Tag
+  Tag,
+  Building2
 } from 'lucide-react';
 import { RouterDevice, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
@@ -33,6 +34,7 @@ import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { WebFigLauncherModal } from './WebFigLauncherModal';
 import { AlertSettingsModal } from './AlertSettingsModal';
 import { RemoteTerminalModal } from '../common/RemoteTerminalModal';
+import { TenantGroupsModal } from './TenantGroupsModal';
 import { RouterContextMenu } from './RouterContextMenu';
 import { RouterAuditModal } from './RouterAuditModal';
 import { RouterActionToolbar } from '../common/RouterActionToolbar';
@@ -77,6 +79,9 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   // De-adopt / Unbind confirmation modal state
   const [deadoptModalRouter, setDeadoptModalRouter] = useState<RouterDevice | null>(null);
   const [copiedDeadoptScript, setCopiedDeadoptScript] = useState(false);
+
+  // External Client Groups (Tenant Brands) Modal State
+  const [showTenantModal, setShowTenantModal] = useState(false);
 
   // Local Vertical Filter (Allows instant switching to bus, hotspot, village/community, stadium, park)
   const [localVerticalFilter, setLocalVerticalFilter] = useState<VerticalType | 'all'>(selectedVertical);
@@ -375,6 +380,18 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </button>
 
           <button
+            onClick={() => setShowTenantModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-purple-500/40 text-purple-300 text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
+            title="Manage External Client Groups (Tenant Brands) and Dynamic Splash Background Policies"
+          >
+            <Building2 className="w-4 h-4 text-purple-400" />
+            <span>Client Groups</span>
+            <span className="text-[10px] bg-purple-950/80 text-purple-300 border border-purple-800/60 px-1.5 py-0.5 rounded-full font-mono">
+              {storage.getTenantGroups().length}
+            </span>
+          </button>
+
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
           >
@@ -502,6 +519,21 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
                     <p className="text-[11px] text-slate-400 font-mono mt-1 truncate">{router.siteName}</p>
 
+                    {/* External Client Group Badge if assigned */}
+                    {(() => {
+                      const group = router.tenantGroupId 
+                        ? storage.getTenantGroups().find(g => g.id === router.tenantGroupId)
+                        : (router.tags ? storage.getTenantGroups().find(g => router.tags?.includes(g.tag)) : null);
+                      if (!group) return null;
+                      return (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] font-mono text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded border border-purple-800/50 truncate">
+                          <Building2 className="w-3 h-3 text-purple-400 shrink-0" />
+                          <span className="truncate">{group.name}</span>
+                          <span className="text-[9px] text-purple-400/80 ml-auto font-sans">{group.tag}</span>
+                        </div>
+                      );
+                    })()}
+
                     {isOffline && (
                       <p className="text-[10px] text-rose-400 font-mono mt-0.5 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
@@ -617,6 +649,28 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         <option value="bus" className="bg-[#0f1422]">🚌 Bus</option>
                         <option value="stadium" className="bg-[#0f1422]">🏟️ Stadium</option>
                         <option value="park" className="bg-[#0f1422]">🌳 Park</option>
+                      </select>
+                    </span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1.5 bg-[#161d31] px-2 py-0.5 rounded border border-purple-800/50 text-purple-300">
+                      <Building2 className="w-3 h-3 text-purple-400" />
+                      <span className="text-slate-400">Client Group:</span>
+                      <select
+                        value={selectedRouter.tenantGroupId || ''}
+                        onChange={(e) => {
+                          const val = e.target.value || null;
+                          storage.assignRouterToTenantGroup(selectedRouter.id, val);
+                          const gName = val ? storage.getTenantGroups().find(g => g.id === val)?.name : 'Standard T-Connect';
+                          triggerToast(`Router assigned to ${gName}`, 'success');
+                        }}
+                        className="bg-transparent text-purple-200 font-bold cursor-pointer focus:outline-none text-xs"
+                      >
+                        <option value="" className="bg-[#0f1422] text-slate-300">Standard (T-Connect)</option>
+                        {storage.getTenantGroups().map(g => (
+                          <option key={g.id} value={g.id} className="bg-[#0f1422] text-white">
+                            🏢 {g.name} ({g.tag})
+                          </option>
+                        ))}
                       </select>
                     </span>
                   </div>
@@ -1267,6 +1321,16 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* External Client Groups (Tenant Brands) Modal */}
+      <TenantGroupsModal
+        isOpen={showTenantModal}
+        onClose={() => setShowTenantModal(false)}
+        routers={routers}
+        onGroupsUpdated={() => {
+          triggerToast('External client tenant groups and splash policies updated.', 'success');
+        }}
+      />
     </div>
   );
 };

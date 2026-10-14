@@ -31,7 +31,10 @@ import {
   Sun,
   Navigation,
   Users,
-  Compass
+  Compass,
+  Building2,
+  Tag,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface RouterDetailSlideoverProps {
@@ -51,6 +54,12 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'telemetry' | 'scope' | 'terminal' | 'audit'>('telemetry');
   const [selectedVertical, setSelectedVertical] = useState<VerticalType>(router?.vertical || 'hotspot');
+  
+  // External Client Tenant Group & Custom Background
+  const [selectedTenantGroupId, setSelectedTenantGroupId] = useState<string>(router?.tenantGroupId || '');
+  const [customBgInput, setCustomBgInput] = useState<string>(router?.customBgUrl || '');
+  const [tagsInput, setTagsInput] = useState<string>((router?.tags || []).join(', '));
+  const [isSavingTenantPolicy, setIsSavingTenantPolicy] = useState(false);
   
   // Embedded terminal state
   const [cliCommand, setCliCommand] = useState('');
@@ -85,6 +94,9 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   useEffect(() => {
     if (router) {
       setSelectedVertical(router.vertical);
+      setSelectedTenantGroupId(router.tenantGroupId || '');
+      setCustomBgInput(router.customBgUrl || '');
+      setTagsInput((router.tags || []).join(', '));
       // Initialize terminal welcome
       setCliLines([
         {
@@ -612,6 +624,153 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                       <li>Free trial access toggled: {router.freeModeEnabled ? 'ENABLED (10 min trial)' : 'DISABLED (Voucher / Payment Required)'}.</li>
                       <li>Hardware isolation: Direct WebFig available on port 80 over WireGuard.</li>
                     </ul>
+                  </div>
+                </div>
+
+                {/* External Client Tenant Group & Dynamic Splash Policy Card */}
+                <div className="p-4 bg-[#101626] rounded-xl border border-purple-900/40 space-y-3.5">
+                  <div className="flex items-center justify-between border-b border-purple-900/30 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-purple-400" />
+                      <div>
+                        <h4 className="text-white font-bold text-xs uppercase tracking-wide">
+                          External Client Group &amp; Splash Policy
+                        </h4>
+                        <p className="text-slate-400 text-[10px]">
+                          Dynamic group policy mapped to router tags for multi-tenant portal branding
+                        </p>
+                      </div>
+                    </div>
+                    {router.tenantGroupId && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950 text-purple-300 border border-purple-800/60 font-mono">
+                        TENANT BOUND
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Tenant Group Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                      <span>Assigned Client Group:</span>
+                      <span className="text-[10px] text-slate-500 font-normal">(Determines captive splash wallpaper)</span>
+                    </label>
+                    <select
+                      value={selectedTenantGroupId}
+                      onChange={(e) => setSelectedTenantGroupId(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#090d16] border border-slate-700 rounded-lg text-white text-xs font-mono focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="">None — Standard T-Connect Brand Splash</option>
+                      {storage.getTenantGroups().map((group) => (
+                        <option key={group.id} value={group.id}>
+                          🏢 {group.name} ({group.tag})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Dynamic Router Policy Tags */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-purple-400" />
+                        <span>Router Policy Tags:</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono font-normal">Comma-separated</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={tagsInput}
+                      onChange={(e) => setTagsInput(e.target.value)}
+                      placeholder="e.g. client:maluti-resorts, vip-lounge, outdoor-patio"
+                      className="w-full px-3 py-2 bg-[#090d16] border border-slate-700 rounded-lg text-purple-200 text-xs font-mono focus:outline-none focus:border-purple-500"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Routers matching a client tag automatically inherit that external group's custom splash wallpaper.
+                    </p>
+                  </div>
+
+                  {/* Direct Wallpaper Override URL */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Direct Splash Wallpaper Override (Optional):</span>
+                      </span>
+                      {customBgInput && (
+                        <button
+                          type="button"
+                          onClick={() => setCustomBgInput('')}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </label>
+                    <input
+                      type="text"
+                      value={customBgInput}
+                      onChange={(e) => setCustomBgInput(e.target.value)}
+                      placeholder="https://images.unsplash.com/... or custom CDN image"
+                      className="w-full px-3 py-2 bg-[#090d16] border border-slate-700 rounded-lg text-slate-200 text-xs font-mono focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  {/* Active Resolved Splash Preview */}
+                  <div className="p-3 bg-[#080b12] rounded-lg border border-slate-800 space-y-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Active Resolved Splash Background:
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-20 h-12 rounded-lg bg-cover bg-center border border-slate-700 shrink-0 shadow-inner"
+                        style={{
+                          backgroundImage: `url(${customBgInput || (selectedTenantGroupId ? storage.getTenantGroups().find(g => g.id === selectedTenantGroupId)?.customBgUrl : '') || 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80'})`
+                        }}
+                      />
+                      <div className="text-[10px] text-slate-400 font-mono space-y-0.5 truncate">
+                        <div className="text-white font-bold truncate">
+                          {customBgInput
+                            ? '🎯 Direct Router Override Wallpaper'
+                            : selectedTenantGroupId
+                            ? `🏢 Inherited from ${storage.getTenantGroups().find(g => g.id === selectedTenantGroupId)?.name}`
+                            : '☕ Standard T-Connect Default Wallpaper'}
+                        </div>
+                        <div className="text-slate-500 truncate text-[9px]">
+                          {customBgInput || (selectedTenantGroupId ? storage.getTenantGroups().find(g => g.id === selectedTenantGroupId)?.customBgUrl : 'Standard')}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Save Button */}
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={isSavingTenantPolicy}
+                      onClick={() => {
+                        setIsSavingTenantPolicy(true);
+                        const cleanTags = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
+                        storage.assignRouterToTenantGroup(router.id, selectedTenantGroupId || null);
+                        storage.updateRouterTags(router.id, cleanTags);
+                        storage.updateRouterCustomBg(router.id, customBgInput);
+                        setTimeout(() => {
+                          setIsSavingTenantPolicy(false);
+                        }, 300);
+                      }}
+                      className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      {isSavingTenantPolicy ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving Policy...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Save Client Group Policy</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
