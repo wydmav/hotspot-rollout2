@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { RouterOSRenderer } from './src/services/routerosRenderer.js';
 import { WALLED_GARDEN_DOMAINS } from './src/services/storage.js';
-import { emailService } from './server/emailService.js';
+import { emailService } from './src/services/emailService.js';
 
 dotenv.config();
 process.env.DISABLE_HMR = 'true';
