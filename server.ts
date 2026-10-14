@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
@@ -1099,8 +1100,16 @@ app.post('/api/webhooks/:provider', (req: Request, res: Response) => {
 // 6. SPA DEV / PRODUCTION HOSTING
 // -----------------------------------------------------------------------------
 async function startServer() {
-  if (!isProd) {
-    // Development mode: attach Vite middleware for instant HMR / JSX compilation
+  const distPath = path.resolve(__dirname, 'dist');
+  const hasDist = fs.existsSync(path.resolve(distPath, 'index.html'));
+
+  if (!isProd || !hasDist) {
+    if (isProd && !hasDist) {
+      console.warn(`\n⚠️  [NOTICE] Production mode active, but 'dist/index.html' was not found.`);
+      console.warn(`   Automatically mounting Vite dynamic compiler so the app loads immediately.`);
+      console.warn(`   To generate pre-compiled static assets, run 'npm run build'.\n`);
+    }
+    // Development mode / dynamic fallback: attach Vite middleware for instant JSX compilation
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { 
@@ -1113,20 +1122,35 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Production mode: serve built static bundle
-    const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (req: Request, res: Response) => {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`=======================================================`);
     console.log(`  T-CONNECT CONTROL TOWER — ONLINE`);
     console.log(`  Port: ${PORT} | Environment: ${isProd ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`  Adoption API: http://0.0.0.0:${PORT}/api/devices/:id/adopt.rsc`);
     console.log(`  Health Check: http://0.0.0.0:${PORT}/api/health`);
     console.log(`=======================================================`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ [PORT CONFLICT] Port ${PORT} is already in use by another process.`);
+      console.error(`To fix this on your Linux VPS:`);
+      console.error(`  Option A: Kill the existing process occupying port ${PORT}:`);
+      console.error(`    sudo fuser -k ${PORT}/tcp`);
+      console.error(`    # OR`);
+      console.error(`    sudo kill -9 $(sudo lsof -t -i:${PORT})\n`);
+      console.error(`  Option B: Launch on an alternative port:`);
+      console.error(`    PORT=3001 npm run start\n`);
+    } else {
+      console.error('Server error:', err);
+    }
+    process.exit(1);
   });
 }
 
