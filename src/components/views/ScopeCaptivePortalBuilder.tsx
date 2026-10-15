@@ -1884,7 +1884,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <div className="space-y-1.5">
                         <label
                           className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer ${
-                            selectedGateway === 'ottvoucher' ? 'bg-blue-600/20 border-blue-500' : 'bg-black/40 border-white/10'
+                            selectedGateway === 'ottvoucher' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-black/40 border-white/10'
                           }`}
                         >
                           <div className="flex items-center gap-2">
@@ -1893,16 +1893,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               name="gw"
                               checked={selectedGateway === 'ottvoucher'}
                               onChange={() => setSelectedGateway('ottvoucher')}
-                              className="accent-blue-500"
+                              className="accent-emerald-500"
                             />
                             <ProviderLogo provider="ottvoucher" className="w-20 h-5" />
                           </div>
-                          <span className="text-[10px] font-mono text-blue-300">Digital PIN</span>
+                          <span className="text-[10px] font-mono text-emerald-300">Digital PIN</span>
                         </label>
 
                         <label
                           className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer ${
-                            selectedGateway === 'ecocash' ? 'bg-amber-600/20 border-amber-500' : 'bg-black/40 border-white/10'
+                            selectedGateway === 'ecocash' ? 'bg-red-600/20 border-red-500' : 'bg-black/40 border-white/10'
                           }`}
                         >
                           <div className="flex items-center gap-2">
@@ -1911,11 +1911,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               name="gw"
                               checked={selectedGateway === 'ecocash'}
                               onChange={() => setSelectedGateway('ecocash')}
-                              className="accent-[#f05e17]"
+                              className="accent-red-500"
                             />
                             <ProviderLogo provider="ecocash" className="w-20 h-5" />
                           </div>
-                          <span className="text-[10px] font-mono text-amber-300">*151# Push</span>
+                          <span className="text-[10px] font-mono text-red-300">Spache-Fono</span>
                         </label>
                       </div>
 

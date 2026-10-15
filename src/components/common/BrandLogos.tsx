@@ -2,31 +2,44 @@ import React from 'react';
 import { GatewayProvider } from '../../types';
 
 export const OttVoucherLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="200" height="80" rx="14" fill="#00438F" />
-    {/* OTT Voucher Ticket Notch Graphic */}
-    <path d="M12 28C18 28 22 34 22 40C22 46 18 52 12 52V28Z" fill="#0b0f19" />
-    <path d="M188 28C182 28 178 34 178 40C178 46 182 52 188 52V28Z" fill="#0b0f19" />
-    {/* OTT Brand Mark */}
-    <rect x="36" y="22" width="36" height="36" rx="8" fill="#F8B100" />
-    <text x="54" y="47" fontFamily="sans-serif" fontWeight="900" fontSize="22" fill="#00438F" textAnchor="middle">O</text>
-    {/* Wordmark */}
-    <text x="86" y="40" fontFamily="sans-serif" fontWeight="900" fontSize="20" fill="#FFFFFF" letterSpacing="1">OTT</text>
-    <text x="86" y="55" fontFamily="sans-serif" fontWeight="700" fontSize="12" fill="#F8B100" letterSpacing="2">VOUCHER</text>
+  <svg viewBox="0 0 220 75" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    {/* Dark card background so white text of OTT-logo-light is crisp and visible everywhere */}
+    <rect width="220" height="75" rx="10" fill="#080E1E" stroke="#1E293B" strokeWidth="1.5" />
+    <g transform="translate(12, 10)">
+      {/* OTT Circular Green Emblem */}
+      <circle cx="28" cy="27" r="24" fill="none" stroke="#35D458" strokeWidth="5.5" />
+      {/* Stylized Monogram */}
+      <path d="M 13 18 L 43 18" stroke="#35D458" strokeWidth="4.5" strokeLinecap="round" />
+      <path d="M 26 21 L 21 38 L 19 44" stroke="#35D458" strokeWidth="5" strokeLinecap="round" />
+      <path d="M 36 21 L 30 44" stroke="#35D458" strokeWidth="4.5" strokeLinecap="round" />
+
+      {/* OTT Wordmark */}
+      <text x="64" y="32" fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fontWeight="900" fontSize="26" fill="#FFFFFF" letterSpacing="0.5">
+        OTT
+      </text>
+      {/* VOUCHER Subtitle */}
+      <text x="65" y="47" fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fontWeight="800" fontSize="10.5" fill="#FFFFFF" letterSpacing="2.5">
+        VOUCHER
+      </text>
+    </g>
   </svg>
 );
 
 export const EcoCashLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 200 80" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="200" height="80" rx="14" fill="#002D72" />
-    {/* Econet Telecom Blue Accent Arc */}
-    <circle cx="48" cy="40" r="22" fill="#0066CC" fillOpacity="0.5"/>
-    <circle cx="48" cy="40" r="16" fill="#F37023" />
-    <path d="M42 40C42 36.6863 44.6863 34 48 34C51.3137 34 54 36.6863 54 40H42Z" fill="#FFFFFF"/>
-    <circle cx="48" cy="45" r="3" fill="#FFFFFF"/>
-    {/* EcoCash Text */}
-    <text x="82" y="38" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">EcoCash</text>
-    <text x="82" y="54" fontFamily="sans-serif" fontWeight="700" fontSize="11" fill="#F37023" letterSpacing="1">ECONET LESOTHO</text>
+  <svg viewBox="0 0 220 75" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    {/* Crisp white card background as in unnamed.jpg */}
+    <rect width="220" height="75" rx="10" fill="#FFFFFF" stroke="#E2E8F0" strokeWidth="1" />
+    <g transform="translate(14, 8)">
+      {/* EcoCash Text: Blue 'Eco' + Red 'Cash' */}
+      <text x="4" y="40" fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fontWeight="900" fontSize="38" letterSpacing="-0.8">
+        <tspan fill="#1A2D87">Eco</tspan>
+        <tspan fill="#E5232A">Cash</tspan>
+      </text>
+      {/* Spache - Fono Tagline */}
+      <text x="82" y="56" fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" fontWeight="800" fontSize="13" fill="#1A2D87" letterSpacing="0.2">
+        Spache - Fono
+      </text>
+    </g>
   </svg>
 );
 

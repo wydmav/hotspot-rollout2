@@ -951,7 +951,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         <label
                           className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
                             selectedGateway === 'ottvoucher'
-                              ? 'bg-blue-600/20 border-blue-500'
+                              ? 'bg-emerald-600/20 border-emerald-500'
                               : 'bg-black/40 border-white/10 hover:border-white/30'
                           }`}
                         >
@@ -961,18 +961,18 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               name="gateway"
                               checked={selectedGateway === 'ottvoucher'}
                               onChange={() => setSelectedGateway('ottvoucher')}
-                              className="accent-blue-500"
+                              className="accent-emerald-500"
                             />
                             <ProviderLogo provider="ottvoucher" className="w-24 h-7" />
                           </div>
-                          <span className="text-[10px] font-mono font-bold text-blue-300">Digital PIN</span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-300">Digital PIN</span>
                         </label>
 
                         {/* EcoCash Lesotho (Econet) */}
                         <label
                           className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
                             selectedGateway === 'ecocash'
-                              ? 'bg-amber-600/20 border-amber-500'
+                              ? 'bg-red-600/20 border-red-500'
                               : 'bg-black/40 border-white/10 hover:border-white/30'
                           }`}
                         >
@@ -982,11 +982,11 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               name="gateway"
                               checked={selectedGateway === 'ecocash'}
                               onChange={() => setSelectedGateway('ecocash')}
-                              className="accent-[#f05e17]"
+                              className="accent-red-500"
                             />
                             <ProviderLogo provider="ecocash" className="w-24 h-7" />
                           </div>
-                          <span className="text-[10px] font-mono font-bold text-amber-300">USSD *151#</span>
+                          <span className="text-[10px] font-mono font-bold text-red-300">Spache-Fono</span>
                         </label>
 
                         {/* Vodacom MyWallet (M-Pesa) */}

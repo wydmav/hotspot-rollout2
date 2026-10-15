@@ -158,7 +158,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       >
                         <td className="py-3">
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded bg-[#161d31] p-1 border border-[#232d42] shrink-0">
+                            <div className="w-11 h-6 rounded bg-[#161d31] p-0.5 border border-[#232d42] shrink-0 flex items-center justify-center">
                               <ProviderLogo provider={tx.provider} className="w-full h-full" />
                             </div>
                             <span className="font-bold text-white uppercase text-[11px]">{tx.provider}</span>
