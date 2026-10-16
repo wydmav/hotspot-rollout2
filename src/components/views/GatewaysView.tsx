@@ -244,7 +244,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
             >
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <div className="w-14 h-9 rounded-lg bg-[#161d31] p-1 border border-[#232d42] flex items-center justify-center shrink-0">
+                  <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
                     <ProviderLogo provider={gw.provider} className="w-full h-full" />
                   </div>
                   <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
@@ -273,7 +273,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#232d42] gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-9 rounded-lg bg-[#161d31] p-1 border border-[#232d42] flex items-center justify-center shrink-0">
+            <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
               <ProviderLogo provider={selectedGateway.provider} className="w-full h-full" />
             </div>
             <div>

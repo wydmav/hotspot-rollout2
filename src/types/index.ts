@@ -36,6 +36,7 @@ export interface RouterDevice {
   firmware: string;
   activeSessions: number;
   freeModeEnabled?: boolean;
+  freeDurationMinutes?: number;
   wan1Interface?: string;
   wan1Name?: string;
   wan2Interface?: string;
@@ -142,6 +143,32 @@ export interface ActiveSession {
   bytesDown: number;
   bytesUp: number;
   speedLimit: string;
+  guestName?: string;
+  guestPhone?: string;
+  guestEmail?: string;
+  authMode?: 'free' | 'voucher' | 'gateway';
+  connectedDurationSeconds?: number;
+}
+
+export interface CaptivePortalLead {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  countryCode: string;
+  phone: string;
+  fullPhone: string;
+  email: string;
+  capturedAt: string;
+  routerId?: string;
+  routerName: string;
+  siteName: string;
+  vertical: VerticalType;
+  clientMac: string;
+  clientIp: string;
+  deviceType: string;
+  durationMinutes: number;
+  status: 'active' | 'expired';
 }
 
 export type GatewayProvider = 'ottvoucher' | 'ecocash' | 'mywallet' | 'xpayments';
@@ -249,9 +276,30 @@ export type AuditLogCategory =
   | 'wan_failover'
   | 'security' 
   | 'authentication' 
+  | 'captive_portal'
+  | 'connection_attempt'
+  | 'captive_redirect'
   | 'billing' 
   | 'team'
   | 'system';
+
+export interface ConnectionAttemptLog {
+  id: string;
+  timestamp: string;
+  routerId: string;
+  routerName: string;
+  clientMac: string;
+  clientIp: string;
+  deviceType: string;
+  clientOs: 'ios' | 'android' | 'windows' | 'macos' | 'linux' | 'other';
+  destinationUrl: string;
+  redirectStatus: 'portal_loaded' | 'cna_302_issued' | 'dns_timeout' | 'ssl_blocked' | 'walled_garden_allowed';
+  httpCode: number;
+  reachedPortal: boolean;
+  latencyMs: number;
+  debugHint: string;
+  assignedSpeedLimit?: string;
+}
 
 export interface AuditLogEntry {
   id: string;

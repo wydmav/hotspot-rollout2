@@ -18,9 +18,16 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// Parse JSON and URL-encoded bodies
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Parse JSON and URL-encoded bodies with 25mb limit for photo uploads
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+// Static images directory for captive portal splash backgrounds
+const publicImagesDir = path.resolve(__dirname, 'public/images');
+if (!fs.existsSync(publicImagesDir)) {
+  fs.mkdirSync(publicImagesDir, { recursive: true });
+}
+app.use('/images', express.static(publicImagesDir));
 
 // CORS for captive portals and mobile money webhook gateways
 app.use((req, res, next) => {
@@ -31,6 +38,58 @@ app.use((req, res, next) => {
     return res.sendStatus(200);
   }
   next();
+});
+
+// Photo listing & physical upload endpoints for captive portal backgrounds
+app.get('/api/photos', (req: Request, res: Response) => {
+  try {
+    if (!fs.existsSync(publicImagesDir)) {
+      fs.mkdirSync(publicImagesDir, { recursive: true });
+    }
+    const files = fs.readdirSync(publicImagesDir).filter(f => /\.(jpg|jpeg|png|webp|svg)$/i.test(f));
+    res.json({
+      success: true,
+      photos: files.map(f => ({
+        name: f,
+        url: `/images/${f}`,
+        path: `public/images/${f}`
+      }))
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/upload-photo', (req: Request, res: Response) => {
+  try {
+    const { filename, base64Data } = req.body;
+    if (!base64Data) {
+      return res.status(400).json({ success: false, error: 'No image data provided' });
+    }
+    if (!fs.existsSync(publicImagesDir)) {
+      fs.mkdirSync(publicImagesDir, { recursive: true });
+    }
+    const ext = filename?.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.jpg';
+    const cleanBase = filename ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_') : `splash_${Date.now()}`;
+    const cleanName = `${cleanBase}${ext}`;
+    const targetPath = path.resolve(publicImagesDir, cleanName);
+
+    const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Clean, 'base64');
+    fs.writeFileSync(targetPath, buffer);
+
+    console.log(`[Photo Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to public/images/`);
+
+    res.json({
+      success: true,
+      filename: cleanName,
+      url: `/images/${cleanName}`,
+      message: 'Photo saved successfully to public/images/'
+    });
+  } catch (err: any) {
+    console.error('Failed to save photo:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -1054,7 +1113,7 @@ app.post('/api/gateways/:provider/charge', async (req: Request, res: Response) =
   // Simulated telecom prompt response
   let actionPrompt = '';
   if (provider === 'ecocash') {
-    actionPrompt = `USSD Push sent to ${phoneNumber}. Please dial *151# and enter your EcoCash PIN to confirm ${currency}${amount}.`;
+    actionPrompt = `USSD Push sent to ${phoneNumber}. Please dial *199# and enter your EcoCash PIN to confirm ${currency}${amount}.`;
   } else if (provider === 'mywallet') {
     actionPrompt = `Vodacom M-Pesa prompt sent to ${phoneNumber}. Please confirm the prompt on your handset.`;
   } else if (provider === 'ottvoucher') {

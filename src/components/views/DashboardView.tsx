@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   DollarSign, 
   Users, 
@@ -13,11 +13,14 @@ import {
   Plus,
   Radio,
   Ticket,
-  Database
+  Database,
+  Clock
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType } from '../../types';
 import { RegionalFleetMap } from './RegionalFleetMap';
 import { TransactionTrendsChart } from './TransactionTrendsChart';
+import { SessionDurationTrackingDisplay, computeSessionStats } from '../common/SessionDurationTrackingDisplay';
+import { storage } from '../../services/storage';
 
 interface DashboardViewProps {
   routers: RouterDevice[];
@@ -44,6 +47,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [showSolarWidget, setShowSolarWidget] = useState(true);
   const [showTransitWidget, setShowTransitWidget] = useState(true);
   const [showWaveChart, setShowWaveChart] = useState(true);
+  const [showSessionTracking, setShowSessionTracking] = useState(true);
 
   // Filter based on selected vertical
   const filteredRouters = selectedVertical === 'all' 
@@ -68,10 +72,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     .filter(t => t.status === 'completed')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  // Extract all active device sessions dynamically from real vouchers
+  // Core session duration calculations from vouchers and transaction logs
+  const sessionStats = useMemo(() => {
+    return computeSessionStats(vouchers, filteredTransactions, selectedVertical);
+  }, [vouchers, filteredTransactions, selectedVertical]);
+
+  // Real active sessions from storage + vouchers
+  const storedSessions = storage.getActiveSessions() || [];
+
   const activeSessionsFromVouchers = vouchers
     .filter(v => v.status === 'used' || (v.associatedDevices && v.associatedDevices.length > 0))
     .flatMap(v => (v.associatedDevices || []).map(device => ({
+      id: `sess_vch_${v.code}_${device.mac}`,
       mac: device.mac,
       hostname: device.hostname || 'Client-Device',
       ip: device.ip || '10.99.10.x',
@@ -79,11 +91,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       price: v.price,
       firstSeen: device.firstSeen,
       siteName: (device as any).siteName || 'Hotspot Node',
-      voucherCode: v.code
+      voucherCode: v.code,
+      guestName: 'Voucher Subscriber',
+      guestPhone: '',
+      authMode: 'voucher' as const,
+      bytesDown: device.bytesIn || 18000000,
+      bytesUp: device.bytesOut || 3200000,
+      startedAt: device.firstSeen || new Date().toISOString()
     })));
 
+  const allActiveSessions = [
+    ...storedSessions.map(s => ({
+      id: s.id,
+      mac: s.clientMac,
+      hostname: s.deviceType || 'Subscriber Device',
+      ip: s.clientIp,
+      planName: s.planName,
+      price: s.authMode === 'free' ? 0 : 10,
+      firstSeen: s.startedAt,
+      siteName: s.siteName,
+      voucherCode: s.voucherCode,
+      guestName: s.guestName || 'Captive Guest',
+      guestPhone: s.guestPhone || '',
+      guestEmail: s.guestEmail || '',
+      authMode: s.authMode || 'free',
+      bytesDown: s.bytesDown || 14200000,
+      bytesUp: s.bytesUp || 3800000,
+      startedAt: s.startedAt
+    })),
+    ...activeSessionsFromVouchers.filter(vs => !storedSessions.some(ss => ss.clientMac === vs.mac))
+  ];
+
   const totalActiveSessions = Math.max(
-    activeSessionsFromVouchers.length,
+    allActiveSessions.length,
     filteredRouters.reduce((acc, curr) => acc + curr.activeSessions, 0)
   );
 
@@ -158,6 +198,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               />
               <span className="text-[11px]">Transit</span>
             </label>
+            <label className="flex items-center gap-1 cursor-pointer hover:text-white">
+              <input 
+                type="checkbox" 
+                checked={showSessionTracking} 
+                onChange={(e) => setShowSessionTracking(e.target.checked)} 
+                className="rounded accent-[#f05e17] w-3 h-3"
+              />
+              <span className="text-[11px]">Duration</span>
+            </label>
           </div>
         </div>
       </div>
@@ -201,7 +250,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {/* Card 1: Reconciled Revenue */}
         <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
@@ -236,7 +285,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="text-[11px] text-slate-500 font-mono mt-1">Simultaneous authenticated clients</p>
         </div>
 
-        {/* Card 3: Hotspot Plans */}
+        {/* Card 3: Session Duration Tracking (Calculated from Voucher & Transaction Logs) */}
+        <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-2">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+            <span>SESSION DURATION</span>
+            <Clock className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className="text-2xl font-extrabold text-white font-mono tabular-nums">
+              {sessionStats.averageShortFormatted}
+            </span>
+            <span className="text-xs font-mono text-purple-300 font-bold">
+              Max: {sessionStats.maximumShortFormatted}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono mt-1">
+            <span>Mean connection</span>
+            <span className="text-cyan-300 font-bold">{sessionStats.totalSessions} tracked</span>
+          </div>
+        </div>
+
+        {/* Card 4: Hotspot Plans */}
         <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
             <span>ACTIVE PLANS</span>
@@ -251,7 +320,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <p className="text-[11px] text-slate-500 font-mono mt-1">QoS rate limits &amp; quotas</p>
         </div>
 
-        {/* Card 4: Router Fleet Status */}
+        {/* Card 5: Router Fleet Status */}
         <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
             <span>MIKROTIK FLEET</span>
@@ -431,69 +500,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* Real-Time Session Ingestion Ledger */}
-      <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-extrabold text-white">Active Subscriber Session Ledger</h3>
-            <p className="text-xs text-slate-400 font-mono">Live session tracking across all physical hotspots, roaming nodes, and mobile transit links</p>
-          </div>
-          <button 
-            onClick={() => onNavigateTab('transactions')}
-            className="text-xs font-mono text-[#f05e17] hover:underline flex items-center gap-1"
-          >
-            <span>View Full Financial Ledger</span>
-            <ArrowUpRight className="w-3 h-3" />
-          </button>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
-            <thead>
-              <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#232d42] pb-2">
-                <th className="py-2.5">CLIENT DEVICE / MAC</th>
-                <th className="py-2.5">ACCESS POINT / SITE</th>
-                <th className="py-2.5">PLAN &amp; ENTITLEMENT</th>
-                <th className="py-2.5">VOUCHER CODE</th>
-                <th className="py-2.5 text-right">STATUS</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1b233a] text-slate-300">
-              {activeSessionsFromVouchers.length > 0 ? (
-                activeSessionsFromVouchers.map((session, idx) => (
-                  <tr key={`${session.mac}-${idx}`}>
-                    <td className="py-3">
-                      <div className="text-white font-bold">{session.hostname}</div>
-                      <div className="text-[10px] text-slate-500">{session.mac}</div>
-                    </td>
-                    <td className="py-3 text-slate-300">{session.siteName}</td>
-                    <td className="py-3 text-white">
-                      <div>{session.planName}</div>
-                      <div className="text-[10px] text-[#f05e17]">{currency}{session.price.toFixed(2)}</div>
-                    </td>
-                    <td className="py-3 text-emerald-400 font-bold">{session.voucherCode}</td>
-                    <td className="py-3 text-right">
-                      <span className="text-emerald-400 font-bold">ACTIVE</span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500 text-xs">
-                    <div className="max-w-md mx-auto space-y-2">
-                      <Users className="w-6 h-6 mx-auto text-slate-600" />
-                      <p className="text-slate-400 font-medium">No active subscriber sessions yet</p>
-                      <p className="text-[11px] text-slate-500">
-                        Adopt a router in <strong>Routers &amp; Adoption</strong> or redeem a voucher in <strong>Network &amp; Security &gt; Captive Portal</strong> to initiate real-time subscriber sessions.
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Session Duration Tracking & Analytics Display (Calculated from Voucher & Transaction Logs) */}
+      {showSessionTracking && (
+        <SessionDurationTrackingDisplay
+          vouchers={vouchers}
+          transactions={filteredTransactions}
+          selectedVertical={selectedVertical}
+          currency={currency}
+        />
+      )}
     </div>
   );
 };

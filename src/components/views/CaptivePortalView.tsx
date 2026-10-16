@@ -32,6 +32,7 @@ import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { CaptivePortalEditor } from './CaptivePortalEditor';
 import { ScopeCaptivePortalBuilder } from './ScopeCaptivePortalBuilder';
 import { TenantGroupsModal } from './TenantGroupsModal';
+import { useConnectFreeValidation } from '../../hooks/useConnectFreeValidation';
 
 interface CaptivePortalViewProps {
   plans: HotspotPlan[];
@@ -112,6 +113,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   // Authentication toggles
   const [authCode, setAuthCode] = useState(true);
   const [authFree, setAuthFree] = useState(false);
+  const [freeAccessDurationMinutes, setFreeAccessDurationMinutes] = useState(30);
   const [authOnlinePayment, setAuthOnlinePayment] = useState(true);
   const [authPos, setAuthPos] = useState(true);
 
@@ -135,13 +137,42 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   const [accentColor, setAccentColor] = useState('#f05e17');
 
   // ---------------------------------------------------------------------------
-  // GUEST SIMULATOR STATE
   // ---------------------------------------------------------------------------
-  const [guestName, setGuestName] = useState('');
-  const [guestCountry, setGuestCountry] = useState(COUNTRY_CODES[0]);
-  const [guestPhone, setGuestPhone] = useState('5800 1234');
-  const [guestEmail, setGuestEmail] = useState('');
-  const [guestTermsAccepted, setGuestTermsAccepted] = useState(true);
+  // GUEST SIMULATOR STATE & FORM VALIDATION HOOK
+  // ---------------------------------------------------------------------------
+  // Enforces at least 2 chars for name/surname, 8 digits for Lesotho (+266),
+  // 10 digits starting with 0 for SA (+27), and email with '@' and '.'
+  const validation = useConnectFreeValidation({
+    initialFirstName: 'Katleho',
+    initialLastName: 'Molapo',
+    initialPhone: '58001234',
+    initialCountryCode: COUNTRY_CODES[0].code,
+    initialEmail: 'katleho.molapo@gmail.com',
+    initialTermsAccepted: true,
+    isEmailRequired: collectEmail,
+    isTermsRequired: termsEnabled
+  });
+
+  const guestFirstName = validation.firstName;
+  const setGuestFirstName = validation.setFirstName;
+  const guestSurname = validation.lastName;
+  const setGuestSurname = validation.setLastName;
+  const guestPhone = validation.phone;
+  const setGuestPhone = validation.setPhone;
+  const guestEmail = validation.email;
+  const setGuestEmail = validation.setEmail;
+  const guestTermsAccepted = validation.termsAccepted;
+  const setGuestTermsAccepted = validation.setTermsAccepted;
+  const guestCountry = COUNTRY_CODES.find((c) => c.code === validation.countryCode) || COUNTRY_CODES[0];
+  const setGuestCountry = (c: { code: string; name: string; flag: string }) => validation.setCountryCode(c.code);
+
+  const isFirstNameValid = validation.isFirstNameValid;
+  const isSurnameValid = validation.isLastNameValid;
+  const isPhoneValid = validation.isPhoneValid;
+  const isEmailValid = validation.isEmailValid;
+  const phoneErrorMsg = validation.phoneError;
+  const emailErrorMsg = validation.emailError;
+  const isFormValid = validation.isFormValid;
 
   // Payment & Voucher
   const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || '');
@@ -182,24 +213,55 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
 
-  // Quick Action: Fill With Sample Data (as shown in Screenshots 1 & 2)
+  // Quick Action: Fill With Sample Data
   const handleFillSampleData = () => {
-    setGuestName('Katleho Molapo');
-    setGuestCountry(COUNTRY_CODES[0]); // 🇱🇸 +266
-    setGuestPhone('5912 3456');
-    setGuestEmail('katleho.molapo@gmail.com');
-    setGuestTermsAccepted(true);
+    validation.fillSampleData();
+  };
+
+  // Free Access Connect Action - Grants Instant Free Session with Live Countdown Timer
+  const handleConnectFree = () => {
+    if (!isFormValid) {
+      validation.markAllTouched();
+      return;
+    }
+    const durationMins = freeAccessDurationMinutes || 30;
+    setRemainingSeconds(durationMins * 60);
+    setTotalPackageSeconds(durationMins * 60);
+
+    // Save real active session and captive lead in storage
+    storage.addActiveSession({
+      id: `sess_free_${Date.now()}`,
+      voucherCode: `FREE-${guestPhone.slice(-4)}`,
+      clientMac: 'F4:D4:88:51:22:90',
+      clientIp: '10.89.1.50',
+      deviceType: deviceFrame === 'iphone' ? 'Apple iPhone (iOS 17)' : 'Android Smartphone',
+      siteName: 'Hotspot Node (Central)',
+      vertical: 'hotspot',
+      routerName: 'MikroTik-Node',
+      planName: `Free Access (${durationMins} Mins)`,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + durationMins * 60 * 1000).toISOString(),
+      remainingSeconds: durationMins * 60,
+      bytesDown: 14200000,
+      bytesUp: 3800000,
+      speedLimit: '30M/10M',
+      guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`,
+      guestPhone: `${guestCountry.code} ${guestPhone}`,
+      guestEmail: guestEmail.trim(),
+      authMode: 'free'
+    });
+
+    setPreviewStep('usage');
   };
 
   // Identification Submit
   const handleIdentificationSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isFormValid) return;
     if (authFree) {
-      // Direct free connection
-      setPreviewStep('success');
+      handleConnectFree();
       return;
     }
-    // Proceed to payment gateway selection
     setPreviewStep('payment');
   };
 
@@ -667,9 +729,46 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
 
             {/* Section: Content & Legal (Sesotho terms as in Screenshot 1) */}
             <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-4 space-y-3 text-xs font-mono">
-              <span className="text-xs font-extrabold text-white uppercase tracking-wider font-mono flex items-center gap-2">
-                <Ticket className="w-4 h-4 text-amber-400" /> Branding &amp; Legal Terms
-              </span>
+              <div className="flex items-center justify-between border-b border-[#1b233a] pb-2">
+                <span className="text-xs font-extrabold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                  <Ticket className="w-4 h-4 text-amber-400" /> Branding &amp; Legal Terms
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHeaderBrand('');
+                    setHeaderTagline('');
+                    setWelcomeHeading('');
+                  }}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 underline font-mono flex items-center gap-1 cursor-pointer"
+                  title="Clear title and tagline to show clean background wallpaper only"
+                >
+                  <span>✨ Clear (Clean Background Only)</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-slate-400 block mb-1">Brand Header Title</label>
+                  <input
+                    type="text"
+                    value={headerBrand}
+                    onChange={(e) => setHeaderBrand(e.target.value)}
+                    placeholder="Leave empty for clean background..."
+                    className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Tagline Sub-header</label>
+                  <input
+                    type="text"
+                    value={headerTagline}
+                    onChange={(e) => setHeaderTagline(e.target.value)}
+                    placeholder="Leave empty for clean background..."
+                    className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white"
+                  />
+                </div>
+              </div>
 
               <div>
                 <label className="text-slate-400 block mb-1">Welcome Headline</label>
@@ -677,6 +776,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                   type="text"
                   value={welcomeHeading}
                   onChange={(e) => setWelcomeHeading(e.target.value)}
+                  placeholder="Leave empty for clean background..."
                   className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-bold"
                 />
               </div>
@@ -781,18 +881,24 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                   style={{ opacity: darkenPercent / 100 }}
                 />
 
-                {/* Brand Header: T-CONNECT | STARLINK AUTHORISED RESELLER */}
-                <div className="relative z-10 text-center pt-2">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-2">
-                    <span className="w-2 h-2 rounded-full bg-[#f05e17] animate-pulse" />
-                    <span className="text-[11px] font-extrabold tracking-wider text-white font-mono">
-                      {headerBrand} <span className="text-slate-400">·</span> {headerTagline}
-                    </span>
+                {/* Brand Header: Render only when title, tagline, or headline is present, otherwise clean background */}
+                {(headerBrand?.trim() || headerTagline?.trim() || welcomeHeading?.trim()) ? (
+                  <div className="relative z-10 text-center pt-2">
+                    {(headerBrand?.trim() || headerTagline?.trim()) && (
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-2">
+                        <span className="w-2 h-2 rounded-full bg-[#f05e17] animate-pulse" />
+                        <span className="text-[11px] font-extrabold tracking-wider text-white font-mono">
+                          {[headerBrand?.trim(), headerTagline?.trim()].filter(Boolean).join(' · ')}
+                        </span>
+                      </div>
+                    )}
+                    {welcomeHeading?.trim() && (
+                      <h2 className="text-2xl font-black text-white tracking-tight drop-shadow-md">
+                        {welcomeHeading}
+                      </h2>
+                    )}
                   </div>
-                  <h2 className="text-2xl font-black text-white tracking-tight drop-shadow-md">
-                    {welcomeHeading}
-                  </h2>
-                </div>
+                ) : null}
 
                 {/* CARD BODY WITH DYNAMIC OPACITY & SIZING */}
                 <div
@@ -809,26 +915,58 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         backgroundColor: `rgba(15, 20, 34, ${glassOpacity / 100})`,
                       }}
                     >
-                      {/* Name Input */}
+                      {/* First Name & Surname Separation */}
                       {collectName && (
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1">Full name</label>
-                          <input
-                            type="text"
-                            value={guestName}
-                            onChange={(e) => setGuestName(e.target.value)}
-                            placeholder="e.g. Katleho Molapo"
-                            required
-                            className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
-                          />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                              First Name <span className="text-red-400">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={guestFirstName}
+                              onChange={(e) => setGuestFirstName(e.target.value)}
+                              placeholder="Katleho"
+                              className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                                guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                              }`}
+                            />
+                            {guestFirstName && !isFirstNameValid && (
+                              <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                                Min 2 characters
+                              </span>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                              Surname <span className="text-red-400">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={guestSurname}
+                              onChange={(e) => setGuestSurname(e.target.value)}
+                              placeholder="Molapo"
+                              className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                                guestSurname && !isSurnameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                              }`}
+                            />
+                            {guestSurname && !isSurnameValid && (
+                              <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                                Min 2 characters
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
 
                       {/* Phone Input with Country Flag & Code Selector */}
                       {collectPhone && (
                         <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1">
-                            Phone number <span className="text-slate-400">(with country flag)</span>
+                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                            Mobile Number <span className="text-red-400">*</span>
                           </label>
                           <div className="flex items-center gap-1.5">
                             {/* Country Dropdown */}
@@ -838,7 +976,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                                 const found = COUNTRY_CODES.find((c) => c.code === e.target.value);
                                 if (found) setGuestCountry(found);
                               }}
-                              className="px-2 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                              className="px-2 py-1.5 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer shrink-0"
                             >
                               {COUNTRY_CODES.map((c) => (
                                 <option key={c.code} value={c.code} className="bg-[#0f1422] text-white">
@@ -851,25 +989,54 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               type="tel"
                               value={guestPhone}
                               onChange={(e) => setGuestPhone(e.target.value)}
-                              placeholder="5800 1234"
+                              placeholder={guestCountry.code === '+266' ? '58001234 (8 digits)' : '0712345678 (10 digits)'}
                               required
-                              className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
+                              className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                                guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                              }`}
                             />
                           </div>
+                          {guestPhone && !isPhoneValid && (
+                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                              {phoneErrorMsg}
+                            </span>
+                          )}
+                          {guestPhone && isPhoneValid && (
+                            <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                              <Check className="w-3 h-3" />
+                              <span>Valid {guestCountry.code === '+266' ? 'Lesotho' : 'South African'} number</span>
+                            </span>
+                          )}
                         </div>
                       )}
 
                       {/* Email Input */}
                       {collectEmail && (
                         <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1">Email address</label>
+                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                            Email address <span className="text-red-400">*</span>
+                          </label>
                           <input
                             type="email"
                             value={guestEmail}
                             onChange={(e) => setGuestEmail(e.target.value)}
-                            placeholder="katleho@example.com"
-                            className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
+                            placeholder="katleho@tconnect.ls"
+                            required
+                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                              guestEmail && !isEmailValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            }`}
                           />
+                          {guestEmail && !isEmailValid && (
+                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                              {emailErrorMsg || 'Email address must contain "@" and domain with "." (e.g. name@domain.com)'}
+                            </span>
+                          )}
+                          {guestEmail && isEmailValid && (
+                            <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                              <Check className="w-3 h-3" />
+                              <span>Valid email format</span>
+                            </span>
+                          )}
                         </div>
                       )}
 
@@ -889,23 +1056,38 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         </label>
                       )}
 
-                      {/* "Fill with sample data" Button (Matches Screenshot 1 & 2!) */}
+                      {/* "Fill with sample data" Button */}
                       <button
                         type="button"
                         onClick={handleFillSampleData}
-                        className="w-full py-2 px-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-[11px] font-bold text-amber-300 font-mono flex items-center justify-center gap-1.5 transition-colors"
+                        className="w-full py-1.5 px-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-[10px] font-bold text-amber-300 font-mono flex items-center justify-center gap-1.5 transition-colors"
                       >
-                        <Sparkles className="w-3.5 h-3.5 fill-current" />
+                        <Sparkles className="w-3 h-3 fill-current" />
                         <span>✨ Fill with sample data</span>
                       </button>
 
-                      {/* Connect / Proceed Button */}
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 px-4 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95"
-                      >
-                        {authFree ? 'Connect Free to Internet' : 'Connect & Choose Pass'} &rarr;
-                      </button>
+                      {/* FREE ACCESS MODE BUTTON IN TANGERINE */}
+                      {authFree ? (
+                        <div className="space-y-1.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleConnectFree}
+                            disabled={!isFormValid}
+                            className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-xl shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            <Zap className="w-4 h-4 fill-current text-white" />
+                            <span>Connect Free</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="submit"
+                          disabled={!isFormValid}
+                          className="w-full py-2.5 px-4 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+                        >
+                          Connect &amp; Choose Pass &rarr;
+                        </button>
+                      )}
                     </form>
                   )}
 
@@ -1068,6 +1250,19 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         </div>
                       )}
 
+                      {/* EcoCash *199# Push Prompt Notice */}
+                      {selectedGateway === 'ecocash' && (
+                        <div className="pt-1 p-2.5 rounded-xl bg-red-950/40 border border-red-500/30 text-xs font-mono space-y-1">
+                          <div className="flex justify-between font-bold text-red-200">
+                            <span>EcoCash Lesotho STK Push</span>
+                            <span className="text-emerald-400">{currency}{selectedPlan.price}</span>
+                          </div>
+                          <p className="text-slate-300 text-[10px]">
+                            An automated prompt for <strong>{currency}{selectedPlan.price}</strong> will be sent to <strong>{guestCountry.code} {guestPhone}</strong>. Approve on your handset via *199# Push to activate internet.
+                          </p>
+                        </div>
+                      )}
+
                       {/* Pay / Redeem Button */}
                       <button
                         onClick={handleExecutePayment}
@@ -1080,14 +1275,14 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                             <span>
                               {selectedGateway === 'ottvoucher'
                                 ? 'Redeeming PIN via OTT Lesotho...'
-                                : 'Processing Telecom STK Push...'}
+                                : 'Processing EcoCash (*199# Push)...'}
                             </span>
                           </>
                         ) : (
                           <span>
                             {selectedGateway === 'ottvoucher'
                               ? `Redeem OTT Voucher (${currency}${selectedPlan.price}) & Connect →`
-                              : `Pay ${currency}${selectedPlan.price} & Connect →`}
+                              : `Pay ${currency}${selectedPlan.price} via EcoCash (*199# Push) →`}
                           </span>
                         )}
                       </button>
@@ -1223,7 +1418,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
 
                 {/* Bottom Footer Credits */}
                 <div className="relative z-10 text-center text-[10px] font-mono text-slate-400/80 pt-2">
-                  Powered by T-Connect Control Tower · Lesotho
+                  T-Connect - Starlink Powered Solutions
                 </div>
               </div>
             </div>

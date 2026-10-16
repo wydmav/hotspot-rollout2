@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Smartphone, Repeat, Sliders, Users, ShieldCheck, Database } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Smartphone, Repeat, Sliders, Users, ShieldCheck, Database, Clock, UserCheck } from 'lucide-react';
 import { 
   HotspotPlan, 
   RouterDevice, 
   Voucher, 
+  PaymentTransaction,
   ContentFilterRule, 
   TeamMember, 
   AuditLogEntry, 
@@ -15,11 +16,15 @@ import { RoamingView } from './RoamingView';
 import { BandwidthFilterView } from './BandwidthFilterView';
 import { TeamRbacView } from './TeamRbacView';
 import { SecurityAuthView } from './SecurityAuthView';
+import { CaptivePortalLeadsView } from './CaptivePortalLeadsView';
+import { SessionDurationTrackingDisplay, computeSessionStats } from '../common/SessionDurationTrackingDisplay';
+import { storage } from '../../services/storage';
 
 interface NetworkSecurityViewProps {
   plans: HotspotPlan[];
   routers: RouterDevice[];
   vouchers: Voucher[];
+  transactions?: PaymentTransaction[];
   contentFilters: ContentFilterRule[];
   team: TeamMember[];
   auditLogs: AuditLogEntry[];
@@ -41,7 +46,11 @@ interface NetworkSecurityViewProps {
 }
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
-  const [activeSubTab, setActiveSubTab] = useState<'portal' | 'roaming' | 'bandwidth' | 'team' | 'security'>('portal');
+  const [activeSubTab, setActiveSubTab] = useState<'portal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security'>('portal');
+
+  const sessionStats = useMemo(() => {
+    return computeSessionStats(props.vouchers, props.transactions || [], props.selectedVertical);
+  }, [props.vouchers, props.transactions, props.selectedVertical]);
 
   return (
     <div className="space-y-5">
@@ -79,6 +88,32 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           </button>
 
           <button
+            onClick={() => setActiveSubTab('sessions')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
+              activeSubTab === 'sessions' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Session Duration</span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-950/60 text-cyan-300 border border-cyan-500/30">
+              {sessionStats.averageShortFormatted}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('leads')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
+              activeSubTab === 'leads' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>Guest Leads</span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-950/60 text-amber-300 border border-amber-500/30">
+              {storage.getCaptiveLeads().length}
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveSubTab('team')}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
               activeSubTab === 'team' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
@@ -113,6 +148,46 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         </button>
       </div>
 
+      {/* Session Duration Telemetry Quick-Glance Ribbon */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#0f1422] border border-[#232d42] text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-cyan-400" />
+            <span className="text-slate-300 font-bold">SESSION TRACKING:</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500">Avg Duration:</span>
+            <span className="text-white font-extrabold text-sm">{sessionStats.averageFormatted}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500">Max Connection:</span>
+            <span className="text-purple-300 font-extrabold text-sm">{sessionStats.maximumFormatted}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500">Total Leases:</span>
+            <span className="text-cyan-300 font-bold">{sessionStats.totalSessions}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-500">Live Active:</span>
+            <span className="text-emerald-400 font-bold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              {sessionStats.activeCount}
+            </span>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setActiveSubTab('sessions')}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+            activeSubTab === 'sessions'
+              ? 'bg-[#f05e17] text-white shadow-sm'
+              : 'bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200'
+          }`}
+        >
+          <span>{activeSubTab === 'sessions' ? 'Viewing Logs Tab' : 'View Full Session Logs →'}</span>
+        </button>
+      </div>
+
       {/* Sub-view Content */}
       {activeSubTab === 'portal' && (
         <CaptivePortalView
@@ -141,6 +216,24 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           onToggleFilter={props.onToggleFilter}
           routers={props.routers}
           selectedVertical={props.selectedVertical}
+        />
+      )}
+
+      {activeSubTab === 'sessions' && (
+        <SessionDurationTrackingDisplay
+          vouchers={props.vouchers}
+          transactions={props.transactions || []}
+          selectedVertical={props.selectedVertical}
+          currency={props.currency}
+          title="Network & Security: Session Duration Tracking"
+          description="Calculates average and maximum connection time per user session from voucher devices, mobile money transactions, and live captive portal leases"
+        />
+      )}
+
+      {activeSubTab === 'leads' && (
+        <CaptivePortalLeadsView
+          selectedVertical={props.selectedVertical}
+          currency={props.currency}
         />
       )}
 

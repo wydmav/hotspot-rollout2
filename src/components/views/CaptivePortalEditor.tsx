@@ -629,18 +629,24 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                 style={{ opacity: config.bgDarken / 100 }}
               />
 
-              {/* Brand Header */}
-              <div className="relative z-10 text-center pt-2">
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-2">
-                  <span className="w-2 h-2 rounded-full bg-[#f05e17] animate-pulse" />
-                  <span className="text-[11px] font-extrabold tracking-wider text-white font-mono">
-                    {config.brandTitle} <span className="text-slate-400">·</span> {config.tagline}
-                  </span>
+              {/* Brand Header: Render only when title, tagline, or headline is present, otherwise clean background wallpaper */}
+              {(config.brandTitle?.trim() || config.tagline?.trim() || config.welcomeHeadline?.trim()) ? (
+                <div className="relative z-10 text-center pt-2">
+                  {(config.brandTitle?.trim() || config.tagline?.trim()) && (
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-2">
+                      <span className="w-2 h-2 rounded-full bg-[#f05e17] animate-pulse" />
+                      <span className="text-[11px] font-extrabold tracking-wider text-white font-mono">
+                        {[config.brandTitle?.trim(), config.tagline?.trim()].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                  )}
+                  {config.welcomeHeadline?.trim() && (
+                    <h2 className="text-2xl font-black text-white tracking-tight drop-shadow-md">
+                      {config.welcomeHeadline}
+                    </h2>
+                  )}
                 </div>
-                <h2 className="text-2xl font-black text-white tracking-tight drop-shadow-md">
-                  {config.welcomeHeadline}
-                </h2>
-              </div>
+              ) : null}
 
               {/* DYNAMIC SIGNUP BOX WITH ADMIN-CONFIGURED WIDTH, OPACITY, PADDING & RADIUS */}
               <div
@@ -888,7 +894,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
 
               {/* Footer */}
               <div className="relative z-10 text-center text-[10px] font-mono text-slate-400/80 pt-2">
-                Powered by T-Connect Control Tower
+                T-Connect - Starlink Powered Solutions
               </div>
             </div>
           </div>

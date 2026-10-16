@@ -180,7 +180,24 @@ export class RouterOSRenderer {
       `/ip hotspot profile`,
       `:do { set [find default=yes] use-radius=yes radius-accounting=yes radius-interim-update=1m login-by=http-pap,mac-cookie,cookie http-cookie-lifetime=1d } on-error={ /log warning "T-Connect: Could not bind default hotspot profile to RADIUS" }`,
       `/ip hotspot user profile`,
-      `:do { set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no } on-error={}`,
+      `:do { set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no rate-limit="10M/30M" } on-error={}`,
+      `:do {`,
+      `  :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={`,
+      `    add name="free_trial" rate-limit="10M/30M" shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no comment="T-Connect Free Access (10M Up / 30M Down)"`,
+      `  } else={`,
+      `    set [find name="free_trial"] rate-limit="10M/30M"`,
+      `  }`,
+      `} on-error={}`,
+      ``,
+      `# Free Access Bandwidth Queue Fallback (Enforces 10M Up / 30M Down)`,
+      `/queue simple`,
+      `:do {`,
+      `  :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={`,
+      `    add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=10M/30M comment="T-Connect Free Access Pool Rate-Limit"`,
+      `  } else={`,
+      `    set [find name="tc-free-pool"] max-limit=10M/30M`,
+      `  }`,
+      `} on-error={}`,
       `# Ultra-lightweight redirect stub: 100% of portal assets, payment UI & vouchers run on VPS`,
       `:do {`,
       `  /file print file="hotspot/login.html"`,
@@ -416,6 +433,69 @@ add host=${checkHost} interval=10s timeout=2s \\
 } on-error={};
 
 :log info "[T-Connect] Router de-adoption complete. Device unlinked from controller.";
+`;
+  }
+
+  /**
+   * Generates RouterOS script for bridging 2 Access Points (Ubiquiti UniFi, TP-Link Omada, etc.)
+   * and bypassing AP management IPs from Hotspot authentication.
+   */
+  static renderApBridgeScript(options: {
+    bridgeName?: string;
+    ap1Port: string;
+    ap2Port: string;
+    ap1Ip: string;
+    ap2Ip: string;
+    ap1Name?: string;
+    ap2Name?: string;
+  }): string {
+    const bridge = options.bridgeName?.trim() || 'tctower-bridge';
+    const ap1Name = options.ap1Name || 'AP1-UniFi-Omada';
+    const ap2Name = options.ap2Name || 'AP2-UniFi-Omada';
+
+    return `# ============================================================
+# T-CONNECT ACCESS POINT BRIDGE & HOTSPOT BYPASS CONFIGURATION
+# Adds Access Point Ethernet ports to the Hotspot Bridge and
+# bypasses AP management IPs so guests get redirected to the portal
+# while AP management traffic flows unhindered.
+# ============================================================
+
+:log info "[T-Connect] Configuring Access Point bridge ports and Hotspot IP-bindings...";
+
+# 1. Ensure Target Bridge Exists
+:do {
+  :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
+    /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge"
+  }
+} on-error={}
+
+# 2. Add AP Physical Ports to Bridge
+/interface bridge port
+:do {
+  :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge="${bridge}"]] = 0) do={
+    add bridge=${bridge} interface="${options.ap1Port}" comment="tc-tower-bridge-port-${options.ap1Port}"
+  }
+} on-error={ :log warning "Port ${options.ap1Port} already in bridge or unavailable" }
+
+:do {
+  :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge="${bridge}"]] = 0) do={
+    add bridge=${bridge} interface="${options.ap2Port}" comment="tc-tower-bridge-port-${options.ap2Port}"
+  }
+} on-error={ :log warning "Port ${options.ap2Port} already in bridge or unavailable" }
+
+# 3. Bypass AP Static Management IPs in Hotspot (Prevents AP login splash blocks)
+/ip hotspot ip-binding
+:do { remove [find comment~"${ap1Name}"] } on-error={}
+:do { add address="${options.ap1Ip}" type=bypassed comment="tc-bypass-${ap1Name}" } on-error={}
+
+:do { remove [find comment~"${ap2Name}"] } on-error={}
+:do { add address="${options.ap2Ip}" type=bypassed comment="tc-bypass-${ap2Name}" } on-error={}
+
+# 4. Verify WinBox Management Service
+/ip service
+:do { set winbox disabled=no port=8291 } on-error={}
+
+:log info "[T-Connect] AP Bridge ports & IP-Bindings active. Guests on AP1 & AP2 will see captive portal.";
 `;
   }
 }

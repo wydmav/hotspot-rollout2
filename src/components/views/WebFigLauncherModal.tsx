@@ -17,8 +17,12 @@ import {
   Monitor, 
   X,
   Activity,
-  Zap
+  Zap,
+  Network,
+  Wifi,
+  HelpCircle
 } from 'lucide-react';
+import { AccessPointSetupModal } from './AccessPointSetupModal';
 
 interface WebFigLauncherModalProps {
   router: RouterDevice;
@@ -33,7 +37,8 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
   onClose,
   onRouterUpdated
 }) => {
-  const [activeTab, setActiveTab] = useState<'launcher' | 'tools' | 'embed'>('launcher');
+  const [activeTab, setActiveTab] = useState<'launcher' | 'tools' | 'embed' | 'ap-wiring'>('launcher');
+  const [showApModal, setShowApModal] = useState(false);
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
@@ -201,6 +206,17 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
             <ExternalLink className="w-4 h-4" />
             Embedded Console
           </button>
+          <button
+            onClick={() => setActiveTab('ap-wiring')}
+            className={`px-4 py-2.5 text-xs font-semibold rounded-t-lg transition-colors flex items-center gap-2 border-b-2 ${
+              activeTab === 'ap-wiring'
+                ? 'border-orange-500 text-orange-400 bg-slate-900'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Network className="w-4 h-4" />
+            2 APs & WinBox Topology
+          </button>
         </div>
 
         {/* Modal Content */}
@@ -354,6 +370,34 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
                   </code>
                 </div>
               </div>
+
+              {/* Dual Access Point (UniFi / Omada) Quick Setup Card */}
+              <div className="bg-gradient-to-r from-amber-500/10 via-slate-950 to-sky-500/10 border border-amber-500/30 rounded-xl p-4.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-lg shrink-0 mt-0.5">
+                    <Network className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-white text-sm">Connecting 2 Access Points to this Router?</h4>
+                      <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-500/20 text-emerald-400 rounded">
+                        Captive Portal Bridged
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Router LAN IP (<span className="text-amber-400 font-mono font-bold">192.168.88.1</span>) is your Default Gateway for Ubiquiti UniFi and TP-Link Omada APs. Add ports to <span className="font-mono text-slate-200">tctower-bridge</span> and bypass AP management IPs.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowApModal(true)}
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-sm shrink-0"
+                >
+                  Open 2 AP & WinBox Assistant
+                </button>
+              </div>
+
             </div>
           )}
 
@@ -507,6 +551,78 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
               </div>
             </div>
           )}
+
+          {activeTab === 'ap-wiring' && (
+            <div className="space-y-5">
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg">
+                      <Network className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-white text-sm">2 Access Points & WinBox Bridge Integration</h4>
+                      <p className="text-xs text-slate-400">Connect Ubiquiti UniFi or TP-Link Omada APs to this router</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowApModal(true)}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shadow-sm"
+                  >
+                    Open Interactive Assistant
+                  </button>
+                </div>
+
+                {/* Gateway Explanation */}
+                <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-white">
+                    <HelpCircle className="w-4 h-4 text-amber-400" />
+                    <span>Router Gateway IP Requirement:</span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    <strong>YES:</strong> Because your access points use <strong>Static Management IPs</strong>, configure their network default gateway and DNS to this router’s LAN IP: <span className="text-amber-400 font-mono font-bold">192.168.88.1</span>.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 text-xs font-mono">
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                      <span className="text-slate-500 block text-[10px]">ROUTER GATEWAY IP</span>
+                      <span className="text-amber-400 font-bold">192.168.88.1</span>
+                    </div>
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                      <span className="text-slate-500 block text-[10px]">AP 1 STATIC IP (ether3)</span>
+                      <span className="text-indigo-400 font-bold">192.168.88.2</span>
+                    </div>
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                      <span className="text-slate-500 block text-[10px]">AP 2 STATIC IP (ether4)</span>
+                      <span className="text-teal-400 font-bold">192.168.88.3</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bridge Port Script Requested by User */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono text-slate-300 font-medium">WinBox Terminal Bridge Script:</span>
+                    <button
+                      onClick={() => copyToClipboard(
+                        `/interface bridge port add bridge=tctower-bridge interface="ether3" comment="tc-tower-bridge-port-ap1"\n/interface bridge port add bridge=tctower-bridge interface="ether4" comment="tc-tower-bridge-port-ap2"\n/ip hotspot ip-binding add address=192.168.88.2 type=bypassed comment="tc-bypass-AP1"\n/ip hotspot ip-binding add address=192.168.88.3 type=bypassed comment="tc-bypass-AP2"`,
+                        'ap-quick-script'
+                      )}
+                      className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-semibold"
+                    >
+                      {copiedText === 'ap-quick-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedText === 'ap-quick-script' ? 'Copied' : 'Copy Commands'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-3 bg-black/60 rounded-lg text-emerald-400 font-mono text-xs overflow-x-auto border border-slate-800 leading-relaxed">
+{`/interface bridge port add bridge=tctower-bridge interface="ether3" comment="tc-tower-bridge-port-ap1"
+/interface bridge port add bridge=tctower-bridge interface="ether4" comment="tc-tower-bridge-port-ap2"
+/ip hotspot ip-binding add address=192.168.88.2 type=bypassed comment="tc-bypass-AP1"
+/ip hotspot ip-binding add address=192.168.88.3 type=bypassed comment="tc-bypass-AP2"`}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Modal Footer */}
@@ -523,6 +639,13 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Full 2 AP & WinBox Assistant Modal */}
+      <AccessPointSetupModal
+        isOpen={showApModal}
+        onClose={() => setShowApModal(false)}
+        router={router}
+      />
     </div>
   );
 };

@@ -28,12 +28,16 @@ import {
   SlidersHorizontal, 
   HelpCircle,
   Copy,
-  Building2
+  Building2,
+  Clock,
+  Folder,
+  Zap
 } from 'lucide-react';
 import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage } from '../../services/storage';
 import { TenantGroupsModal } from './TenantGroupsModal';
+import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
 
 // =============================================================================
 // SCOPE DEFINITIONS & METADATA
@@ -751,17 +755,103 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [deviceFrame, setDeviceFrame] = useState<'iphone' | 'android' | 'desktop'>('iphone');
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ottvoucher');
-  const [guestName, setGuestName] = useState('Katleho Molapo');
-  const [guestPhone, setGuestPhone] = useState('5800 1234');
+  
+  // Guest Sign-up State with First Name & Surname Separation
+  const [guestFirstName, setGuestFirstName] = useState('Katleho');
+  const [guestSurname, setGuestSurname] = useState('Molapo');
+  const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
+  const [guestPhone, setGuestPhone] = useState('58001234');
   const [guestEmail, setGuestEmail] = useState('katleho@tconnect.ls');
   const [ottPin, setOttPin] = useState('8921 3482 9011');
   const [savedToast, setSavedToast] = useState<string | null>(null);
-  const [sessionRemaining, setSessionRemaining] = useState(3600);
+  
+  // Real-time Connection Duration Telemetry (Stopwatch & Countdown)
+  const [sessionRemaining, setSessionRemaining] = useState(1800); // 30 mins
+  const [sessionElapsed, setSessionElapsed] = useState(0); // Elapsed seconds
+  const [sessionAuthMode, setSessionAuthMode] = useState<'free' | 'paid'>('free');
+  
+  // Physical Photos in VPS /public/images/
+  const [uploadedPhotos, setUploadedPhotos] = useState<Array<{ name: string; url: string }>>([]);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live Stopwatch Ticker for Connected Session
+  useEffect(() => {
+    let timer: any;
+    if (previewStep === 'usage') {
+      timer = setInterval(() => {
+        setSessionElapsed((prev) => prev + 1);
+        setSessionRemaining((prev) => Math.max(0, prev - 1));
+      }, 1000);
+    } else {
+      setSessionElapsed(0);
+    }
+    return () => clearInterval(timer);
+  }, [previewStep]);
+
+  // Load physical photos from VPS filesystem on mount
+  useEffect(() => {
+    fetch('/api/photos')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.photos)) {
+          setUploadedPhotos(data.photos);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // External Client Tenant Group & Dynamic Splash Policy Preview
   const [previewClientGroupId, setPreviewClientGroupId] = useState<string>('default');
   const [showTenantModal, setShowTenantModal] = useState(false);
+
+  // Active router resolution based on preview dropdown
+  const activeRouter = React.useMemo(() => {
+    if (previewClientGroupId.startsWith('router:')) {
+      const rid = previewClientGroupId.replace('router:', '');
+      return routers.find((r) => r.id === rid);
+    }
+    return routers.find((r) => r.vertical === selectedScope) || routers[0];
+  }, [previewClientGroupId, routers, selectedScope]);
+
+  // Per-hotspot Free Access Mode: router's freeModeEnabled or scope allowFreeAccess
+  const isFreeModeActive = Boolean(activeRouter?.freeModeEnabled ?? currentConfig.allowFreeAccess);
+
+  // Strict Validation Rules:
+  // 1. First name has 2 characters or more
+  const isFirstNameValid = guestFirstName.trim().length >= 2;
+  // 2. Surname has 2 characters or more
+  const isSurnameValid = guestSurname.trim().length >= 2;
+  // 3. Phone number validation:
+  const cleanPhoneDigits = guestPhone.replace(/\D/g, '');
+  let isPhoneValid = false;
+  let phoneErrorMsg = '';
+
+  if (guestCountryCode === '+266') {
+    // Lesotho: exactly 8 digits (strip optional leading 0)
+    const lsDigits = cleanPhoneDigits.replace(/^0/, '');
+    if (lsDigits.length === 8) {
+      isPhoneValid = true;
+    } else {
+      phoneErrorMsg = `Lesotho (+266) numbers must have exactly 8 digits (${lsDigits.length}/8)`;
+    }
+  } else {
+    // South Africa (+27): 9 digits without leading 0, or 10 digits starting with 0
+    if (cleanPhoneDigits.startsWith('0') && cleanPhoneDigits.length === 10) {
+      isPhoneValid = true;
+    } else if (!cleanPhoneDigits.startsWith('0') && cleanPhoneDigits.length === 9) {
+      isPhoneValid = true;
+    } else {
+      phoneErrorMsg = `South African (+27) numbers must have 9 digits or 10 starting with 0 (${cleanPhoneDigits.length} entered)`;
+    }
+  }
+
+  // 4. Email validation: enforces presence of '@' and '.'
+  const emailValidation = validateEmailAddress(guestEmail, Boolean(currentConfig.collectEmail));
+  const isEmailValid = emailValidation.isValid;
+  const emailErrorMsg = emailValidation.error;
+
+  const isGuestFormValid = isFirstNameValid && isSurnameValid && isPhoneValid && isEmailValid;
 
   // Dynamically resolved preview background image based on selected scope, tenant group, or router tag
   const effectivePreviewBg = React.useMemo(() => {
@@ -809,18 +899,43 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     saveScopeConfig(defaultConf);
   };
 
-  // Image upload
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Physical Photo upload saved to /public/images/ on VPS
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('File size exceeds 5MB limit. Please upload an optimized image.');
+      if (file.size > 20 * 1024 * 1024) {
+        alert('File size exceeds 20MB limit. Please upload an optimized image.');
         return;
       }
+      setIsUploadingPhoto(true);
       const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        const result = uploadEvent.target?.result as string;
-        handleUpdateCurrent({ bgImage: result });
+      reader.onload = async (uploadEvent) => {
+        const base64Data = uploadEvent.target?.result as string;
+        try {
+          const res = await fetch('/api/upload-photo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: file.name,
+              base64Data
+            })
+          });
+          const json = await res.json();
+          if (json.success && json.url) {
+            handleUpdateCurrent({ bgImage: json.url });
+            setUploadedPhotos((prev) => [
+              { name: json.filename, url: json.url },
+              ...prev.filter((p) => p.url !== json.url)
+            ]);
+            setSavedToast(`Photo uploaded & saved to VPS public/images/!`);
+          } else {
+            handleUpdateCurrent({ bgImage: base64Data });
+          }
+        } catch {
+          handleUpdateCurrent({ bgImage: base64Data });
+        } finally {
+          setIsUploadingPhoto(false);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -885,21 +1000,84 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     handleUpdateCurrent({ plans: filtered });
   };
 
+  // Handle Free Access Connection
+  const handleConnectFree = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!isGuestFormValid) return;
+
+    const freeMins = activeRouter?.freeDurationMinutes || 30;
+    const durationSec = freeMins * 60;
+    setSessionRemaining(durationSec);
+    setSessionElapsed(0);
+    setSessionAuthMode('free');
+
+    // Persist active session for metrics
+    storage.addActiveSession({
+      id: `sess_free_${Date.now()}`,
+      voucherCode: `FREE-${guestPhone.slice(-4)}`,
+      clientMac: '7A:91:02:11:44:99',
+      clientIp: activeRouter?.wireguardIp || '10.89.1.45',
+      deviceType: deviceFrame === 'iphone' ? 'Apple iPhone (iOS 17)' : deviceFrame === 'android' ? 'Samsung Galaxy (Android 14)' : 'Windows 11 Laptop',
+      siteName: activeRouter?.siteName || activeMeta.label,
+      vertical: selectedScope,
+      routerName: activeRouter?.name || `${activeMeta.label} Hotspot`,
+      planName: `Free Access (${freeMins} Mins)`,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + durationSec * 1000).toISOString(),
+      remainingSeconds: durationSec,
+      bytesDown: 14200000,
+      bytesUp: 3800000,
+      speedLimit: '30M/10M',
+      guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`,
+      guestPhone: `${guestCountryCode} ${guestPhone}`,
+      guestEmail: guestEmail.trim(),
+      authMode: 'free'
+    });
+
+    setPreviewStep('usage');
+  };
+
   // Simulating Guest Payment Flow
   const handleSimulatePayment = () => {
     const chosenPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+    const fullPhone = `${guestCountryCode} ${guestPhone}`;
     if (onProcessPayment) {
       try {
         onProcessPayment(
           selectedGateway, 
           chosenPlan.id, 
-          guestPhone, 
+          fullPhone, 
           selectedGateway === 'ottvoucher' ? ottPin : undefined,
           chosenPlan
         );
       } catch {}
     }
-    setSessionRemaining(chosenPlan.durationSeconds);
+    const duration = chosenPlan.durationSeconds || 3600;
+    setSessionRemaining(duration);
+    setSessionElapsed(0);
+    setSessionAuthMode('paid');
+
+    storage.addActiveSession({
+      id: `sess_paid_${Date.now()}`,
+      voucherCode: `PAID-${Date.now().toString(36).toUpperCase()}`,
+      clientMac: '7A:91:02:11:44:99',
+      clientIp: activeRouter?.wireguardIp || '10.89.1.45',
+      deviceType: deviceFrame === 'iphone' ? 'Apple iPhone (iOS 17)' : deviceFrame === 'android' ? 'Samsung Galaxy (Android 14)' : 'Windows 11 Laptop',
+      siteName: activeRouter?.siteName || activeMeta.label,
+      vertical: selectedScope,
+      routerName: activeRouter?.name || `${activeMeta.label} Hotspot`,
+      planName: chosenPlan.name,
+      startedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + duration * 1000).toISOString(),
+      remainingSeconds: duration,
+      bytesDown: 35000000,
+      bytesUp: 7200000,
+      speedLimit: `${chosenPlan.downloadSpeedMbps}M/${chosenPlan.uploadSpeedMbps}M`,
+      guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`,
+      guestPhone: fullPhone,
+      authMode: 'gateway'
+    });
+
     setPreviewStep('usage');
   };
 
@@ -1117,20 +1295,52 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="py-1.5 px-3 bg-[#161d31] hover:bg-[#232d42] border border-dashed border-slate-600 rounded-lg text-slate-300 text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                    disabled={isUploadingPhoto}
+                    className="py-1.5 px-3 bg-[#161d31] hover:bg-[#232d42] border border-dashed border-slate-600 rounded-lg text-slate-300 text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <Upload className="w-3.5 h-3.5 text-[#f05e17]" />
-                    <span>Upload Custom Image</span>
+                    {isUploadingPhoto ? <RefreshCw className="w-3.5 h-3.5 text-[#f05e17] animate-spin" /> : <Upload className="w-3.5 h-3.5 text-[#f05e17]" />}
+                    <span>{isUploadingPhoto ? 'Saving to VPS...' : 'Upload Photo to VPS'}</span>
                   </button>
 
                   <input
                     type="text"
                     value={currentConfig.bgImage}
                     onChange={(e) => handleUpdateCurrent({ bgImage: e.target.value })}
-                    placeholder="Or paste external image URL..."
+                    placeholder="Or paste external image URL or /images/photo.jpg..."
                     className="flex-1 px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200 text-xs focus:outline-none focus:border-[#f05e17]"
                   />
                 </div>
+
+                {/* Physical Photos on VPS */}
+                {uploadedPhotos.length > 0 && (
+                  <div className="pt-2 border-t border-[#1b233a] space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                      <span className="flex items-center gap-1.5">
+                        <Folder className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>VPS Uploaded Physical Photos ({uploadedPhotos.length})</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-normal">public/images/</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {uploadedPhotos.map((photo, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => handleUpdateCurrent({ bgImage: photo.url })}
+                          className={`h-16 rounded-lg overflow-hidden border relative text-left group transition-all ${
+                            currentConfig.bgImage === photo.url ? 'border-2 border-[#f05e17] ring-1 ring-[#f05e17]' : 'border-[#232d42] hover:border-slate-400'
+                          }`}
+                        >
+                          <img src={photo.url} alt={photo.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent p-1 flex items-end">
+                            <span className="text-[9px] text-white font-mono truncate">{photo.name}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Scope-Specific Pricing Quick Bar */}
@@ -1196,10 +1406,75 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
               {/* Scope Content & Brand Titles */}
               <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
-                <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2 border-b border-[#1b233a] pb-2">
-                  <Tag className="w-4 h-4 text-amber-400" />
-                  {activeMeta.label} Branding &amp; Guest Prompts
-                </span>
+                <div className="flex items-center justify-between border-b border-[#1b233a] pb-2">
+                  <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-amber-400" />
+                    {activeMeta.label} Branding &amp; Guest Prompts
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateCurrent({ brandTitle: '', tagline: '', welcomeHeadline: '' })}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 underline font-mono flex items-center gap-1 cursor-pointer"
+                    title="Clear title and tagline to show unobstructed background wallpaper only"
+                  >
+                    <span>✨ Clear (Clean Background Only)</span>
+                  </button>
+                </div>
+
+                {/* Hotspot Free Access Mode Switcher */}
+                <div className="bg-[#121829] p-3 rounded-xl border border-[#1f283d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Hotspot Free Access Mode</span>
+                      </span>
+                      <p className="text-[10px] text-slate-400">
+                        Target Hotspot: <strong className="text-white">{activeRouter?.name || `${activeMeta.label} Hotspot`}</strong>
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (activeRouter) {
+                          storage.toggleRouterFreeMode(activeRouter.id, !activeRouter.freeModeEnabled);
+                        } else {
+                          handleUpdateCurrent({ allowFreeAccess: !currentConfig.allowFreeAccess });
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg font-bold text-xs font-mono transition-all cursor-pointer ${
+                        isFreeModeActive
+                          ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
+                          : 'bg-[#1b233a] text-slate-400 hover:text-white border border-[#232d42]'
+                      }`}
+                    >
+                      {isFreeModeActive ? '⚡ FREE MODE ACTIVE' : 'PAID ONLY'}
+                    </button>
+                  </div>
+
+                  {isFreeModeActive && (
+                    <div className="flex items-center justify-between pt-1 border-t border-[#1b233a] text-[11px] font-mono text-slate-300">
+                      <span>Free Session Duration:</span>
+                      <select
+                        value={activeRouter?.freeDurationMinutes || 30}
+                        onChange={(e) => {
+                          const mins = Number(e.target.value);
+                          if (activeRouter) {
+                            storage.toggleRouterFreeMode(activeRouter.id, true, mins);
+                          }
+                        }}
+                        className="bg-[#0b0f19] border border-[#232d42] text-amber-300 px-2 py-0.5 rounded text-xs cursor-pointer"
+                      >
+                        <option value="15">15 Minutes</option>
+                        <option value="30">30 Minutes (Recommended)</option>
+                        <option value="45">45 Minutes</option>
+                        <option value="60">1 Hour</option>
+                        <option value="120">2 Hours</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -1208,6 +1483,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       type="text"
                       value={currentConfig.brandTitle}
                       onChange={(e) => handleUpdateCurrent({ brandTitle: e.target.value })}
+                      placeholder="Leave empty for clean background..."
                       className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-bold"
                     />
                   </div>
@@ -1217,6 +1493,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       type="text"
                       value={currentConfig.tagline}
                       onChange={(e) => handleUpdateCurrent({ tagline: e.target.value })}
+                      placeholder="Leave empty for clean background..."
                       className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white"
                     />
                   </div>
@@ -1228,6 +1505,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     type="text"
                     value={currentConfig.welcomeHeadline}
                     onChange={(e) => handleUpdateCurrent({ welcomeHeadline: e.target.value })}
+                    placeholder="Leave empty for clean background..."
                     className="w-full px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-bold"
                   />
                 </div>
@@ -1674,18 +1952,24 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 style={{ opacity: currentConfig.bgDarken / 100 }}
               />
 
-              {/* Scope Header */}
-              <div className="relative z-10 text-center pt-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-1.5">
-                  <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeMeta.color }} />
-                  <span className="text-[10px] font-bold text-white font-mono">
-                    {currentConfig.brandTitle} · {currentConfig.tagline}
-                  </span>
+              {/* Scope Header: Render only when title, tagline, or headline is provided; otherwise show pure background */}
+              {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim() || currentConfig.welcomeHeadline?.trim()) ? (
+                <div className="relative z-10 text-center pt-2">
+                  {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-1.5">
+                      <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeMeta.color }} />
+                      <span className="text-[10px] font-bold text-white font-mono">
+                        {[currentConfig.brandTitle?.trim(), currentConfig.tagline?.trim()].filter(Boolean).join(' · ')}
+                      </span>
+                    </div>
+                  )}
+                  {currentConfig.welcomeHeadline?.trim() && (
+                    <h3 className="text-xl font-black text-white tracking-tight drop-shadow-md leading-tight">
+                      {currentConfig.welcomeHeadline}
+                    </h3>
+                  )}
                 </div>
-                <h3 className="text-xl font-black text-white tracking-tight drop-shadow-md leading-tight">
-                  {currentConfig.welcomeHeadline}
-                </h3>
-              </div>
+              ) : null}
 
               {/* Dynamic Glassmorphism Card */}
               <div
@@ -1702,55 +1986,141 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      setPreviewStep('plan');
+                      if (!isGuestFormValid) return;
+                      if (isFreeModeActive) {
+                        handleConnectFree();
+                      } else {
+                        setPreviewStep('plan');
+                      }
                     }}
-                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5"
+                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
                     style={{
                       backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
                     }}
                   >
+                    {/* Hotspot Free Mode Badge Notice */}
+                    {isFreeModeActive && (
+                      <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono text-amber-200 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 font-bold">
+                          <Zap className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Free Hotspot Access Enabled</span>
+                        </span>
+                        <span className="bg-amber-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[9px]">
+                          {activeRouter?.freeDurationMinutes || 30} MINS
+                        </span>
+                      </div>
+                    )}
+
                     {currentConfig.collectName && (
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">Full name</label>
-                        <input
-                          type="text"
-                          required
-                          value={guestName}
-                          onChange={(e) => setGuestName(e.target.value)}
-                          placeholder="e.g. Katleho Molapo"
-                          className="w-full px-2.5 py-1.5 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none"
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                            First Name <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={guestFirstName}
+                            onChange={(e) => setGuestFirstName(e.target.value)}
+                            placeholder="Katleho"
+                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                              guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            }`}
+                          />
+                          {guestFirstName && !isFirstNameValid && (
+                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                              Min 2 characters
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                            Surname <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={guestSurname}
+                            onChange={(e) => setGuestSurname(e.target.value)}
+                            placeholder="Molapo"
+                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                              guestSurname && !isSurnameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            }`}
+                          />
+                          {guestSurname && !isSurnameValid && (
+                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                              Min 2 characters
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {currentConfig.collectPhone && (
                       <div>
-                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">Phone number</label>
-                        <div className="flex items-center gap-1">
-                          <span className="px-2 py-1.5 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono">
-                            🇱🇸 +266
-                          </span>
+                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                          Mobile Number <span className="text-red-400">*</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={guestCountryCode}
+                            onChange={(e) => setGuestCountryCode(e.target.value as '+266' | '+27')}
+                            className="px-2 py-1.5 bg-black/50 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer shrink-0"
+                          >
+                            <option value="+266" className="bg-[#0f1422] text-white">🇱🇸 +266</option>
+                            <option value="+27" className="bg-[#0f1422] text-white">🇿🇦 +27</option>
+                          </select>
                           <input
                             type="tel"
                             required
                             value={guestPhone}
                             onChange={(e) => setGuestPhone(e.target.value)}
-                            className="w-full px-2.5 py-1.5 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none"
+                            placeholder={guestCountryCode === '+266' ? '58001234 (8 digits)' : '0712345678 (10 digits)'}
+                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                              guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            }`}
                           />
                         </div>
+                        {guestPhone && !isPhoneValid && (
+                          <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                            {phoneErrorMsg}
+                          </span>
+                        )}
+                        {guestPhone && isPhoneValid && (
+                          <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                            <Check className="w-3 h-3" />
+                            <span>Valid {guestCountryCode === '+266' ? 'Lesotho' : 'South African'} number</span>
+                          </span>
+                        )}
                       </div>
                     )}
 
                     {currentConfig.collectEmail && (
                       <div>
-                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">Email (Optional)</label>
+                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                          Email address <span className="text-red-400">*</span>
+                        </label>
                         <input
                           type="email"
                           value={guestEmail}
                           onChange={(e) => setGuestEmail(e.target.value)}
-                          placeholder="guest@mail.ls"
-                          className="w-full px-2.5 py-1.5 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none"
+                          placeholder="katleho@tconnect.ls"
+                          className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
+                            guestEmail && !isEmailValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                          }`}
                         />
+                        {guestEmail && !isEmailValid && (
+                          <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                            {emailErrorMsg || 'Enter valid email with @ and . (e.g. name@domain.com)'}
+                          </span>
+                        )}
+                        {guestEmail && isEmailValid && (
+                          <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                            <Check className="w-3 h-3" />
+                            <span>Valid email format</span>
+                          </span>
+                        )}
                       </div>
                     )}
 
@@ -1760,12 +2130,39 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       </div>
                     )}
 
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
-                    >
-                      Continue to Pass &rarr;
-                    </button>
+                    {/* FREE ACCESS MODE BUTTON IN TANGERINE */}
+                    {isFreeModeActive ? (
+                      <div className="space-y-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleConnectFree()}
+                          disabled={!isGuestFormValid}
+                          className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-xl shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          <Zap className="w-4 h-4 fill-current text-white" />
+                          <span>Connect Free ({activeRouter?.freeDurationMinutes || 30} Mins) &rarr;</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isGuestFormValid) setPreviewStep('plan');
+                          }}
+                          disabled={!isGuestFormValid}
+                          className="w-full py-1.5 text-slate-300 hover:text-white disabled:opacity-30 text-[10px] font-mono transition-colors"
+                        >
+                          Or Buy High-Speed Pass &rarr;
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={!isGuestFormValid}
+                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+                      >
+                        Continue to Pass &rarr;
+                      </button>
+                    )}
                   </form>
                 )}
 
@@ -1965,7 +2362,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             <span className="text-emerald-400">{currency}{chosenPlan.price}</span>
                           </div>
                           <p className="text-slate-300 text-[10px]">
-                            An automated prompt for <strong>{currency}{chosenPlan.price}</strong> will be sent to <strong>+266 {guestPhone}</strong>. Approve on your handset via *151# to activate internet.
+                            An automated prompt for <strong>{currency}{chosenPlan.price}</strong> will be sent to <strong>{guestCountryCode} {guestPhone}</strong>. Approve on your handset via *199# Push to activate internet.
                           </p>
                         </div>
                       )}
@@ -2004,8 +2401,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <div className="flex justify-between text-slate-400 text-[11px]">
                         <span>Remaining Time:</span>
                         <span className="text-emerald-400 font-bold">
-                          {Math.floor(sessionRemaining / 3600)}h {Math.floor((sessionRemaining % 3600) / 60)}m
+                          {Math.floor(sessionRemaining / 3600)}h {Math.floor((sessionRemaining % 3600) / 60)}m {sessionRemaining % 60}s
                         </span>
+                      </div>
+                      <div className="flex justify-between text-slate-400 text-[11px]">
+                        <span>Guest Subscriber:</span>
+                        <span className="text-white font-bold">{guestFirstName} {guestSurname}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400 text-[11px]">
+                        <span>Contact &amp; Email:</span>
+                        <span className="text-cyan-300 font-mono truncate max-w-[170px]">{guestEmail || `${guestCountryCode} ${guestPhone}`}</span>
                       </div>
                       <div className="flex justify-between text-slate-400 text-[11px]">
                         <span>Scope Profile:</span>
@@ -2026,7 +2431,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
               {/* Footer Powered By Lockup */}
               <div className="relative z-10 text-center text-[10px] font-mono text-slate-400 pb-1">
-                Powered by T-Connect · High-Speed Starlink Backbone
+                T-Connect - Starlink Powered Solutions
               </div>
             </div>
           </div>

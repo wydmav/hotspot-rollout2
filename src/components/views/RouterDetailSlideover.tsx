@@ -22,6 +22,7 @@ import {
   HardDrive, 
   Wifi, 
   Clock, 
+  Zap,
   Send, 
   Trash2, 
   Download, 
@@ -60,6 +61,17 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   const [customBgInput, setCustomBgInput] = useState<string>(router?.customBgUrl || '');
   const [tagsInput, setTagsInput] = useState<string>((router?.tags || []).join(', '));
   const [isSavingTenantPolicy, setIsSavingTenantPolicy] = useState(false);
+
+  // Per-Hotspot Free Access Mode State
+  const [freeModeActive, setFreeModeActive] = useState<boolean>(Boolean(router?.freeModeEnabled));
+  const [freeDurationMinutes, setFreeDurationMinutes] = useState<number>(router?.freeDurationMinutes || 30);
+
+  useEffect(() => {
+    if (router) {
+      setFreeModeActive(Boolean(router.freeModeEnabled));
+      setFreeDurationMinutes(router.freeDurationMinutes || 30);
+    }
+  }, [router]);
   
   // Embedded terminal state
   const [cliCommand, setCliCommand] = useState('');
@@ -621,9 +633,91 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                     <ul className="space-y-1 text-slate-400 list-disc list-inside">
                       <li>Captive portal welcome branding tuned for {currentMeta.name}.</li>
                       <li>Walled garden rules permit payment gateway callbacks without consuming client time.</li>
-                      <li>Free trial access toggled: {router.freeModeEnabled ? 'ENABLED (10 min trial)' : 'DISABLED (Voucher / Payment Required)'}.</li>
+                      <li>Free trial access toggled: {freeModeActive ? `ENABLED (${freeDurationMinutes} min free session)` : 'DISABLED (Voucher / Payment Required)'}.</li>
                       <li>Hardware isolation: Direct WebFig available on port 80 over WireGuard.</li>
                     </ul>
+                  </div>
+                </div>
+
+                {/* Per-Hotspot Free Access Mode Controller Card */}
+                <div className="p-4 bg-[#101726] rounded-xl border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-500/20 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-[#f05e17]" />
+                      <div>
+                        <h4 className="text-white font-bold text-xs uppercase tracking-wide flex items-center gap-1.5">
+                          <span>Per-Hotspot Free Access Mode</span>
+                          <span className="text-[10px] text-amber-300 font-normal">({router.name})</span>
+                        </h4>
+                        <p className="text-slate-400 text-[10px]">
+                          Emergency or promotional bypass: allows guests at this specific location to connect free without compromising other hotspots.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !freeModeActive;
+                        setFreeModeActive(next);
+                        storage.toggleRouterFreeMode(router.id, next, freeDurationMinutes);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5 ${
+                        freeModeActive
+                          ? 'bg-[#f05e17] text-white shadow-orange-950/40'
+                          : 'bg-[#1b233a] text-slate-400 border border-[#232d42] hover:text-white'
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5 fill-current" />
+                      <span>{freeModeActive ? '⚡ Free Mode ACTIVE' : '🔒 Paid / Voucher Mode'}</span>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono pt-1">
+                    <span className="text-slate-300 text-[11px]">Session Duration Granted:</span>
+                    <div className="flex items-center gap-2">
+                      {[15, 30, 60, 120].map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => {
+                            setFreeDurationMinutes(mins);
+                            if (freeModeActive) {
+                              storage.toggleRouterFreeMode(router.id, true, mins);
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
+                            freeDurationMinutes === mins
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              : 'bg-[#161d31] text-slate-400 border-[#232d42] hover:text-white'
+                          }`}
+                        >
+                          {mins}m
+                        </button>
+                      ))}
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400 pl-1">
+                        <input
+                          type="number"
+                          min="1"
+                          max="1440"
+                          value={freeDurationMinutes}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setFreeDurationMinutes(val);
+                            if (freeModeActive) {
+                              storage.toggleRouterFreeMode(router.id, true, val);
+                            }
+                          }}
+                          className="w-14 px-1.5 py-0.5 bg-[#0b0f19] border border-[#232d42] rounded text-white text-center font-bold"
+                        />
+                        <span>mins</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-500/10 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Enforced Bandwidth: <strong className="text-emerald-400 font-mono">30M Down / 10M Up</strong></span>
+                    <span className="text-[10px] text-slate-500 font-mono">(Hidden on guest screens)</span>
                   </div>
                 </div>
 

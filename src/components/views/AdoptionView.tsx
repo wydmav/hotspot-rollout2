@@ -26,12 +26,15 @@ import {
   Filter,
   AlertTriangle,
   Tag,
-  Building2
+  Building2,
+  Network
 } from 'lucide-react';
 import { RouterDevice, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { WebFigLauncherModal } from './WebFigLauncherModal';
+import { AccessPointSetupModal } from './AccessPointSetupModal';
+import { OfficeReadinessModal } from './OfficeReadinessModal';
 import { AlertSettingsModal } from './AlertSettingsModal';
 import { RemoteTerminalModal } from '../common/RemoteTerminalModal';
 import { TenantGroupsModal } from './TenantGroupsModal';
@@ -94,8 +97,10 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   }, [selectedVertical]);
 
   // Port & Bridge Management State
+  const [showApAssistantModal, setShowApAssistantModal] = useState(false);
+  const [showOfficeReadinessModal, setShowOfficeReadinessModal] = useState(false);
   const [selectedExtraPort, setSelectedExtraPort] = useState('ether3');
-  const [selectedBridgeName, setSelectedBridgeName] = useState('mkcontroller-bridge');
+  const [selectedBridgeName, setSelectedBridgeName] = useState('tctower-bridge');
   const [copiedBridgeCmd, setCopiedBridgeCmd] = useState(false);
 
   // Automated WAN Failover State (MKController Feature)
@@ -706,6 +711,26 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <span>Detailed View</span>
                   </button>
 
+                  {/* 2 Access Points & WinBox Bridge Button */}
+                  <button
+                    onClick={() => setShowApAssistantModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                    title="Connect 2 Access Points (Ubiquiti UniFi / TP-Link Omada) & Generate WinBox Bridge Scripts"
+                  >
+                    <Network className="w-3.5 h-3.5 text-amber-400" />
+                    <span>2 APs & WinBox</span>
+                  </button>
+
+                  {/* Office Readiness & 30M/10M Speed Test Button */}
+                  <button
+                    onClick={() => setShowOfficeReadinessModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                    title="Open Office Deployment Test Suite & 30M/10M Policy Validator"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Office Test &amp; 30M/10M</span>
+                  </button>
+
                   {selectedRouter.status === 'pending_adoption' && (
                     <button
                       onClick={runTerminalAdoptionSimulation}
@@ -854,6 +879,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         onChange={(e) => setSelectedBridgeName(e.target.value)}
                         className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white text-xs"
                       >
+                        <option value="tctower-bridge">tctower-bridge (Tower AP Bridge)</option>
                         <option value="mkcontroller-bridge">mkcontroller-bridge (Standard)</option>
                         <option value="tconnect-bridge">tconnect-bridge</option>
                       </select>
@@ -900,6 +926,33 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <pre className="text-emerald-400 font-mono text-xs select-all whitespace-pre-wrap">
                       {RouterOSRenderer.renderBridgePortCommand(selectedBridgeName, selectedExtraPort)}
                     </pre>
+                  </div>
+
+                  {/* Dual AP Fast Launcher Banner */}
+                  <div className="p-3 bg-gradient-to-r from-amber-500/10 via-[#161d31] to-sky-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
+                        <Network className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>Setting up 2 Access Points (Ubiquiti UniFi · TP-Link Omada)?</span>
+                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                            Gateway: 192.168.88.1
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          Configure AP static management IPs, bridge ports ether3/ether4 to <span className="font-mono text-amber-300">tctower-bridge</span>, and bypass AP management from captive splash.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowApAssistantModal(true)}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors shadow-sm shrink-0 whitespace-nowrap"
+                    >
+                      Open 2 AP Assistant
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1164,6 +1217,21 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           onRouterUpdated={() => {}}
         />
       )}
+
+      {/* Access Points & WinBox Topology Assistant Modal */}
+      <AccessPointSetupModal
+        isOpen={showApAssistantModal}
+        onClose={() => setShowApAssistantModal(false)}
+        router={selectedRouter}
+      />
+
+      {/* Office Deployment & Readiness Verification Modal */}
+      <OfficeReadinessModal
+        isOpen={showOfficeReadinessModal}
+        onClose={() => setShowOfficeReadinessModal(false)}
+        router={selectedRouter}
+        onRouterUpdated={() => {}}
+      />
 
       {/* Deadman Watchdog & Email Notification Settings Modal */}
       <AlertSettingsModal

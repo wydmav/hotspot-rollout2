@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Ticket, CreditCard, FileText } from 'lucide-react';
+import { Ticket, CreditCard, FileText, ShieldCheck } from 'lucide-react';
 import { HotspotPlan, Voucher, GatewayConfig, PaymentTransaction, VerticalType, GatewayProvider } from '../../types';
 import { PlansVouchersView } from './PlansVouchersView';
 import { GatewaysView } from './GatewaysView';
 import { TransactionsView } from './TransactionsView';
+import { ProviderLogo } from '../common/BrandLogos';
 
 interface BillingViewProps {
   plans: HotspotPlan[];
@@ -30,6 +31,31 @@ export const BillingView: React.FC<BillingViewProps> = (props) => {
 
   return (
     <div className="space-y-5">
+      {/* Top FinTech Gateway Spotlight Banner with Official Logos */}
+      <div className="bg-[#0f1422] p-3.5 rounded-xl border border-[#232d42] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-extrabold text-white">Integrated FinTech Providers (Lesotho &amp; Southern Africa)</h2>
+          </div>
+          <p className="text-xs text-slate-400 font-mono mt-0.5">
+            Official EcoCash (*199# Push) &amp; OTT Digital Voucher payment channels for captive portal subscribers
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#161d31] border border-[#232d42]">
+            <ProviderLogo provider="ecocash" className="w-28 h-8" />
+            <span className="text-[10px] font-mono font-bold text-slate-300 bg-red-950/40 border border-red-500/30 px-1.5 py-0.5 rounded">*199# Push</span>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#161d31] border border-[#232d42]">
+            <ProviderLogo provider="ottvoucher" className="w-28 h-8" />
+            <span className="text-[10px] font-mono font-bold text-slate-300 bg-emerald-950/40 border border-emerald-500/30 px-1.5 py-0.5 rounded">Digital PIN</span>
+          </div>
+        </div>
+      </div>
+
       {/* Sub-navigation Tabs */}
       <div className="flex rounded-xl bg-[#121829] p-1 border border-[#1f283d] text-xs font-mono w-fit">
         <button

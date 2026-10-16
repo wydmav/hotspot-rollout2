@@ -12,7 +12,9 @@ import {
   VerticalType,
   GatewayProvider,
   AuthSession,
-  TenantGroup
+  TenantGroup,
+  CaptivePortalLead,
+  ConnectionAttemptLog
 } from '../types';
 
 // Updated storage key for pristine scratch state
@@ -79,7 +81,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
     provider: 'ecocash',
     name: 'EcoCash Lesotho',
-    subtitle: 'Econet Telecom Mobile Money STK Push',
+    subtitle: 'Econet Telecom Mobile Money (*199# Push)',
     currency: 'M',
     isLive: false,
     isSandbox: true,
@@ -267,6 +269,234 @@ export const WALLED_GARDEN_DOMAINS = [
   'hub.tconnect.co.ls'
 ];
 
+export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [
+  {
+    id: 'sess_live_01',
+    voucherCode: 'FREE-1234',
+    clientMac: 'F4:D4:88:51:22:90',
+    clientIp: '10.89.1.50',
+    deviceType: 'Apple iPhone (iOS 17)',
+    siteName: 'Maseru Central Cafe',
+    vertical: 'hotspot',
+    routerName: 'Hotspot-Maseru-01',
+    planName: 'Free Access (30 Mins)',
+    startedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 16 * 60 * 1000).toISOString(),
+    remainingSeconds: 16 * 60,
+    bytesDown: 48200000,
+    bytesUp: 9400000,
+    speedLimit: '5M/2.5M',
+    guestName: 'Katleho Molapo',
+    guestPhone: '+266 5800 1234',
+    guestEmail: 'katleho.molapo@gmail.com',
+    authMode: 'free'
+  },
+  {
+    id: 'sess_live_02',
+    voucherCode: 'VCH-7821-M10',
+    clientMac: '40:B0:76:A2:99:31',
+    clientIp: '10.89.2.14',
+    deviceType: 'Samsung Galaxy A54 (Android 14)',
+    siteName: 'Thaba-Tseka Community Mesh',
+    vertical: 'village',
+    routerName: 'Village-Mesh-01',
+    planName: 'Daily Pass (Unlimited)',
+    startedAt: new Date(Date.now() - 48 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 23 * 3600 * 1000).toISOString(),
+    remainingSeconds: 23 * 3600,
+    bytesDown: 185000000,
+    bytesUp: 34000000,
+    speedLimit: '10M/5M',
+    guestName: 'Tsepiso Lerotholi',
+    guestPhone: '+266 6200 4567',
+    guestEmail: 'tsepiso.lerotholi@tconnect.ls',
+    authMode: 'voucher'
+  },
+  {
+    id: 'sess_live_03',
+    voucherCode: 'FREE-5678',
+    clientMac: 'B8:27:EB:04:19:D2',
+    clientIp: '10.89.3.88',
+    deviceType: 'HP Spectre x360 (Windows 11)',
+    siteName: 'Setsoto Stadium Arena',
+    vertical: 'stadium',
+    routerName: 'Stadium-Arena-02',
+    planName: 'Free Access (30 Mins)',
+    startedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 1000).toISOString(),
+    remainingSeconds: 24 * 60,
+    bytesDown: 22100000,
+    bytesUp: 4100000,
+    speedLimit: '5M/2.5M',
+    guestName: 'Sipho Dlamini',
+    guestPhone: '+27 71 234 5678',
+    guestEmail: 'sipho.dlamini@vodamail.co.za',
+    authMode: 'free'
+  }
+];
+
+export const INITIAL_CAPTIVE_LEADS: CaptivePortalLead[] = [
+  {
+    id: 'lead_cna_01',
+    firstName: 'Katleho',
+    lastName: 'Molapo',
+    fullName: 'Katleho Molapo',
+    countryCode: '+266',
+    phone: '58001234',
+    fullPhone: '+266 5800 1234',
+    email: 'katleho.molapo@gmail.com',
+    capturedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    routerName: 'Hotspot-Maseru-01',
+    siteName: 'Maseru Central Cafe',
+    vertical: 'hotspot',
+    clientMac: 'F4:D4:88:51:22:90',
+    clientIp: '10.89.1.50',
+    deviceType: 'Apple iPhone (iOS 17)',
+    durationMinutes: 30,
+    status: 'active'
+  },
+  {
+    id: 'lead_cna_02',
+    firstName: 'Sipho',
+    lastName: 'Dlamini',
+    fullName: 'Sipho Dlamini',
+    countryCode: '+27',
+    phone: '0712345678',
+    fullPhone: '+27 071 234 5678',
+    email: 'sipho.dlamini@vodamail.co.za',
+    capturedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+    routerName: 'Stadium-Arena-02',
+    siteName: 'Setsoto Stadium Arena',
+    vertical: 'stadium',
+    clientMac: 'B8:27:EB:04:19:D2',
+    clientIp: '10.89.3.88',
+    deviceType: 'HP Spectre x360 (Windows 11)',
+    durationMinutes: 30,
+    status: 'active'
+  },
+  {
+    id: 'lead_cna_03',
+    firstName: 'Lerato',
+    lastName: 'Khatleli',
+    fullName: 'Lerato Khatleli',
+    countryCode: '+266',
+    phone: '62009876',
+    fullPhone: '+266 6200 9876',
+    email: 'lerato.k@outlook.com',
+    capturedAt: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
+    routerName: 'MikroTik-Node',
+    siteName: 'Pioneer Mall Express',
+    vertical: 'hotspot',
+    clientMac: '7A:91:02:11:44:99',
+    clientIp: '10.89.1.45',
+    deviceType: 'Samsung Galaxy A54 (Android 14)',
+    durationMinutes: 30,
+    status: 'expired'
+  }
+];
+
+export const INITIAL_CONNECTION_ATTEMPTS: ConnectionAttemptLog[] = [
+  {
+    id: 'att_01',
+    timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    routerId: 'rt_central_01',
+    routerName: 'Maseru Central hAP ax³',
+    clientMac: 'F4:D4:88:51:22:90',
+    clientIp: '10.89.1.50',
+    deviceType: 'Apple iPhone 15 Pro (iOS 17.4)',
+    clientOs: 'ios',
+    destinationUrl: 'http://captive.apple.com/hotspot-detect.html',
+    redirectStatus: 'portal_loaded',
+    httpCode: 200,
+    reachedPortal: true,
+    latencyMs: 14,
+    debugHint: 'RFC 8910 Option 114 CNA discovery triggered system splash window successfully.',
+    assignedSpeedLimit: '30M/10M'
+  },
+  {
+    id: 'att_02',
+    timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    routerId: 'rt_central_01',
+    routerName: 'Maseru Central hAP ax³',
+    clientMac: '2C:54:CF:88:12:04',
+    clientIp: '10.89.1.52',
+    deviceType: 'Samsung Galaxy S24 (Android 14)',
+    clientOs: 'android',
+    destinationUrl: 'http://connectivitycheck.gstatic.com/generate_204',
+    redirectStatus: 'portal_loaded',
+    httpCode: 200,
+    reachedPortal: true,
+    latencyMs: 18,
+    debugHint: 'Android CaptivePortalLogin component intercepted HTTP 302 and displayed portal.',
+    assignedSpeedLimit: '30M/10M'
+  },
+  {
+    id: 'att_03',
+    timestamp: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+    routerId: 'rt_leribe_02',
+    routerName: 'Leribe Pitso Hub (v7)',
+    clientMac: '7A:91:02:11:44:99',
+    clientIp: '10.89.2.14',
+    deviceType: 'Dell XPS 15 (Windows 11)',
+    clientOs: 'windows',
+    destinationUrl: 'http://www.msftconnecttest.com/connecttest.txt',
+    redirectStatus: 'cna_302_issued',
+    httpCode: 302,
+    reachedPortal: true,
+    latencyMs: 22,
+    debugHint: 'Windows NCSI active probe received HTTP 302 redirect to central controller URL.',
+    assignedSpeedLimit: '30M/10M'
+  },
+  {
+    id: 'att_04',
+    timestamp: new Date(Date.now() - 19 * 60 * 1000).toISOString(),
+    routerId: 'rt_central_01',
+    routerName: 'Maseru Central hAP ax³',
+    clientMac: '48:D7:05:92:41:BB',
+    clientIp: '10.89.1.61',
+    deviceType: 'Apple iPad Air (iPadOS 17)',
+    clientOs: 'ios',
+    destinationUrl: 'http://8.8.8.8/test',
+    redirectStatus: 'dns_timeout',
+    httpCode: 504,
+    reachedPortal: false,
+    latencyMs: 1240,
+    debugHint: 'Client configured with hardcoded static DNS (8.8.8.8). DNS intercept dstnat rule intercepted query.',
+  },
+  {
+    id: 'att_05',
+    timestamp: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
+    routerId: 'rt_central_01',
+    routerName: 'Maseru Central hAP ax³',
+    clientMac: '90:B6:86:14:8A:71',
+    clientIp: '10.89.1.68',
+    deviceType: 'Google Pixel 8 (Android 14)',
+    clientOs: 'android',
+    destinationUrl: 'https://bank.fnb.co.za/login',
+    redirectStatus: 'ssl_blocked',
+    httpCode: 495,
+    reachedPortal: false,
+    latencyMs: 310,
+    debugHint: 'Client attempted direct HTTPS navigation before splash authentication. CNA fallback initiated.',
+  },
+  {
+    id: 'att_06',
+    timestamp: new Date(Date.now() - 36 * 60 * 1000).toISOString(),
+    routerId: 'rt_central_01',
+    routerName: 'Maseru Central hAP ax³',
+    clientMac: 'F4:D4:88:51:22:90',
+    clientIp: '10.89.1.50',
+    deviceType: 'Apple iPhone 15 Pro (iOS 17.4)',
+    clientOs: 'ios',
+    destinationUrl: 'https://mpesa.vodacom.co.ls/ipg/pay',
+    redirectStatus: 'walled_garden_allowed',
+    httpCode: 200,
+    reachedPortal: false,
+    latencyMs: 16,
+    debugHint: 'Vodacom M-Pesa Lesotho payment API accessed under pre-auth walled garden whitelist.',
+  }
+];
+
 class StorageService {
   private state: {
     plans: HotspotPlan[];
@@ -279,6 +509,9 @@ class StorageService {
     auditLogs: AuditLogEntry[];
     contentFilters: ContentFilterRule[];
     tenantGroups: TenantGroup[];
+    activeSessions: ActiveSession[];
+    captiveLeads: CaptivePortalLead[];
+    connectionAttempts: ConnectionAttemptLog[];
   };
 
   private listeners: Set<() => void> = new Set();
@@ -328,6 +561,15 @@ class StorageService {
           if (!parsed.tenantGroups || !Array.isArray(parsed.tenantGroups) || parsed.tenantGroups.length === 0) {
             parsed.tenantGroups = STARTER_TENANT_GROUPS;
           }
+          if (!parsed.activeSessions || !Array.isArray(parsed.activeSessions) || parsed.activeSessions.length === 0) {
+            parsed.activeSessions = INITIAL_ACTIVE_SESSIONS;
+          }
+          if (!parsed.captiveLeads || !Array.isArray(parsed.captiveLeads) || parsed.captiveLeads.length === 0) {
+            parsed.captiveLeads = INITIAL_CAPTIVE_LEADS;
+          }
+          if (!parsed.connectionAttempts || !Array.isArray(parsed.connectionAttempts) || parsed.connectionAttempts.length === 0) {
+            parsed.connectionAttempts = INITIAL_CONNECTION_ATTEMPTS;
+          }
           return parsed;
         }
       } catch {
@@ -345,7 +587,10 @@ class StorageService {
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
-      tenantGroups: STARTER_TENANT_GROUPS
+      tenantGroups: STARTER_TENANT_GROUPS,
+      activeSessions: INITIAL_ACTIVE_SESSIONS,
+      captiveLeads: INITIAL_CAPTIVE_LEADS,
+      connectionAttempts: INITIAL_CONNECTION_ATTEMPTS
     };
   }
 
@@ -387,7 +632,9 @@ class StorageService {
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
-      tenantGroups: STARTER_TENANT_GROUPS
+      tenantGroups: STARTER_TENANT_GROUPS,
+      activeSessions: [],
+      captiveLeads: []
     };
     this.saveState();
   }
@@ -487,18 +734,31 @@ class StorageService {
     this.saveState();
   }
 
-  toggleRouterFreeMode(routerId: string | 'all', enabled: boolean) {
+  updateRouter(routerId: string, updates: Partial<RouterDevice>): void {
+    this.state.routers = this.state.routers.map(r => r.id === routerId ? { ...r, ...updates } : r);
+    this.saveState();
+  }
+
+  toggleRouterFreeMode(routerId: string | 'all', enabled: boolean, durationMinutes?: number) {
     if (routerId === 'all') {
-      this.state.routers = this.state.routers.map(r => ({ ...r, freeModeEnabled: enabled }));
+      this.state.routers = this.state.routers.map(r => ({ 
+        ...r, 
+        freeModeEnabled: enabled,
+        freeDurationMinutes: durationMinutes !== undefined ? durationMinutes : (r.freeDurationMinutes || 30)
+      }));
       this.logAudit({
         actor: 'Admin',
         role: 'Owner',
         action: 'router.free_mode',
         target: 'Fleet All Routers',
-        details: `Set global free mode to ${enabled ? 'ENABLED' : 'DISABLED'}`
+        details: `Set global free mode to ${enabled ? 'ENABLED' : 'DISABLED'} (${durationMinutes || 30} mins)`
       });
     } else {
-      this.state.routers = this.state.routers.map(r => r.id === routerId ? ({ ...r, freeModeEnabled: enabled }) : r);
+      this.state.routers = this.state.routers.map(r => r.id === routerId ? ({ 
+        ...r, 
+        freeModeEnabled: enabled,
+        freeDurationMinutes: durationMinutes !== undefined ? durationMinutes : (r.freeDurationMinutes || 30)
+      }) : r);
       const target = this.state.routers.find(r => r.id === routerId);
       if (target) {
         this.logAudit({
@@ -506,10 +766,103 @@ class StorageService {
           role: 'Owner',
           action: 'router.free_mode',
           target: target.name,
-          details: `Set free access mode to ${enabled ? 'ENABLED' : 'DISABLED'}`
+          details: `Set free access mode to ${enabled ? 'ENABLED' : 'DISABLED'} (${durationMinutes || 30} mins)`
         });
       }
     }
+    this.saveState();
+  }
+
+  getActiveSessions(): ActiveSession[] {
+    return this.state.activeSessions || INITIAL_ACTIVE_SESSIONS;
+  }
+
+  getCaptiveLeads(): CaptivePortalLead[] {
+    return this.state.captiveLeads || INITIAL_CAPTIVE_LEADS;
+  }
+
+  addCaptiveLead(lead: CaptivePortalLead): void {
+    if (!this.state.captiveLeads) {
+      this.state.captiveLeads = [...INITIAL_CAPTIVE_LEADS];
+    }
+    this.state.captiveLeads = [
+      lead,
+      ...this.state.captiveLeads.filter(l => l.id !== lead.id && l.clientMac !== lead.clientMac)
+    ];
+    this.saveState();
+  }
+
+  deleteCaptiveLead(id: string): void {
+    if (!this.state.captiveLeads) return;
+    this.state.captiveLeads = this.state.captiveLeads.filter(l => l.id !== id);
+    this.saveState();
+  }
+
+  addActiveSession(session: ActiveSession): void {
+    if (!this.state.activeSessions) {
+      this.state.activeSessions = [...INITIAL_ACTIVE_SESSIONS];
+    }
+    this.state.activeSessions = [
+      session,
+      ...this.state.activeSessions.filter(s => s.clientMac !== session.clientMac && s.id !== session.id)
+    ];
+
+    // If session has guest contact information, automatically record lead into captive leads repository
+    if (session.guestName || session.guestPhone || session.guestEmail) {
+      const parts = (session.guestName || 'Guest User').trim().split(' ');
+      const fName = parts[0] || 'Guest';
+      const lName = parts.slice(1).join(' ') || 'User';
+      const phoneDigits = (session.guestPhone || '').replace(/\D/g, '');
+      const isLesotho = (session.guestPhone || '').includes('+266') || phoneDigits.length === 8;
+      const cCode = isLesotho ? '+266' : '+27';
+
+      const leadRecord: CaptivePortalLead = {
+        id: `lead_${session.id}`,
+        firstName: fName,
+        lastName: lName,
+        fullName: session.guestName || `${fName} ${lName}`,
+        countryCode: cCode,
+        phone: session.guestPhone || '',
+        fullPhone: session.guestPhone || '',
+        email: session.guestEmail || '',
+        capturedAt: session.startedAt || new Date().toISOString(),
+        routerName: session.routerName,
+        siteName: session.siteName,
+        vertical: session.vertical,
+        clientMac: session.clientMac,
+        clientIp: session.clientIp,
+        deviceType: session.deviceType,
+        durationMinutes: Math.round(session.remainingSeconds / 60) || 30,
+        status: 'active'
+      };
+
+      if (!this.state.captiveLeads) {
+        this.state.captiveLeads = [...INITIAL_CAPTIVE_LEADS];
+      }
+      this.state.captiveLeads = [
+        leadRecord,
+        ...this.state.captiveLeads.filter(l => l.id !== leadRecord.id && l.clientMac !== leadRecord.clientMac)
+      ];
+
+      // Record in Network Security audit log
+      this.logAudit({
+        actor: session.guestName || 'Captive Guest',
+        role: 'Guest',
+        category: 'captive_portal',
+        action: 'portal.guest_lead_captured',
+        target: session.routerName,
+        routerName: session.routerName,
+        details: `Captured guest lead & granted instant free access: ${session.guestName} | Phone: ${session.guestPhone || 'N/A'} | Email: ${session.guestEmail || 'N/A'} on ${session.routerName} [MAC: ${session.clientMac}, IP: ${session.clientIp}]`,
+        ipAddress: session.clientIp
+      });
+    }
+
+    this.saveState();
+  }
+
+  removeActiveSession(id: string): void {
+    if (!this.state.activeSessions) return;
+    this.state.activeSessions = this.state.activeSessions.filter(s => s.id !== id);
     this.saveState();
   }
 

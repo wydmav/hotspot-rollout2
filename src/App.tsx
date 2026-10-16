@@ -706,6 +706,7 @@ export default function App() {
               plans={state.plans}
               routers={state.routers}
               vouchers={state.vouchers}
+              transactions={state.transactions}
               contentFilters={state.contentFilters}
               team={state.team}
               auditLogs={state.auditLogs}
