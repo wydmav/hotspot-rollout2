@@ -634,7 +634,8 @@ class StorageService {
       contentFilters: INITIAL_CONTENT_FILTERS,
       tenantGroups: STARTER_TENANT_GROUPS,
       activeSessions: [],
-      captiveLeads: []
+      captiveLeads: [],
+      connectionAttempts: []
     };
     this.saveState();
   }
