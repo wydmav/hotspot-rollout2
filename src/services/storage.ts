@@ -703,7 +703,12 @@ class StorageService {
       lastHeartbeat: 'Never',
       activeSessions: 0,
       token,
-      tokenExpiresAt: expiresAt
+      tokenExpiresAt: expiresAt,
+      accessMode: 'PAID_ONLY',
+      freeModeEnabled: false,
+      freeDurationMinutes: 30,
+      freeRateLimit: '10M/30M',
+      freeDailyQuotaMb: 500
     };
 
     this.state.routers.unshift(newRouter);
@@ -713,7 +718,7 @@ class StorageService {
       role: 'Owner',
       action: 'router.create',
       target: newRouter.name,
-      details: `Generated adoption one-liner token with 60-minute expiration for ${newRouter.model}.`
+      details: `Generated adoption one-liner token with 60-minute expiration for ${newRouter.model}. Access Mode: PAID_ONLY (Clean Adoption).`
     });
 
     this.saveState();
@@ -740,38 +745,62 @@ class StorageService {
     this.saveState();
   }
 
-  toggleRouterFreeMode(routerId: string | 'all', enabled: boolean, durationMinutes?: number) {
+  setRouterAccessPolicy(
+    routerId: string | 'all',
+    policy: {
+      accessMode: 'PAID_ONLY' | 'FREE_TRIAL_AND_PAID' | 'COMPLETELY_FREE';
+      freeDurationMinutes?: number;
+      freeRateLimit?: string;
+      freeDailyQuotaMb?: number;
+    }
+  ) {
+    const isFree = policy.accessMode !== 'PAID_ONLY';
+    const now = new Date().toISOString();
+
     if (routerId === 'all') {
-      this.state.routers = this.state.routers.map(r => ({ 
-        ...r, 
-        freeModeEnabled: enabled,
-        freeDurationMinutes: durationMinutes !== undefined ? durationMinutes : (r.freeDurationMinutes || 30)
+      this.state.routers = this.state.routers.map(r => ({
+        ...r,
+        accessMode: policy.accessMode,
+        freeModeEnabled: isFree,
+        freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
+        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/30M'),
+        freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
+        policyLastSyncedAt: now
       }));
       this.logAudit({
         actor: 'Admin',
         role: 'Owner',
-        action: 'router.free_mode',
+        action: 'fleet.access_policy',
         target: 'Fleet All Routers',
-        details: `Set global free mode to ${enabled ? 'ENABLED' : 'DISABLED'} (${durationMinutes || 30} mins)`
+        details: `Updated fleet access mode to ${policy.accessMode} (${policy.accessMode === 'PAID_ONLY' ? 'Paid Vouchers Only' : `${policy.freeDurationMinutes || 30}m free trial`}).`
       });
     } else {
-      this.state.routers = this.state.routers.map(r => r.id === routerId ? ({ 
-        ...r, 
-        freeModeEnabled: enabled,
-        freeDurationMinutes: durationMinutes !== undefined ? durationMinutes : (r.freeDurationMinutes || 30)
+      this.state.routers = this.state.routers.map(r => r.id === routerId ? ({
+        ...r,
+        accessMode: policy.accessMode,
+        freeModeEnabled: isFree,
+        freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
+        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/30M'),
+        freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
+        policyLastSyncedAt: now
       }) : r);
       const target = this.state.routers.find(r => r.id === routerId);
       if (target) {
         this.logAudit({
           actor: 'Admin',
           role: 'Owner',
-          action: 'router.free_mode',
+          action: 'router.access_policy',
           target: target.name,
-          details: `Set free access mode to ${enabled ? 'ENABLED' : 'DISABLED'} (${durationMinutes || 30} mins)`
+          details: `Router access mode configured as ${policy.accessMode}. Policy pushed.`
         });
       }
     }
     this.saveState();
+  }
+
+  toggleRouterFreeMode(routerId: string | 'all', enabled: boolean, durationMinutes?: number) {
+    const accessMode = enabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+    this.setRouterAccessPolicy(routerId, { accessMode, freeDurationMinutes: durationMinutes });
   }
 
   getActiveSessions(): ActiveSession[] {

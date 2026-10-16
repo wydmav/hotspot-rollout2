@@ -24,9 +24,11 @@ import {
   HardDrive,
   Info,
   AlertTriangle,
-  Building2
+  Building2,
+  Unlock,
+  Send
 } from 'lucide-react';
-import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice } from '../../types';
+import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice, RouterAccessMode } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { CaptivePortalEditor } from './CaptivePortalEditor';
@@ -38,6 +40,15 @@ interface CaptivePortalViewProps {
   plans: HotspotPlan[];
   routers?: RouterDevice[];
   onToggleRouterFreeMode?: (routerId: string | 'all', enabled: boolean) => void;
+  onSetRouterAccessPolicy?: (
+    routerId: string | 'all',
+    policy: {
+      accessMode: RouterAccessMode;
+      freeDurationMinutes?: number;
+      freeRateLimit?: string;
+      freeDailyQuotaMb?: number;
+    }
+  ) => Promise<any>;
   onProcessPayment: (provider: GatewayProvider, planId: string, phone?: string, ottPin?: string) => any;
   onRedeemVoucher: (code: string, mac: string, hostname?: string) => any;
   currency: string;
@@ -87,6 +98,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   plans,
   routers = [],
   onToggleRouterFreeMode,
+  onSetRouterAccessPolicy,
   onProcessPayment,
   onRedeemVoucher,
   currency,
@@ -186,6 +198,178 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   const [remainingSeconds, setRemainingSeconds] = useState(306132); // ~3 days, 13 hours, 2 minutes
   const [totalPackageSeconds, setTotalPackageSeconds] = useState(604800); // 7 days (Week pass)
   const [copiedLockdownScript, setCopiedLockdownScript] = useState(false);
+
+  // Dedicated Hotspot Access Policies & Monetization State (Centralized Platform Control)
+  const [fleetScopeVertical, setFleetScopeVertical] = useState<VerticalType | 'all'>(selectedVertical);
+  const [fleetAccessMode, setFleetAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
+  const [fleetFreeDuration, setFleetFreeDuration] = useState<number>(30);
+  const [fleetRateLimit, setFleetRateLimit] = useState<string>('10M/30M');
+  const [isFleetPushing, setIsFleetPushing] = useState(false);
+  const [fleetPushToast, setFleetPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Per-router tuning drafts & loading state
+  const [routerPolicyDrafts, setRouterPolicyDrafts] = useState<{
+    [routerId: string]: {
+      mode: RouterAccessMode;
+      duration: number;
+      rateLimit: string;
+      quotaMb: number;
+    };
+  }>({});
+  const [pushingRouters, setPushingRouters] = useState<{ [routerId: string]: boolean }>({});
+  const [routerPolicyFeedback, setRouterPolicyFeedback] = useState<{
+    [routerId: string]: { type: 'success' | 'error'; message: string; script?: string };
+  }>({});
+  const [expandedScriptRouterId, setExpandedScriptRouterId] = useState<string | null>(null);
+  const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
+
+  const getRouterDraft = (router: RouterDevice) => {
+    return routerPolicyDrafts[router.id] || {
+      mode: router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY'),
+      duration: router.freeDurationMinutes || 30,
+      rateLimit: router.freeRateLimit || '10M/30M',
+      quotaMb: router.freeDailyQuotaMb || 500
+    };
+  };
+
+  const updateRouterDraft = (routerId: string, updates: Partial<{ mode: RouterAccessMode; duration: number; rateLimit: string; quotaMb: number }>) => {
+    setRouterPolicyDrafts(prev => {
+      const current = prev[routerId] || {
+        mode: 'PAID_ONLY',
+        duration: 30,
+        rateLimit: '10M/30M',
+        quotaMb: 500
+      };
+      return {
+        ...prev,
+        [routerId]: { ...current, ...updates }
+      };
+    });
+  };
+
+  const handlePushRouterPolicy = async (router: RouterDevice, overrideMode?: RouterAccessMode) => {
+    const draft = getRouterDraft(router);
+    const targetMode = overrideMode || draft.mode;
+
+    setPushingRouters(prev => ({ ...prev, [router.id]: true }));
+    setRouterPolicyFeedback(prev => {
+      const copy = { ...prev };
+      delete copy[router.id];
+      return copy;
+    });
+
+    try {
+      let scriptOutput = '';
+      if (onSetRouterAccessPolicy) {
+        const result = await onSetRouterAccessPolicy(router.id, {
+          accessMode: targetMode,
+          freeDurationMinutes: draft.duration,
+          freeRateLimit: draft.rateLimit,
+          freeDailyQuotaMb: draft.quotaMb
+        });
+        if (result?.script) scriptOutput = result.script;
+      } else {
+        const res = await fetch(`/api/devices/${router.id}/access-policy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessMode: targetMode,
+            freeDurationMinutes: draft.duration,
+            freeRateLimit: draft.rateLimit,
+            freeDailyQuotaMb: draft.quotaMb
+          })
+        });
+        const data = await res.json();
+        scriptOutput = data.script;
+        storage.setRouterAccessPolicy(router.id, {
+          accessMode: targetMode,
+          freeDurationMinutes: draft.duration,
+          freeRateLimit: draft.rateLimit,
+          freeDailyQuotaMb: draft.quotaMb
+        });
+      }
+
+      // Update in-memory reference
+      router.accessMode = targetMode;
+      router.freeModeEnabled = targetMode !== 'PAID_ONLY';
+      router.freeDurationMinutes = draft.duration;
+      router.freeRateLimit = draft.rateLimit;
+      router.freeDailyQuotaMb = draft.quotaMb;
+      router.policyLastSyncedAt = new Date().toISOString();
+
+      setRouterPolicyFeedback(prev => ({
+        ...prev,
+        [router.id]: {
+          type: 'success',
+          message: `Policy '${targetMode}' applied and queued for remote sync to ${router.name}.`,
+          script: scriptOutput
+        }
+      }));
+    } catch (err: any) {
+      setRouterPolicyFeedback(prev => ({
+        ...prev,
+        [router.id]: {
+          type: 'error',
+          message: err.message || 'Failed to dispatch policy to router.'
+        }
+      }));
+    } finally {
+      setPushingRouters(prev => ({ ...prev, [router.id]: false }));
+    }
+  };
+
+  const handlePushFleetPolicy = async () => {
+    setIsFleetPushing(true);
+    setFleetPushToast(null);
+
+    const targetRouters = routers.filter(r => {
+      if (fleetScopeVertical === 'all') return true;
+      if (fleetScopeVertical === 'community' || fleetScopeVertical === 'village') {
+        return r.vertical === 'community' || r.vertical === 'village';
+      }
+      return r.vertical === fleetScopeVertical;
+    });
+
+    try {
+      if (onSetRouterAccessPolicy) {
+        await onSetRouterAccessPolicy('all', {
+          accessMode: fleetAccessMode,
+          freeDurationMinutes: fleetFreeDuration,
+          freeRateLimit: fleetRateLimit
+        });
+      } else {
+        await fetch('/api/devices/fleet/access-policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            routerIds: targetRouters.map(r => r.id),
+            vertical: fleetScopeVertical === 'all' ? undefined : fleetScopeVertical,
+            accessMode: fleetAccessMode,
+            freeDurationMinutes: fleetFreeDuration,
+            freeRateLimit: fleetRateLimit
+          })
+        });
+        storage.setRouterAccessPolicy('all', {
+          accessMode: fleetAccessMode,
+          freeDurationMinutes: fleetFreeDuration,
+          freeRateLimit: fleetRateLimit
+        });
+      }
+
+      setFleetPushToast({
+        type: 'success',
+        message: `Policy '${fleetAccessMode}' pushed to ${targetRouters.length} routers across ${fleetScopeVertical === 'all' ? 'the entire fleet' : `${fleetScopeVertical.toUpperCase()} vertical`}.`
+      });
+      setTimeout(() => setFleetPushToast(null), 5000);
+    } catch (err: any) {
+      setFleetPushToast({
+        type: 'error',
+        message: err.message || 'Failed to dispatch fleet policy.'
+      });
+    } finally {
+      setIsFleetPushing(false);
+    }
+  };
 
   // Ticking countdown effect
   useEffect(() => {
@@ -407,11 +591,11 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
           <button
             onClick={() => setActiveMainTab('free_mode')}
             className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
-              activeMainTab === 'free_mode' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              activeMainTab === 'free_mode' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Free Mode Switch</span>
+            <Zap className="w-3.5 h-3.5 fill-current" />
+            <span>Access Policies &amp; Monetization</span>
           </button>
 
           <button
@@ -1427,91 +1611,406 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 2: REAL-TIME FREE MODE SWITCHER (PER-ROUTER & FLEET-WIDE) */}
+      {/* TAB 2: CENTRALIZED ACCESS POLICIES & MONETIZATION MANAGER             */}
       {/* ===================================================================== */}
       {activeMainTab === 'free_mode' && (
-        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-6 space-y-6">
+        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5 sm:p-6 space-y-6">
+          {/* Header & Overview */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b233a] pb-4">
             <div>
               <div className="flex items-center gap-2">
-                <Zap className="w-5 h-5 text-amber-400" />
-                <h2 className="text-base font-extrabold text-white">Hotspot Free Mode Manager</h2>
+                <Zap className="w-5 h-5 text-amber-400 fill-current" />
+                <h2 className="text-base font-extrabold text-white">Hotspot Access Policies &amp; Monetization Manager</h2>
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-1">
-                Instantly switch all routers or select individual routers into Free Access Mode in real time.
+              <p className="text-xs text-slate-400 font-mono mt-1 leading-relaxed">
+                Clean device adoption onboards your routers as neutral network nodes (WireGuard + RADIUS AAA + watchdog only). The platform gives you total operational control to dictate monetization and guest access policies across the fleet.
               </p>
             </div>
 
-            {/* Global Fleet Free Mode Toggle */}
-            <div className="flex items-center gap-3 bg-[#161d31] p-2.5 rounded-xl border border-[#232d42]">
-              <span className="text-xs font-mono text-slate-300 font-bold">Global Fleet Free Mode:</span>
-              <button
-                type="button"
-                onClick={() => onToggleRouterFreeMode && onToggleRouterFreeMode('all', true)}
-                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold font-mono rounded-lg transition-colors"
-              >
-                Set All Free
-              </button>
-              <button
-                type="button"
-                onClick={() => onToggleRouterFreeMode && onToggleRouterFreeMode('all', false)}
-                className="px-3 py-1 bg-[#232d42] hover:bg-[#303d59] text-slate-300 text-xs font-mono rounded-lg transition-colors"
-              >
-                Disable Free
-              </button>
+            <div className="flex items-center gap-2 bg-[#121829] px-3 py-1.5 rounded-lg border border-[#1f283d] text-xs font-mono">
+              <span className="text-slate-400">Total Fleet Routers:</span>
+              <span className="text-white font-bold">{routers.length}</span>
             </div>
           </div>
 
-          {/* Router Table with Real-Time Free Mode Toggles */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">
-              Fleet Routers Status &amp; Free Mode Assignment
-            </h3>
+          {/* Fleet-Wide Bulk Scope Policy Bar */}
+          <div className="bg-[#121829] p-4 rounded-xl border border-amber-500/30 space-y-3 font-mono text-xs">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-amber-400" />
+                  <span>Fleet Scope Bulk Policy Dispatch</span>
+                </span>
+                <p className="text-[11px] text-slate-400">
+                  Select a vertical scope and broadcast access policy across all matching routers in real time.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Vertical Scope Selector */}
+                <select
+                  value={fleetScopeVertical}
+                  onChange={(e) => setFleetScopeVertical(e.target.value as any)}
+                  className="px-2.5 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+                >
+                  <option value="all">🌐 All Fleet Routers</option>
+                  <option value="hotspot">☕ Connected Hotspots</option>
+                  <option value="community">🏡 Villages / Solar Mesh</option>
+                  <option value="bus">🚌 Connected Buses</option>
+                  <option value="stadium">🏟️ Connected Stadiums</option>
+                  <option value="park">🌳 Connected Parks</option>
+                </select>
+
+                {/* Mode Selector */}
+                <select
+                  value={fleetAccessMode}
+                  onChange={(e) => setFleetAccessMode(e.target.value as RouterAccessMode)}
+                  className="px-2.5 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+                >
+                  <option value="PAID_ONLY">🔒 Strictly Paid Only</option>
+                  <option value="FREE_TRIAL_AND_PAID">⚡ Free Trial + Paid Vouchers</option>
+                  <option value="COMPLETELY_FREE">🌐 100% Free Public Wi-Fi</option>
+                </select>
+
+                {fleetAccessMode !== 'PAID_ONLY' && (
+                  <>
+                    <select
+                      value={fleetFreeDuration}
+                      onChange={(e) => setFleetFreeDuration(Number(e.target.value))}
+                      className="px-2 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+                    >
+                      <option value={15}>15 mins</option>
+                      <option value={30}>30 mins</option>
+                      <option value={45}>45 mins</option>
+                      <option value={60}>60 mins</option>
+                      <option value={120}>120 mins</option>
+                    </select>
+
+                    <select
+                      value={fleetRateLimit}
+                      onChange={(e) => setFleetRateLimit(e.target.value)}
+                      className="px-2 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-400 cursor-pointer"
+                    >
+                      <option value="3M/10M">3M/10M</option>
+                      <option value="5M/15M">5M/15M</option>
+                      <option value="10M/30M">10M/30M</option>
+                      <option value="20M/50M">20M/50M</option>
+                    </select>
+                  </>
+                )}
+
+                <button
+                  type="button"
+                  disabled={isFleetPushing || routers.length === 0}
+                  onClick={handlePushFleetPolicy}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    isFleetPushing
+                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      : 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-950/40'
+                  }`}
+                >
+                  {isFleetPushing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 fill-current" />}
+                  <span>{isFleetPushing ? 'Broadcasting...' : 'Broadcast to Scope'}</span>
+                </button>
+              </div>
+            </div>
+
+            {fleetPushToast && (
+              <div className={`p-2.5 rounded-lg text-xs font-mono flex items-center justify-between animate-in fade-in ${
+                fleetPushToast.type === 'success' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-rose-950/60 text-rose-300 border border-rose-500/30'
+              }`}>
+                <span>{fleetPushToast.message}</span>
+                <button onClick={() => setFleetPushToast(null)} className="text-slate-400 hover:text-white ml-2">✕</button>
+              </div>
+            )}
+          </div>
+
+          {/* Router Table with Granular Live Policy Controls */}
+          <div className="space-y-4 font-mono text-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Radio className="w-4 h-4 text-cyan-400" />
+                <span>Router Fleet Granular Policy Controls ({routers.length})</span>
+              </h3>
+              <span className="text-slate-500 text-[11px]">Direct live push via WireGuard management tunnel</span>
+            </div>
 
             {routers.length === 0 ? (
-              <div className="p-8 text-center text-xs font-mono text-slate-500 bg-[#080b12] rounded-xl border border-[#1b233a]">
-                No routers currently adopted. Add a router in &quot;Routers &amp; Adoption&quot; to manage its Free Mode status.
+              <div className="p-8 text-center text-xs font-mono text-slate-500 bg-[#080b12] rounded-xl border border-[#1b233a] space-y-2">
+                <p className="text-slate-300 font-bold">No Routers Adopted Yet</p>
+                <p className="text-[11px] text-slate-500">
+                  Onboard a MikroTik router using the one-liner in &quot;Routers &amp; Adoption&quot;. Once adopted, it will appear here for full monetization and access management.
+                </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {routers.map((router) => (
-                  <div
-                    key={router.id}
-                    className="p-4 bg-[#121829] rounded-xl border border-[#1f283d] flex items-center justify-between gap-4 font-mono text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <strong className="text-white text-sm">{router.name}</strong>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                          router.status === 'online' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'
-                        }`}>
-                          {router.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="text-slate-400 text-[11px] mt-0.5">
-                        Site: <span className="text-slate-200">{router.siteName}</span> · WireGuard IP: {router.wireguardIp}
-                      </div>
-                    </div>
+              <div className="grid grid-cols-1 gap-4">
+                {routers.map((router) => {
+                  const draft = getRouterDraft(router);
+                  const isPushing = Boolean(pushingRouters[router.id]);
+                  const feedback = routerPolicyFeedback[router.id];
+                  const isScriptExpanded = expandedScriptRouterId === router.id;
 
-                    {/* Per-Router Switch */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onToggleRouterFreeMode &&
-                          onToggleRouterFreeMode(router.id, !router.freeModeEnabled)
-                        }
-                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all ${
-                          router.freeModeEnabled
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
-                            : 'bg-[#1b233a] text-slate-400 border border-[#232d42] hover:text-white'
-                        }`}
-                      >
-                        {router.freeModeEnabled ? '⚡ Free Mode Active' : 'Paid / Voucher Mode'}
-                      </button>
+                  return (
+                    <div
+                      key={router.id}
+                      className="p-4 sm:p-5 bg-[#121829] rounded-xl border border-[#1f283d] space-y-4"
+                    >
+                      {/* Router Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1b233a] pb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <strong className="text-white text-sm">{router.name}</strong>
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                              router.status === 'online' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                            }`}>
+                              {router.status.toUpperCase()}
+                            </span>
+                            <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700 uppercase">
+                              {router.vertical}
+                            </span>
+                          </div>
+                          <div className="text-slate-400 text-[11px] mt-1 flex flex-wrap items-center gap-2">
+                            <span>Site: <strong className="text-slate-200">{router.siteName}</strong></span>
+                            <span>·</span>
+                            <span>Model: <span className="text-cyan-300">{router.model.split('(')[0]}</span></span>
+                            <span>·</span>
+                            <span>Tunnel IP: <code className="text-emerald-400">{router.wireguardIp || '10.99.1.50'}</code></span>
+                          </div>
+                        </div>
+
+                        {/* Active Policy Status Badge */}
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] text-slate-400 uppercase block font-bold">Active Policy</span>
+                          <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full border mt-0.5 ${
+                            router.accessMode === 'COMPLETELY_FREE'
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                              : (router.accessMode === 'FREE_TRIAL_AND_PAID' || router.freeModeEnabled)
+                              ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                              : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                          }`}>
+                            {router.accessMode === 'COMPLETELY_FREE' ? (
+                              <><Unlock className="w-3 h-3" /> 100% Free Wi-Fi</>
+                            ) : (router.accessMode === 'FREE_TRIAL_AND_PAID' || router.freeModeEnabled) ? (
+                              <><Zap className="w-3 h-3 fill-current" /> Free Trial ({router.freeDurationMinutes || 30}m)</>
+                            ) : (
+                              <><Lock className="w-3 h-3" /> Paid Vouchers Only</>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 3-Way Mode Switcher Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {/* Option 1: Paid Only */}
+                        <div
+                          onClick={() => updateRouterDraft(router.id, { mode: 'PAID_ONLY' })}
+                          className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                            draft.mode === 'PAID_ONLY'
+                              ? 'bg-rose-950/20 border-rose-500/60 shadow-md ring-1 ring-rose-500/30'
+                              : 'bg-[#161d31] border-[#232d42] hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-white flex items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Paid Only</span>
+                            </span>
+                            {draft.mode === 'PAID_ONLY' && (
+                              <span className="text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded">SELECTED</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-normal">
+                            Zero free access. Guests must purchase a voucher or pay via EcoCash/MyWallet.
+                          </p>
+                        </div>
+
+                        {/* Option 2: Free Trial + Paid */}
+                        <div
+                          onClick={() => updateRouterDraft(router.id, { mode: 'FREE_TRIAL_AND_PAID' })}
+                          className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                            draft.mode === 'FREE_TRIAL_AND_PAID'
+                              ? 'bg-amber-950/20 border-amber-500/60 shadow-md ring-1 ring-amber-500/30'
+                              : 'bg-[#161d31] border-[#232d42] hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-white flex items-center gap-1.5">
+                              <Zap className="w-3.5 h-3.5 text-amber-400 fill-current" />
+                              <span>Free Trial + Paid</span>
+                            </span>
+                            {draft.mode === 'FREE_TRIAL_AND_PAID' && (
+                              <span className="text-[9px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">SELECTED</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-normal">
+                            Teaser trial ({draft.duration}m) granted on connect, after which guests purchase vouchers.
+                          </p>
+                        </div>
+
+                        {/* Option 3: Completely Free */}
+                        <div
+                          onClick={() => updateRouterDraft(router.id, { mode: 'COMPLETELY_FREE' })}
+                          className={`p-3 rounded-xl border transition-all cursor-pointer space-y-1.5 ${
+                            draft.mode === 'COMPLETELY_FREE'
+                              ? 'bg-emerald-950/20 border-emerald-500/60 shadow-md ring-1 ring-emerald-500/30'
+                              : 'bg-[#161d31] border-[#232d42] hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-white flex items-center gap-1.5">
+                              <Unlock className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>100% Free Wi-Fi</span>
+                            </span>
+                            {draft.mode === 'COMPLETELY_FREE' && (
+                              <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">SELECTED</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-normal">
+                            Open public access sponsored by municipality, NGO, or donor. Zero paywalls.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Tuning strip if Free Trial or Completely Free */}
+                      {draft.mode !== 'PAID_ONLY' && (
+                        <div className="p-3 bg-[#101626] rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                          <div className="flex flex-wrap items-center gap-3">
+                            {/* Duration */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400 font-bold">Duration:</span>
+                              {[15, 30, 45, 60, 120].map((mins) => (
+                                <button
+                                  key={mins}
+                                  type="button"
+                                  onClick={() => updateRouterDraft(router.id, { duration: mins })}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                                    draft.duration === mins
+                                      ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                                      : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  {mins}m
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Rate Limit */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-slate-400 font-bold">Bandwidth:</span>
+                              {['3M/10M', '5M/15M', '10M/30M', '20M/50M'].map((rate) => (
+                                <button
+                                  key={rate}
+                                  type="button"
+                                  onClick={() => updateRouterDraft(router.id, { rateLimit: rate })}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
+                                    draft.rateLimit === rate
+                                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                                      : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  {rate}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Push to Router Action Bar */}
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                        <div className="text-[11px] text-slate-400">
+                          {router.policyLastSyncedAt ? (
+                            <span>Last synced: <span className="text-slate-200">{new Date(router.policyLastSyncedAt).toLocaleTimeString()}</span></span>
+                          ) : (
+                            <span className="text-amber-400">Policy not yet pushed to hardware</span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isPushing}
+                            onClick={() => handlePushRouterPolicy(router)}
+                            className={`px-3.5 py-1.5 rounded-lg font-bold text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                              isPushing
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                : 'bg-gradient-to-r from-[#f05e17] to-amber-600 hover:from-[#d94c0b] hover:to-amber-500 text-white shadow-md shadow-orange-950/40'
+                            }`}
+                          >
+                            {isPushing ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Pushing to Router...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Zap className="w-3.5 h-3.5 fill-current" />
+                                <span>Push Policy to Router</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Feedback Banner */}
+                      {feedback && (
+                        <div className={`p-3 rounded-lg border text-[11px] flex items-start justify-between gap-2 animate-in fade-in ${
+                          feedback.type === 'success'
+                            ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                            : 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                        }`}>
+                          <div className="space-y-1">
+                            <span className="font-bold block">{feedback.message}</span>
+                            {feedback.script && (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedScriptRouterId(isScriptExpanded ? null : router.id)}
+                                className="text-[10px] underline text-emerald-300 hover:text-white cursor-pointer"
+                              >
+                                {isScriptExpanded ? 'Hide RouterOS CLI commands' : 'Inspect dispatched RouterOS CLI commands'}
+                              </button>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setRouterPolicyFeedback(prev => {
+                              const copy = { ...prev };
+                              delete copy[router.id];
+                              return copy;
+                            })}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Dispatched Script Preview */}
+                      {isScriptExpanded && feedback?.script && (
+                        <div className="p-3 bg-black/70 rounded-lg border border-slate-800 space-y-2 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] uppercase font-bold text-slate-400">Dispatched RouterOS Script:</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(feedback.script || '');
+                                setCopiedScriptId(router.id);
+                                setTimeout(() => setCopiedScriptId(null), 2000);
+                              }}
+                              className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 hover:text-white border border-slate-700 flex items-center gap-1 cursor-pointer"
+                            >
+                              {copiedScriptId === router.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              <span>{copiedScriptId === router.id ? 'Copied' : 'Copy'}</span>
+                            </button>
+                          </div>
+                          <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto p-2 bg-[#050810] rounded border border-slate-900">
+                            {feedback.script}
+                          </pre>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

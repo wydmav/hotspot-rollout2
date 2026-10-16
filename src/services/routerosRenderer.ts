@@ -1,4 +1,4 @@
-import { RouterDevice } from '../types';
+import { RouterDevice, RouterAccessMode } from '../types';
 
 export interface OneLinerOptions {
   controllerDomain: string;
@@ -6,6 +6,14 @@ export interface OneLinerOptions {
   token: string;
   rosVersion?: 'v7' | 'v6';
   endpointProtocol?: string;
+}
+
+export interface AccessPolicyOptions {
+  router: RouterDevice;
+  accessMode: RouterAccessMode;
+  freeDurationMinutes?: number;
+  rateLimit?: string;
+  portalBaseUrl?: string;
 }
 
 export interface ProvisioningOptions {
@@ -163,15 +171,9 @@ export class RouterOSRenderer {
       `:do { /radius incoming set accept=yes port=3799 } on-error={}`,
       `/log info "T-Connect: [5/7] Central RADIUS configured."`,
       ``,
-      `# 7. Hotspot Server Profile RADIUS & Zero-RAM External Captive Portal`,
+      `# 7. Hotspot Server Profile RADIUS & External Captive Portal Redirect`,
       `:do { /ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes radius-interim-update=1m login-by=http-pap,mac-cookie,cookie http-cookie-lifetime=1d } on-error={ /log warning "T-Connect: Could not bind default hotspot profile to RADIUS" }`,
-      `:do { /ip hotspot user profile set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no rate-limit="10M/30M" } on-error={}`,
-      `:do { /ip hotspot user profile set [find name="free_trial"] rate-limit="10M/30M" shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no } on-error={}`,
-      `:do { :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={ /ip hotspot user profile add name="free_trial" rate-limit="10M/30M" shared-users=1 keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no comment="T-Connect Free Access (10M Up / 30M Down)" } } on-error={}`,
-      ``,
-      `# Free Access Bandwidth Queue Fallback (Enforces 10M Up / 30M Down)`,
-      `:do { /queue simple set [find name="tc-free-pool"] max-limit=10M/30M } on-error={}`,
-      `:do { :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={ /queue simple add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=10M/30M comment="T-Connect Free Access Pool Rate-Limit" } } on-error={}`,
+      `:do { /ip hotspot user profile set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no } on-error={}`,
       ``,
       `# Ultra-lightweight redirect stub: 100% of portal assets, payment UI & vouchers run on VPS`,
       `:do { /file add name="hotspot/login.html" contents="<!DOCTYPE html><html><head><meta http-equiv=\\"refresh\\" content=\\"0; url=${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\"></head><body style=\\"background:%230b0f19;color:white;font-family:sans-serif;text-align:center;padding-top:40px;\\">Connecting to T-Connect Network...</body></html>" } on-error={ :do { /file set [find name="hotspot/login.html"] contents="<!DOCTYPE html><html><head><meta http-equiv=\\"refresh\\" content=\\"0; url=${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\"></head><body style=\\"background:%230b0f19;color:white;font-family:sans-serif;text-align:center;padding-top:40px;\\">Connecting to T-Connect Network...</body></html>" } on-error={} }`,
@@ -224,6 +226,68 @@ export class RouterOSRenderer {
     );
 
     return scriptLines.join('\n');
+  }
+
+  /**
+   * Generates dynamic Access Policy script for live execution on an adopted router.
+   * Gives administrators total platform control over whether the router is:
+   * 1. PAID_ONLY (strictly vouchers & mobile money, no free access)
+   * 2. FREE_TRIAL_AND_PAID (hybrid with customizable duration, rate limit & daily quota)
+   * 3. COMPLETELY_FREE (open public Wi-Fi or community-sponsored)
+   */
+  static renderAccessPolicyScript(options: AccessPolicyOptions): string {
+    const { router, accessMode } = options;
+    const duration = options.freeDurationMinutes || router.freeDurationMinutes || 30;
+    const rateLimit = options.rateLimit || router.freeRateLimit || '10M/30M';
+    const lines: string[] = [
+      `# ============================================================`,
+      `# T-Connect Dynamic Access Policy Push`,
+      `# Target Router: ${router.name} (${router.id})`,
+      `# Policy Mode: ${accessMode}`,
+      `# Timestamp: ${new Date().toISOString()}`,
+      `# ============================================================`,
+      `:log info "[T-Connect Policy] Pushing Access Mode '${accessMode}' to router...";`
+    ];
+
+    if (accessMode === 'PAID_ONLY') {
+      lines.push(
+        `# Policy: Strictly Paid Vouchers & Mobile Money`,
+        `# 1. Remove local free user profiles & free simple queues`,
+        `:do { /ip hotspot user profile remove [find name="free_trial"] } on-error={}`,
+        `:do { /queue simple remove [find name="tc-free-pool"] } on-error={}`,
+        `:do { /ip hotspot user remove [find comment~"tc-free"] } on-error={}`,
+        `# 2. Enforce RADIUS AAA authentication for all guests`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-pap,mac-cookie,cookie use-radius=yes radius-accounting=yes } on-error={}`,
+        `:log info "[T-Connect Policy] Router successfully configured for PAID_ONLY access. Free trial deactivated.";`
+      );
+    } else if (accessMode === 'FREE_TRIAL_AND_PAID') {
+      lines.push(
+        `# Policy: Hybrid Access (Free Trial + Paid Vouchers)`,
+        `# 1. Configure free_trial User Profile (${duration}m session timeout @ ${rateLimit})`,
+        `:do { /ip hotspot user profile set [find name="free_trial"] rate-limit="${rateLimit}" shared-users=1 keepalive-timeout=2m status-autorefresh=1m session-timeout=${duration}m transparent-proxy=no } on-error={}`,
+        `:do { :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={ /ip hotspot user profile add name="free_trial" rate-limit="${rateLimit}" shared-users=1 keepalive-timeout=2m status-autorefresh=1m session-timeout=${duration}m transparent-proxy=no comment="T-Connect Free Trial (${rateLimit})" } } on-error={}`,
+        `# 2. Configure Free Simple Queue Rate Limiter`,
+        `:do { /queue simple set [find name="tc-free-pool"] max-limit=${rateLimit} } on-error={}`,
+        `:do { :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={ /queue simple add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=${rateLimit} comment="T-Connect Free Pool Limit" } } on-error={}`,
+        `# 3. Ensure RADIUS AAA remains active for paid vouchers`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-pap,mac-cookie,cookie use-radius=yes radius-accounting=yes } on-error={}`,
+        `:log info "[T-Connect Policy] Hybrid mode active: ${duration}m free trial enabled alongside paid vouchers.";`
+      );
+    } else if (accessMode === 'COMPLETELY_FREE') {
+      lines.push(
+        `# Policy: 100% Free Open Access (Municipal / Community Sponsored)`,
+        `# 1. Configure open access profile with rate limit ${rateLimit}`,
+        `:do { /ip hotspot user profile set [find default=yes] rate-limit="${rateLimit}" keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no } on-error={}`,
+        `:do { /ip hotspot user profile set [find name="free_trial"] rate-limit="${rateLimit}" shared-users=100 keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no } on-error={}`,
+        `:do { :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={ /ip hotspot user profile add name="free_trial" rate-limit="${rateLimit}" shared-users=100 keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no comment="T-Connect Free Open Pool" } } on-error={}`,
+        `# 2. Maintain pool bandwidth queue`,
+        `:do { /queue simple set [find name="tc-free-pool"] max-limit=${rateLimit} } on-error={}`,
+        `:do { :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={ /queue simple add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=${rateLimit} comment="T-Connect Free Pool Limit" } } on-error={}`,
+        `:log info "[T-Connect Policy] COMPLETELY_FREE mode active on router.";`
+      );
+    }
+
+    return lines.join('\n');
   }
 
   /**

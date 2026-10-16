@@ -146,6 +146,7 @@ interface MonitoredRouter {
   id: string;
   name: string;
   siteName: string;
+  vertical?: string;
   status: 'online' | 'offline' | 'pending_adoption';
   publicWanIp: string;
   wireguardIp: string;
@@ -161,6 +162,12 @@ interface MonitoredRouter {
   lastAlertSentAt?: number;
   webfigPort: number;
   winboxPort: number;
+  accessMode?: 'PAID_ONLY' | 'FREE_TRIAL_AND_PAID' | 'COMPLETELY_FREE';
+  freeDurationMinutes?: number;
+  freeRateLimit?: string;
+  freeDailyQuotaMb?: number;
+  pendingCommands?: string[];
+  policyLastSyncedAt?: string;
 }
 
 const monitoredRouters = new Map<string, MonitoredRouter>();
@@ -434,13 +441,18 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
     }
   }
 
+  const pendingCmds = router?.pendingCommands && router.pendingCommands.length > 0 ? [...router.pendingCommands] : [];
+  if (router && router.pendingCommands) {
+    router.pendingCommands = [];
+  }
+
   res.json({
     status: 'acknowledged',
     routerId,
     watchdogStatus: 'HEALTHY',
     intervalSeconds: 15,
     receivedAt: new Date().toISOString(),
-    commands: []
+    commands: pendingCmds
   });
 });
 
@@ -687,6 +699,201 @@ app.delete('/api/devices/:routerId', (req: Request, res: Response) => {
     success: true,
     routerId,
     message: `Router ${routerName} removed from server monitoring and ready for clean re-adoption.`
+  });
+});
+
+// -----------------------------------------------------------------------------
+// CENTRALIZED ACCESS POLICY & MONETIZATION CONTROL (Free vs. Paid)
+// -----------------------------------------------------------------------------
+app.get('/api/devices/:routerId/access-policy', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const router = monitoredRouters.get(routerId);
+  const host = req.get('host') || '127.0.0.1:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = `${protocol}://${host}`;
+
+  const accessMode = router?.accessMode || 'PAID_ONLY';
+  const freeDurationMinutes = router?.freeDurationMinutes || 30;
+  const freeRateLimit = router?.freeRateLimit || '10M/30M';
+  const freeDailyQuotaMb = router?.freeDailyQuotaMb || 500;
+
+  const script = RouterOSRenderer.renderAccessPolicyScript({
+    router: {
+      id: routerId,
+      name: router?.name || `MikroTik-${routerId.slice(-6)}`,
+      vertical: (router?.vertical as any) || 'hotspot',
+      siteName: router?.siteName || 'Hotspot Site',
+      model: 'RouterOS Device',
+      boardName: 'RouterBOARD',
+      rosVersion: 'v7',
+      macAddress: 'AUTO',
+      wireguardIp: router?.wireguardIp || '10.99.1.50',
+      publicWanIp: router?.publicWanIp || '127.0.0.1',
+      status: router?.status || 'online',
+      uptime: router?.uptime || '1h',
+      cpuLoad: router?.cpuLoad || 2,
+      memoryUsage: router?.memoryUsage || 20,
+      lastHeartbeat: router?.lastHeartbeat || 'Just now',
+      firmware: '7.15.2',
+      activeSessions: router?.activeSessions || 0,
+      freeDurationMinutes,
+      freeRateLimit
+    },
+    accessMode,
+    freeDurationMinutes,
+    rateLimit: freeRateLimit,
+    portalBaseUrl
+  });
+
+  res.json({
+    routerId,
+    accessMode,
+    freeDurationMinutes,
+    freeRateLimit,
+    freeDailyQuotaMb,
+    policyLastSyncedAt: router?.policyLastSyncedAt || null,
+    script
+  });
+});
+
+app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const { accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb } = req.body;
+  const router = monitoredRouters.get(routerId);
+  const routerName = router?.name || `MikroTik-${routerId.slice(-6)}`;
+  const host = req.get('host') || '127.0.0.1:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = `${protocol}://${host}`;
+
+  const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const duration = Number(freeDurationMinutes) || 30;
+  const rateLimit = freeRateLimit || '10M/30M';
+  const quota = Number(freeDailyQuotaMb) || 500;
+  const now = new Date().toISOString();
+
+  if (router) {
+    router.accessMode = validMode;
+    router.freeDurationMinutes = duration;
+    router.freeRateLimit = rateLimit;
+    router.freeDailyQuotaMb = quota;
+    router.policyLastSyncedAt = now;
+  }
+
+  const script = RouterOSRenderer.renderAccessPolicyScript({
+    router: {
+      id: routerId,
+      name: routerName,
+      vertical: (router?.vertical as any) || 'hotspot',
+      siteName: router?.siteName || 'Hotspot Site',
+      model: 'RouterOS Device',
+      boardName: 'RouterBOARD',
+      rosVersion: 'v7',
+      macAddress: 'AUTO',
+      wireguardIp: router?.wireguardIp || '10.99.1.50',
+      publicWanIp: router?.publicWanIp || '127.0.0.1',
+      status: router?.status || 'online',
+      uptime: router?.uptime || '1h',
+      cpuLoad: router?.cpuLoad || 2,
+      memoryUsage: router?.memoryUsage || 20,
+      lastHeartbeat: router?.lastHeartbeat || 'Just now',
+      firmware: '7.15.2',
+      activeSessions: router?.activeSessions || 0,
+      freeDurationMinutes: duration,
+      freeRateLimit: rateLimit
+    },
+    accessMode: validMode,
+    freeDurationMinutes: duration,
+    rateLimit,
+    portalBaseUrl
+  });
+
+  // Extract commands for immediate remote execution or queueing on next heartbeat
+  const commands = script
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0 && !line.startsWith('#'));
+
+  if (router) {
+    router.pendingCommands = commands;
+  }
+
+  recordServerAudit({
+    category: 'router_config',
+    action: 'router.access_policy_push',
+    target: routerName,
+    routerId,
+    routerName,
+    details: `Access policy updated to ${validMode} (${validMode === 'PAID_ONLY' ? 'Vouchers/Paid Only' : `${duration}m free trial @ ${rateLimit}`}). Pushed to router.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1',
+    metadata: {
+      accessMode: validMode,
+      freeDurationMinutes: duration,
+      freeRateLimit: rateLimit,
+      commandCount: commands.length
+    }
+  });
+
+  console.log(`[Access Policy] Router ${routerId} (${routerName}) set to ${validMode}. Generated ${commands.length} commands.`);
+
+  res.json({
+    success: true,
+    routerId,
+    routerName,
+    accessMode: validMode,
+    freeDurationMinutes: duration,
+    freeRateLimit: rateLimit,
+    freeDailyQuotaMb: quota,
+    appliedAt: now,
+    script,
+    commandCount: commands.length,
+    message: `Access policy '${validMode}' successfully applied and queued for remote router sync.`
+  });
+});
+
+app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
+  const { routerIds, vertical, accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb } = req.body;
+  const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const duration = Number(freeDurationMinutes) || 30;
+  const rateLimit = freeRateLimit || '10M/30M';
+  const quota = Number(freeDailyQuotaMb) || 500;
+  const now = new Date().toISOString();
+
+  let affectedRouters: MonitoredRouter[] = [];
+
+  for (const router of monitoredRouters.values()) {
+    const idMatch = !routerIds || routerIds.length === 0 || routerIds.includes(router.id);
+    const verticalMatch = !vertical || vertical === 'all' || router.vertical === vertical;
+    if (idMatch && verticalMatch) {
+      router.accessMode = validMode;
+      router.freeDurationMinutes = duration;
+      router.freeRateLimit = rateLimit;
+      router.freeDailyQuotaMb = quota;
+      router.policyLastSyncedAt = now;
+      affectedRouters.push(router);
+    }
+  }
+
+  recordServerAudit({
+    category: 'router_config',
+    action: 'fleet.bulk_policy_push',
+    target: 'Fleet Management',
+    details: `Bulk access policy updated to ${validMode} across ${affectedRouters.length} routers.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1',
+    metadata: {
+      affectedCount: affectedRouters.length,
+      accessMode: validMode
+    }
+  });
+
+  res.json({
+    success: true,
+    accessMode: validMode,
+    updatedCount: affectedRouters.length,
+    routerIds: affectedRouters.map(r => r.id),
+    appliedAt: now,
+    message: `Bulk policy '${validMode}' pushed to ${affectedRouters.length} routers.`
   });
 });
 

@@ -17,6 +17,8 @@ export interface VerticalConfig {
   defaultPlanExample: string;
 }
 
+export type RouterAccessMode = 'PAID_ONLY' | 'FREE_TRIAL_AND_PAID' | 'COMPLETELY_FREE';
+
 export interface RouterDevice {
   id: string;
   name: string;
@@ -35,8 +37,13 @@ export interface RouterDevice {
   lastHeartbeat: string;
   firmware: string;
   activeSessions: number;
+  accessMode?: RouterAccessMode;
   freeModeEnabled?: boolean;
   freeDurationMinutes?: number;
+  freeRateLimit?: string;
+  freeDailyQuotaMb?: number;
+  freeCooldownHours?: number;
+  policyLastSyncedAt?: string;
   wan1Interface?: string;
   wan1Name?: string;
   wan2Interface?: string;

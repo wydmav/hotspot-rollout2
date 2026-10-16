@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RouterDevice, VerticalType, AuditLogEntry } from '../../types';
+import { RouterDevice, RouterAccessMode, VerticalType, AuditLogEntry } from '../../types';
 import { storage } from '../../services/storage';
 import { auditService } from '../../services/audit';
 import { useRouterActions } from '../../hooks/useRouterActions';
@@ -35,7 +35,11 @@ import {
   Compass,
   Building2,
   Tag,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Lock,
+  Unlock,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface RouterDetailSlideoverProps {
@@ -53,7 +57,7 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   onUpdateVertical,
   onNavigateToBuilder
 }) => {
-  const [activeTab, setActiveTab] = useState<'telemetry' | 'scope' | 'terminal' | 'audit'>('telemetry');
+  const [activeTab, setActiveTab] = useState<'telemetry' | 'policy' | 'scope' | 'terminal' | 'audit'>('telemetry');
   const [selectedVertical, setSelectedVertical] = useState<VerticalType>(router?.vertical || 'hotspot');
   
   // External Client Tenant Group & Custom Background
@@ -62,16 +66,91 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   const [tagsInput, setTagsInput] = useState<string>((router?.tags || []).join(', '));
   const [isSavingTenantPolicy, setIsSavingTenantPolicy] = useState(false);
 
-  // Per-Hotspot Free Access Mode State
-  const [freeModeActive, setFreeModeActive] = useState<boolean>(Boolean(router?.freeModeEnabled));
+  // Access Policy & Monetization Mode State (Centralized Platform Control)
+  const [accessMode, setAccessMode] = useState<RouterAccessMode>(
+    router?.accessMode || (router?.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY')
+  );
   const [freeDurationMinutes, setFreeDurationMinutes] = useState<number>(router?.freeDurationMinutes || 30);
+  const [freeRateLimit, setFreeRateLimit] = useState<string>(router?.freeRateLimit || '10M/30M');
+  const [freeDailyQuotaMb, setFreeDailyQuotaMb] = useState<number>(router?.freeDailyQuotaMb || 500);
+  const [isPushingPolicy, setIsPushingPolicy] = useState(false);
+  const [policyPushFeedback, setPolicyPushFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    script?: string;
+  } | null>(null);
+  const [showScriptPreview, setShowScriptPreview] = useState(false);
+  const [copiedPolicyScript, setCopiedPolicyScript] = useState(false);
+
+  const freeModeActive = accessMode !== 'PAID_ONLY';
+  const setFreeModeActive = (active: boolean) => {
+    const nextMode: RouterAccessMode = active ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+    setAccessMode(nextMode);
+  };
 
   useEffect(() => {
     if (router) {
-      setFreeModeActive(Boolean(router.freeModeEnabled));
+      setAccessMode(router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY'));
       setFreeDurationMinutes(router.freeDurationMinutes || 30);
+      setFreeRateLimit(router.freeRateLimit || '10M/30M');
+      setFreeDailyQuotaMb(router.freeDailyQuotaMb || 500);
+      setPolicyPushFeedback(null);
     }
   }, [router]);
+
+  const handlePushPolicy = async (modeOverride?: RouterAccessMode) => {
+    if (!router) return;
+    const targetMode = modeOverride || accessMode;
+    setIsPushingPolicy(true);
+    setPolicyPushFeedback(null);
+
+    try {
+      const res = await fetch(`/api/devices/${router.id}/access-policy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessMode: targetMode,
+          freeDurationMinutes,
+          freeRateLimit,
+          freeDailyQuotaMb
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        storage.setRouterAccessPolicy(router.id, {
+          accessMode: targetMode,
+          freeDurationMinutes,
+          freeRateLimit,
+          freeDailyQuotaMb
+        });
+        setPolicyPushFeedback({
+          type: 'success',
+          message: `Access policy '${targetMode}' successfully dispatched to ${router.name}. ${data.commandCount} CLI commands queued over WireGuard.`,
+          script: data.script
+        });
+        // Update current router reference in place
+        router.accessMode = targetMode;
+        router.freeModeEnabled = targetMode !== 'PAID_ONLY';
+        router.freeDurationMinutes = freeDurationMinutes;
+        router.freeRateLimit = freeRateLimit;
+        router.freeDailyQuotaMb = freeDailyQuotaMb;
+        router.policyLastSyncedAt = data.appliedAt;
+      } else {
+        setPolicyPushFeedback({
+          type: 'error',
+          message: data.message || 'Failed to dispatch access policy to router.'
+        });
+      }
+    } catch (err: any) {
+      setPolicyPushFeedback({
+        type: 'error',
+        message: err.message || 'Network error communicating with controller API.'
+      });
+    } finally {
+      setIsPushingPolicy(false);
+    }
+  };
   
   // Embedded terminal state
   const [cliCommand, setCliCommand] = useState('');
@@ -401,6 +480,18 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('policy')}
+              className={`py-3 px-3 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'policy'
+                  ? 'border-[#f05e17] text-white'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>Access Policy (Free/Paid)</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('scope')}
               className={`py-3 px-3 font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'scope'
@@ -581,6 +672,292 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                       <span className="text-slate-300 text-xs">{router.boardName || 'hAP ax³'}</span>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: ACCESS POLICY & MONETIZATION CONTROL */}
+            {activeTab === 'policy' && (
+              <div className="space-y-4">
+                {/* Active Mode Overview Banner */}
+                <div className="p-4 bg-[#101726] rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">CURRENT OPERATIONAL POLICY</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-bold border flex items-center gap-1.5 ${
+                          (router.accessMode || accessMode) === 'PAID_ONLY'
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            : (router.accessMode || accessMode) === 'COMPLETELY_FREE'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {(router.accessMode || accessMode) === 'PAID_ONLY' && <Lock className="w-3 h-3" />}
+                          {(router.accessMode || accessMode) === 'FREE_TRIAL_AND_PAID' && <Zap className="w-3 h-3 fill-current" />}
+                          {(router.accessMode || accessMode) === 'COMPLETELY_FREE' && <Unlock className="w-3 h-3" />}
+                          <span>
+                            {(router.accessMode || accessMode) === 'PAID_ONLY' && 'STRICTLY PAID / VOUCHERS ONLY'}
+                            {(router.accessMode || accessMode) === 'FREE_TRIAL_AND_PAID' && `HYBRID (${freeDurationMinutes}m Free Trial + Paid)`}
+                            {(router.accessMode || accessMode) === 'COMPLETELY_FREE' && '100% UNRESTRICTED FREE WI-FI'}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-left sm:text-right">
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">LAST HARDWARE SYNC</span>
+                      <span className="text-[11px] text-slate-300 font-mono">
+                        {router.policyLastSyncedAt ? new Date(router.policyLastSyncedAt).toLocaleTimeString() : 'Pending live push'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    Clean adoption onboards this device with zero pre-baked free trials or queues. The platform gives you total operational control to dictate whether this router enforces paid vouchers, grants promotional free trials, or runs as open public Wi-Fi.
+                  </p>
+                </div>
+
+                {/* Policy Mode Selector Cards */}
+                <div className="space-y-2">
+                  <span className="text-xs font-bold text-white uppercase tracking-wide block">Select Access Policy:</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    
+                    {/* Option 1: PAID ONLY */}
+                    <div 
+                      onClick={() => setAccessMode('PAID_ONLY')}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                        accessMode === 'PAID_ONLY'
+                          ? 'bg-rose-950/20 border-rose-500/60 shadow-lg shadow-rose-950/30 ring-1 ring-rose-500/40'
+                          : 'bg-[#101626] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <Lock className="w-4 h-4" />
+                        </div>
+                        {accessMode === 'PAID_ONLY' && (
+                          <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">ACTIVE</span>
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="text-white font-bold text-xs">Paid / Vouchers Only</h4>
+                        <p className="text-slate-400 text-[11px] mt-1 leading-normal">
+                          Zero free access. Guests must purchase a ticket, enter a voucher PIN, or pay via EcoCash/MyWallet.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Option 2: HYBRID */}
+                    <div 
+                      onClick={() => setAccessMode('FREE_TRIAL_AND_PAID')}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                        accessMode === 'FREE_TRIAL_AND_PAID'
+                          ? 'bg-amber-950/20 border-amber-500/60 shadow-lg shadow-amber-950/30 ring-1 ring-amber-500/40'
+                          : 'bg-[#101626] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <Zap className="w-4 h-4 fill-current" />
+                        </div>
+                        {accessMode === 'FREE_TRIAL_AND_PAID' && (
+                          <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">ACTIVE</span>
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="text-white font-bold text-xs">Free Trial + Vouchers</h4>
+                        <p className="text-slate-400 text-[11px] mt-1 leading-normal">
+                          Teaser trial: guests get {freeDurationMinutes}m free session, then buy high-speed vouchers to stay online.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Option 3: 100% FREE */}
+                    <div 
+                      onClick={() => setAccessMode('COMPLETELY_FREE')}
+                      className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                        accessMode === 'COMPLETELY_FREE'
+                          ? 'bg-emerald-950/20 border-emerald-500/60 shadow-lg shadow-emerald-950/30 ring-1 ring-emerald-500/40'
+                          : 'bg-[#101626] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          <Unlock className="w-4 h-4" />
+                        </div>
+                        {accessMode === 'COMPLETELY_FREE' && (
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">ACTIVE</span>
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="text-white font-bold text-xs">100% Free Public Wi-Fi</h4>
+                        <p className="text-slate-400 text-[11px] mt-1 leading-normal">
+                          Unrestricted public access sponsored by municipality, NGO, or donor. No payment prompts.
+                        </p>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Free Access Settings (Shown when mode allows free access) */}
+                {accessMode !== 'PAID_ONLY' && (
+                  <div className="p-4 bg-[#101626] rounded-xl border border-slate-800 space-y-4 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Sliders className="w-4 h-4 text-cyan-400" />
+                        <span className="font-bold text-white text-xs uppercase">Free Access Tuning</span>
+                      </div>
+                      <span className="text-slate-400 text-[11px]">Enforced via RouterOS Profile &amp; Simple Queues</span>
+                    </div>
+
+                    {/* Duration Buttons */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-300 font-bold block">Free Session Duration Granted:</label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[15, 30, 45, 60, 120].map((mins) => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => setFreeDurationMinutes(mins)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                              freeDurationMinutes === mins
+                                ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                                : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            {mins} mins
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bandwidth Speed Limit */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-300 font-bold block">Rate Limit (Upload / Download):</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {['3M/10M', '5M/15M', '10M/30M', '20M/50M'].map((rate) => (
+                          <button
+                            key={rate}
+                            type="button"
+                            onClick={() => setFreeRateLimit(rate)}
+                            className={`p-2 rounded-lg text-center text-xs font-mono font-bold border transition-colors cursor-pointer ${
+                              freeRateLimit === rate
+                                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                                : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            {rate}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Daily Quota */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-300 font-bold block">Daily Data Quota Per Client MAC:</label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[250, 500, 1000, 2000].map((mb) => (
+                          <button
+                            key={mb}
+                            type="button"
+                            onClick={() => setFreeDailyQuotaMb(mb)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-colors cursor-pointer ${
+                              freeDailyQuotaMb === mb
+                                ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
+                                : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            {mb >= 1000 ? `${mb / 1000} GB` : `${mb} MB`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Feedback Notification */}
+                {policyPushFeedback && (
+                  <div className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs animate-in fade-in duration-150 ${
+                    policyPushFeedback.type === 'success'
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                      : 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                  }`}>
+                    {policyPushFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 space-y-1">
+                      <span className="font-bold block">{policyPushFeedback.message}</span>
+                      {policyPushFeedback.script && (
+                        <button
+                          type="button"
+                          onClick={() => setShowScriptPreview(!showScriptPreview)}
+                          className="text-[11px] underline text-emerald-300 hover:text-white cursor-pointer"
+                        >
+                          {showScriptPreview ? 'Hide executed CLI script' : 'View executed CLI script'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Script Preview Box */}
+                {showScriptPreview && policyPushFeedback?.script && (
+                  <div className="p-3 bg-black/60 rounded-xl border border-slate-800 space-y-2 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-slate-400">RouterOS Commands Dispatched:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(policyPushFeedback.script || '');
+                          setCopiedPolicyScript(true);
+                          setTimeout(() => setCopiedPolicyScript(false), 2000);
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 hover:text-white border border-slate-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedPolicyScript ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedPolicyScript ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <pre className="text-[10px] text-emerald-400 font-mono whitespace-pre-wrap overflow-x-auto max-h-48 p-2 bg-[#050810] rounded border border-slate-900">
+                      {policyPushFeedback.script}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Push Policy to Router Action Bar */}
+                <div className="p-4 bg-[#0d121f] rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-xs">
+                    <span className="font-bold text-white block">Ready to sync policy?</span>
+                    <span className="text-slate-400 text-[11px]">
+                      Pushes live RouterOS configuration changes to {router.name} via WireGuard tunnel.
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isPushingPolicy}
+                    onClick={() => handlePushPolicy()}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
+                      isPushingPolicy
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-[#f05e17] to-amber-600 hover:from-[#d94c0b] hover:to-amber-500 text-white shadow-lg shadow-orange-950/50'
+                    }`}
+                  >
+                    {isPushingPolicy ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Pushing to Router...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>Push Policy to Router</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
             )}

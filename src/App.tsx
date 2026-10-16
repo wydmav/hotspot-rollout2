@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { storage } from './services/storage';
 import { supabaseService } from './services/supabase';
-import { VerticalType, GatewayProvider, AuthSession, TeamMember, Voucher, RouterDevice } from './types';
+import { VerticalType, GatewayProvider, AuthSession, TeamMember, Voucher, RouterDevice, RouterAccessMode } from './types';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
@@ -388,6 +388,46 @@ export default function App() {
     }
   };
 
+  const handleSetRouterAccessPolicy = async (
+    routerId: string | 'all',
+    policy: {
+      accessMode: RouterAccessMode;
+      freeDurationMinutes?: number;
+      freeRateLimit?: string;
+      freeDailyQuotaMb?: number;
+    }
+  ) => {
+    if (!checkPermission('toggle_freemode', 'Configuring router access policy')) return;
+    storage.setRouterAccessPolicy(routerId, policy);
+
+    try {
+      if (routerId === 'all') {
+        const res = await fetch('/api/devices/fleet/access-policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(policy)
+        });
+        const data = await res.json();
+        showToast(`Fleet policy '${policy.accessMode}' pushed to ${data.updatedCount || 'all'} routers over WireGuard.`);
+      } else {
+        const res = await fetch(`/api/devices/${routerId}/access-policy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(policy)
+        });
+        const data = await res.json();
+        showToast(`Policy '${policy.accessMode}' dispatched to router. ${data.commandCount || 0} CLI commands queued.`);
+      }
+    } catch (err: any) {
+      console.warn('[Policy Push] Controller API communication:', err.message);
+      showToast(`Policy saved locally as '${policy.accessMode}'.`);
+    }
+
+    if (isSupabaseConnected) {
+      supabaseService.syncRoutersToSupabase(storage.getState().routers);
+    }
+  };
+
   // Plan & Voucher Handlers
   const handleCreatePlan = (planData: any) => {
     if (!checkPermission('create_plan', 'Saving new pricing plan')) return;
@@ -723,6 +763,7 @@ export default function App() {
               onOpenDatabaseModal={() => setShowDatabaseModal(true)}
               isSupabaseConnected={isSupabaseConnected}
               onToggleRouterFreeMode={handleToggleRouterFreeMode}
+              onSetRouterAccessPolicy={handleSetRouterAccessPolicy}
               onIssuePassword={handleIssuePassword}
               currentUser={authSession.user}
             />

@@ -3,6 +3,7 @@ import { Smartphone, Repeat, Sliders, Users, ShieldCheck, Database, Clock, UserC
 import { 
   HotspotPlan, 
   RouterDevice, 
+  RouterAccessMode,
   Voucher, 
   PaymentTransaction,
   ContentFilterRule, 
@@ -41,6 +42,15 @@ interface NetworkSecurityViewProps {
   onOpenDatabaseModal: () => void;
   isSupabaseConnected: boolean;
   onToggleRouterFreeMode?: (routerId: string | 'all', enabled: boolean) => void;
+  onSetRouterAccessPolicy?: (
+    routerId: string | 'all',
+    policy: {
+      accessMode: RouterAccessMode;
+      freeDurationMinutes?: number;
+      freeRateLimit?: string;
+      freeDailyQuotaMb?: number;
+    }
+  ) => Promise<any>;
   onIssuePassword?: (memberId: string, customPass?: string) => void;
   currentUser?: TeamMember;
 }
@@ -194,6 +204,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           plans={props.plans}
           routers={props.routers}
           onToggleRouterFreeMode={props.onToggleRouterFreeMode}
+          onSetRouterAccessPolicy={props.onSetRouterAccessPolicy}
           onProcessPayment={props.onProcessPayment}
           onRedeemVoucher={props.onRedeemVoucher}
           currency={props.currency}

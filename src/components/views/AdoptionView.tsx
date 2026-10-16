@@ -27,9 +27,12 @@ import {
   AlertTriangle,
   Tag,
   Building2,
-  Network
+  Network,
+  Lock,
+  Unlock,
+  Sliders
 } from 'lucide-react';
-import { RouterDevice, VerticalType } from '../../types';
+import { RouterDevice, RouterAccessMode, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { WebFigLauncherModal } from './WebFigLauncherModal';
@@ -117,6 +120,59 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [newModel, setNewModel] = useState('MikroTik hAP ax³ (v7)');
   const [newRosVersion, setNewRosVersion] = useState<'v7' | 'v6'>('v7');
   const [newMacAddress, setNewMacAddress] = useState('D4:01:C3:AA:BB:CC');
+
+  // Fleet Bulk Access Policy Control State
+  const [bulkAccessMode, setBulkAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
+  const [bulkFreeMinutes, setBulkFreeMinutes] = useState<number>(30);
+  const [bulkRateLimit, setBulkRateLimit] = useState<string>('10M/30M');
+  const [isBulkPushing, setIsBulkPushing] = useState(false);
+  const [bulkPushToast, setBulkPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleBulkPolicyPush = async () => {
+    setIsBulkPushing(true);
+    setBulkPushToast(null);
+
+    try {
+      const targetRouterIds = filteredRouters.map(r => r.id);
+      const res = await fetch('/api/devices/fleet/access-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerIds: targetRouterIds,
+          vertical: localVerticalFilter === 'all' ? undefined : localVerticalFilter,
+          accessMode: bulkAccessMode,
+          freeDurationMinutes: bulkFreeMinutes,
+          freeRateLimit: bulkRateLimit
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        storage.setRouterAccessPolicy('all', {
+          accessMode: bulkAccessMode,
+          freeDurationMinutes: bulkFreeMinutes,
+          freeRateLimit: bulkRateLimit
+        });
+        setBulkPushToast({
+          type: 'success',
+          message: `Policy '${bulkAccessMode}' pushed to ${data.updatedCount} routers across the fleet!`
+        });
+        setTimeout(() => setBulkPushToast(null), 5000);
+      } else {
+        setBulkPushToast({
+          type: 'error',
+          message: data.message || 'Failed to dispatch bulk policy.'
+        });
+      }
+    } catch (err: any) {
+      setBulkPushToast({
+        type: 'error',
+        message: err.message || 'Network error'
+      });
+    } finally {
+      setIsBulkPushing(false);
+    }
+  };
 
   const effectiveFilter = localVerticalFilter;
   const filteredRouters = effectiveFilter === 'all'
@@ -472,6 +528,75 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         </div>
       </div>
 
+      {/* Fleet Access Policy Control Toolbar */}
+      <div className="bg-[#0f1422] p-3 sm:p-4 rounded-xl border border-amber-500/30 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+            <div>
+              <span className="text-xs font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
+                <span>Fleet Access Policy &amp; Monetization Control</span>
+                <span className="text-[10px] text-amber-300 font-normal">
+                  ({localVerticalFilter === 'all' ? 'All Fleet Routers' : `${localVerticalFilter.toUpperCase()} Scope`})
+                </span>
+              </span>
+              <p className="text-[11px] text-slate-400 font-mono">
+                Dictate whether routers enforce paid vouchers, offer promotional free trials, or run 100% open Wi-Fi.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <select
+              value={bulkAccessMode}
+              onChange={(e) => setBulkAccessMode(e.target.value as RouterAccessMode)}
+              className="px-2.5 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+            >
+              <option value="PAID_ONLY">🔒 Strictly Paid / Vouchers Only</option>
+              <option value="FREE_TRIAL_AND_PAID">⚡ Free Trial + Paid Vouchers</option>
+              <option value="COMPLETELY_FREE">🌐 100% Free Public Wi-Fi</option>
+            </select>
+
+            {bulkAccessMode !== 'PAID_ONLY' && (
+              <select
+                value={bulkFreeMinutes}
+                onChange={(e) => setBulkFreeMinutes(Number(e.target.value))}
+                className="px-2 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+              >
+                <option value={15}>15 mins</option>
+                <option value={30}>30 mins</option>
+                <option value={45}>45 mins</option>
+                <option value={60}>60 mins</option>
+                <option value={120}>120 mins</option>
+              </select>
+            )}
+
+            <button
+              type="button"
+              disabled={isBulkPushing || filteredRouters.length === 0}
+              onClick={handleBulkPolicyPush}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                isBulkPushing
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-950/40'
+              }`}
+            >
+              {isBulkPushing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3 fill-current" />}
+              <span>{isBulkPushing ? 'Pushing...' : 'Push to Scope'}</span>
+            </button>
+          </div>
+        </div>
+
+        {bulkPushToast && (
+          <div className={`p-2 rounded-lg text-xs font-mono flex items-center justify-between animate-in fade-in ${
+            bulkPushToast.type === 'success' ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-rose-950/60 text-rose-300 border border-rose-500/30'
+          }`}>
+            <span>{bulkPushToast.message}</span>
+            <button onClick={() => setBulkPushToast(null)} className="text-slate-400 hover:text-white ml-2">✕</button>
+          </div>
+        )}
+      </div>
+
       {/* Main Split Grid: Router Selector & One-Liner Box */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Router Fleet List */}
@@ -523,6 +648,23 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     </div>
 
                     <p className="text-[11px] text-slate-400 font-mono mt-1 truncate">{router.siteName}</p>
+
+                    {/* Access Policy Badge */}
+                    <div className="mt-1 flex items-center gap-1.5">
+                      {router.accessMode === 'COMPLETELY_FREE' ? (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          <Unlock className="w-2.5 h-2.5" /> 100% FREE ACCESS
+                        </span>
+                      ) : (router.accessMode === 'FREE_TRIAL_AND_PAID' || router.freeModeEnabled) ? (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                          <Zap className="w-2.5 h-2.5 fill-current" /> FREE TRIAL ({router.freeDurationMinutes || 30}m)
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" /> PAID ONLY
+                        </span>
+                      )}
+                    </div>
 
                     {/* External Client Group Badge if assigned */}
                     {(() => {
