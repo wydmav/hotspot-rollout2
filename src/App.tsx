@@ -24,7 +24,10 @@ export default function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => storage.getAuthSession());
   const [effectiveRole, setEffectiveRole] = useState<TeamMember['role']>(() => {
     const s = storage.getAuthSession();
-    return s ? s.effectiveRole : 'Owner';
+    if (!s) return 'Super Admin';
+    if (s.effectiveRole === 'Owner' || s.effectiveRole === 'Admin') return 'Super Admin';
+    if (s.effectiveRole === 'Viewer') return 'Management';
+    return s.effectiveRole;
   });
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedVertical, setSelectedVertical] = useState<VerticalType | 'all'>('all');
@@ -46,6 +49,7 @@ export default function App() {
   const [globalInviteSites, setGlobalInviteSites] = useState<string[]>([]);
   const [recentlyInvitedTeammate, setRecentlyInvitedTeammate] = useState<{ member: TeamMember; inviteUrl: string } | null>(null);
   const [copiedGlobalInviteUrl, setCopiedGlobalInviteUrl] = useState(false);
+  const [copiedTempPass, setCopiedTempPass] = useState(false);
 
   // Subscribe to reactive storage mutations
   useEffect(() => {
@@ -139,6 +143,22 @@ export default function App() {
       window.removeEventListener('hashchange', handleUrlAuth);
     };
   }, []);
+
+  // Role-Based Navigation Safety:
+  // - Super Admin: full access to all 4 tabs
+  // - Collaborator: only captive portal & ads ('network' tab)
+  // - Management: only fleet overview ('dashboard' tab)
+  useEffect(() => {
+    const isSuperAdmin = !effectiveRole || effectiveRole === 'Super Admin' || effectiveRole === 'Owner' || effectiveRole === 'Admin';
+    const isCollaborator = effectiveRole === 'Collaborator';
+    const isManagement = effectiveRole === 'Management' || effectiveRole === 'Viewer';
+
+    if (isCollaborator && currentTab !== 'network') {
+      setCurrentTab('network');
+    } else if (isManagement && currentTab !== 'dashboard') {
+      setCurrentTab('dashboard');
+    }
+  }, [effectiveRole, currentTab]);
 
   // -----------------------------------------------------------------------------
   // DEADMAN WATCHDOG SENTINEL (Jitter-Resilient Status Verification)
@@ -629,6 +649,7 @@ export default function App() {
         totalRouterCount={state.routers.length}
         isSupabaseConnected={isSupabaseConnected}
         onOpenDatabaseModal={() => setShowDatabaseModal(true)}
+        effectiveRole={effectiveRole}
       />
 
       {/* Main Workspace Frame */}
@@ -656,9 +677,13 @@ export default function App() {
           onTriggerBackgroundCheck={handleTriggerVoucherCheck}
           onQuickRestock={handleQuickRestock}
           currentUser={authSession.user}
-          effectiveRole={effectiveRole}
           onRolePreviewChange={(role) => {
             setEffectiveRole(role);
+            if (role === 'Collaborator') {
+              setCurrentTab('network');
+            } else if (role === 'Management') {
+              setCurrentTab('dashboard');
+            }
             showToast(`Switched active preview role to: ${role}`);
           }}
           onSignOut={() => {
@@ -907,11 +932,12 @@ export default function App() {
                   onChange={(e) => setGlobalInviteRole(e.target.value as TeamMember['role'])}
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17] cursor-pointer"
                 >
-                  <option value="Admin">Admin (Full Site Configuration &amp; Billing)</option>
-                  <option value="Technical">Technical (MikroTik Router &amp; WireGuard Only)</option>
-                  <option value="Collaborator">Collaborator (Voucher Generation Only)</option>
+                  <option value="Super Admin">Super Admin (Full Access: Code, Adoption, Billing &amp; Gateways)</option>
+                  <option value="Collaborator">Collaborator (Captive Portal, Image Uploads &amp; Ads)</option>
+                  <option value="Management">Management (Fleet Overview Dashboard Only)</option>
+                  <option value="Admin">Admin (Site Admin)</option>
+                  <option value="Technical">Technical (MikroTik Router &amp; WireGuard)</option>
                   <option value="Viewer">Viewer (Read-Only Dashboard)</option>
-                  <option value="Owner">Owner (Super Admin Controller Authority)</option>
                 </select>
               </div>
 

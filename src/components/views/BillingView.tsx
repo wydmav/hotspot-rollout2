@@ -24,6 +24,8 @@ interface BillingViewProps {
   voucherThreshold?: number;
   onUpdateVoucherThreshold?: (threshold: number) => void;
   onTriggerVoucherCheck?: () => void;
+  onRemoveGateway?: (provider: GatewayProvider) => void;
+  isSuperAdmin?: boolean;
 }
 
 export const BillingView: React.FC<BillingViewProps> = (props) => {
@@ -112,6 +114,8 @@ export const BillingView: React.FC<BillingViewProps> = (props) => {
           onRunSandboxPayment={props.onRunSandboxPayment}
           onToggleLive={props.onToggleLive}
           onUpdateCredentials={props.onUpdateCredentials}
+          onRemoveGateway={props.onRemoveGateway}
+          isSuperAdmin={props.isSuperAdmin}
           currency={props.currency}
         />
       )}

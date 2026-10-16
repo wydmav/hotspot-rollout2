@@ -53,10 +53,19 @@ interface NetworkSecurityViewProps {
   ) => Promise<any>;
   onIssuePassword?: (memberId: string, customPass?: string) => void;
   currentUser?: TeamMember;
+  effectiveRole?: TeamMember['role'];
 }
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
+  const isCollaborator = props.effectiveRole === 'Collaborator';
   const [activeSubTab, setActiveSubTab] = useState<'portal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security'>('portal');
+
+  // Enforce portal subtab for Collaborator
+  React.useEffect(() => {
+    if (isCollaborator && activeSubTab !== 'portal') {
+      setActiveSubTab('portal');
+    }
+  }, [isCollaborator, activeSubTab]);
 
   const sessionStats = useMemo(() => {
     return computeSessionStats(props.vouchers, props.transactions || [], props.selectedVertical);
@@ -74,8 +83,11 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
             }`}
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span>Captive Portal</span>
+            <span>{isCollaborator ? 'Captive Portal, Images & Ads' : 'Captive Portal'}</span>
           </button>
+
+          {!isCollaborator && (
+            <>
 
           <button
             onClick={() => setActiveSubTab('roaming')}
@@ -142,23 +154,44 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>Security &amp; Passkeys</span>
           </button>
+        </>
+      )}
+    </div>
+
+    {/* Database Shortcut Button (Super Admin Exclusive) */}
+    {!isCollaborator && (
+      <button
+        onClick={props.onOpenDatabaseModal}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
+          props.isSupabaseConnected
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
+        }`}
+      >
+        <Database className="w-3.5 h-3.5" />
+        <span>{props.isSupabaseConnected ? 'Supabase Active' : 'Configure Supabase DB'}</span>
+      </button>
+    )}
+  </div>
+
+    {/* Collaborator Role Context Banner */}
+    {isCollaborator && (
+      <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-3.5 flex items-center justify-between font-mono text-xs">
+        <div className="flex items-center gap-2.5">
+          <Smartphone className="w-4 h-4 text-[#f05e17]" />
+          <div>
+            <span className="font-bold text-white block">Collaborator Creative Studio</span>
+            <span className="text-[10px] text-slate-400 block font-normal">Design guest captive portal appearance, upload branded backgrounds, and configure connected sponsor ad banners.</span>
+          </div>
         </div>
-
-        {/* Database Shortcut Button */}
-        <button
-          onClick={props.onOpenDatabaseModal}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
-            props.isSupabaseConnected
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-              : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
-          }`}
-        >
-          <Database className="w-3.5 h-3.5" />
-          <span>{props.isSupabaseConnected ? 'Supabase Active' : 'Configure Supabase DB'}</span>
-        </button>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30 shrink-0">
+          Collaborator Tier
+        </span>
       </div>
+    )}
 
-      {/* Session Duration Telemetry Quick-Glance Ribbon */}
+    {/* Session Duration Telemetry Quick-Glance Ribbon (Super Admin Exclusive) */}
+    {!isCollaborator && (
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#0f1422] border border-[#232d42] text-xs font-mono">
         <div className="flex flex-wrap items-center gap-4 sm:gap-6">
           <div className="flex items-center gap-2">
@@ -197,6 +230,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           <span>{activeSubTab === 'sessions' ? 'Viewing Logs Tab' : 'View Full Session Logs →'}</span>
         </button>
       </div>
+    )}
 
       {/* Sub-view Content */}
       {activeSubTab === 'portal' && (
@@ -209,6 +243,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           onRedeemVoucher={props.onRedeemVoucher}
           currency={props.currency}
           selectedVertical={props.selectedVertical}
+          effectiveRole={props.effectiveRole}
         />
       )}
 

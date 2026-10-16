@@ -125,24 +125,19 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
     description: string;
   }> = [
     {
-      role: 'Owner',
-      label: 'Owner / Super Admin',
-      description: 'Unrestricted hardware, billing, keys & team authority'
-    },
-    {
-      role: 'Admin',
-      label: 'Site Admin',
-      description: 'Fleet and captive portal config, plans & vouchers'
+      role: 'Super Admin',
+      label: 'Super Admin',
+      description: 'Full code, adoption, billing & gateways'
     },
     {
       role: 'Collaborator',
-      label: 'Hotspot Collaborator',
-      description: 'Vouchers & plans only. Gateway credentials hidden.'
+      label: 'Collaborator',
+      description: 'Captive portal, image upload & ads only'
     },
     {
-      role: 'Viewer',
-      label: 'Read-Only Viewer',
-      description: 'Auditor access. All mutations and deletions disabled.'
+      role: 'Management',
+      label: 'Management',
+      description: 'Fleet overview dashboard only'
     }
   ];
 
@@ -177,12 +172,7 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
             {currentUser.name}
           </div>
           <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-            <span className="truncate">{effectiveRole}</span>
-            {effectiveRole !== currentUser.role && (
-              <span className="text-[9px] text-[#f05e17] font-bold px-1 rounded bg-[#f05e17]/10 border border-[#f05e17]/30">
-                Preview
-              </span>
-            )}
+            <span className="truncate">{currentUser.role}</span>
           </div>
         </div>
 
@@ -343,61 +333,6 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
                 </span>
               </button>
             )}
-          </div>
-
-          {/* 3. Role Preview Switcher */}
-          <div className="space-y-1.5 pt-2 border-t border-[#1f283d]">
-            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between px-1">
-              <span className="flex items-center gap-1.5">
-                <Eye className="w-3.5 h-3.5 text-[#f05e17]" />
-                <span>Role Preview Switcher</span>
-              </span>
-              {effectiveRole !== currentUser.role && (
-                <button
-                  type="button"
-                  onClick={() => onRolePreviewChange(currentUser.role)}
-                  className="text-[10px] text-[#f05e17] hover:text-[#ff7e42] hover:underline cursor-pointer"
-                >
-                  Reset ({currentUser.role})
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-1.5">
-              {rolesList.map((r) => {
-                const isActive = effectiveRole === r.role;
-                return (
-                  <button
-                    key={r.role}
-                    type="button"
-                    onClick={() => onRolePreviewChange(r.role)}
-                    className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-[#f05e17]/15 border-[#f05e17] text-white shadow-sm'
-                        : 'bg-[#121829] hover:bg-[#182035] border-[#1f283d] text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <div className="font-bold text-[11px] truncate flex items-center gap-1.5">
-                      {isActive ? (
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#f05e17] shrink-0" />
-                      ) : (
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-600 shrink-0" />
-                      )}
-                      <span>{r.role}</span>
-                    </div>
-                    <div className="text-[9px] text-slate-500 truncate mt-0.5">
-                      {r.role === 'Owner'
-                        ? 'Full Control'
-                        : r.role === 'Collaborator'
-                        ? 'Vouchers Only'
-                        : r.role === 'Viewer'
-                        ? 'Read-Only'
-                        : 'Fleet Admin'}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           {/* 4. Sign Out Button */}

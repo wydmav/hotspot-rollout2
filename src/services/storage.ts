@@ -14,7 +14,9 @@ import {
   AuthSession,
   TenantGroup,
   CaptivePortalLead,
-  ConnectionAttemptLog
+  ConnectionAttemptLog,
+  SponsorAdConfig,
+  PlatformRole
 } from '../types';
 
 // Updated storage key for pristine scratch state
@@ -160,7 +162,7 @@ export const INITIAL_TEAM: TeamMember[] = [
     id: 'tm_owner',
     name: 'Raphooko Phooko',
     email: 'rphooko@tconnect.africa',
-    role: 'Owner',
+    role: 'Super Admin',
     scopedSites: [],
     mfaEnabled: true,
     status: 'active',
@@ -547,10 +549,11 @@ class StorageService {
             }
           }
           if (parsed.team && Array.isArray(parsed.team)) {
-            const owner = parsed.team.find((m: any) => m.role === 'Owner' || m.id === 'tm_owner');
+            const owner = parsed.team.find((m: any) => m.role === 'Super Admin' || m.role === 'Owner' || m.id === 'tm_owner');
             if (owner) {
               owner.name = 'Raphooko Phooko';
               owner.email = 'rphooko@tconnect.africa';
+              owner.role = 'Super Admin';
             } else {
               parsed.team.unshift(INITIAL_TEAM[0]);
             }
@@ -1475,6 +1478,39 @@ class StorageService {
     this.saveState();
   }
 
+  removeGateway(provider: GatewayProvider): boolean {
+    const target = this.state.gateways.find((g) => g.provider === provider);
+    if (!target) return false;
+
+    this.state.gateways = this.state.gateways.filter((g) => g.provider !== provider);
+
+    this.logAudit({
+      actor: 'Raphooko Phooko',
+      role: 'Super Admin',
+      action: 'gateway.remove',
+      target: target.name,
+      details: `Super Admin permanently removed payment gateway integration '${target.name}' from active gateway roster.`
+    });
+
+    this.saveState();
+    return true;
+  }
+
+  restoreGateway(gateway: GatewayConfig): void {
+    const exists = this.state.gateways.some((g) => g.provider === gateway.provider);
+    if (!exists) {
+      this.state.gateways.push(gateway);
+      this.logAudit({
+        actor: 'Raphooko Phooko',
+        role: 'Super Admin',
+        action: 'gateway.restore',
+        target: gateway.name,
+        details: `Restored payment gateway '${gateway.name}' to active roster.`
+      });
+      this.saveState();
+    }
+  }
+
   /**
    * Initiates an atomic 'pending' transaction prior to remote gateway dispatch.
    * Prevents race conditions, client double-clicks, and phantom voucher generation.
@@ -1736,12 +1772,15 @@ class StorageService {
   }
 
   // Team, RBAC & Invites
-  inviteTeamMember(name: string, email: string, role: TeamMember['role'], scopedSites: string[]) {
+  inviteTeamMember(name: string, email: string, role: TeamMember['role'], scopedSites: string[], customPassword?: string) {
     const inviteToken = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const cleanEmail = email.trim().toLowerCase();
+    const randCode = Math.floor(1000 + Math.random() * 9000);
+    const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : `TC-${randCode}-${alphaCode}!`;
     
     // Check if member already exists by email
-    const cleanEmail = email.trim().toLowerCase();
     const existingIndex = this.state.team.findIndex((m) => m.email.toLowerCase() === cleanEmail);
     
     if (existingIndex >= 0) {
@@ -1752,13 +1791,15 @@ class StorageService {
       existing.inviteToken = inviteToken;
       existing.inviteTokenExpiresAt = expiresAt;
       existing.invitedBy = 'Raphooko Phooko';
+      existing.tempPassword = tempPassword;
+      existing.tempPasswordIssuedAt = new Date().toISOString();
       existing.status = 'invited';
       this.logAudit({
         actor: 'Raphooko Phooko',
-        role: 'Owner',
+        role: 'Super Admin',
         action: 'team.invite_reissued',
         target: cleanEmail,
-        details: `Re-issued single-use invitation for role '${role}' with instant token authentication.`
+        details: `Re-issued invitation for role '${role}' with temporary credentials.`
       });
       this.saveState();
       return existing;
@@ -1770,26 +1811,60 @@ class StorageService {
       email: cleanEmail,
       role,
       scopedSites,
-      mfaEnabled: role === 'Owner' || role === 'Admin' || role === 'Technical',
+      mfaEnabled: role === 'Super Admin' || role === 'Owner',
       status: 'invited',
       invitedAt: new Date().toISOString().replace('T', ' ').slice(0, 10),
       inviteToken,
       inviteTokenExpiresAt: expiresAt,
-      invitedBy: 'Raphooko Phooko'
+      invitedBy: 'Raphooko Phooko',
+      tempPassword,
+      tempPasswordIssuedAt: new Date().toISOString()
     };
 
     this.state.team.push(newMember);
 
     this.logAudit({
       actor: 'Raphooko Phooko',
-      role: 'Owner',
+      role: 'Super Admin',
       action: 'team.invite',
       target: cleanEmail,
-      details: `Dispatched single-use invite for role '${role}' (Scoped to: ${scopedSites.length ? scopedSites.join(', ') : 'All Sites'}) with instant link auth.`
+      details: `Dispatched single-use invite for role '${role}' (Scoped to: ${scopedSites.length ? scopedSites.join(', ') : 'All Sites'}) with credentials.`
     });
 
     this.saveState();
     return newMember;
+  }
+
+  getSponsorAdConfig(): SponsorAdConfig {
+    if ((this.state as any).sponsorAd) {
+      return (this.state as any).sponsorAd;
+    }
+    return {
+      enabled: true,
+      sponsorName: 'Alliance Insurance Lesotho',
+      headline: 'Travel & Asset Protection Across Lesotho',
+      description: 'Enjoy free high-speed Starlink WiFi courtesy of Alliance Insurance. Connect with local protection plans today.',
+      imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80',
+      destinationUrl: 'https://alliance.co.ls',
+      displayTrigger: 'both',
+      countdownDurationSec: 5,
+      skipAllowed: true
+    };
+  }
+
+  updateSponsorAdConfig(config: Partial<SponsorAdConfig>): SponsorAdConfig {
+    const current = this.getSponsorAdConfig();
+    const updated: SponsorAdConfig = { ...current, ...config };
+    (this.state as any).sponsorAd = updated;
+    this.logAudit({
+      actor: 'Admin / Collaborator',
+      role: 'Collaborator',
+      action: 'portal.sponsor_ad_update',
+      target: updated.sponsorName,
+      details: `Updated captive portal in-session sponsor ad banner: '${updated.headline}'.`
+    });
+    this.saveState();
+    return updated;
   }
 
   redeemInviteToken(token: string, emailHint?: string): { success: boolean; session?: AuthSession; member?: TeamMember; message: string } {

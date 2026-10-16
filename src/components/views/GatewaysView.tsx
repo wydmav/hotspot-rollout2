@@ -16,7 +16,8 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  Ticket
+  Ticket,
+  Trash2
 } from 'lucide-react';
 import { GatewayConfig, GatewayProvider } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
@@ -27,6 +28,8 @@ interface GatewaysViewProps {
   onRunSandboxPayment: (provider: GatewayProvider, amount?: number) => { success: boolean; message?: string; transactionRef?: string };
   onToggleLive: (provider: GatewayProvider, setLive: boolean) => { success: boolean; isLive?: boolean; message?: string };
   onUpdateCredentials: (provider: GatewayProvider, updates: Partial<GatewayConfig>) => void;
+  onRemoveGateway?: (provider: GatewayProvider) => void;
+  isSuperAdmin?: boolean;
   currency: string;
 }
 
@@ -36,22 +39,36 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   onRunSandboxPayment,
   onToggleLive,
   onUpdateCredentials,
+  onRemoveGateway,
+  isSuperAdmin = true,
   currency,
 }) => {
-  const [selectedGateway, setSelectedGateway] = useState<GatewayConfig>(gateways[0]);
+  const [selectedGateway, setSelectedGateway] = useState<GatewayConfig | undefined>(gateways[0]);
   const [activeStep, setActiveStep] = useState<number>(1);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+
+  // Keep selectedGateway in sync when gateways array updates
+  React.useEffect(() => {
+    if (gateways.length > 0) {
+      if (!selectedGateway || !gateways.some(g => g.provider === selectedGateway.provider)) {
+        handleSelectGateway(gateways[0]);
+      }
+    } else {
+      setSelectedGateway(undefined);
+    }
+  }, [gateways]);
 
   // Edit fields for selected gateway
-  const [apiKey, setApiKey] = useState(selectedGateway.apiKey || '');
-  const [apiSecret, setApiSecret] = useState(selectedGateway.apiSecret || '');
-  const [apiPassword, setApiPassword] = useState(selectedGateway.apiPassword || '');
+  const [apiKey, setApiKey] = useState(selectedGateway?.apiKey || '');
+  const [apiSecret, setApiSecret] = useState(selectedGateway?.apiSecret || '');
+  const [apiPassword, setApiPassword] = useState(selectedGateway?.apiPassword || '');
   const [showPassword, setShowPassword] = useState(false);
-  const [bearerToken, setBearerToken] = useState(selectedGateway.bearerToken || '');
-  const [merchantId, setMerchantId] = useState(selectedGateway.merchantId || (selectedGateway.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-  const [webhookSecret, setWebhookSecret] = useState(selectedGateway.webhookSecret || '');
+  const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
+  const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
+  const [webhookSecret, setWebhookSecret] = useState(selectedGateway?.webhookSecret || '');
 
   // OTT Voucher Generation & Quick Redemption Tester
   const [generatedTestPin, setGeneratedTestPin] = useState('8921-3482-9011');
@@ -71,7 +88,15 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setActiveStep(1);
   };
 
+  const handleConfirmRemoveGateway = () => {
+    if (!selectedGateway || !onRemoveGateway) return;
+    const providerToRemove = selectedGateway.provider;
+    setShowRemoveConfirm(false);
+    onRemoveGateway(providerToRemove);
+  };
+
   const handleSaveCredentials = () => {
+    if (!selectedGateway) return;
     onUpdateCredentials(selectedGateway.provider, {
       apiKey,
       apiSecret,
@@ -89,6 +114,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   };
 
   const handleRunPing = async () => {
+    if (!selectedGateway) return;
     setIsProcessing(true);
     setTestResult(null);
     try {
@@ -176,12 +202,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   };
 
   const handleCopyWebhook = () => {
+    if (!selectedGateway) return;
     navigator.clipboard.writeText(selectedGateway.webhookUrl);
     setCopiedWebhook(true);
     setTimeout(() => setCopiedWebhook(false), 2000);
   };
 
   const handleRunSandboxPayment = () => {
+    if (!selectedGateway) return;
     setIsProcessing(true);
     setTimeout(() => {
       const res = onRunSandboxPayment(selectedGateway.provider, 10);
@@ -197,6 +225,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   };
 
   const handleToggleLiveStatus = (setLive: boolean) => {
+    if (!selectedGateway) return;
     const res = onToggleLive(selectedGateway.provider, setLive);
     if (!res.success) {
       setTestResult({
@@ -231,7 +260,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       {/* Gateway Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {gateways.map((gw) => {
-          const isSelected = selectedGateway.provider === gw.provider;
+          const isSelected = selectedGateway?.provider === gw.provider;
           return (
             <div
               key={gw.provider}
@@ -270,6 +299,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       </div>
 
       {/* Guided 5-Step Gateway Setup Wizard */}
+      {selectedGateway ? (
       <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#232d42] gap-3">
           <div className="flex items-center gap-3">
@@ -287,9 +317,19 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {isSuperAdmin && onRemoveGateway && (
+              <button
+                type="button"
+                onClick={() => setShowRemoveConfirm(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Remove Gateway</span>
+              </button>
+            )}
             <button
               onClick={() => handleToggleLiveStatus(!selectedGateway.isLive)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer ${
                 selectedGateway.isLive
                   ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm'
@@ -713,6 +753,50 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           )}
         </div>
       </div>
+      ) : (
+        <div className="p-8 text-center bg-[#0f1422] rounded-xl border border-[#232d42] text-slate-400 font-mono text-xs">
+          No payment gateways available.
+        </div>
+      )}
+
+      {/* Remove Gateway Confirmation Modal */}
+      {showRemoveConfirm && selectedGateway && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-rose-500/40 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2.5 text-rose-400 font-bold text-sm">
+              <Trash2 className="w-5 h-5 text-rose-400 shrink-0" />
+              <span>Remove Payment Gateway</span>
+            </div>
+
+            <p className="text-slate-300 leading-relaxed">
+              Are you sure you want to remove <strong className="text-white">{selectedGateway.name}</strong> from active gateway configurations?
+            </p>
+            <div className="p-3 rounded-xl bg-[#161d31] border border-[#232d42] text-slate-400 text-[11px] space-y-1">
+              <div>• Non-super admin roles (Collaborators, Management) will not see this gateway.</div>
+              <div>• Captive portal checkouts will no longer offer {selectedGateway.name}.</div>
+              <div>• All credentials and webhook signing keys for this adapter will be cleared.</div>
+            </div>
+
+            <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRemoveConfirm(false)}
+                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemoveGateway}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Confirm &amp; Remove</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

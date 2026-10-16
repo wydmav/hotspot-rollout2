@@ -28,7 +28,7 @@ import {
   Unlock,
   Send
 } from 'lucide-react';
-import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice, RouterAccessMode } from '../../types';
+import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice, RouterAccessMode, SponsorAdConfig, TeamMember } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { CaptivePortalEditor } from './CaptivePortalEditor';
@@ -53,6 +53,7 @@ interface CaptivePortalViewProps {
   onRedeemVoucher: (code: string, mac: string, hostname?: string) => any;
   currency: string;
   selectedVertical?: VerticalType | 'all';
+  effectiveRole?: TeamMember['role'];
 }
 
 // Preset Background Wallpapers
@@ -103,9 +104,17 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   onRedeemVoucher,
   currency,
   selectedVertical = 'all',
+  effectiveRole = 'Super Admin',
 }) => {
+  const isCollaborator = effectiveRole === 'Collaborator';
   // Main view navigation tabs (Scope builders is primary)
-  const [activeMainTab, setActiveMainTab] = useState<'scopes' | 'free_mode' | 'lockdown' | 'walled_garden' | 'builder'>('scopes');
+  const [activeMainTab, setActiveMainTab] = useState<'scopes' | 'builder' | 'ads' | 'free_mode' | 'lockdown' | 'walled_garden'>('scopes');
+
+  // Sponsor Ad Campaign State
+  const [sponsorAd, setSponsorAd] = useState<SponsorAdConfig>(() => storage.getSponsorAdConfig());
+  const [adSavedMessage, setAdSavedMessage] = useState(false);
+  const [testAdActive, setTestAdActive] = useState(false);
+  const [testAdTimer, setTestAdTimer] = useState(5);
 
   // Preview simulator step (matches mkcontroller: Identification -> Authentication -> Payment -> Success -> Session Usage)
   const [previewStep, setPreviewStep] = useState<'identification' | 'authentication' | 'payment' | 'success' | 'usage'>('identification');
@@ -575,7 +584,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Scope Builders (5 Verticals)</span>
+            <span>Scope Builders</span>
           </button>
 
           <button
@@ -589,34 +598,48 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
           </button>
 
           <button
-            onClick={() => setActiveMainTab('free_mode')}
+            onClick={() => setActiveMainTab('ads')}
             className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
-              activeMainTab === 'free_mode' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              activeMainTab === 'ads' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Zap className="w-3.5 h-3.5 fill-current" />
-            <span>Access Policies &amp; Monetization</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>Connected Ads &amp; Sponsors</span>
           </button>
 
-          <button
-            onClick={() => setActiveMainTab('lockdown')}
-            className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
-              activeMainTab === 'lockdown' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Strict CNA Lockdown</span>
-          </button>
+          {!isCollaborator && (
+            <>
+              <button
+                onClick={() => setActiveMainTab('free_mode')}
+                className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
+                  activeMainTab === 'free_mode' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Access Policies &amp; Monetization</span>
+              </button>
 
-          <button
-            onClick={() => setActiveMainTab('walled_garden')}
-            className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
-              activeMainTab === 'walled_garden' ? 'bg-[#161d31] text-white' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Walled Garden</span>
-          </button>
+              <button
+                onClick={() => setActiveMainTab('lockdown')}
+                className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
+                  activeMainTab === 'lockdown' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Strict CNA Lockdown</span>
+              </button>
+
+              <button
+                onClick={() => setActiveMainTab('walled_garden')}
+                className={`px-3 py-1.5 rounded-md font-bold transition-colors flex items-center gap-1.5 ${
+                  activeMainTab === 'walled_garden' ? 'bg-[#161d31] text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Walled Garden</span>
+              </button>
+            </>
+          )}
 
           <button
             onClick={() => setShowTenantModal(true)}
@@ -1603,6 +1626,245 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                 {/* Bottom Footer Credits */}
                 <div className="relative z-10 text-center text-[10px] font-mono text-slate-400/80 pt-2">
                   T-Connect - Starlink Powered Solutions
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 1.5: IN-SESSION SPONSOR ADS & CONNECTED BANNERS                   */}
+      {/* ===================================================================== */}
+      {activeMainTab === 'ads' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start font-mono text-xs">
+          {/* LEFT 6 COLS: AD CAMPAIGN CONTROLS */}
+          <div className="lg:col-span-6 bg-[#0f1422] rounded-2xl border border-[#232d42] p-5 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h2 className="text-sm font-extrabold text-white">In-Session Connected Ads &amp; Sponsors</h2>
+                  <p className="text-[11px] text-slate-400">Promotions displayed to users upon Wi-Fi connection</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                Collaborator Feature
+              </span>
+            </div>
+
+            {/* Campaign Enable Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-[#161d31] border border-[#232d42]">
+              <div>
+                <span className="font-bold text-white block">Enable Sponsor Ad Campaign</span>
+                <span className="text-[10px] text-slate-400 block">Display sponsor banner when subscribers connect</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSponsorAd(prev => ({ ...prev, enabled: !prev.enabled }))}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  sponsorAd.enabled
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-[#090d16] text-slate-400 border border-[#232d42]'
+                }`}
+              >
+                {sponsorAd.enabled ? 'Campaign Active' : 'Campaign Paused'}
+              </button>
+            </div>
+
+            {/* Sponsor Identity */}
+            <div className="space-y-3">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Sponsor Brand Name</label>
+                <input
+                  type="text"
+                  value={sponsorAd.sponsorName}
+                  onChange={(e) => setSponsorAd(prev => ({ ...prev, sponsorName: e.target.value }))}
+                  placeholder="e.g. Alliance Insurance Lesotho"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Ad Headline</label>
+                <input
+                  type="text"
+                  value={sponsorAd.headline}
+                  onChange={(e) => setSponsorAd(prev => ({ ...prev, headline: e.target.value }))}
+                  placeholder="e.g. Protect Your Journey Across Lesotho"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Promotional Description</label>
+                <textarea
+                  rows={2}
+                  value={sponsorAd.description}
+                  onChange={(e) => setSponsorAd(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Brief message displayed below headline..."
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17] resize-none text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Destination Web Link (Click-Through URL)</label>
+                <input
+                  type="url"
+                  value={sponsorAd.destinationUrl}
+                  onChange={(e) => setSponsorAd(prev => ({ ...prev, destinationUrl: e.target.value }))}
+                  placeholder="https://alliance.co.ls"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              {/* Banner Image URL / Preset Picker */}
+              <div className="space-y-2 pt-1">
+                <label className="text-slate-300 font-bold block">Ad Banner Image URL</label>
+                <input
+                  type="text"
+                  value={sponsorAd.imageUrl}
+                  onChange={(e) => setSponsorAd(prev => ({ ...prev, imageUrl: e.target.value }))}
+                  placeholder="https://images.unsplash.com/..."
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17]"
+                />
+
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 block w-full mb-0.5">Quick Presets:</span>
+                  {[
+                    { label: 'Alliance Insurance', url: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80' },
+                    { label: 'Maluti Coffee', url: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80' },
+                    { label: 'Maseru Metro Transit', url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80' },
+                  ].map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setSponsorAd(prev => ({ ...prev, imageUrl: p.url }))}
+                      className="px-2 py-1 rounded bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-[10px] text-slate-300 cursor-pointer"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Countdown Duration */}
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Ad Interstitial Countdown</label>
+                  <select
+                    value={sponsorAd.countdownDurationSec}
+                    onChange={(e) => setSponsorAd(prev => ({ ...prev, countdownDurationSec: Number(e.target.value) }))}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-xl text-white focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                  >
+                    <option value={3}>3 Seconds</option>
+                    <option value={5}>5 Seconds (Recommended)</option>
+                    <option value={10}>10 Seconds</option>
+                    <option value={15}>15 Seconds</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Skip Option</label>
+                  <button
+                    type="button"
+                    onClick={() => setSponsorAd(prev => ({ ...prev, skipAllowed: !prev.skipAllowed }))}
+                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      sponsorAd.skipAllowed
+                        ? 'bg-[#161d31] border-emerald-500/40 text-emerald-300'
+                        : 'bg-[#161d31] border-[#232d42] text-slate-400'
+                    }`}
+                  >
+                    {sponsorAd.skipAllowed ? 'Skip Allowed after 3s' : 'Mandatory View'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Save Ad Configuration Action */}
+            <div className="pt-3 border-t border-[#232d42] flex items-center justify-between">
+              <span className="text-[11px] text-emerald-400 font-bold">
+                {adSavedMessage ? 'Campaign Saved & Pushed Live!' : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  storage.updateSponsorAdConfig(sponsorAd);
+                  setAdSavedMessage(true);
+                  setTimeout(() => setAdSavedMessage(false), 3000);
+                }}
+                className="px-5 py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save &amp; Deploy Sponsor Campaign</span>
+              </button>
+            </div>
+          </div>
+
+          {/* RIGHT 6 COLS: LIVE INTERACTIVE PREVIEW */}
+          <div className="lg:col-span-6 bg-[#0f1422] rounded-2xl border border-[#232d42] p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <span className="font-extrabold text-white text-sm flex items-center gap-2">
+                <Eye className="w-4 h-4 text-[#f05e17]" /> Live Connected Ad Preview
+              </span>
+              <span className="text-[10px] text-slate-400">Simulator</span>
+            </div>
+
+            {/* Simulated Phone Frame */}
+            <div className="mx-auto w-full max-w-[320px] bg-[#000] border-4 border-slate-700 rounded-[32px] overflow-hidden shadow-2xl relative font-sans">
+              {/* Top Speaker Notch */}
+              <div className="w-24 h-4 bg-slate-800 mx-auto rounded-b-xl z-20 relative flex items-center justify-center">
+                <div className="w-10 h-1 bg-slate-600 rounded-full"></div>
+              </div>
+
+              {/* Screen Content */}
+              <div className="p-4 space-y-4 text-white min-h-[440px] flex flex-col justify-between bg-gradient-to-b from-slate-900 to-black relative">
+                {/* Simulated Header */}
+                <div className="flex items-center justify-between text-[11px] font-mono text-slate-300 pt-1">
+                  <span className="font-bold">Wi-Fi Connected</span>
+                  <span className="text-emerald-400 font-bold">● Starlink High-Speed</span>
+                </div>
+
+                {/* Main Sponsor Card Overlay */}
+                <div className="bg-[#121829]/95 border border-[#232d42] rounded-2xl p-3.5 space-y-3 shadow-xl backdrop-blur-md">
+                  <div className="relative rounded-xl overflow-hidden h-36 bg-slate-800 border border-slate-700">
+                    <img
+                      src={sponsorAd.imageUrl || 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80'}
+                      alt="Sponsor Banner"
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-mono text-amber-300 font-bold border border-amber-500/30">
+                      SPONSORED BY {sponsorAd.sponsorName.toUpperCase()}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="font-extrabold text-white text-sm leading-snug">{sponsorAd.headline}</h3>
+                    <p className="text-[11px] text-slate-300 leading-relaxed font-sans">{sponsorAd.description}</p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 flex items-center gap-2 font-mono">
+                    <a
+                      href={sponsorAd.destinationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-center text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-1"
+                    >
+                      <span>Visit Sponsor</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+
+                {/* Countdown Badge */}
+                <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-center text-[10px] font-mono text-slate-400">
+                  {sponsorAd.enabled ? (
+                    <span className="text-emerald-400 font-bold">
+                      Granting Internet Access ({sponsorAd.countdownDurationSec}s Ad Interstitial Active)
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 font-bold">Campaign Paused</span>
+                  )}
                 </div>
               </div>
             </div>

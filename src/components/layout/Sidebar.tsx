@@ -9,7 +9,7 @@ import {
   Zap,
   CheckCircle2
 } from 'lucide-react';
-import { VerticalType } from '../../types';
+import { VerticalType, TeamMember } from '../../types';
 import { TConnectLogo } from '../common/TConnectLogo';
 
 interface SidebarProps {
@@ -21,6 +21,7 @@ interface SidebarProps {
   totalRouterCount: number;
   isSupabaseConnected: boolean;
   onOpenDatabaseModal: () => void;
+  effectiveRole?: TeamMember['role'];
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -32,9 +33,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalRouterCount,
   isSupabaseConnected,
   onOpenDatabaseModal,
+  effectiveRole = 'Super Admin',
 }) => {
   // Streamlined 4 Core Navigation Items
-  const navItems = [
+  const allNavItems = [
     { 
       id: 'dashboard', 
       label: 'Fleet Overview', 
@@ -60,6 +62,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Sliders 
     },
   ];
+
+  const isSuperAdmin = !effectiveRole || effectiveRole === 'Super Admin' || effectiveRole === 'Owner' || effectiveRole === 'Admin';
+  const isCollaborator = effectiveRole === 'Collaborator';
+  const isManagement = effectiveRole === 'Management' || effectiveRole === 'Viewer';
+
+  // Strict role-based navigation filtering:
+  // - Super Admins: all 4 items
+  // - Collaborators: just captive portal (network tab)
+  // - Management: just fleet overview (dashboard tab)
+  const navItems = allNavItems.filter((item) => {
+    if (isSuperAdmin) return true;
+    if (isCollaborator) return item.id === 'network';
+    if (isManagement) return item.id === 'dashboard';
+    return item.id === 'dashboard';
+  }).map((item) => {
+    if (isCollaborator && item.id === 'network') {
+      return {
+        ...item,
+        label: 'Captive Portal & Ads',
+        description: 'Design, Uploads & Ads'
+      };
+    }
+    return item;
+  });
 
   const verticals: Array<{ id: VerticalType | 'all'; label: string; icon: string }> = [
     { id: 'all', label: 'All 5', icon: '🌐' },
@@ -134,32 +160,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Database Connection & Tunnel Status Widget */}
       <div className="space-y-2 mt-4 font-mono text-xs">
-        {/* Supabase Status Button */}
-        <button
-          onClick={onOpenDatabaseModal}
-          className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-colors ${
-            isSupabaseConnected
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
-              : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Database className={`w-3.5 h-3.5 ${isSupabaseConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
-            <div>
-              <div className="text-[11px] font-bold text-white leading-tight">
-                {isSupabaseConnected ? 'Supabase Connected' : 'Connect Supabase'}
-              </div>
-              <div className="text-[9px] text-slate-400">
-                {isSupabaseConnected ? 'PostgreSQL Active' : 'Configure Remote DB'}
+        {/* Supabase Status Button (Super Admin Exclusive) */}
+        {isSuperAdmin ? (
+          <button
+            onClick={onOpenDatabaseModal}
+            className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-left transition-colors ${
+              isSupabaseConnected
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Database className={`w-3.5 h-3.5 ${isSupabaseConnected ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <div>
+                <div className="text-[11px] font-bold text-white leading-tight">
+                  {isSupabaseConnected ? 'Supabase Connected' : 'Connect Supabase'}
+                </div>
+                <div className="text-[9px] text-slate-400">
+                  {isSupabaseConnected ? 'PostgreSQL Active' : 'Configure Remote DB'}
+                </div>
               </div>
             </div>
+            {isSupabaseConnected ? (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <span className="text-[10px] text-[#f05e17] font-bold">SETUP</span>
+            )}
+          </button>
+        ) : (
+          <div className="p-2 rounded-xl border border-[#1f283d] bg-[#121829] flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Access Tier</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30">
+              {effectiveRole}
+            </span>
           </div>
-          {isSupabaseConnected ? (
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          ) : (
-            <span className="text-[10px] text-[#f05e17] font-bold">SETUP</span>
-          )}
-        </button>
+        )}
 
         {/* WireGuard Fleet Pulse */}
         <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-2.5 text-[10px] text-slate-400 flex items-center justify-between">

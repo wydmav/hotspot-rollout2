@@ -247,11 +247,25 @@ export interface SystemAlert {
   };
 }
 
+export type PlatformRole = 'Super Admin' | 'Collaborator' | 'Management';
+
+export interface SponsorAdConfig {
+  enabled: boolean;
+  sponsorName: string;
+  headline: string;
+  description: string;
+  imageUrl: string;
+  destinationUrl: string;
+  displayTrigger: 'pre_login' | 'post_connect' | 'both';
+  countdownDurationSec: number;
+  skipAllowed: boolean;
+}
+
 export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'Owner' | 'Admin' | 'Technical' | 'Collaborator' | 'Viewer' | 'Custom';
+  role: 'Super Admin' | 'Collaborator' | 'Management' | 'Owner' | 'Admin' | 'Technical' | 'Viewer' | 'Custom';
   customPermissions?: string[];
   scopedSites: string[]; // empty for all sites
   mfaEnabled: boolean;

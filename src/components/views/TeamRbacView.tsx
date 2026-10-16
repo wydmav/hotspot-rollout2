@@ -64,7 +64,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
   // Invite Form
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<TeamMember['role']>('Technical');
+  const [inviteRole, setInviteRole] = useState<TeamMember['role']>('Super Admin');
   const [selectedSites, setSelectedSites] = useState<string[]>([]);
   const [auditSearch, setAuditSearch] = useState('');
 
@@ -210,15 +210,17 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                     <td className="py-3">
                       <select
                         value={member.role}
-                        disabled={!isAdminOrOwner && member.role === 'Owner'}
+                        disabled={!isAdminOrOwner && (member.role === 'Owner' || member.role === 'Super Admin')}
                         onChange={(e) => onUpdateRole(member.id, e.target.value as TeamMember['role'])}
                         className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white font-mono text-xs focus:outline-none focus:border-[#f05e17] disabled:opacity-60 cursor-pointer"
                       >
-                        <option value="Owner">Owner</option>
+                        <option value="Super Admin">Super Admin (Full Access &amp; Gateways)</option>
+                        <option value="Collaborator">Collaborator (Captive Portal &amp; Ads)</option>
+                        <option value="Management">Management (Fleet Overview Only)</option>
+                        <option value="Owner">Owner (Root)</option>
                         <option value="Admin">Admin</option>
-                        <option value="Technical">Technical (No Billing)</option>
-                        <option value="Collaborator">Collaborator</option>
-                        <option value="Viewer">Viewer (Read-Only)</option>
+                        <option value="Technical">Technical</option>
+                        <option value="Viewer">Viewer</option>
                       </select>
                     </td>
                     <td className="py-3">
@@ -499,10 +501,12 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                   onChange={(e) => setInviteRole(e.target.value as TeamMember['role'])}
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                 >
-                  <option value="Admin">Admin (Full Site Configuration &amp; Billing)</option>
-                  <option value="Technical">Technical (Router &amp; WireGuard Only, No Financial Access)</option>
-                  <option value="Collaborator">Collaborator (Voucher Generation Only)</option>
-                  <option value="Viewer">Viewer (Read-Only Dashboard)</option>
+                  <option value="Super Admin">Super Admin (Full Access: Code, Adoption, Billing &amp; Gateways)</option>
+                  <option value="Collaborator">Collaborator (Captive Portal, Image Uploads &amp; Ads)</option>
+                  <option value="Management">Management (Fleet Overview Dashboard Only)</option>
+                  <option value="Admin">Admin (Site Admin)</option>
+                  <option value="Technical">Technical (Network Engineer)</option>
+                  <option value="Viewer">Viewer (Read-Only)</option>
                 </select>
               </div>
 
