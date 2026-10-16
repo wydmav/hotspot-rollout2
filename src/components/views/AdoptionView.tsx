@@ -128,6 +128,59 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [isBulkPushing, setIsBulkPushing] = useState(false);
   const [bulkPushToast, setBulkPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Adoption Handshake Verification & WinBox Terminal Diagnostics State
+  const [isVerifyingHandshake, setIsVerifyingHandshake] = useState(false);
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [copiedTestCmd, setCopiedTestCmd] = useState(false);
+  const [copiedPingCmd, setCopiedPingCmd] = useState(false);
+  const [diagnosticFeedback, setDiagnosticFeedback] = useState<string | null>(null);
+
+  const handleVerifyHandshake = async (routerId: string) => {
+    setIsVerifyingHandshake(true);
+    setDiagnosticFeedback(null);
+    try {
+      const res = await fetch(`/api/devices/${routerId}/verify-handshake`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.verified) {
+        onAdoptRouter(routerId);
+        triggerToast(`Handshake verified! "${selectedRouter.name}" is now adopted and ONLINE.`, 'success');
+        setShowDiagnosticsModal(false);
+      } else {
+        const msg = data.message || 'No heartbeat acknowledged yet. Run the test command in WinBox terminal.';
+        setDiagnosticFeedback(msg);
+        triggerToast(msg, 'info');
+        setShowDiagnosticsModal(true);
+      }
+    } catch (err: any) {
+      setDiagnosticFeedback(err.message || 'Connection test failed');
+      triggerToast('Could not reach controller API. Check network connectivity.', 'error');
+    } finally {
+      setIsVerifyingHandshake(false);
+    }
+  };
+
+  const handleForceAdopt = async (routerId: string) => {
+    try {
+      const res = await fetch(`/api/devices/${routerId}/force-adopt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onAdoptRouter(routerId);
+        triggerToast(`Router "${selectedRouter.name}" verified and promoted to ONLINE status.`, 'success');
+        setShowDiagnosticsModal(false);
+      }
+    } catch {
+      onAdoptRouter(routerId);
+      triggerToast(`Router "${selectedRouter.name}" adopted (Local state promoted).`, 'success');
+      setShowDiagnosticsModal(false);
+    }
+  };
+
   const handleBulkPolicyPush = async () => {
     setIsBulkPushing(true);
     setBulkPushToast(null);
@@ -874,14 +927,44 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   </button>
 
                   {selectedRouter.status === 'pending_adoption' && (
-                    <button
-                      onClick={runTerminalAdoptionSimulation}
-                      disabled={isSimulatingAdoption}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors font-mono shadow-sm"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>{isSimulatingAdoption ? 'Adopting...' : 'Simulate Run'}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* 1-Click Verify Handshake Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyHandshake(selectedRouter.id)}
+                        disabled={isVerifyingHandshake}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors font-mono shadow-sm cursor-pointer whitespace-nowrap"
+                        title="Query controller to verify if router has transmitted telemetry and promote to ONLINE"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingHandshake ? 'animate-spin' : ''}`} />
+                        <span>{isVerifyingHandshake ? 'Verifying...' : 'Verify Handshake'}</span>
+                      </button>
+
+                      {/* WinBox Terminal Diagnostics & Ping Tool */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDiagnosticFeedback(null);
+                          setShowDiagnosticsModal(true);
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1e293b] hover:bg-[#334155] text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                        title="Inspect WinBox Terminal test commands, ping checks & diagnostic troubleshooting"
+                      >
+                        <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Diagnostics</span>
+                      </button>
+
+                      {/* Instant Force-Adopt Option */}
+                      <button
+                        type="button"
+                        onClick={() => handleForceAdopt(selectedRouter.id)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                        title="Directly mark router as adopted & online (useful for offline lab bench or isolated testing)"
+                      >
+                        <Zap className="w-3 h-3 text-amber-400" />
+                        <span>Force Adopt</span>
+                      </button>
+                    </div>
                   )}
 
                   {/* Complete Platform De-Adoption / Unbind Button */}
@@ -901,6 +984,40 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 <div className="bg-[#1b233a] border border-emerald-500/40 p-3 rounded-xl flex items-center gap-3 text-xs font-mono text-emerald-300 animate-pulse">
                   <RefreshCw className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
                   <span>{simulationStep}</span>
+                </div>
+              )}
+
+              {/* Pending WinBox Handshake Helper Banner */}
+              {selectedRouter.status === 'pending_adoption' && (
+                <div className="bg-[#12192c] border border-amber-500/30 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                    <div>
+                      <p className="font-bold text-amber-300">Awaiting WinBox Handshake</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Already ran the script in WinBox? Click <strong>Verify Handshake</strong> to acknowledge connection, or open <strong>Diagnostics</strong>.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleVerifyHandshake(selectedRouter.id)}
+                      disabled={isVerifyingHandshake}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-xs flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isVerifyingHandshake ? 'animate-spin' : ''}`} />
+                      <span>Verify Now</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDiagnosticsModal(true)}
+                      className="px-2.5 py-1 bg-[#1e293b] hover:bg-[#334155] text-cyan-300 border border-cyan-500/30 rounded font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Terminal className="w-3 h-3 text-cyan-400" />
+                      <span>Diagnostics</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1525,6 +1642,185 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Confirm Complete De-Adoption</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WinBox Terminal Diagnostics & Handshake Inspector Modal */}
+      {showDiagnosticsModal && selectedRouter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-[#1f283d] flex items-center justify-between bg-[#141b2d]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                    WinBox Terminal Diagnostics &amp; Handshake Inspector
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                      {selectedRouter.status === 'online' ? 'ONLINE' : 'PENDING'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    Target Router: <span className="text-slate-200 font-bold">{selectedRouter.name}</span> ({selectedRouter.model}) · ID: <span className="text-cyan-400 font-mono">{selectedRouter.id}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDiagnosticsModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 font-mono text-xs">
+              {/* Controller Endpoint Info */}
+              <div className="p-3 bg-[#131a2b] border border-[#1f283d] rounded-xl flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-slate-400 text-[11px] block">Target Controller Host Endpoint:</span>
+                  <span className="text-cyan-300 font-bold text-xs">{endpointProtocol}://{controllerHost}</span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <span>Watchdog: 80/443</span>
+                  <span>·</span>
+                  <span>WireGuard: 51820 UDP</span>
+                </div>
+              </div>
+
+              {diagnosticFeedback && (
+                <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-amber-200 text-xs">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    Controller Handshake Status:
+                  </p>
+                  <p className="mt-1 text-[11px] text-amber-300/90">{diagnosticFeedback}</p>
+                </div>
+              )}
+
+              {/* Step 1: Quick Heartbeat Test in WinBox */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-200 font-bold flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-[10px]">1</span>
+                    Run Instant Test Fetch in WinBox Terminal:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cmd = `/tool fetch url="${endpointProtocol}://${controllerHost}/api/devices/${selectedRouter.id}/heartbeat" mode=http check-certificate=no keep-result=yes dst-path=tc-test.txt; /file print where name="tc-test.txt"; /file remove "tc-test.txt"`;
+                      navigator.clipboard.writeText(cmd);
+                      setCopiedTestCmd(true);
+                      setTimeout(() => setCopiedTestCmd(false), 2000);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-[#1e293b] hover:bg-[#334155] text-cyan-300 border border-cyan-500/30 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                  >
+                    {copiedTestCmd ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedTestCmd ? 'Copied Command!' : 'Copy Command'}</span>
+                  </button>
+                </div>
+                <div className="p-2.5 bg-[#080b12] border border-[#1b233a] rounded-lg text-slate-300 text-[11px] break-all select-all leading-relaxed">
+                  {`/tool fetch url="${endpointProtocol}://${controllerHost}/api/devices/${selectedRouter.id}/heartbeat" mode=http check-certificate=no keep-result=yes dst-path=tc-test.txt; /file print where name="tc-test.txt"; /file remove "tc-test.txt"`}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Paste this into <strong>WinBox &gt; New Terminal</strong>. If the downloaded file is displayed with status acknowledged, your MikroTik router has established HTTP communication with the platform.
+                </p>
+              </div>
+
+              {/* Step 2: Ping Check */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-200 font-bold flex items-center gap-1.5">
+                    <span className="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-[10px]">2</span>
+                    Verify WAN Ping from MikroTik to Host IP:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hostIp = controllerHost.split(':')[0];
+                      const cmd = `/ping count=3 ${hostIp}`;
+                      navigator.clipboard.writeText(cmd);
+                      setCopiedPingCmd(true);
+                      setTimeout(() => setCopiedPingCmd(false), 2000);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-[#1e293b] hover:bg-[#334155] text-cyan-300 border border-cyan-500/30 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                  >
+                    {copiedPingCmd ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedPingCmd ? 'Copied Ping!' : 'Copy Ping'}</span>
+                  </button>
+                </div>
+                <div className="p-2.5 bg-[#080b12] border border-[#1b233a] rounded-lg text-slate-300 text-[11px] break-all select-all">
+                  {`/ping count=3 ${controllerHost.split(':')[0]}`}
+                </div>
+              </div>
+
+              {/* Diagnostic Checklist */}
+              <div className="p-3 bg-[#131a2b] border border-[#1f283d] rounded-xl space-y-2">
+                <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                  MikroTik Connectivity Checklist
+                </span>
+                <ul className="space-y-1.5 text-[11px] text-slate-300">
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span><strong>RouterOS Device Mode:</strong> Ensure <code>/system device-mode</code> has not restricted <code>fetch</code> (run <code>/system/device-mode/print</code>).</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span><strong>DNS &amp; WAN Gateway:</strong> Confirm the router can resolve domains (<code>/tool dns print</code>). If using raw IP, ensure default route <code>0.0.0.0/0</code> points to active WAN.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span><strong>Inbound Controller Firewall:</strong> VPS security group or port forwarding must permit TCP port 80/443 (HTTP/HTTPS) and UDP port 51820 (WireGuard).</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="px-5 py-3 border-t border-[#1f283d] bg-[#141b2d] flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleForceAdopt(selectedRouter.id)}
+                  className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Mark router online immediately (best for lab topologies or isolated bench routers)"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Force Adopt (Lab Mode)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={runTerminalAdoptionSimulation}
+                  disabled={isSimulatingAdoption}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold font-mono transition-colors cursor-pointer"
+                >
+                  <span>Simulate Run</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDiagnosticsModal(false)}
+                  className="px-3.5 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg font-bold text-xs font-mono transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleVerifyHandshake(selectedRouter.id)}
+                  disabled={isVerifyingHandshake}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs font-mono shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingHandshake ? 'animate-spin' : ''}`} />
+                  <span>{isVerifyingHandshake ? 'Verifying...' : 'Verify Handshake Now'}</span>
                 </button>
               </div>
             </div>

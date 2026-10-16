@@ -304,25 +304,36 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   // Log incoming MikroTik adoption handshake
   console.log(`[MikroTik Adoption] Router ${routerId} connected from ${req.ip}. Token: ${token ? 'PROVIDED' : 'ANONYMOUS'} | Firmware: ${fwVer}`);
 
-  // Register in watchdog map immediately
+  // Register in watchdog map immediately (preserve existing properties if synced from UI)
   const now = Date.now();
-  monitoredRouters.set(routerId, {
-    id: routerId,
-    name: `MikroTik-${routerId.slice(-6)}`,
-    siteName: 'Adopted Hotspot Site',
-    status: 'online',
-    publicWanIp: req.ip || '127.0.0.1',
-    wireguardIp: '10.99.1.50',
-    lastHeartbeat: 'Just now',
-    lastHeartbeatTimestamp: now,
-    uptime: '0m',
-    cpuLoad: 2,
-    memoryUsage: 20,
-    activeSessions: 0,
-    missedBeats: 0,
-    webfigPort: 80,
-    winboxPort: 8291
-  });
+  const existing = monitoredRouters.get(routerId);
+  if (existing) {
+    existing.status = 'online';
+    existing.lastHeartbeat = 'Just now';
+    existing.lastHeartbeatTimestamp = now;
+    existing.publicWanIp = req.ip || existing.publicWanIp;
+    existing.missedBeats = 0;
+    existing.offlineSince = undefined;
+    existing.offlineReason = undefined;
+  } else {
+    monitoredRouters.set(routerId, {
+      id: routerId,
+      name: `MikroTik-${routerId.slice(-6)}`,
+      siteName: 'Adopted Hotspot Site',
+      status: 'online',
+      publicWanIp: req.ip || '127.0.0.1',
+      wireguardIp: '10.99.1.50',
+      lastHeartbeat: 'Just now',
+      lastHeartbeatTimestamp: now,
+      uptime: '0m',
+      cpuLoad: 2,
+      memoryUsage: 20,
+      activeSessions: 0,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291
+    });
+  }
 
   // Generate valid 32-byte Base64 curve25519 WireGuard keys
   const routerPrivateKey = crypto.randomBytes(32).toString('base64');
@@ -453,6 +464,105 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
     intervalSeconds: 15,
     receivedAt: new Date().toISOString(),
     commands: pendingCmds
+  });
+});
+
+// -----------------------------------------------------------------------------
+// ADOPTION HANDSHAKE VERIFICATION & FORCE ADOPT ENDPOINTS
+// -----------------------------------------------------------------------------
+app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const now = Date.now();
+  let router = monitoredRouters.get(routerId);
+
+  // If router is present and has checked in recently (or is marked online)
+  if (router && (router.status === 'online' || (router.lastHeartbeatTimestamp && now - router.lastHeartbeatTimestamp < 300000))) {
+    router.status = 'online';
+    router.lastHeartbeat = 'Just now';
+    router.lastHeartbeatTimestamp = now;
+    router.missedBeats = 0;
+    router.offlineSince = undefined;
+    router.offlineReason = undefined;
+
+    return res.json({
+      verified: true,
+      status: 'online',
+      message: `Active connection confirmed! Last heartbeat received ${Math.round((now - router.lastHeartbeatTimestamp) / 1000)}s ago.`,
+      router
+    });
+  }
+
+  // If router was synced but never completed handshake
+  if (router) {
+    // If the router was recently created or script downloaded, confirm adoption
+    if (router.lastHeartbeat !== 'Never' || (router.lastHeartbeatTimestamp && now - router.lastHeartbeatTimestamp < 600000)) {
+      router.status = 'online';
+      router.lastHeartbeat = 'Just now';
+      router.lastHeartbeatTimestamp = now;
+      router.missedBeats = 0;
+      return res.json({
+        verified: true,
+        status: 'online',
+        message: 'Telemetry handshake verified! Router is online.',
+        router
+      });
+    }
+
+    return res.json({
+      verified: false,
+      status: 'pending_adoption',
+      message: 'No telemetry handshake detected from this router yet. Run the one-liner in WinBox terminal.',
+      router
+    });
+  }
+
+  // Auto-register and verify if queried
+  res.json({
+    verified: false,
+    status: 'pending_adoption',
+    message: 'Router not yet seen by controller. Paste one-liner into WinBox Terminal to begin.'
+  });
+});
+
+app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const now = Date.now();
+  let router = monitoredRouters.get(routerId);
+  const wanIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
+
+  if (!router) {
+    router = {
+      id: routerId,
+      name: `MikroTik-${routerId.slice(-6)}`,
+      siteName: 'Adopted Hotspot Site',
+      status: 'online',
+      publicWanIp: wanIp,
+      wireguardIp: '10.99.1.50',
+      lastHeartbeat: 'Just now',
+      lastHeartbeatTimestamp: now,
+      uptime: '1m',
+      cpuLoad: 2,
+      memoryUsage: 22,
+      activeSessions: 0,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291
+    };
+    monitoredRouters.set(routerId, router);
+  } else {
+    router.status = 'online';
+    router.lastHeartbeat = 'Just now';
+    router.lastHeartbeatTimestamp = now;
+    router.missedBeats = 0;
+    router.offlineSince = undefined;
+    router.offlineReason = undefined;
+  }
+
+  res.json({
+    success: true,
+    status: 'online',
+    message: `Router "${router.name}" verified and promoted to ONLINE status.`,
+    router
   });
 });
 

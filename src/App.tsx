@@ -197,8 +197,15 @@ export default function App() {
           const prev = currentRouters.find(r => r.id === incoming.id);
           if (!prev && !incoming.id) return;
 
+          // Auto-promote router from pending_adoption to online if incoming status is confirmed online
+          if (prev?.status === 'pending_adoption' && incoming.status === 'online') {
+            storage.adoptRouter(incoming.id);
+            showToast(`Router "${prev.name}" adopted successfully! Live handshake acknowledged.`);
+            return;
+          }
+
           // Preserve unadopted nodes without tripping deadman alarms
-          if (incoming.status === 'pending_adoption' || prev?.status === 'pending_adoption') {
+          if (incoming.status === 'pending_adoption') {
             verifiedStatuses.push({
               id: incoming.id,
               status: 'pending_adoption',
