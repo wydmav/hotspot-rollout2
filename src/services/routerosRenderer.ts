@@ -477,28 +477,46 @@ export class RouterOSRenderer {
 
     return `# ============================================================
 # T-CONNECT ACCESS POINTS & WINBOX BRIDGE CONFIGURATION
-# Adds Ethernet Ports (ether2 & ether3) to the Hotspot Bridge,
+# Adds Ethernet Ports to the active Hotspot Bridge,
 # configures open Test WiFi SSID "MIKROTIK-TC", and provides
 # independent WiFi CLI enable/disable controls.
 # ============================================================
 
 :log info "[T-Connect] Configuring Access Point bridge ports and MIKROTIK-TC wireless interface...";
 
-# 1. Ensure Target Hotspot Bridge Exists
+# 1. Auto-Detect Existing Active Bridge or Create Target Bridge
+:local targetBridge "${bridge}";
+:if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
+  :if ([:len [/interface bridge find]] > 0) do={
+    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];
+  } else={
+    /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
+    :set targetBridge "${bridge}";
+  }
+}
+
+# 2. Add Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to Target Bridge
+:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
+:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap2Port}" comment="tc-ap-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge" }
+
+# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS v6 & v7 Compatible)
 :do {
-  :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-    /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge"
+  :if ([:len [/interface wireless find]] > 0) do={
+    /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
   }
 } on-error={}
 
-# 2. Add Ethernet Ports (ether2 & ether3) to Hotspot Bridge
-:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
-:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap2Port}" comment="tc-ap-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge" }
-
-# 3. Configure Open Test WiFi SSID "MIKROTIK-TC"
 :do {
-  /interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no
-} on-error={ :log warning "wlan1 interface not available on this RouterOS model" }
+  :if ([:len [/interface wifi find]] > 0) do={
+    /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+  }
+} on-error={}
+
+:do {
+  :if ([:len [/interface wifiwave2 find]] > 0) do={
+    /interface wifiwave2 set [pick [/interface wifiwave2 find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+  }
+} on-error={}
 
 # 4. Bypass AP Static Management IPs in Hotspot
 :do { /ip hotspot ip-binding remove [find comment~"${ap1Name}"] } on-error={}
@@ -514,13 +532,15 @@ export class RouterOSRenderer {
 # INDEPENDENT WIFI CLI CONTROLS (Disabling WiFi does NOT stop platform/Ethernet)
 # ============================================================
 # To turn OFF WiFi radio broadcasting:
-#   /interface wireless disable [find name=wlan1]
+#   /interface wireless disable [find]  (RouterOS v6)
+#   /interface wifi disable [find]      (RouterOS v7)
 #
 # To turn ON WiFi radio broadcasting:
-#   /interface wireless enable [find name=wlan1]
+#   /interface wireless enable [find]   (RouterOS v6)
+#   /interface wifi enable [find]       (RouterOS v7)
 # ============================================================
 
-:log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients on ether2/ether3 & wireless guests redirected to captive portal.";
+:log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients & wireless guests redirected to captive portal.";
 `;
   }
 }

@@ -1,37 +1,62 @@
 # MikroTik RouterOS Port & WiFi Configuration (`port config.md`)
 
-RouterOS CLI setup commands for Ethernet ports **ether2**, **ether3**, **ether5**, and **wlan1** (open WiFi SSID `"MIKROTIK-TC"`).
+Bulletproof RouterOS CLI setup commands for Ethernet ports **ether2**, **ether3**, **ether5**, and **wlan1** (open WiFi SSID `"MIKROTIK-TC"`) with **bridge auto-detection** and **RouterOS v6/v7 wireless compatibility**.
 
 ---
 
-## 1. Combined All-in-One Copy-Paste RouterOS Script
+## 1. Combined All-in-One Auto-Detecting RouterOS Script
 
-Paste this complete block into **WinBox > New Terminal** or SSH console to configure all ports, bridge interfaces, open test WiFi SSID, and IP bindings at once:
+Paste this complete block into **WinBox > New Terminal** or SSH console. It automatically detects your router's active bridge name (e.g. `bridge`, `bridge1`, `hs-bridge`, or `tctower-bridge`) to avoid "input does not match any value of bridge" errors and handles wireless interface syntax for RouterOS v6 & v7:
 
 ```routeros
 # ============================================================
-# T-CONNECT HOTSPOT PORT & WIFI CONFIGURATION SCRIPT
+# T-CONNECT AUTO-DETECTING PORT & WIFI CONFIGURATION SCRIPT
 # Configures ether2, ether3, ether5 & open SSID "MIKROTIK-TC"
 # ============================================================
 
 :log info "[T-Connect] Initiating port & WiFi configuration...";
 
-# 1. Ensure Target Hotspot Bridge Exists
+# 1. Auto-Detect Existing Active Bridge or Create Target Bridge
+:local targetBridge "tctower-bridge";
+:if ([:len [/interface bridge find name="tctower-bridge"]] = 0) do={
+  :if ([:len [/interface bridge find]] > 0) do={
+    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];
+    :log info ("[T-Connect] Detected active bridge: " . $targetBridge);
+  } else={
+    /interface bridge add name="tctower-bridge" comment="T-Connect Hotspot & AP Bridge";
+    :set targetBridge "tctower-bridge";
+    :log info "[T-Connect] Created bridge: tctower-bridge";
+  }
+} else={
+  :log info "[T-Connect] Using existing bridge: tctower-bridge";
+};
+
+# 2. Add Ethernet Ports (ether2, ether3, ether5) to Target Bridge
+:do { :if ([:len [/interface bridge port find interface="ether2" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={ :log warning "Port ether2 already in bridge or unavailable" }
+:do { :if ([:len [/interface bridge port find interface="ether3" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={ :log warning "Port ether3 already in bridge or unavailable" }
+:do { :if ([:len [/interface bridge port find interface="ether5" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={ :log warning "Port ether5 already in bridge or unavailable" }
+
+# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS v6 & v7 Compatible)
 :do {
-  :if ([:len [/interface bridge find name="tctower-bridge"]] = 0) do={
-    /interface bridge add name="tctower-bridge" comment="T-Connect Hotspot & AP Bridge"
+  :if ([:len [/interface wireless find]] > 0) do={
+    /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
+    :log info "[T-Connect] RouterOS v6 wireless wlan1 configured with SSID MIKROTIK-TC";
   }
 } on-error={}
 
-# 2. Add Ethernet Ports (ether2, ether3, ether5) to Hotspot Bridge
-:do { :if ([:len [/interface bridge port find interface="ether2" bridge="tctower-bridge"]] = 0) do={ /interface bridge port add bridge="tctower-bridge" interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={ :log warning "Port ether2 already in bridge" }
-:do { :if ([:len [/interface bridge port find interface="ether3" bridge="tctower-bridge"]] = 0) do={ /interface bridge port add bridge="tctower-bridge" interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={ :log warning "Port ether3 already in bridge" }
-:do { :if ([:len [/interface bridge port find interface="ether5" bridge="tctower-bridge"]] = 0) do={ /interface bridge port add bridge="tctower-bridge" interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={ :log warning "Port ether5 already in bridge" }
-
-# 3. Configure Open Test WiFi SSID "MIKROTIK-TC"
 :do {
-  /interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no
-} on-error={ :log warning "wlan1 interface not available on this RouterOS hardware model" }
+  :if ([:len [/interface wifi find]] > 0) do={
+    /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+    :log info "[T-Connect] RouterOS v7 wifi configured with SSID MIKROTIK-TC";
+  }
+} on-error={}
+
+:do {
+  :if ([:len [/interface wifiwave2 find]] > 0) do={
+    /interface wifiwave2 set [pick [/interface wifiwave2 find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+    :log info "[T-Connect] RouterOS v7 wifiwave2 configured with SSID MIKROTIK-TC";
+  }
+} on-error={}
 
 # 4. Bypass Static Management IPs for Access Points (Prevents Splash Interception)
 :do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}
@@ -42,36 +67,43 @@ Paste this complete block into **WinBox > New Terminal** or SSH console to confi
 # 5. Enable WinBox Service (Port 8291)
 :do { /ip service set winbox disabled=no port=8291 } on-error={}
 
-:log info "[T-Connect] Configuration applied successfully. Ethernet clients on ether2, ether3, ether5 and wireless clients on MIKROTIK-TC are redirected to captive portal.";
+:log info "[T-Connect] Configuration complete! Wired ethernet clients on ether2, ether3, ether5 and wireless guests on MIKROTIK-TC are active.";
 ```
 
 ---
 
 ## 2. Modular Command Reference & Step-by-Step Breakdown
 
-### Part A: Add Ethernet Ports (ether2, ether3, ether5) to Hotspot Bridge
+### Part A: Add Ethernet Ports (ether2, ether3, ether5) to Active Bridge
 
-Connecting an Ethernet cable directly to **ether2**, **ether3**, or **ether5** grants instant wired client connectivity and redirects connected devices or Access Points to the T-Connect captive portal.
+If your bridge is named `bridge` or `bridge1`, replace `YOUR_BRIDGE_NAME` with your actual bridge name (or run the snippet below which auto-detects it):
 
 ```routeros
-# Add ether2 to Hotspot Bridge
-/interface bridge port add bridge=tctower-bridge interface="ether2" comment="tc-ap-ethernet-ether2"
+# Auto-detect bridge and add ether2
+:local b [/interface bridge get [pick [/interface bridge find] 0] name];
+/interface bridge port add bridge=$b interface="ether2" comment="tc-ap-ethernet-ether2"
 
-# Add ether3 to Hotspot Bridge
-/interface bridge port add bridge=tctower-bridge interface="ether3" comment="tc-ap-ethernet-ether3"
+# Auto-detect bridge and add ether3
+:local b [/interface bridge get [pick [/interface bridge find] 0] name];
+/interface bridge port add bridge=$b interface="ether3" comment="tc-ap-ethernet-ether3"
 
-# Add ether5 to Hotspot Bridge
-/interface bridge port add bridge=tctower-bridge interface="ether5" comment="tc-ap-ethernet-ether5"
+# Auto-detect bridge and add ether5
+:local b [/interface bridge get [pick [/interface bridge find] 0] name];
+/interface bridge port add bridge=$b interface="ether5" comment="tc-ap-ethernet-ether5"
 ```
 
 ---
 
 ### Part B: Configure Open Test WiFi SSID (`MIKROTIK-TC`)
 
-Establishes an unencrypted open WiFi access point broadcasting the SSID **"MIKROTIK-TC"** for platform testing:
-
+#### RouterOS v6 (Standard Wireless):
 ```routeros
-/interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no
+/interface wireless set wlan1 ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
+```
+
+#### RouterOS v7 (WifiWave2):
+```routeros
+/interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
 ```
 
 ---
@@ -79,17 +111,25 @@ Establishes an unencrypted open WiFi access point broadcasting the SSID **"MIKRO
 ### Part C: Independent WiFi Radio Controls (Disable & Enable)
 
 > [!NOTE]
-> **Disabling WiFi broadcasting ONLY turns off wireless radio `wlan1`.**
-> Wired Ethernet clients connected via **ether2**, **ether3**, and **ether5** as well as the T-Connect platform controller over WireGuard remain **100% active and connected**.
+> **Disabling WiFi radio broadcasting ONLY turns off the wireless signal.**
+> Wired Ethernet clients connected via **ether2**, **ether3**, and **ether5** as well as the T-Connect controller platform over WireGuard remain **100% active and connected**.
 
-#### Disable WiFi Broadcasting:
+#### Disable WiFi Radio Broadcasting:
 ```routeros
-/interface wireless disable [find name=wlan1]
+# RouterOS v6
+/interface wireless disable [find]
+
+# RouterOS v7
+/interface wifi disable [find]
 ```
 
-#### Enable WiFi Broadcasting:
+#### Enable WiFi Radio Broadcasting:
 ```routeros
-/interface wireless enable [find name=wlan1]
+# RouterOS v6
+/interface wireless enable [find]
+
+# RouterOS v7
+/interface wifi enable [find]
 ```
 
 ---

@@ -573,23 +573,31 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to Hotspot Bridge
+                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to Hotspot Bridge (Auto-Detects Bridge)
                       </span>
                     </div>
                     <button
                       onClick={() => copyToClipboard(
-                        `/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
+                        `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find]] > 0) do={\n    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];\n  } else={\n    /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";\n  }\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
                         'port-script'
                       )}
-                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
                     >
                       {copiedKey === 'port-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'port-script' ? 'Copied' : 'Copy'}</span>
+                      <span>{copiedKey === 'port-script' ? 'Copied' : 'Copy Auto-Bridge Script'}</span>
                     </button>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"
-/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`}
+{`:local targetBridge "${bridgeName}";
+:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={
+  :if ([:len [/interface bridge find]] > 0) do={
+    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];
+  } else={
+    /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";
+  }
+};
+/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"
+/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`}
                   </pre>
                   <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800/80 text-[11px] text-slate-400">
                     🔌 <strong>Wired Ethernet Testing:</strong> Connecting an Ethernet cable directly to <span className="font-mono text-amber-300">{ap1Port}</span> or <span className="font-mono text-amber-300">{ap2Port}</span> redirects wired clients directly to the T-Connect captive portal.
@@ -602,22 +610,23 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot;
+                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot; (RouterOS v6 &amp; v7)
                       </span>
                     </div>
                     <button
                       onClick={() => copyToClipboard(
-                        `/interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no`,
+                        `:do { :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } on-error={};\n:do { :if ([:len [/interface wifi find]] > 0) do={ /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no } } on-error={};`,
                         'wifi-setup-script'
                       )}
-                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
                     >
                       {copiedKey === 'wifi-setup-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'wifi-setup-script' ? 'Copied' : 'Copy'}</span>
+                      <span>{copiedKey === 'wifi-setup-script' ? 'Copied' : 'Copy WiFi Script'}</span>
                     </button>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed bg-black/40">
-{`/interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no`}
+{`:do { :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } on-error={};
+:do { :if ([:len [/interface wifi find]] > 0) do={ /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no } } on-error={};`}
                   </pre>
                 </div>
 
