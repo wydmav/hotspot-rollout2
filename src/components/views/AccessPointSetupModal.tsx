@@ -45,13 +45,13 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
   // AP 1 configuration
   const [ap1Name, setAp1Name] = useState('AP1-Ubiquiti-UniFi');
   const [ap1Vendor, setAp1Vendor] = useState<'unifi' | 'omada'>('unifi');
-  const [ap1Port, setAp1Port] = useState('ether3');
+  const [ap1Port, setAp1Port] = useState('ether2');
   const [ap1Ip, setAp1Ip] = useState('192.168.88.2');
 
   // AP 2 configuration
   const [ap2Name, setAp2Name] = useState('AP2-TPLink-Omada');
   const [ap2Vendor, setAp2Vendor] = useState<'unifi' | 'omada'>('omada');
-  const [ap2Port, setAp2Port] = useState('ether4');
+  const [ap2Port, setAp2Port] = useState('ether3');
   const [ap2Ip, setAp2Ip] = useState('192.168.88.3');
 
   // Clipboard & Interactive State
@@ -109,14 +109,14 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-lg font-semibold text-white tracking-tight">
-                  2 Access Points & WinBox Setup Assistant
+                  Access Points and Winbox Setup Assistant
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
-                  Ubiquiti UniFi · TP-Link Omada
+                  ether2/ether3 Ethernet Bridge · MIKROTIK-TC WiFi
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Connect 2 APs to <span className="text-slate-200 font-mono">{effectiveRouterName}</span> so all wireless guests get redirected to the T-Connect captive portal.
+                Connect APs or test wired Ethernet on ports <span className="text-amber-300 font-mono">ether2 &amp; ether3</span> or open SSID <span className="text-amber-300 font-mono">MIKROTIK-TC</span> with independent WiFi CLI controls.
               </p>
             </div>
           </div>
@@ -567,18 +567,18 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
               {/* Individual Snippets */}
               <div className="space-y-4">
                 
-                {/* 1. Bridge Port Command (The user's exact query format) */}
+                {/* 1. Bridge Port Command (Ethernet ether2 & ether3) */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        1. Add Extra Ports to Hotspot Bridge
+                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to Hotspot Bridge
                       </span>
                     </div>
                     <button
                       onClick={() => copyToClipboard(
-                        `/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-tower-bridge-port-${ap1Port}"\n/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-tower-bridge-port-${ap2Port}"`,
+                        `/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
                         'port-script'
                       )}
                       className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
@@ -588,18 +588,85 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     </button>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-tower-bridge-port-${ap1Port}"
-/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-tower-bridge-port-${ap2Port}"`}
+{`/interface bridge port add bridge=${bridgeName} interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"
+/interface bridge port add bridge=${bridgeName} interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`}
+                  </pre>
+                  <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800/80 text-[11px] text-slate-400">
+                    🔌 <strong>Wired Ethernet Testing:</strong> Connecting an Ethernet cable directly to <span className="font-mono text-amber-300">{ap1Port}</span> or <span className="font-mono text-amber-300">{ap2Port}</span> redirects wired clients directly to the T-Connect captive portal.
+                  </div>
+                </div>
+
+                {/* 2. Configure Open Test WiFi SSID "MIKROTIK-TC" */}
+                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span className="text-xs font-mono font-medium text-slate-200">
+                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot;
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(
+                        `/interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no`,
+                        'wifi-setup-script'
+                      )}
+                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors"
+                    >
+                      {copiedKey === 'wifi-setup-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedKey === 'wifi-setup-script' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed bg-black/40">
+{`/interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no`}
                   </pre>
                 </div>
 
-                {/* 2. Hotspot IP-Binding Bypass */}
+                {/* 3. Independent WiFi CLI Control (Disable / Enable WiFi Radio) */}
+                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
+                    <div className="flex items-center space-x-2">
+                      <span className="w-2 h-2 rounded-full bg-rose-400" />
+                      <span className="text-xs font-mono font-medium text-slate-200">
+                        3. Independent Wireless Control CLI Snippets
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => copyToClipboard(`/interface wireless disable [find name=wlan1]`, 'wifi-off')}
+                        className="text-xs text-rose-300 hover:text-white px-2 py-1 bg-rose-500/10 border border-rose-500/20 rounded transition-colors"
+                      >
+                        {copiedKey === 'wifi-off' ? 'Copied Disable' : 'Copy Disable CLI'}
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(`/interface wireless enable [find name=wlan1]`, 'wifi-on')}
+                        className="text-xs text-emerald-300 hover:text-white px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded transition-colors"
+                      >
+                        {copiedKey === 'wifi-on' ? 'Copied Enable' : 'Copy Enable CLI'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-4 bg-black/40 space-y-2 text-xs font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-rose-400"># Disable WiFi Broadcasting:</span>
+                      <span className="text-slate-300">/interface wireless disable [find name=wlan1]</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-emerald-400"># Enable WiFi Broadcasting:</span>
+                      <span className="text-slate-300">/interface wireless enable [find name=wlan1]</span>
+                    </div>
+                  </div>
+                  <div className="px-4 py-2 bg-slate-900/80 border-t border-slate-800/80 text-[11px] text-slate-300">
+                    💡 <strong>Independent Radio Control:</strong> Disabling WiFi radio (<code className="text-rose-400">wlan1</code>) only turns off wireless broadcasting. Ethernet clients connected via <span className="text-amber-300 font-mono">ether2 &amp; ether3</span> and the T-Connect controller platform remain 100% active over WireGuard.
+                  </div>
+                </div>
+
+                {/* 4. Hotspot IP-Binding Bypass */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-indigo-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        2. Bypass AP Static Management IPs from Captive Portal
+                        4. Bypass AP Static Management IPs from Captive Portal
                       </span>
                     </div>
                     <button
@@ -622,13 +689,13 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </div>
                 </div>
 
-                {/* 3. WinBox Service Port Check */}
+                {/* 5. WinBox Service Port Check */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-sky-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        3. Verify WinBox Port Service (Port 8291)
+                        5. Verify WinBox Port Service (Port 8291)
                       </span>
                     </div>
                     <button

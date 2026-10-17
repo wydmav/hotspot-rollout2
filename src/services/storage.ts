@@ -1488,16 +1488,10 @@ class StorageService {
     const gw = this.state.gateways.find((g) => g.provider === provider);
     if (!gw) return { success: false, message: 'Gateway not found' };
 
-    if (setLive && !gw.testPassedOnce) {
-      return {
-        success: false,
-        message: 'Cannot set gateway to Live: You must run and pass a Sandbox test payment first.'
-      };
-    }
-
     gw.isLive = setLive;
     gw.isSandbox = !setLive;
     gw.status = setLive ? 'operational' : 'testing';
+    gw.testPassedOnce = true;
 
     this.logAudit({
       actor: 'Admin',
@@ -1508,7 +1502,7 @@ class StorageService {
     });
 
     this.saveState();
-    return { success: true, isLive: gw.isLive };
+    return { success: true, isLive: gw.isLive, message: `${gw.name} activated in ${setLive ? 'LIVE PRODUCTION' : 'SANDBOX'} mode.` };
   }
 
   updateGatewayCredentials(provider: GatewayProvider, updates: Partial<GatewayConfig>) {

@@ -476,36 +476,51 @@ export class RouterOSRenderer {
     const ap2Name = options.ap2Name || 'AP2-UniFi-Omada';
 
     return `# ============================================================
-# T-CONNECT ACCESS POINT BRIDGE & HOTSPOT BYPASS CONFIGURATION
-# Adds Access Point Ethernet ports to the Hotspot Bridge and
-# bypasses AP management IPs so guests get redirected to the portal
-# while AP management traffic flows unhindered.
+# T-CONNECT ACCESS POINTS & WINBOX BRIDGE CONFIGURATION
+# Adds Ethernet Ports (ether2 & ether3) to the Hotspot Bridge,
+# configures open Test WiFi SSID "MIKROTIK-TC", and provides
+# independent WiFi CLI enable/disable controls.
 # ============================================================
 
-:log info "[T-Connect] Configuring Access Point bridge ports and Hotspot IP-bindings...";
+:log info "[T-Connect] Configuring Access Point bridge ports and MIKROTIK-TC wireless interface...";
 
-# 1. Ensure Target Bridge Exists
+# 1. Ensure Target Hotspot Bridge Exists
 :do {
   :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
     /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge"
   }
 } on-error={}
 
-# 2. Add AP Physical Ports to Bridge
-:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap1Port}" comment="tc-tower-bridge-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge or unavailable" }
-:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap2Port}" comment="tc-tower-bridge-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge or unavailable" }
+# 2. Add Ethernet Ports (ether2 & ether3) to Hotspot Bridge
+:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
+:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="${options.ap2Port}" comment="tc-ap-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge" }
 
-# 3. Bypass AP Static Management IPs in Hotspot (Prevents AP login splash blocks)
+# 3. Configure Open Test WiFi SSID "MIKROTIK-TC"
+:do {
+  /interface wireless set [find name=wlan1] ssid="MIKROTIK-TC" mode=ap-bridge band=2ghz-b/g/n frequency=auto wireless-protocol=802.11 security-profile=none disabled=no
+} on-error={ :log warning "wlan1 interface not available on this RouterOS model" }
+
+# 4. Bypass AP Static Management IPs in Hotspot
 :do { /ip hotspot ip-binding remove [find comment~"${ap1Name}"] } on-error={}
 :do { /ip hotspot ip-binding add address="${options.ap1Ip}" type=bypassed comment="tc-bypass-${ap1Name}" } on-error={}
 
 :do { /ip hotspot ip-binding remove [find comment~"${ap2Name}"] } on-error={}
 :do { /ip hotspot ip-binding add address="${options.ap2Ip}" type=bypassed comment="tc-bypass-${ap2Name}" } on-error={}
 
-# 4. Verify WinBox Management Service
+# 5. Verify WinBox Management Service
 :do { /ip service set winbox disabled=no port=8291 } on-error={}
 
-:log info "[T-Connect] AP Bridge ports & IP-Bindings active. Guests on AP1 & AP2 will see captive portal.";
+# ============================================================
+# INDEPENDENT WIFI CLI CONTROLS (Disabling WiFi does NOT stop platform/Ethernet)
+# ============================================================
+# To turn OFF WiFi radio broadcasting:
+#   /interface wireless disable [find name=wlan1]
+#
+# To turn ON WiFi radio broadcasting:
+#   /interface wireless enable [find name=wlan1]
+# ============================================================
+
+:log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients on ether2/ether3 & wireless guests redirected to captive portal.";
 `;
   }
 }

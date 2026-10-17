@@ -934,14 +934,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <span>Detailed View</span>
                   </button>
 
-                  {/* 2 Access Points & WinBox Bridge Button */}
+                  {/* Access Points and Winbox Setup Assistant Button */}
                   <button
                     onClick={() => setShowApAssistantModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
-                    title="Connect 2 Access Points (Ubiquiti UniFi / TP-Link Omada) & Generate WinBox Bridge Scripts"
+                    title="Access Points and Winbox Setup Assistant (Ethernet Bridge & MIKROTIK-TC WiFi)"
                   >
                     <Network className="w-3.5 h-3.5 text-amber-400" />
-                    <span>2 APs & WinBox</span>
+                    <span>APs &amp; Winbox Assistant</span>
                   </button>
 
                   {/* Office Readiness & 30M/10M Speed Test Button */}
@@ -1223,13 +1223,13 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       </div>
                       <div>
                         <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span>Setting up 2 Access Points (Ubiquiti UniFi · TP-Link Omada)?</span>
+                          <span>Access Points and Winbox Setup Assistant</span>
                           <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
                             Gateway: 192.168.88.1
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-300">
-                          Configure AP static management IPs, bridge ports ether3/ether4 to <span className="font-mono text-amber-300">tctower-bridge</span>, and bypass AP management from captive splash.
+                          Bridge ports ether2 &amp; ether3 to <span className="font-mono text-amber-300">tctower-bridge</span>, setup open test SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>, and control WiFi broadcasting via CLI.
                         </p>
                       </div>
                     </div>

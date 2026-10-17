@@ -392,9 +392,9 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowApModal(true)}
-                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-sm shrink-0"
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg transition-colors whitespace-nowrap shadow-sm shrink-0 cursor-pointer"
                 >
-                  Open 2 AP & WinBox Assistant
+                  Open Access Points and Winbox Assistant
                 </button>
               </div>
 
@@ -561,7 +561,7 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
                       <Network className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-white text-sm">2 Access Points & WinBox Bridge Integration</h4>
+                      <h4 className="font-bold text-white text-sm">Access Points and Winbox Setup Assistant</h4>
                       <p className="text-xs text-slate-400">Connect Ubiquiti UniFi or TP-Link Omada APs to this router</p>
                     </div>
                   </div>

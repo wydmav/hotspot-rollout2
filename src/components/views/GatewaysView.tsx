@@ -690,20 +690,31 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Standard Telecom Sandbox Payment Simulation */
-                <>
+                /* Telecom Sandbox Payment Simulation or Production Bypass */
+                <div className="space-y-3">
                   <p className="text-slate-400">
-                    Before marking the gateway &quot;Live&quot;, our system requires a successful sandbox test payment to ensure STK push, callback signature validation, and voucher issuance function properly.
+                    If your provider issued production merchant credentials directly (no sandbox required, e.g. OTTvoucher), you can proceed directly to Live Production.
                   </p>
-                  <button
-                    onClick={handleRunSandboxPayment}
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-lg shadow-sm flex items-center gap-2"
-                  >
-                    {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-                    <span>{isProcessing ? 'Executing Test Transaction...' : `Simulate ${currency}10.00 Test Payment`}</span>
-                  </button>
-                </>
+                  <div className="flex flex-wrap gap-2.5">
+                    <button
+                      onClick={handleRunSandboxPayment}
+                      disabled={isProcessing}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      {isProcessing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+                      <span>{isProcessing ? 'Executing Test Transaction...' : `Simulate ${currency}10.00 Test Payment`}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        onUpdateCredentials(selectedGateway.provider, { testPassedOnce: true });
+                        setActiveStep(5);
+                      }}
+                      className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      <span>Bypass Sandbox &amp; Mark Production Ready &rarr;</span>
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -714,21 +725,21 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Step 5: Gateway Certified &amp; Ready for Production
               </h3>
               <p className="text-slate-300">
-                All verification steps have passed. You can now toggle this payment provider to <strong>LIVE PRODUCTION</strong> to accept real money from subscribers across all hotspot locations.
+                You can now toggle <strong>{selectedGateway.name}</strong> to <strong>LIVE PRODUCTION</strong> to accept real money from subscribers across all hotspot locations.
               </p>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <button
                   onClick={() => handleToggleLiveStatus(true)}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-2"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
                 >
                   <ShieldCheck className="w-4 h-4" />
                   <span>Activate Live Production Mode</span>
                 </button>
                 <button
                   onClick={() => handleToggleLiveStatus(false)}
-                  className="px-4 py-2.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
+                  className="px-4 py-2.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
                 >
-                  Keep in Sandbox
+                  Keep in Sandbox / Test Mode
                 </button>
               </div>
             </div>

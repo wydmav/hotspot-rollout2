@@ -607,9 +607,9 @@ export const OfficeReadinessModal: React.FC<OfficeReadinessModalProps> = ({
                       3
                     </div>
                     <div className="space-y-1">
-                      <div className="font-bold text-white">Connect 2 Access Points (Ubiquiti / TP-Link Omada)</div>
+                      <div className="font-bold text-white">Connect Access Points (Ubiquiti / TP-Link Omada)</div>
                       <div>
-                        Plug AP 1 into <strong>ether3</strong> and AP 2 into <strong>ether4</strong>. Verify both APs have static management IPs (192.168.88.2 and 192.168.88.3) and default gateway set to <strong>192.168.88.1</strong>.
+                        Plug Ethernet AP 1 into <strong>ether2</strong> and AP 2 into <strong>ether3</strong>. Verify both APs have static management IPs (192.168.88.2 and 192.168.88.3) and default gateway set to <strong>192.168.88.1</strong>.
                       </div>
                     </div>
                   </div>
