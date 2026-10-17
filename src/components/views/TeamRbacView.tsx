@@ -84,7 +84,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
     const trimmedEmail = inviteEmail.trim();
     const token = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
-    const inviteUrl = `${origin}/#invite?token=${token}&email=${encodeURIComponent(trimmedEmail)}&role=${encodeURIComponent(inviteRole)}`;
+    const inviteUrl = `${origin}/#invite?token=${token}&email=${encodeURIComponent(trimmedEmail)}&role=${encodeURIComponent(inviteRole)}&name=${encodeURIComponent(trimmedName)}`;
 
     onInviteMember(trimmedName, trimmedEmail, inviteRole, selectedSites);
     
@@ -109,10 +109,11 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
     setSelectedSites([]);
   };
 
-  const handleCopyInviteLink = (email: string, role?: string, token?: string) => {
+  const handleCopyInviteLink = (email: string, role?: string, token?: string, name?: string) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
     const resolvedToken = token || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const inviteUrl = `${origin}/#invite?token=${resolvedToken}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}`;
+    const resolvedName = name || email.split('@')[0];
+    const inviteUrl = `${origin}/#invite?token=${resolvedToken}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}&name=${encodeURIComponent(resolvedName)}`;
     navigator.clipboard.writeText(inviteUrl);
     setCopiedInviteUrl(email);
     setTimeout(() => setCopiedInviteUrl(null), 2500);
@@ -313,7 +314,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                         {member.status === 'invited' && (
                           <button
                             type="button"
-                            onClick={() => handleCopyInviteLink(member.email, member.role, member.inviteToken)}
+                            onClick={() => handleCopyInviteLink(member.email, member.role, member.inviteToken, member.name)}
                             className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300 hover:text-white cursor-pointer"
                             title="Copy Instant Magic Login Link"
                           >

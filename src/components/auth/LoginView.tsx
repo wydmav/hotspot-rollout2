@@ -48,16 +48,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
 
     let token = '';
     let emailHint = '';
+    let roleHint = '';
+    let nameHint = '';
 
     if (hash.startsWith('#invite') || hash.includes('token=')) {
       const tokenMatch = hash.match(/token=([^&]+)/);
       const emailMatch = hash.match(/email=([^&]+)/);
+      const roleMatch = hash.match(/role=([^&]+)/);
+      const nameMatch = hash.match(/name=([^&]+)/);
       if (tokenMatch) token = decodeURIComponent(tokenMatch[1]);
       if (emailMatch) emailHint = decodeURIComponent(emailMatch[1]);
+      if (roleMatch) roleHint = decodeURIComponent(roleMatch[1]);
+      if (nameMatch) nameHint = decodeURIComponent(nameMatch[1]);
     } else if (search.includes('token=') || search.includes('invite=')) {
       const params = new URLSearchParams(search);
       token = params.get('token') || params.get('invite') || '';
       emailHint = params.get('email') || '';
+      roleHint = params.get('role') || '';
+      nameHint = params.get('name') || '';
     }
 
     if (emailHint) {
@@ -65,10 +73,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
       setForgotEmail(emailHint);
     }
 
-    if (token) {
+    if (token || (emailHint && (hash.startsWith('#invite') || search.includes('invite')))) {
       setIsLoading(true);
-      setTimeout(() => {
-        const res = storage.redeemInviteToken(token, emailHint);
+      setTimeout(async () => {
+        // Sync with server in case member was invited from another device (like desktop)
+        await storage.syncTeamWithServer();
+        const res = storage.redeemInviteToken(token, emailHint, roleHint, nameHint);
         if (res.success && res.session) {
           window.history.replaceState(null, '', window.location.pathname);
           onLoginSuccess(res.session);
@@ -76,28 +86,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
           setIsLoading(false);
           setErrorMsg(res.message);
         }
-      }, 300);
+      }, 200);
     }
   }, [onLoginSuccess]);
 
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleCredentialsSubmit = (e: React.FormEvent) => {
+  const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
 
     setIsLoading(true);
     setErrorMsg(null);
 
-    setTimeout(() => {
-      const res = storage.login(email.trim(), password);
-      setIsLoading(false);
-      if (res.success && res.session) {
-        onLoginSuccess(res.session);
-      } else {
-        setErrorMsg(res.message);
-      }
-    }, 400);
+    // Sync with server to guarantee member exists on this device
+    await storage.syncTeamWithServer();
+
+    const res = storage.login(email.trim(), password);
+    setIsLoading(false);
+    if (res.success && res.session) {
+      onLoginSuccess(res.session);
+    } else {
+      setErrorMsg(res.message);
+    }
   };
 
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
@@ -192,27 +203,53 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
               </div>
             )}
 
-            {/* Administrator Email Quick-Fill Chip */}
-            <div className="flex items-center justify-between p-2.5 bg-[#141a29] rounded-xl border border-[#1f283d] text-xs font-mono">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded bg-gradient-to-br from-[#f05e17] to-[#d94c0b] text-white font-bold flex items-center justify-center text-[10px] shrink-0">
-                  RP
+            {/* Master Password & Invited Member Helper Banner */}
+            <div className="p-3 bg-[#141a29] rounded-xl border border-[#1f283d] text-xs font-mono space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-slate-300 font-bold">
+                  <KeyRound className="w-3.5 h-3.5 text-[#f05e17]" />
+                  <span>Master Access &amp; Temp Passwords</span>
                 </div>
-                <div className="min-w-0">
-                  <div className="text-white font-bold text-[11px] truncate">Raphooko Phooko</div>
-                  <div className="text-[10px] text-slate-400 truncate">rphooko@tconnect.africa</div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPassword('TConnected#4321');
+                    if (!email) setEmail('rphooko@tconnect.africa');
+                    setErrorMsg(null);
+                  }}
+                  className="px-2 py-0.5 bg-[#f05e17]/10 hover:bg-[#f05e17]/20 border border-[#f05e17]/30 text-[#f05e17] rounded text-[10px] font-bold transition-colors cursor-pointer"
+                >
+                  Fill Master Pass
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('rphooko@tconnect.africa');
-                  setErrorMsg(null);
-                }}
-                className="px-2.5 py-1 bg-[#1a233a] hover:bg-[#253252] border border-[#2b3752] text-slate-300 hover:text-white rounded-lg text-[10px] font-bold transition-colors shrink-0"
-              >
-                Use Admin Email
-              </button>
+              <p className="text-[10px] text-slate-400 leading-normal">
+                Newly invited members use their assigned temporary password (<code className="text-[#f05e17]">TC-XXXX-YYYY!</code>) or Master Password <code className="text-[#f05e17]">TConnected#4321</code>.
+              </p>
+              
+              <div className="flex items-center gap-1.5 pt-1 border-t border-[#1f283d]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('rphooko@tconnect.africa');
+                    setPassword('TConnected#4321');
+                    setErrorMsg(null);
+                  }}
+                  className="flex-1 py-1 px-2 bg-[#1a233a] hover:bg-[#253252] border border-[#2b3752] text-slate-300 hover:text-white rounded-lg text-[10px] font-bold transition-colors text-center"
+                >
+                  👑 Admin (rphooko)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('bernphooko@proton.me');
+                    setPassword('TC-2849-BKUP!');
+                    setErrorMsg(null);
+                  }}
+                  className="flex-1 py-1 px-2 bg-[#1a233a] hover:bg-[#253252] border border-[#2b3752] text-slate-300 hover:text-white rounded-lg text-[10px] font-bold transition-colors text-center"
+                >
+                  👤 Teammate (bern)
+                </button>
+              </div>
             </div>
 
             {/* Standard Credentials Form */}

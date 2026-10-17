@@ -7,7 +7,9 @@ import {
   Database,
   Globe,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  PanelLeftClose,
+  X
 } from 'lucide-react';
 import { VerticalType, TeamMember } from '../../types';
 import { TConnectLogo } from '../common/TConnectLogo';
@@ -22,6 +24,8 @@ interface SidebarProps {
   isSupabaseConnected: boolean;
   onOpenDatabaseModal: () => void;
   effectiveRole?: TeamMember['role'];
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -34,6 +38,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isSupabaseConnected,
   onOpenDatabaseModal,
   effectiveRole = 'Super Admin',
+  isOpen = true,
+  onClose
 }) => {
   // Streamlined 4 Core Navigation Items
   const allNavItems = [
@@ -96,67 +102,108 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'park', label: 'Parks', icon: '🌳' },
   ];
 
+  const handleNavClick = (tabId: string) => {
+    onTabChange(tabId);
+    if (typeof window !== 'undefined' && window.innerWidth < 1024 && onClose) {
+      onClose();
+    }
+  };
+
+  const handleVerticalClick = (vId: VerticalType | 'all') => {
+    onVerticalChange(vId);
+    if (typeof window !== 'undefined' && window.innerWidth < 1024 && onClose) {
+      onClose();
+    }
+  };
+
+  if (!isOpen) {
+    return null;
+  }
+
   return (
-    <aside className="w-60 bg-[#0c101c] border-r border-[#1f283d] flex flex-col justify-between shrink-0 p-4 select-none z-20">
-      <div className="space-y-5">
-        {/* Official T-Connect Brand Identity */}
-        <div className="flex items-center gap-3 px-1.5 py-1">
-          <TConnectLogo withBackground />
-          <div>
-            <span className="text-sm font-extrabold tracking-tight text-white block leading-none">T-CONNECT</span>
-            <span className="text-[9px] tracking-wider font-mono text-[#ff5500] font-semibold">CONTROL TOWER</span>
-          </div>
-        </div>
+    <>
+      {/* Mobile Backdrop Overlay */}
+      <div 
+        className="fixed inset-0 bg-black/75 backdrop-blur-xs z-40 lg:hidden animate-in fade-in duration-200"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
-        {/* Compact Vertical Selector Strip */}
-        <div className="bg-[#121829] p-1.5 rounded-xl border border-[#1f283d]">
-          <div className="text-[9px] font-mono uppercase text-slate-400 font-bold mb-1 px-1 flex items-center justify-between">
-            <span>Vertical Scope</span>
-            <Globe className="w-3 h-3 text-slate-500" />
-          </div>
-          <div className="grid grid-cols-3 gap-1 text-[11px] font-medium font-mono">
-            {verticals.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => onVerticalChange(v.id)}
-                className={`flex items-center justify-center gap-1 py-1 rounded-md transition-colors truncate ${
-                  selectedVertical === v.id
-                    ? 'bg-[#f05e17] text-white font-bold shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a233a]'
-                }`}
-              >
-                <span>{v.icon}</span>
-                <span className="text-[10px]">{v.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Main Sidebar Element (Drawer on mobile, docked on desktop) */}
+      <aside className="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] lg:static lg:w-60 bg-[#0c101c] border-r border-[#1f283d] flex flex-col justify-between shrink-0 p-4 select-none shadow-2xl lg:shadow-none animate-in slide-in-from-left duration-200">
+        <div className="space-y-5">
+          {/* Official T-Connect Brand Identity & Hide Panel Button */}
+          <div className="flex items-center justify-between px-1.5 py-1">
+            <div className="flex items-center gap-2.5">
+              <TConnectLogo withBackground />
+              <div>
+                <span className="text-sm font-extrabold tracking-tight text-white block leading-none">T-CONNECT</span>
+                <span className="text-[9px] tracking-wider font-mono text-[#ff5500] font-semibold">CONTROL TOWER</span>
+              </div>
+            </div>
 
-        {/* Streamlined Navigation: Just 4 Core Sections */}
-        <nav className="space-y-1 text-xs">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentTab === item.id;
-            return (
+            {/* Hide Panel Button */}
+            {onClose && (
               <button
-                key={item.id}
-                onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
-                  isActive
-                    ? 'bg-[#182138] text-white font-bold border border-[#2b3859] shadow-sm'
-                    : 'text-slate-400 hover:bg-[#121829] hover:text-slate-200'
-                }`}
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title="Hide side panel (Full screen view)"
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#f05e17]' : 'text-slate-500'}`} />
-                <div className="min-w-0">
-                  <div className="text-xs truncate">{item.label}</div>
-                  <div className="text-[10px] font-mono text-slate-500 truncate font-normal">{item.description}</div>
-                </div>
+                <PanelLeftClose className="w-4 h-4 text-slate-300" />
               </button>
-            );
-          })}
-        </nav>
-      </div>
+            )}
+          </div>
+
+          {/* Compact Vertical Selector Strip */}
+          <div className="bg-[#121829] p-1.5 rounded-xl border border-[#1f283d]">
+            <div className="text-[9px] font-mono uppercase text-slate-400 font-bold mb-1 px-1 flex items-center justify-between">
+              <span>Vertical Scope</span>
+              <Globe className="w-3 h-3 text-slate-500" />
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[11px] font-medium font-mono">
+              {verticals.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => handleVerticalClick(v.id)}
+                  className={`flex items-center justify-center gap-1 py-1 rounded-md transition-colors truncate cursor-pointer ${
+                    selectedVertical === v.id
+                      ? 'bg-[#f05e17] text-white font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-[#1a233a]'
+                  }`}
+                >
+                  <span>{v.icon}</span>
+                  <span className="text-[10px]">{v.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Streamlined Navigation: Just 4 Core Sections */}
+          <nav className="space-y-1 text-xs">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = currentTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleNavClick(item.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left cursor-pointer ${
+                    isActive
+                      ? 'bg-[#182138] text-white font-bold border border-[#2b3859] shadow-sm'
+                      : 'text-slate-400 hover:bg-[#121829] hover:text-slate-200'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#f05e17]' : 'text-slate-500'}`} />
+                  <div className="min-w-0">
+                    <div className="text-xs truncate">{item.label}</div>
+                    <div className="text-[10px] font-mono text-slate-500 truncate font-normal">{item.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
 
       {/* Database Connection & Tunnel Status Widget */}
       <div className="space-y-2 mt-4 font-mono text-xs">
@@ -206,5 +253,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
+  </>
   );
 };

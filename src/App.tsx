@@ -15,7 +15,7 @@ import { BillingView } from './components/views/BillingView';
 import { NetworkSecurityView } from './components/views/NetworkSecurityView';
 import { DatabaseModal } from './components/common/DatabaseModal';
 import { LoginView } from './components/auth/LoginView';
-import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight } from 'lucide-react';
+import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight, PanelLeftOpen } from 'lucide-react';
 import { simulateInviteEmail } from './services/auth';
 import { browserNotificationService } from './services/browserNotifications';
 
@@ -35,11 +35,28 @@ export default function App() {
   const [biometricActive, setBiometricActive] = useState(true);
   const [showBiometricModal, setShowBiometricModal] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(() => {
     return supabaseService.getConfig().isConnected;
   });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [voucherThreshold, setVoucherThreshold] = useState<number>(() => storage.getVoucherLowThreshold());
+
+  // Auto-collapse sidebar on smaller screens
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Global Invite Modal State (Triggered from User Profile dropdown or Team view)
   const [isGlobalInviteModalOpen, setIsGlobalInviteModalOpen] = useState(false);
@@ -638,7 +655,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans relative">
       {/* Streamlined 4-Section Sidebar Navigation */}
       <Sidebar
         currentTab={currentTab}
@@ -650,7 +667,22 @@ export default function App() {
         isSupabaseConnected={isSupabaseConnected}
         onOpenDatabaseModal={() => setShowDatabaseModal(true)}
         effectiveRole={effectiveRole}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
+
+      {/* Floating Re-open Side Panel Button (Visible when sidebar is closed) */}
+      {!isSidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setIsSidebarOpen(true)}
+          className="fixed bottom-5 left-5 z-40 px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-xl shadow-2xl font-mono text-xs font-bold flex items-center gap-2 border border-white/20 transition-all cursor-pointer animate-in fade-in duration-150"
+          title="Open side panel (Navigation menu)"
+        >
+          <PanelLeftOpen className="w-4 h-4 text-white" />
+          <span>Side Panel</span>
+        </button>
+      )}
 
       {/* Main Workspace Frame */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#080b14] overflow-hidden">
@@ -659,6 +691,8 @@ export default function App() {
           currentTab={currentTab}
           alerts={state.alerts}
           onAcknowledgeAlert={handleAcknowledgeAlert}
+          onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
+          isSidebarOpen={isSidebarOpen}
           transactions={state.transactions}
           routerCount={state.routers.length}
           totalRevenue={totalRevenue}

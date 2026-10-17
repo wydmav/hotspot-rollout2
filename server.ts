@@ -1235,6 +1235,186 @@ Router: ${routerName} (${wgIp})`;
 });
 
 // -----------------------------------------------------------------------------
+// TEAM RBAC & CROSS-DEVICE AUTHENTICATION REGISTRY
+// Persists team members, invitations, and temporary passwords across all devices
+// (Desktops, Phones, and Tablets).
+// -----------------------------------------------------------------------------
+interface ServerTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: 'Owner' | 'Admin' | 'Technical' | 'Collaborator' | 'Viewer' | 'Super Admin';
+  scopedSites: string[];
+  mfaEnabled: boolean;
+  status: 'active' | 'invited' | 'expired';
+  invitedAt: string;
+  lastLoginAt?: string;
+  inviteToken?: string;
+  inviteTokenExpiresAt?: string;
+  invitedBy?: string;
+  tempPassword?: string;
+  tempPasswordIssuedAt?: string;
+  hasPendingReset?: boolean;
+}
+
+const serverTeamStore = new Map<string, ServerTeamMember>();
+
+// Seed default Super Admin
+serverTeamStore.set('rphooko@tconnect.africa', {
+  id: 'tm_owner',
+  name: 'Raphooko Phooko',
+  email: 'rphooko@tconnect.africa',
+  role: 'Super Admin',
+  scopedSites: [],
+  mfaEnabled: true,
+  status: 'active',
+  invitedAt: '2026-10-02',
+  lastLoginAt: 'Just now'
+});
+
+// Seed backup account from user's roster so it's instantly accessible everywhere
+serverTeamStore.set('bernphooko@proton.me', {
+  id: 'tm_backup_bern',
+  name: 'Raphooko Backup',
+  email: 'bernphooko@proton.me',
+  role: 'Viewer',
+  scopedSites: ['Maseru Golf Course'],
+  mfaEnabled: false,
+  status: 'invited',
+  invitedAt: '2026-10-17',
+  inviteToken: 'inv_backup_bernphooko',
+  tempPassword: 'TC-2849-BKUP!'
+});
+
+app.get('/api/team', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    team: Array.from(serverTeamStore.values())
+  });
+});
+
+app.post('/api/team/sync', (req: Request, res: Response) => {
+  const { team } = req.body;
+  if (Array.isArray(team)) {
+    team.forEach((m: ServerTeamMember) => {
+      if (m && m.email) {
+        const clean = m.email.trim().toLowerCase();
+        const existing = serverTeamStore.get(clean);
+        serverTeamStore.set(clean, {
+          ...existing,
+          ...m,
+          email: clean
+        });
+      }
+    });
+  }
+  res.json({
+    success: true,
+    team: Array.from(serverTeamStore.values())
+  });
+});
+
+app.post('/api/team/invite', (req: Request, res: Response) => {
+  const { name, email, role, scopedSites, tempPassword, inviteToken } = req.body;
+  if (!email) {
+    return res.status(400).json({ success: false, message: 'Email is required' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const token = inviteToken || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const pass = tempPassword || `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
+
+  const member: ServerTeamMember = {
+    id: `tm_${Date.now()}`,
+    name: name || cleanEmail.split('@')[0],
+    email: cleanEmail,
+    role: role || 'Viewer',
+    scopedSites: Array.isArray(scopedSites) ? scopedSites : [],
+    mfaEnabled: role === 'Owner' || role === 'Admin',
+    status: 'invited',
+    invitedAt: new Date().toISOString().slice(0, 10),
+    inviteToken: token,
+    inviteTokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    invitedBy: 'Raphooko Phooko',
+    tempPassword: pass,
+    tempPasswordIssuedAt: new Date().toISOString()
+  };
+
+  serverTeamStore.set(cleanEmail, member);
+  res.json({ success: true, member });
+});
+
+app.post('/api/team/redeem-invite', (req: Request, res: Response) => {
+  const { token, email, role, name } = req.body;
+  const cleanToken = (token || '').trim();
+  const cleanEmail = (email || '').trim().toLowerCase();
+
+  let member: ServerTeamMember | undefined;
+
+  for (const m of serverTeamStore.values()) {
+    if (cleanToken && m.inviteToken && m.inviteToken.toLowerCase() === cleanToken.toLowerCase()) {
+      member = m;
+      break;
+    }
+    if (cleanEmail && m.email.toLowerCase() === cleanEmail) {
+      member = m;
+      break;
+    }
+  }
+
+  // If not found, auto-provision from invite parameters
+  if (!member && cleanEmail) {
+    member = {
+      id: `tm_${Date.now()}`,
+      name: name || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: role || 'Viewer',
+      scopedSites: [],
+      mfaEnabled: false,
+      status: 'active',
+      invitedAt: new Date().toISOString().slice(0, 10),
+      lastLoginAt: 'Just now'
+    };
+    serverTeamStore.set(cleanEmail, member);
+  }
+
+  if (!member) {
+    return res.status(404).json({ success: false, message: 'Invite token not found' });
+  }
+
+  member.status = 'active';
+  member.lastLoginAt = 'Just now';
+  member.hasPendingReset = false;
+
+  res.json({ success: true, member });
+});
+
+app.post('/api/team/issue-password', (req: Request, res: Response) => {
+  const { memberId, email, tempPassword } = req.body;
+  const cleanEmail = (email || '').trim().toLowerCase();
+  let member: ServerTeamMember | undefined;
+
+  if (cleanEmail && serverTeamStore.has(cleanEmail)) {
+    member = serverTeamStore.get(cleanEmail);
+  } else if (memberId) {
+    for (const m of serverTeamStore.values()) {
+      if (m.id === memberId) {
+        member = m;
+        break;
+      }
+    }
+  }
+
+  if (member) {
+    member.tempPassword = tempPassword;
+    member.tempPasswordIssuedAt = new Date().toISOString();
+    return res.json({ success: true, member });
+  }
+
+  res.status(404).json({ success: false, message: 'Member not found' });
+});
+
+// -----------------------------------------------------------------------------
 // HISTORICAL AUDIT LOGS QUERY & INGESTION ENDPOINTS
 // -----------------------------------------------------------------------------
 app.get('/api/audit-logs', (req: Request, res: Response) => {

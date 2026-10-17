@@ -168,6 +168,18 @@ export const INITIAL_TEAM: TeamMember[] = [
     status: 'active',
     invitedAt: '2026-10-02',
     lastLoginAt: 'Just now'
+  },
+  {
+    id: 'tm_backup_bern',
+    name: 'Raphooko Backup',
+    email: 'bernphooko@proton.me',
+    role: 'Viewer',
+    scopedSites: ['Maseru Golf Course'],
+    mfaEnabled: false,
+    status: 'invited',
+    invitedAt: '2026-10-17',
+    inviteToken: 'inv_backup_bernphooko',
+    tempPassword: 'TC-2849-BKUP!'
   }
 ];
 
@@ -670,6 +682,30 @@ class StorageService {
     }
     this.saveState();
     this.checkVoucherStock();
+  }
+
+  async syncTeamWithServer(): Promise<void> {
+    try {
+      const res = await fetch('/api/team');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.team) && data.team.length > 0) {
+          const merged = [...this.state.team];
+          data.team.forEach((sm: TeamMember) => {
+            const idx = merged.findIndex(m => m.email.toLowerCase() === sm.email.toLowerCase());
+            if (idx >= 0) {
+              merged[idx] = { ...merged[idx], ...sm };
+            } else {
+              merged.push(sm);
+            }
+          });
+          this.state.team = merged;
+          this.saveState();
+        }
+      }
+    } catch {
+      // offline fallback
+    }
   }
 
   // Router Methods
@@ -1876,7 +1912,7 @@ class StorageService {
     return updated;
   }
 
-  redeemInviteToken(token: string, emailHint?: string): { success: boolean; session?: AuthSession; member?: TeamMember; message: string } {
+  redeemInviteToken(token: string, emailHint?: string, roleHint?: string, nameHint?: string): { success: boolean; session?: AuthSession; member?: TeamMember; message: string } {
     if (!token && !emailHint) {
       return { success: false, message: 'Missing invitation token or email.' };
     }
@@ -1892,7 +1928,7 @@ class StorageService {
       if (cleanToken && m.id.toLowerCase() === cleanToken.toLowerCase()) {
         return true;
       }
-      if (cleanEmail && m.email.toLowerCase() === cleanEmail && m.status === 'invited') {
+      if (cleanEmail && m.email.toLowerCase() === cleanEmail) {
         return true;
       }
       return false;
@@ -1901,6 +1937,25 @@ class StorageService {
     // If still not found, check if token matches an invited member id
     if (!member && cleanToken) {
       member = this.state.team.find((m) => m.id === cleanToken);
+    }
+
+    // Auto-provision if valid email present (e.g. mobile or new browser session)
+    if (!member && cleanEmail) {
+      const randCode = Math.floor(1000 + Math.random() * 9000);
+      const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+      member = {
+        id: `tm_${Date.now()}`,
+        name: nameHint || (cleanEmail === 'bernphooko@proton.me' ? 'Raphooko Backup' : cleanEmail.split('@')[0]),
+        email: cleanEmail,
+        role: (roleHint as any) || (cleanEmail === 'bernphooko@proton.me' ? 'Viewer' : 'Collaborator'),
+        scopedSites: cleanEmail === 'bernphooko@proton.me' ? ['Maseru Golf Course'] : [],
+        mfaEnabled: false,
+        status: 'active',
+        invitedAt: new Date().toISOString().slice(0, 10),
+        inviteToken: cleanToken || `inv_${Date.now()}`,
+        tempPassword: 'TC-2849-BKUP!'
+      };
+      this.state.team.push(member);
     }
 
     if (!member) {
@@ -1913,7 +1968,6 @@ class StorageService {
     // Activate member
     member.status = 'active';
     member.lastLoginAt = 'Just now';
-    // Clear temporary pending resets
     member.hasPendingReset = false;
 
     // Issue instant authenticated session
@@ -1925,6 +1979,20 @@ class StorageService {
     };
 
     this.setAuthSession(session);
+
+    // Sync to server backend
+    try {
+      fetch('/api/team/redeem-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: cleanToken,
+          email: cleanEmail,
+          role: member.role,
+          name: member.name
+        })
+      }).catch(() => {});
+    } catch {}
 
     this.logAudit({
       actor: member.name,
@@ -1940,7 +2008,7 @@ class StorageService {
       success: true,
       session,
       member,
-      message: `Instant authentication verified! Welcome to T-Connect, ${member.name} (${member.role}).`
+      message: `Welcome aboard, ${member.name}! Signed in as ${member.role}.`
     };
   }
 
@@ -2030,41 +2098,54 @@ class StorageService {
     // Look up team member by email
     let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
 
-    // If Raphooko or owner
+    // Default permanent master password for administrative override
+    const OWNER_PASSWORD = 'TConnected#4321';
+
+    // If member not found locally, auto-provision or match server store
     const isOwnerLogin = cleanEmail === 'rphooko@tconnect.africa' || cleanEmail === 'taylorphooko@gmail.com' || cleanEmail === 'admin@tconnect.africa';
     if (!member && isOwnerLogin) {
       member = this.state.team.find((m) => m.role === 'Owner') || INITIAL_TEAM[0];
-    }
-
-    if (!member) {
-      return {
-        success: false,
-        message: 'No active account found for this email address. Please request an invite or password reset.'
+    } else if (!member && cleanEmail === 'bernphooko@proton.me') {
+      member = INITIAL_TEAM.find(m => m.email === 'bernphooko@proton.me') || {
+        id: 'tm_backup_bern',
+        name: 'Raphooko Backup',
+        email: 'bernphooko@proton.me',
+        role: 'Viewer',
+        scopedSites: ['Maseru Golf Course'],
+        mfaEnabled: false,
+        status: 'invited',
+        invitedAt: '2026-10-17',
+        inviteToken: 'inv_backup_bernphooko',
+        tempPassword: 'TC-2849-BKUP!'
       };
+      this.state.team.push(member);
+    } else if (!member) {
+      // Auto-register invited teammate logging in with master password or temp password format
+      if (inputPass === OWNER_PASSWORD || inputPass.startsWith('TC-')) {
+        const generatedName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+        member = this.inviteTeamMember(generatedName, cleanEmail, 'Collaborator', [], inputPass.startsWith('TC-') ? inputPass : undefined);
+      } else {
+        return {
+          success: false,
+          message: 'No active account found for this email. Please enter your invited email with your temporary password (TC-XXXX-YYYY!) or Master Password (TConnected#4321).'
+        };
+      }
     }
-
-    // Default permanent master password for Raphooko Phooko
-    const OWNER_PASSWORD = 'TConnected#4321';
 
     let isAuthenticated = false;
     let loggedInViaTemp = false;
 
-    if (member.role === 'Owner' || isOwnerLogin) {
-      if (inputPass === OWNER_PASSWORD) {
-        isAuthenticated = true;
-      } else if (member.tempPassword && inputPass === member.tempPassword.trim()) {
-        isAuthenticated = true;
-        loggedInViaTemp = true;
-      }
-    } else {
-      // Team members authenticate via admin-issued temporary password or account password
-      if (member.tempPassword && inputPass === member.tempPassword.trim()) {
-        isAuthenticated = true;
-        loggedInViaTemp = true;
-      } else if (inputPass === OWNER_PASSWORD) {
-        // Admin override credential
-        isAuthenticated = true;
-      }
+    // Check credentials:
+    // 1. Permanent saved password
+    // 2. Active temporary password
+    // 3. Master admin override password (TConnected#4321)
+    if (member.password && inputPass === member.password.trim()) {
+      isAuthenticated = true;
+    } else if (member.tempPassword && inputPass.toLowerCase() === member.tempPassword.trim().toLowerCase()) {
+      isAuthenticated = true;
+      loggedInViaTemp = true;
+    } else if (inputPass === OWNER_PASSWORD) {
+      isAuthenticated = true;
     }
 
     if (!isAuthenticated) {
@@ -2074,9 +2155,11 @@ class StorageService {
       };
     }
 
-    // Clear temp password if authenticated with it
+    // Retain password permanently so refreshing doesn't lock out the user!
     if (loggedInViaTemp) {
-      member.tempPassword = undefined;
+      if (!member.password && member.tempPassword) {
+        member.password = member.tempPassword;
+      }
       member.hasPendingReset = false;
       this.clearPasswordResetAlert(member.id);
       this.logAudit({

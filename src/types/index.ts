@@ -304,6 +304,7 @@ export interface TeamMember {
   lastLoginAt?: string;
   tempPassword?: string;
   tempPasswordIssuedAt?: string;
+  password?: string;
   hasPendingReset?: boolean;
   pendingResetRequestedAt?: string;
 }

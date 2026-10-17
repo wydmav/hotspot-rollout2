@@ -13,7 +13,9 @@ import {
   RefreshCw,
   ArrowRight,
   SlidersHorizontal,
-  Sparkles
+  Sparkles,
+  PanelLeft,
+  PanelLeftClose
 } from 'lucide-react';
 import { SystemAlert, PaymentTransaction, TeamMember } from '../../types';
 import { ExportService } from '../../services/exportService';
@@ -23,6 +25,8 @@ interface HeaderProps {
   currentTab: string;
   alerts: SystemAlert[];
   onAcknowledgeAlert: (id: string) => void;
+  onToggleSidebar?: () => void;
+  isSidebarOpen?: boolean;
   transactions: PaymentTransaction[];
   routerCount: number;
   totalRevenue: number;
@@ -53,6 +57,8 @@ export const Header: React.FC<HeaderProps> = ({
   currentTab,
   alerts,
   onAcknowledgeAlert,
+  onToggleSidebar,
+  isSidebarOpen = true,
   transactions,
   routerCount,
   totalRevenue,
@@ -146,13 +152,30 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-16 bg-[#0f1422] border-b border-[#232d42] px-6 flex items-center justify-between shrink-0 select-none z-30">
-      {/* Zone 1: Current Section Context & Breadcrumb */}
-      <div className="flex items-center gap-3">
+    <header className="h-16 bg-[#0f1422] border-b border-[#232d42] px-4 sm:px-6 flex items-center justify-between shrink-0 select-none z-30">
+      {/* Zone 1: Current Section Context & Side Panel Toggle */}
+      <div className="flex items-center gap-2.5">
+        {onToggleSidebar && (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="p-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 hover:text-white transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
+            title={isSidebarOpen ? "Hide side panel (Full page view)" : "Open side panel"}
+          >
+            {isSidebarOpen ? (
+              <PanelLeftClose className="w-4 h-4 text-[#f05e17]" />
+            ) : (
+              <>
+                <PanelLeft className="w-4 h-4 text-[#f05e17]" />
+                <span className="text-[11px] font-bold text-white hidden sm:inline">Side Panel</span>
+              </>
+            )}
+          </button>
+        )}
         <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-          <span className="text-slate-200 font-bold">T-Connect</span>
-          <span>/</span>
-          <span className="text-[#f05e17] font-semibold">{formatTabTitle(currentTab)}</span>
+          <span className="text-slate-200 font-bold hidden sm:inline">T-Connect</span>
+          <span className="hidden sm:inline">/</span>
+          <span className="text-[#f05e17] font-semibold truncate max-w-[150px] sm:max-w-none">{formatTabTitle(currentTab)}</span>
         </div>
       </div>
 
