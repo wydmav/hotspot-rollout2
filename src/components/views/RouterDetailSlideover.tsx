@@ -811,24 +811,92 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                       <span className="text-slate-400 text-[11px]">Enforced via RouterOS Profile &amp; Simple Queues</span>
                     </div>
 
-                    {/* Duration Buttons */}
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-300 font-bold block">Free Session Duration Granted:</label>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {[15, 30, 45, 60, 120].map((mins) => (
+                    {/* Duration Controls: 30 Mins to 24 Hours */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] text-slate-300 font-bold block">Free Session Duration Granted:</label>
+                        <span className="text-amber-300 font-mono font-bold text-xs bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                          {freeDurationMinutes >= 60 
+                            ? `${Math.floor(freeDurationMinutes / 60)}h${freeDurationMinutes % 60 ? ` ${freeDurationMinutes % 60}m` : ''}` 
+                            : `${freeDurationMinutes} mins`}
+                        </span>
+                      </div>
+
+                      {/* Range Slider 30m to 1440m */}
+                      <input
+                        type="range"
+                        min="30"
+                        max="1440"
+                        step="15"
+                        value={freeDurationMinutes}
+                        onChange={(e) => setFreeDurationMinutes(Number(e.target.value))}
+                        className="w-full accent-[#f05e17] cursor-pointer"
+                      />
+
+                      {/* Preset Chips */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { label: '30m', mins: 30 },
+                          { label: '1 Hour', mins: 60 },
+                          { label: '2 Hours', mins: 120 },
+                          { label: '4 Hours', mins: 240 },
+                          { label: '8 Hours', mins: 480 },
+                          { label: '12 Hours', mins: 720 },
+                          { label: '24 Hours (1 Day)', mins: 1440 }
+                        ].map((item) => (
                           <button
-                            key={mins}
+                            key={item.mins}
                             type="button"
-                            onClick={() => setFreeDurationMinutes(mins)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                              freeDurationMinutes === mins
+                            onClick={() => setFreeDurationMinutes(item.mins)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                              freeDurationMinutes === item.mins
                                 ? 'bg-[#f05e17] text-white border-[#f05e17]'
                                 : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
                             }`}
                           >
-                            {mins} mins
+                            {item.label}
                           </button>
                         ))}
+                      </div>
+
+                      {/* Custom Time Numeric Input */}
+                      <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Custom Duration Input:</span>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <div className="flex items-center gap-1 bg-[#161d31] px-2 py-1 rounded border border-slate-700">
+                            <input
+                              type="number"
+                              min="0"
+                              max="24"
+                              value={Math.floor(freeDurationMinutes / 60)}
+                              onChange={(e) => {
+                                const h = Math.max(0, Math.min(24, parseInt(e.target.value) || 0));
+                                const currentM = freeDurationMinutes % 60;
+                                const total = Math.max(30, Math.min(1440, h * 60 + currentM));
+                                setFreeDurationMinutes(total);
+                              }}
+                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                            />
+                            <span className="text-slate-400 text-[10px]">hrs</span>
+                          </div>
+                          <span className="text-slate-500 font-bold">:</span>
+                          <div className="flex items-center gap-1 bg-[#161d31] px-2 py-1 rounded border border-slate-700">
+                            <input
+                              type="number"
+                              min="0"
+                              max="59"
+                              value={freeDurationMinutes % 60}
+                              onChange={(e) => {
+                                const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                                const currentH = Math.floor(freeDurationMinutes / 60);
+                                const total = Math.max(30, Math.min(1440, currentH * 60 + m));
+                                setFreeDurationMinutes(total);
+                              }}
+                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                            />
+                            <span className="text-slate-400 text-[10px]">mins</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 

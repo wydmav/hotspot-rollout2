@@ -31,13 +31,23 @@ import {
   Building2,
   Clock,
   Folder,
-  Zap
+  Zap,
+  AlertTriangle
 } from 'lucide-react';
 import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage } from '../../services/storage';
 import { TenantGroupsModal } from './TenantGroupsModal';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
+
+export const formatDuration = (mins: number) => {
+  if (mins >= 1440) return '24 Hours (1 Day)';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h} ${h === 1 ? 'Hour' : 'Hours'}`;
+  return `${m} Minutes`;
+};
 
 // =============================================================================
 // SCOPE DEFINITIONS & METADATA
@@ -1454,24 +1464,111 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </div>
 
                   {isFreeModeActive && (
-                    <div className="flex items-center justify-between pt-1 border-t border-[#1b233a] text-[11px] font-mono text-slate-300">
-                      <span>Free Session Duration:</span>
-                      <select
-                        value={activeRouter?.freeDurationMinutes || 30}
-                        onChange={(e) => {
-                          const mins = Number(e.target.value);
-                          if (activeRouter) {
-                            storage.toggleRouterFreeMode(activeRouter.id, true, mins);
-                          }
-                        }}
-                        className="bg-[#0b0f19] border border-[#232d42] text-amber-300 px-2 py-0.5 rounded text-xs cursor-pointer"
-                      >
-                        <option value="15">15 Minutes</option>
-                        <option value="30">30 Minutes (Recommended)</option>
-                        <option value="45">45 Minutes</option>
-                        <option value="60">1 Hour</option>
-                        <option value="120">2 Hours</option>
-                      </select>
+                    <div className="pt-2 border-t border-[#1b233a] space-y-2 text-[11px] font-mono text-slate-300">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Free Session Duration:</span>
+                        </span>
+                        <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                          {formatDuration(activeRouter?.freeDurationMinutes || 30)}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span>30 Mins</span>
+                          <span>12 Hours</span>
+                          <span>24 Hours (1 Day)</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="30"
+                          max="1440"
+                          step="15"
+                          value={activeRouter?.freeDurationMinutes || 30}
+                          onChange={(e) => {
+                            const mins = Number(e.target.value);
+                            if (activeRouter) {
+                              storage.toggleRouterFreeMode(activeRouter.id, true, mins);
+                            }
+                          }}
+                          className="w-full accent-[#f05e17] cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        {[
+                          { label: '30m', mins: 30 },
+                          { label: '1 Hour', mins: 60 },
+                          { label: '2 Hours', mins: 120 },
+                          { label: '4 Hours', mins: 240 },
+                          { label: '8 Hours', mins: 480 },
+                          { label: '12 Hours', mins: 720 },
+                          { label: '24 Hours (1 Day)', mins: 1440 }
+                        ].map((item) => (
+                          <button
+                            key={item.mins}
+                            type="button"
+                            onClick={() => {
+                              if (activeRouter) {
+                                storage.toggleRouterFreeMode(activeRouter.id, true, item.mins);
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                              (activeRouter?.freeDurationMinutes || 30) === item.mins
+                                ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                                : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Custom Numeric Hour & Minute Inputs up to 24 Hours */}
+                      <div className="pt-2 border-t border-[#1b233a] flex items-center justify-between gap-2 text-[10px]">
+                        <span className="text-slate-400 font-bold shrink-0">Custom Time Input:</span>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
+                            <input
+                              type="number"
+                              min="0"
+                              max="24"
+                              value={Math.floor((activeRouter?.freeDurationMinutes || 30) / 60)}
+                              onChange={(e) => {
+                                const h = Math.max(0, Math.min(24, parseInt(e.target.value) || 0));
+                                const currentM = (activeRouter?.freeDurationMinutes || 30) % 60;
+                                const total = Math.max(30, Math.min(1440, h * 60 + currentM));
+                                if (activeRouter) {
+                                  storage.toggleRouterFreeMode(activeRouter.id, true, total);
+                                }
+                              }}
+                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                            />
+                            <span className="text-slate-400 text-[10px]">hrs</span>
+                          </div>
+                          <span className="text-slate-500 font-bold">:</span>
+                          <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
+                            <input
+                              type="number"
+                              min="0"
+                              max="59"
+                              value={(activeRouter?.freeDurationMinutes || 30) % 60}
+                              onChange={(e) => {
+                                const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                                const currentH = Math.floor((activeRouter?.freeDurationMinutes || 30) / 60);
+                                const total = Math.max(30, Math.min(1440, currentH * 60 + m));
+                                if (activeRouter) {
+                                  storage.toggleRouterFreeMode(activeRouter.id, true, total);
+                                }
+                              }}
+                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                            />
+                            <span className="text-slate-400 text-[10px]">mins</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2386,45 +2483,120 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
                     }}
                   >
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
-                      <CheckCircle2 className="w-6 h-6" />
-                    </div>
+                    {sessionRemaining > 0 ? (
+                      <>
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
 
-                    <div>
-                      <h4 className="font-extrabold text-white text-sm">Online &amp; Connected!</h4>
-                      <p className="text-[10px] text-slate-400 font-mono">
-                        Active on {currentConfig.brandTitle}
-                      </p>
-                    </div>
+                        <div>
+                          <h4 className="font-extrabold text-white text-sm">Online &amp; Connected!</h4>
+                          <p className="text-[10px] text-slate-400 font-mono">
+                            Active on {currentConfig.brandTitle}
+                          </p>
+                        </div>
 
-                    <div className="bg-black/40 p-2.5 rounded-xl border border-white/10 space-y-1 text-xs font-mono">
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>Remaining Time:</span>
-                        <span className="text-emerald-400 font-bold">
-                          {Math.floor(sessionRemaining / 3600)}h {Math.floor((sessionRemaining % 3600) / 60)}m {sessionRemaining % 60}s
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>Guest Subscriber:</span>
-                        <span className="text-white font-bold">{guestFirstName} {guestSurname}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>Contact &amp; Email:</span>
-                        <span className="text-cyan-300 font-mono truncate max-w-[170px]">{guestEmail || `${guestCountryCode} ${guestPhone}`}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-400 text-[11px]">
-                        <span>Scope Profile:</span>
-                        <span className="text-white font-bold">{activeMeta.label}</span>
-                      </div>
-                    </div>
+                        <div className="bg-black/40 p-2.5 rounded-xl border border-white/10 space-y-1 text-xs font-mono">
+                          <div className="flex justify-between text-slate-400 text-[11px]">
+                            <span>Remaining Time:</span>
+                            <span className="text-emerald-400 font-bold">
+                              {Math.floor(sessionRemaining / 3600)}h {Math.floor((sessionRemaining % 3600) / 60)}m {sessionRemaining % 60}s
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 text-[11px]">
+                            <span>Access Mode:</span>
+                            <span className="text-amber-300 font-bold uppercase">
+                              {sessionAuthMode === 'free' ? '⚡ Free Access' : '💳 Paid Pass'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 text-[11px]">
+                            <span>Guest Subscriber:</span>
+                            <span className="text-white font-bold">{guestFirstName} {guestSurname}</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 text-[11px]">
+                            <span>Contact &amp; Email:</span>
+                            <span className="text-cyan-300 font-mono truncate max-w-[170px]">{guestEmail || `${guestCountryCode} ${guestPhone}`}</span>
+                          </div>
+                        </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setPreviewStep('identification')}
-                      className="w-full py-2 bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-mono rounded-xl transition-colors"
-                    >
-                      Reset Simulator
-                    </button>
+                        <div className="flex items-center gap-2 pt-1 font-mono">
+                          <button
+                            type="button"
+                            onClick={() => setSessionRemaining(0)}
+                            className="flex-1 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 text-[10px] rounded-lg transition-colors cursor-pointer"
+                            title="Test session expiry"
+                          >
+                            Simulate Expiry (0s)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewStep('identification')}
+                            className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] rounded-lg transition-colors"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      /* EXPIRED SESSION STATE: ALIGNED FREE RECONNECT & PAID RE-AUTHENTICATION */
+                      <div className="space-y-3">
+                        <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30 animate-pulse">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+
+                        <div>
+                          <h4 className="font-extrabold text-white text-sm">Session Expired</h4>
+                          <p className="text-[10px] text-rose-300 font-mono mt-0.5">
+                            {sessionAuthMode === 'free'
+                              ? 'Your free access duration has ended.'
+                              : 'Your paid pass duration has concluded.'}
+                          </p>
+                        </div>
+
+                        <div className="p-2.5 bg-black/50 rounded-xl border border-rose-500/30 text-[11px] font-mono text-slate-300 text-left leading-relaxed">
+                          {sessionAuthMode === 'free' ? (
+                            <span>
+                              Free trial finished. You can <strong>reconnect again for free</strong>, or upgrade to an unlimited high-speed paid pass.
+                            </span>
+                          ) : (
+                            <span>
+                              Your paid pass is exhausted. Authenticate via <strong>EcoCash (*199#)</strong> or <strong>OTT Voucher</strong> to restore connection.
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-1.5 pt-1 font-mono">
+                          {sessionAuthMode === 'free' ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleConnectFree()}
+                                className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <Zap className="w-3.5 h-3.5 fill-current" />
+                                <span>Connect Free Again &rarr;</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewStep('plan')}
+                                className="w-full py-2 bg-white/10 hover:bg-white/20 text-slate-200 text-xs rounded-xl transition-colors cursor-pointer"
+                              >
+                                Upgrade to Paid Pass &rarr;
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewStep('plan')}
+                              className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <DollarSign className="w-3.5 h-3.5" />
+                              <span>Pay Again via Gateway to Reconnect &rarr;</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

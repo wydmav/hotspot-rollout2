@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Smartphone, Repeat, Sliders, Users, ShieldCheck, Database, Clock, UserCheck } from 'lucide-react';
+import { Smartphone, Repeat, Sliders, Users, ShieldCheck, Database, Clock, UserCheck, Terminal } from 'lucide-react';
 import { 
   HotspotPlan, 
   RouterDevice, 
@@ -13,6 +13,7 @@ import {
   GatewayProvider 
 } from '../../types';
 import { CaptivePortalView } from './CaptivePortalView';
+import { RouterTerminalSubTab } from './RouterTerminalSubTab';
 import { RoamingView } from './RoamingView';
 import { BandwidthFilterView } from './BandwidthFilterView';
 import { TeamRbacView } from './TeamRbacView';
@@ -58,7 +59,7 @@ interface NetworkSecurityViewProps {
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
   const isCollaborator = props.effectiveRole === 'Collaborator';
-  const [activeSubTab, setActiveSubTab] = useState<'portal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security'>('portal');
+  const [activeSubTab, setActiveSubTab] = useState<'portal' | 'terminal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security'>('portal');
 
   // Enforce portal subtab for Collaborator
   React.useEffect(() => {
@@ -88,6 +89,19 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
 
           {!isCollaborator && (
             <>
+
+          <button
+            onClick={() => setActiveSubTab('terminal')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
+              activeSubTab === 'terminal' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Router Terminal</span>
+            <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-950/60 text-orange-300 border border-orange-500/30">
+              4 Options
+            </span>
+          </button>
 
           <button
             onClick={() => setActiveSubTab('roaming')}
@@ -244,6 +258,14 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
           currency={props.currency}
           selectedVertical={props.selectedVertical}
           effectiveRole={props.effectiveRole}
+        />
+      )}
+
+      {activeSubTab === 'terminal' && (
+        <RouterTerminalSubTab
+          routers={props.routers}
+          selectedVertical={props.selectedVertical}
+          currency={props.currency}
         />
       )}
 

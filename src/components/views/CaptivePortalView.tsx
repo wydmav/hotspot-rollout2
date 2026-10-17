@@ -26,7 +26,8 @@ import {
   AlertTriangle,
   Building2,
   Unlock,
-  Send
+  Send,
+  DollarSign
 } from 'lucide-react';
 import { HotspotPlan, GatewayProvider, VerticalType, RouterDevice, RouterAccessMode, SponsorAdConfig, TeamMember } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
@@ -207,6 +208,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   const [remainingSeconds, setRemainingSeconds] = useState(306132); // ~3 days, 13 hours, 2 minutes
   const [totalPackageSeconds, setTotalPackageSeconds] = useState(604800); // 7 days (Week pass)
   const [copiedLockdownScript, setCopiedLockdownScript] = useState(false);
+  const [lastConnectedAuthMode, setLastConnectedAuthMode] = useState<'free' | 'paid'>('free');
 
   // Dedicated Hotspot Access Policies & Monetization State (Centralized Platform Control)
   const [fleetScopeVertical, setFleetScopeVertical] = useState<VerticalType | 'all'>(selectedVertical);
@@ -420,6 +422,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
     const durationMins = freeAccessDurationMinutes || 30;
     setRemainingSeconds(durationMins * 60);
     setTotalPackageSeconds(durationMins * 60);
+    setLastConnectedAuthMode('free');
 
     // Save real active session and captive lead in storage
     storage.addActiveSession({
@@ -468,6 +471,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
       const res = onProcessPayment(selectedGateway, selectedPlan.id, fullPhone, ottPin);
       setIssuedCode(res.voucher.code);
       setIsProcessing(false);
+      setLastConnectedAuthMode('paid');
       setPreviewStep('success');
 
       // Set package duration based on chosen plan
@@ -498,6 +502,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
       setIsProcessing(false);
       if (res.success) {
         setIssuedCode(voucherCodeInput.toUpperCase());
+        setLastConnectedAuthMode('paid');
         setPreviewStep('success');
       } else {
         alert(res.message);
@@ -788,6 +793,106 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                   <span className="text-[10px] font-bold">{authPos ? 'ACTIVE' : 'OFF'}</span>
                 </button>
               </div>
+
+              {/* Free Access Duration Controls: 30 Mins to 24 Hours (1 Day) */}
+              {authFree && (
+                <div className="pt-3 border-t border-[#1b233a] space-y-2.5 text-xs font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Free Session Duration:</span>
+                    </span>
+                    <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 text-[11px]">
+                      {freeAccessDurationMinutes >= 60 
+                        ? `${Math.floor(freeAccessDurationMinutes / 60)}h${freeAccessDurationMinutes % 60 ? ` ${freeAccessDurationMinutes % 60}m` : ''}` 
+                        : `${freeAccessDurationMinutes}m`}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>30 Mins</span>
+                      <span>12 Hours</span>
+                      <span>24 Hours (1 Day)</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="30"
+                      max="1440"
+                      step="15"
+                      value={freeAccessDurationMinutes}
+                      onChange={(e) => setFreeAccessDurationMinutes(Number(e.target.value))}
+                      className="w-full accent-[#f05e17] cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Preset chips */}
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                    {[
+                      { label: '30m', mins: 30 },
+                      { label: '1 Hour', mins: 60 },
+                      { label: '2 Hours', mins: 120 },
+                      { label: '4 Hours', mins: 240 },
+                      { label: '8 Hours', mins: 480 },
+                      { label: '12 Hours', mins: 720 },
+                      { label: '24 Hours (1 Day)', mins: 1440 }
+                    ].map((item) => (
+                      <button
+                        key={item.mins}
+                        type="button"
+                        onClick={() => setFreeAccessDurationMinutes(item.mins)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                          freeAccessDurationMinutes === item.mins
+                            ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                            : 'bg-[#161d31] text-slate-300 border-[#232d42] hover:text-white'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom hours & minutes inputs */}
+                  <div className="pt-2 border-t border-[#1b233a] flex items-center justify-between gap-2 text-[10px]">
+                    <span className="text-slate-400 font-bold shrink-0">Custom Time Input:</span>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
+                        <input
+                          type="number"
+                          min="0"
+                          max="24"
+                          value={Math.floor(freeAccessDurationMinutes / 60)}
+                          onChange={(e) => {
+                            const h = Math.max(0, Math.min(24, parseInt(e.target.value) || 0));
+                            const currentM = freeAccessDurationMinutes % 60;
+                            const total = Math.max(30, Math.min(1440, h * 60 + currentM));
+                            setFreeAccessDurationMinutes(total);
+                          }}
+                          className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                        />
+                        <span className="text-slate-400 text-[10px]">hrs</span>
+                      </div>
+                      <span className="text-slate-500 font-bold">:</span>
+                      <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
+                        <input
+                          type="number"
+                          min="0"
+                          max="59"
+                          value={freeAccessDurationMinutes % 60}
+                          onChange={(e) => {
+                            const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                            const currentH = Math.floor(freeAccessDurationMinutes / 60);
+                            const total = Math.max(30, Math.min(1440, currentH * 60 + m));
+                            setFreeAccessDurationMinutes(total);
+                          }}
+                          className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
+                        />
+                        <span className="text-slate-400 text-[10px]">mins</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Section: Customize Appearance (Screenshot 2) */}
@@ -1570,55 +1675,120 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         <Wifi className="w-6 h-6 text-[#f05e17]" />
                       </div>
 
-                      {/* TIME USAGE METRIC (41.17% Used · Days, Hours, Minutes remaining) */}
-                      <div className="p-3 bg-black/50 rounded-xl border border-white/10 space-y-1">
-                        <div className="text-[11px] font-mono text-slate-400">Time usage</div>
-                        <div className="text-2xl font-black text-white font-mono">
-                          {((1 - remainingSeconds / totalPackageSeconds) * 100).toFixed(2)}% Used
-                        </div>
+                      {remainingSeconds > 0 ? (
+                        <>
+                          {/* TIME USAGE METRIC (41.17% Used · Days, Hours, Minutes remaining) */}
+                          <div className="p-3 bg-black/50 rounded-xl border border-white/10 space-y-1">
+                            <div className="text-[11px] font-mono text-slate-400">Time usage</div>
+                            <div className="text-2xl font-black text-white font-mono">
+                              {((1 - remainingSeconds / totalPackageSeconds) * 100).toFixed(2)}% Used
+                            </div>
 
-                        {/* Days, Hours, Minutes, Seconds display */}
-                        <div className="text-xs font-extrabold text-emerald-400 font-mono pt-1">
-                          {formatDetailedTimeRemaining(remainingSeconds)}
-                        </div>
+                            {/* Days, Hours, Minutes, Seconds display */}
+                            <div className="text-xs font-extrabold text-emerald-400 font-mono pt-1">
+                              {formatDetailedTimeRemaining(remainingSeconds)}
+                            </div>
 
-                        {/* Progress Bar */}
-                        <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
-                          <div
-                            className="bg-emerald-500 h-full rounded-full transition-all duration-1000"
-                            style={{
-                              width: `${Math.max(5, (1 - remainingSeconds / totalPackageSeconds) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
+                            {/* Progress Bar */}
+                            <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
+                              <div
+                                className="bg-emerald-500 h-full rounded-full transition-all duration-1000"
+                                style={{
+                                  width: `${Math.max(5, (1 - remainingSeconds / totalPackageSeconds) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
 
-                      {/* DATA USAGE METRIC */}
-                      <div className="p-3 bg-black/50 rounded-xl border border-white/10 text-left space-y-1 font-mono text-xs">
-                        <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                          <span>Data usage</span>
-                          <span className="text-emerald-400 font-bold">Unlimited data</span>
-                        </div>
-                        <div className="text-slate-200 text-[11px]">17 MB consumed</div>
-                        <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-cyan-500 h-full rounded-full w-1/4" />
-                        </div>
-                      </div>
+                          {/* DATA USAGE METRIC */}
+                          <div className="p-3 bg-black/50 rounded-xl border border-white/10 text-left space-y-1 font-mono text-xs">
+                            <div className="flex items-center justify-between text-slate-400 text-[10px]">
+                              <span>Data usage</span>
+                              <span className="text-emerald-400 font-bold">Unlimited data</span>
+                            </div>
+                            <div className="text-slate-200 text-[11px]">17 MB consumed · High-Speed QoS</div>
+                            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                              <div className="bg-cyan-500 h-full rounded-full w-1/4" />
+                            </div>
+                          </div>
 
-                      <div className="flex items-center gap-2 pt-1 font-mono">
-                        <button
-                          onClick={() => setPreviewStep('identification')}
-                          className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs"
-                        >
-                          Reconnect
-                        </button>
-                        <button
-                          onClick={() => setPreviewStep('payment')}
-                          className="flex-1 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg text-xs"
-                        >
-                          Extend Pass
-                        </button>
-                      </div>
+                          <div className="flex items-center gap-2 pt-1 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => setRemainingSeconds(0)}
+                              className="flex-1 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 rounded-lg text-[10px] transition-colors cursor-pointer"
+                              title="Test session expiry"
+                            >
+                              Simulate Expiry (0s)
+                            </button>
+                            <button
+                              onClick={() => setPreviewStep('payment')}
+                              className="flex-1 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg text-[10px] transition-colors"
+                            >
+                              Extend Pass
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        /* EXPIRED SESSION STATE: ALIGNED FREE RECONNECT & PAID RE-AUTHENTICATION */
+                        <div className="space-y-3 font-mono">
+                          <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30 animate-pulse">
+                            <AlertTriangle className="w-5 h-5" />
+                          </div>
+
+                          <div>
+                            <h4 className="font-extrabold text-white text-sm">Session Expired</h4>
+                            <p className="text-[10px] text-rose-300 mt-0.5">
+                              {lastConnectedAuthMode === 'free'
+                                ? 'Your free access duration has concluded.'
+                                : 'Your paid Wi-Fi pass is exhausted.'}
+                            </p>
+                          </div>
+
+                          <div className="p-3 bg-black/50 rounded-xl border border-rose-500/30 text-[11px] text-slate-300 text-left leading-relaxed">
+                            {lastConnectedAuthMode === 'free' ? (
+                              <span>
+                                Free trial completed. You can <strong>connect again for free</strong> right now, or upgrade to a high-speed paid pass.
+                              </span>
+                            ) : (
+                              <span>
+                                Session finished. Authenticate and pay again via <strong>EcoCash (*199#)</strong> or <strong>OTT Voucher</strong> to restore connection.
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="space-y-2 pt-1">
+                            {lastConnectedAuthMode === 'free' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={handleConnectFree}
+                                  className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <Zap className="w-3.5 h-3.5 fill-current" />
+                                  <span>Connect Free Again ({freeAccessDurationMinutes >= 60 ? `${Math.floor(freeAccessDurationMinutes / 60)}h` : `${freeAccessDurationMinutes}m`}) &rarr;</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewStep('payment')}
+                                  className="w-full py-2 bg-white/10 hover:bg-white/20 text-slate-200 text-xs rounded-xl transition-colors cursor-pointer"
+                                >
+                                  Upgrade to High-Speed Pass &rarr;
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewStep('payment')}
+                                className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <DollarSign className="w-3.5 h-3.5" />
+                                <span>Pay Again via Gateway to Reconnect &rarr;</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1941,11 +2111,13 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                       onChange={(e) => setFleetFreeDuration(Number(e.target.value))}
                       className="px-2 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
                     >
-                      <option value={15}>15 mins</option>
                       <option value={30}>30 mins</option>
-                      <option value={45}>45 mins</option>
-                      <option value={60}>60 mins</option>
-                      <option value={120}>120 mins</option>
+                      <option value={60}>1 hour (60m)</option>
+                      <option value={120}>2 hours (120m)</option>
+                      <option value={240}>4 hours (240m)</option>
+                      <option value={480}>8 hours (480m)</option>
+                      <option value={720}>12 hours (720m)</option>
+                      <option value={1440}>24 hours (1 Day)</option>
                     </select>
 
                     <select
@@ -2138,22 +2310,44 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         <div className="p-3 bg-[#101626] rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-[11px]">
                           <div className="flex flex-wrap items-center gap-3">
                             {/* Duration */}
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <span className="text-slate-400 font-bold">Duration:</span>
-                              {[15, 30, 45, 60, 120].map((mins) => (
+                              {[
+                                { label: '30m', mins: 30 },
+                                { label: '1h', mins: 60 },
+                                { label: '2h', mins: 120 },
+                                { label: '4h', mins: 240 },
+                                { label: '8h', mins: 480 },
+                                { label: '12h', mins: 720 },
+                                { label: '24h', mins: 1440 },
+                              ].map((item) => (
                                 <button
-                                  key={mins}
+                                  key={item.mins}
                                   type="button"
-                                  onClick={() => updateRouterDraft(router.id, { duration: mins })}
+                                  onClick={() => updateRouterDraft(router.id, { duration: item.mins })}
                                   className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
-                                    draft.duration === mins
+                                    draft.duration === item.mins
                                       ? 'bg-[#f05e17] text-white border-[#f05e17]'
                                       : 'bg-[#161d31] text-slate-400 border-slate-700 hover:text-white'
                                   }`}
                                 >
-                                  {mins}m
+                                  {item.label}
                                 </button>
                               ))}
+                              <div className="flex items-center gap-1 bg-[#0b0f19] px-1.5 py-0.5 rounded border border-[#232d42] text-[10px] ml-1">
+                                <input
+                                  type="number"
+                                  min="30"
+                                  max="1440"
+                                  value={draft.duration || 30}
+                                  onChange={(e) => {
+                                    const val = Math.max(30, Math.min(1440, parseInt(e.target.value) || 30));
+                                    updateRouterDraft(router.id, { duration: val });
+                                  }}
+                                  className="w-10 bg-transparent text-amber-300 font-bold text-center focus:outline-none"
+                                />
+                                <span className="text-slate-500">m</span>
+                              </div>
                             </div>
 
                             {/* Rate Limit */}

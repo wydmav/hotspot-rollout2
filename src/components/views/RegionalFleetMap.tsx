@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MapPin, 
   Wifi, 
@@ -19,7 +19,7 @@ import {
   Compass,
   Info
 } from 'lucide-react';
-import { RouterDevice, VerticalType } from '../../types';
+import { RouterDevice, VerticalType, LESOTHO_DISTRICTS } from '../../types';
 
 interface RegionalFleetMapProps {
   routers: RouterDevice[];
@@ -241,18 +241,48 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
   onNavigateTab,
 }) => {
   const [selectedDistrict, setSelectedDistrict] = useState<string>('all');
-  const [selectedHubId, setSelectedHubId] = useState<string>(LESOTHO_HUBS[0].id);
+  const [selectedHubId, setSelectedHubId] = useState<string>(() => {
+    // If routers exist, find the hub for the first router
+    if (routers.length > 0) {
+      const firstRouterDistrict = routers[0].district?.toLowerCase() || 'maseru';
+      const found = LESOTHO_HUBS.find(h => h.district.toLowerCase() === firstRouterDistrict);
+      if (found) return found.id;
+    }
+    return LESOTHO_HUBS[0].id;
+  });
   const [mapStyle, setMapStyle] = useState<'cyber' | 'topo' | 'satellite'>('cyber');
   const [showLabels, setShowLabels] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Keep selected hub synced with adopted routers if routers change
+  useEffect(() => {
+    if (routers.length > 0) {
+      const firstRouterDistrict = routers[0].district?.toLowerCase() || 'maseru';
+      const matchingHub = LESOTHO_HUBS.find(h => h.district.toLowerCase() === firstRouterDistrict);
+      if (matchingHub) {
+        setSelectedHubId(prev => {
+          const currentHubHasRouters = routers.some(r => r.district?.toLowerCase() === LESOTHO_HUBS.find(h => h.id === prev)?.district.toLowerCase());
+          return currentHubHasRouters ? prev : matchingHub.id;
+        });
+      }
+    }
+  }, [routers]);
+
   // Map physical routers from fleet state to nearest regional hub or direct coordinates
   const mappedHubs = useMemo(() => {
     return LESOTHO_HUBS.map((hub) => {
-      // Find matching routers by district, siteName, or id
+      // Find matching routers by district, physicalAddress, siteName, or id
       const matchedRouters = routers.filter((r) => {
-        const text = `${r.siteName} ${r.name} ${r.model}`.toLowerCase();
+        if (r.district && r.district.toLowerCase() === hub.district.toLowerCase()) {
+          const text = `${r.siteName} ${r.physicalAddress || ''} ${r.name}`.toLowerCase();
+          const hubWords = `${hub.name} ${hub.district}`.toLowerCase().split(/\s+/);
+          const hasSpecificMatch = hubWords.some((word) => word.length > 3 && text.includes(word));
+          if (hasSpecificMatch) return true;
+          const districtHubs = LESOTHO_HUBS.filter(h => h.district.toLowerCase() === r.district!.toLowerCase());
+          return districtHubs[0]?.id === hub.id;
+        }
+        const text = `${r.siteName} ${r.physicalAddress || ''} ${r.name} ${r.model}`.toLowerCase();
         const hubWords = `${hub.name} ${hub.district}`.toLowerCase().split(/\s+/);
         return hubWords.some((word) => word.length > 3 && text.includes(word));
       });
@@ -294,17 +324,34 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
   }, [mappedHubs, selectedDistrict, searchQuery]);
 
   const uniqueDistricts = useMemo(() => {
-    return ['all', ...Array.from(new Set(LESOTHO_HUBS.map((h) => h.district)))];
+    return ['all', ...LESOTHO_DISTRICTS];
   }, []);
 
-  const totalHotspotsCount = useMemo(() => {
-    const fromRouters = routers.length;
-    return fromRouters > 0 ? fromRouters : LESOTHO_HUBS.length;
-  }, [routers]);
+  const adoptedRoutersCount = routers.length;
+  const onlineRoutersCount = routers.filter(r => r.status === 'online').length;
+  const pendingRoutersCount = routers.filter(r => r.status === 'pending_adoption').length;
+  const totalActiveSubscribers = routers.reduce((acc, curr) => acc + (curr.activeSessions || 0), 0);
 
-  const totalActiveSubscribers = useMemo(() => {
-    const fromFleet = routers.reduce((acc, curr) => acc + (curr.activeSessions || 0), 0);
-    return fromFleet > 0 ? fromFleet : 42;
+  // Exact 10-district distribution calculation
+  const districtDistribution = useMemo(() => {
+    const map = new Map<string, { count: number; online: number; sessions: number }>();
+    LESOTHO_DISTRICTS.forEach((d) => map.set(d, { count: 0, online: 0, sessions: 0 }));
+
+    routers.forEach((r) => {
+      const d = r.district || 'Maseru';
+      const prev = map.get(d) || { count: 0, online: 0, sessions: 0 };
+      map.set(d, {
+        count: prev.count + 1,
+        online: prev.online + (r.status === 'online' ? 1 : 0),
+        sessions: prev.sessions + (r.activeSessions || 0)
+      });
+    });
+
+    return Array.from(map.entries()).map(([district, data]) => ({
+      district,
+      ...data,
+      percentOfFleet: routers.length > 0 ? Math.round((data.count / routers.length) * 100) : 0
+    }));
   }, [routers]);
 
   const selectedHub: MappedRegionNode = useMemo(() => {
@@ -429,17 +476,20 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
           isExpanded ? 'h-full min-h-[500px]' : 'min-h-[460px]'
         }`}>
           {/* Top Floating Map Stats Overlay */}
-          <div className="absolute top-3 left-3 z-20 flex items-center gap-2 pointer-events-none">
+          <div className="absolute top-3 left-3 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
             <div className="bg-[#0f1422]/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#232d42] text-[11px] font-mono text-slate-300 flex items-center gap-2 shadow-lg pointer-events-auto">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span><strong>{totalHotspotsCount}</strong> Total Hotspots Plotted</span>
+              <span className={`w-2 h-2 rounded-full ${onlineRoutersCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span>
+                <strong>{adoptedRoutersCount}</strong> {adoptedRoutersCount === 1 ? 'Router' : 'Routers'} Adopted
+                {adoptedRoutersCount > 0 ? ` (${onlineRoutersCount} Online)` : ' (0 Online)'}
+              </span>
               <span className="text-slate-500">|</span>
               <span className="text-cyan-400 font-bold">{totalActiveSubscribers}</span> Active Clients
             </div>
 
             <div className="hidden sm:flex bg-[#0f1422]/90 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-[#232d42] text-[10px] font-mono text-slate-400 items-center gap-1.5 shadow-lg">
               <Radio className="w-3 h-3 text-[#f05e17]" />
-              <span>Starlink LEO Uplink</span>
+              <span>Starlink LEO + Fiber Lowlands</span>
             </div>
           </div>
 
@@ -723,19 +773,31 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                   </div>
 
                   {selectedHub.assignedRouters.length > 0 ? (
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                       {selectedHub.assignedRouters.map((r) => (
                         <div
                           key={r.id}
-                          className="p-2 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between text-[11px]"
+                          onClick={() => {
+                            if (onSelectRouter) onSelectRouter(r.id);
+                            if (onNavigateTab) onNavigateTab('fleet');
+                          }}
+                          className="p-2.5 bg-[#161d31] hover:bg-[#1b233a] hover:border-[#f05e17] rounded-lg border border-[#232d42] space-y-1 text-[11px] cursor-pointer transition-all"
+                          title="Click to view and configure this router in Fleet view"
                         >
-                          <div>
-                            <div className="text-white font-bold">{r.name}</div>
-                            <div className="text-slate-400 text-[10px]">{r.wireguardIp}</div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-white font-bold">{r.name}</span>
+                            <span className="text-emerald-400 text-[10px] font-bold">
+                              {r.activeSessions || 0} online
+                            </span>
                           </div>
-                          <span className="text-emerald-400 text-[10px] font-bold">
-                            {r.activeSessions} online
-                          </span>
+                          <div className="text-[10px] text-cyan-300 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-cyan-400 shrink-0" />
+                            <span className="truncate">{r.district || selectedHub.district} · {r.physicalAddress || r.siteName}</span>
+                          </div>
+                          <div className="text-slate-400 text-[10px] flex items-center justify-between pt-0.5">
+                            <span>WG: {r.wireguardIp}</span>
+                            <span className="text-slate-500 font-mono">{r.macAddress}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -775,6 +837,69 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               <p className="text-[11px] text-slate-400">Click any hotspot pin on the map to inspect regional backhaul, hardware models, and live client sessions.</p>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ACCURATE REGIONAL HOTSPOT DISTRIBUTION: 10-DISTRICT FLEET BREAKDOWN */}
+      <div className="bg-[#0a0e17] p-4 rounded-xl border border-[#1b233a] font-mono text-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1b233a] pb-2">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-[#f05e17]" />
+            <h3 className="font-extrabold text-white text-xs uppercase tracking-wider">
+              Lesotho 10-District Hotspot Distribution
+            </h3>
+            <span className="text-[10px] text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded font-bold">
+              {adoptedRoutersCount} Adopted {adoptedRoutersCount === 1 ? 'Node' : 'Nodes'}
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Real-time physical fleet mapping synchronized with MikroTik adoption database
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {districtDistribution.map((item) => {
+            const hasNodes = item.count > 0;
+            const isSelected = selectedDistrict === item.district;
+
+            return (
+              <button
+                type="button"
+                key={item.district}
+                onClick={() => setSelectedDistrict(isSelected ? 'all' : item.district)}
+                className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                  hasNodes
+                    ? isSelected
+                      ? 'bg-[#1b2438] border-[#f05e17] ring-1 ring-[#f05e17]/50 shadow-md'
+                      : 'bg-[#121829] border-emerald-500/40 hover:border-emerald-400'
+                    : isSelected
+                    ? 'bg-[#121624] border-slate-600 text-white'
+                    : 'bg-[#080c14] border-slate-800/80 hover:border-slate-700 text-slate-500'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`font-bold text-[11px] ${hasNodes ? 'text-white' : 'text-slate-400'}`}>
+                    {item.district}
+                  </span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                    hasNodes 
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                      : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    {item.count}
+                  </span>
+                </div>
+                <div className="mt-1 text-[10px] flex items-center justify-between text-slate-400">
+                  <span className={hasNodes ? 'text-emerald-300' : 'text-slate-500'}>
+                    {hasNodes ? `${item.online} Online` : '0 Adopted'}
+                  </span>
+                  {hasNodes && (
+                    <span className="text-cyan-400 font-bold">{item.percentOfFleet}%</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

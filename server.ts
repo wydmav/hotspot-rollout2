@@ -1008,6 +1008,86 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
+// ALL-FLEET BROADCAST TERMINAL COMMAND EXECUTION
+// -----------------------------------------------------------------------------
+app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
+  const { command, routerIds } = req.body;
+  const cleanCmd = (command || '').trim();
+
+  if (!cleanCmd) {
+    return res.status(400).json({ success: false, message: 'Command cannot be empty' });
+  }
+
+  const targetRouters: Array<{ id: string; name: string; wireguardIp: string }> = [];
+
+  if (Array.isArray(routerIds) && routerIds.length > 0) {
+    routerIds.forEach(id => {
+      const r = monitoredRouters.get(id);
+      if (r) {
+        targetRouters.push({ id: r.id, name: r.name, wireguardIp: r.wireguardIp });
+      } else {
+        targetRouters.push({ id, name: `Router-${id.slice(-6)}`, wireguardIp: '10.99.1.50' });
+      }
+    });
+  } else if (monitoredRouters.size > 0) {
+    monitoredRouters.forEach(r => {
+      targetRouters.push({ id: r.id, name: r.name, wireguardIp: r.wireguardIp });
+    });
+  } else {
+    targetRouters.push({ id: 'r-default-1', name: 'Maseru Central Gateway', wireguardIp: '10.99.1.1' });
+  }
+
+  const results = targetRouters.map(router => {
+    let out = '';
+    if (cleanCmd.includes('speed-test') || cleanCmd.includes('bandwidth-test') || cleanCmd.startsWith('/speedtest')) {
+      const downMatch = cleanCmd.match(/download=([0-9.]+)[mM]?/i) || cleanCmd.match(/rx[a-z-]*=([0-9.]+)[mM]?/i);
+      const upMatch = cleanCmd.match(/upload=([0-9.]+)[mM]?/i) || cleanCmd.match(/tx[a-z-]*=([0-9.]+)[mM]?/i);
+      const targetDown = downMatch ? parseFloat(downMatch[1]) : 50;
+      const targetUp = upMatch ? parseFloat(upMatch[1]) : 25;
+      const actualDown = (targetDown * (0.95 + Math.random() * 0.04)).toFixed(1);
+      const actualUp = (targetUp * (0.94 + Math.random() * 0.05)).toFixed(1);
+      out = `tcp-download: ${actualDown}Mbps, tcp-upload: ${actualUp}Mbps, ping: 22ms`;
+    } else if (cleanCmd.includes('reboot')) {
+      out = `Reboot initiated on ${router.name}`;
+    } else if (cleanCmd.includes('dns') && cleanCmd.includes('flush')) {
+      out = `DNS cache flushed on ${router.name}`;
+    } else {
+      out = `OK - Command executed on ${router.name}`;
+    }
+
+    recordServerAudit({
+      category: 'terminal_command',
+      action: 'router.fleet_broadcast',
+      target: router.name,
+      routerId: router.id,
+      routerName: router.name,
+      command: cleanCmd,
+      outputPreview: out.slice(0, 300),
+      details: `Fleet Broadcast Command: "${cleanCmd}"`,
+      severity: cleanCmd.includes('reboot') ? 'warning' : 'info',
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    return {
+      routerId: router.id,
+      routerName: router.name,
+      wireguardIp: router.wireguardIp,
+      success: true,
+      output: out,
+      executionTimeMs: Math.floor(40 + Math.random() * 50)
+    };
+  });
+
+  res.json({
+    success: true,
+    broadcastCount: results.length,
+    command: cleanCmd,
+    results,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// -----------------------------------------------------------------------------
 // REMOTE ROUTER TERMINAL CLI EXECUTION
 // -----------------------------------------------------------------------------
 app.post('/api/devices/:routerId/terminal', (req: Request, res: Response) => {
@@ -1089,6 +1169,41 @@ Restarting kernel.`;
  0 R hs-tconnect   VCH-9842         192.168.88.24  A4:C3:F0:12:34:56 4h12m     
  1 R hs-tconnect   VCH-1102         192.168.88.35  BC:D1:19:90:AB:02 1h08m     
  2 R hs-tconnect   VCH-8839         192.168.88.49  52:54:00:12:34:56 22m       `;
+  } else if (cleanCmd.includes('speed-test') || cleanCmd.includes('bandwidth-test') || cleanCmd.startsWith('/speedtest')) {
+    // Parse target download & upload speeds if specified in command arguments
+    const downMatch = cleanCmd.match(/download=([0-9.]+)[mM]?/i) || cleanCmd.match(/rx[a-z-]*=([0-9.]+)[mM]?/i);
+    const upMatch = cleanCmd.match(/upload=([0-9.]+)[mM]?/i) || cleanCmd.match(/tx[a-z-]*=([0-9.]+)[mM]?/i);
+    
+    const targetDown = downMatch ? parseFloat(downMatch[1]) : 50;
+    const targetUp = upMatch ? parseFloat(upMatch[1]) : 25;
+
+    const actualDown = (targetDown * (0.95 + Math.random() * 0.04)).toFixed(1);
+    const actualUp = (targetUp * (0.94 + Math.random() * 0.05)).toFixed(1);
+    const udpDown = (targetDown * (0.98 + Math.random() * 0.03)).toFixed(1);
+    const udpUp = (targetUp * (0.97 + Math.random() * 0.04)).toFixed(1);
+    const pingAvg = Math.floor(18 + Math.random() * 8);
+
+    output = `                status: done
+        time-remaining: 0s
+              ping-min: ${pingAvg - 4}ms
+              ping-avg: ${pingAvg}ms
+              ping-max: ${pingAvg + 12}ms
+            jitter-min: 1ms
+            jitter-avg: 2ms
+            jitter-max: 4ms
+            loss-ratio: 0.0%
+          tcp-download: ${actualDown}Mbps (target: ${targetDown}Mbps)
+            tcp-upload: ${actualUp}Mbps (target: ${targetUp}Mbps)
+          udp-download: ${udpDown}Mbps
+            udp-upload: ${udpUp}Mbps`;
+  } else if (cleanCmd.includes('dns') && cleanCmd.includes('flush')) {
+    output = `DNS cache cleared successfully.
+Flushed all dynamic DNS resolver cache entries.
+Log entry written: "DNS cache flushed via T-Connect Controller"`;
+  } else if (cleanCmd.includes('hotspot') && (cleanCmd.includes('remove') || cleanCmd.includes('flush'))) {
+    output = `Active hotspot leases cleared.
+Removed dynamic bindings from bridge-local interface.
+Radius AAA session queue refreshed.`;
   } else {
     output = `Executed RouterOS command: "${cleanCmd}"
 Status: OK (exit code 0)
@@ -1111,6 +1226,7 @@ Router: ${routerName} (${wgIp})`;
   res.json({
     success: true,
     routerId,
+    routerName,
     command: cleanCmd,
     output,
     durationMs: 85,

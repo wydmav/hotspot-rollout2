@@ -30,9 +30,10 @@ import {
   Network,
   Lock,
   Unlock,
-  Sliders
+  Sliders,
+  MapPin
 } from 'lucide-react';
-import { RouterDevice, RouterAccessMode, VerticalType } from '../../types';
+import { RouterDevice, RouterAccessMode, VerticalType, LesothoDistrict, LESOTHO_DISTRICTS } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
 import { WebFigLauncherModal } from './WebFigLauncherModal';
@@ -117,6 +118,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [newName, setNewName] = useState('');
   const [newVertical, setNewVertical] = useState<VerticalType>('hotspot');
   const [newSiteName, setNewSiteName] = useState('');
+  const [newDistrict, setNewDistrict] = useState<LesothoDistrict>('Maseru');
+  const [newPhysicalAddress, setNewPhysicalAddress] = useState('');
   const [newModel, setNewModel] = useState('MikroTik hAP ax³ (v7)');
   const [newRosVersion, setNewRosVersion] = useState<'v7' | 'v6'>('v7');
   const [newMacAddress, setNewMacAddress] = useState('D4:01:C3:AA:BB:CC');
@@ -297,6 +300,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       name: newName.trim(),
       vertical: newVertical,
       siteName: newSiteName.trim(),
+      district: newDistrict,
+      physicalAddress: newPhysicalAddress.trim() || newSiteName.trim(),
       model: newModel,
       boardName: newModel.includes('ax3') ? 'hAP ax3' : 'RouterBOARD',
       rosVersion: newRosVersion,
@@ -311,6 +316,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       setShowAddModal(false);
       setNewName('');
       setNewSiteName('');
+      setNewDistrict('Maseru');
+      setNewPhysicalAddress('');
     }
   };
 
@@ -699,8 +706,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         </button>
                       </div>
                     </div>
-
-                    <p className="text-[11px] text-slate-400 font-mono mt-1 truncate">{router.siteName}</p>
+                    <div className="text-[11px] font-mono mt-1 flex items-center gap-1.5 text-slate-300 truncate">
+                      <span className="text-cyan-400 font-bold bg-cyan-950/60 border border-cyan-800/60 px-1.5 py-0.2 rounded text-[10px] shrink-0">
+                        📍 {router.district || 'Maseru'}
+                      </span>
+                      <span className="truncate text-slate-400">
+                        {router.physicalAddress || router.siteName}
+                      </span>
+                    </div>
 
                     {/* Access Policy Badge */}
                     <div className="mt-1 flex items-center gap-1.5">
@@ -812,9 +825,13 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
               {/* Selected Router Overview Bar */}
               <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-base font-extrabold text-white">{selectedRouter.name}</h2>
-                    <span className="text-xs font-mono text-slate-400">· {selectedRouter.siteName}</span>
+                    <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-cyan-400" />
+                      <span>{selectedRouter.district || 'Maseru'}</span>
+                    </span>
+                    <span className="text-xs font-mono text-slate-300">· {selectedRouter.physicalAddress || selectedRouter.siteName}</span>
                     <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
                       selectedRouter.status === 'online' 
                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
@@ -892,6 +909,17 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     isPending={isActionPending}
                     activeAction={activeAction}
                   />
+
+                  {/* Router Terminal Suite (4 Options) Button */}
+                  <button
+                    type="button"
+                    onClick={() => setTerminalModalRouter(selectedRouter)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors font-mono shadow-md cursor-pointer whitespace-nowrap"
+                    title="Open Full 4-Option MikroTik Terminal Suite (CLI Shell, Quick Ops, Diagnostics & Script Export)"
+                  >
+                    <Terminal className="w-3.5 h-3.5 text-white" />
+                    <span>Terminal (4 Options)</span>
+                  </button>
 
                   {/* Detailed Router View Button */}
                   <button
@@ -1393,14 +1421,44 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </select>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Lesotho District</label>
+                  <select
+                    value={newDistrict}
+                    onChange={(e) => setNewDistrict(e.target.value as LesothoDistrict)}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                  >
+                    {LESOTHO_DISTRICTS.map((dist) => (
+                      <option key={dist} value={dist}>🇱🇸 {dist}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1">Site / Venue Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newSiteName}
+                    onChange={(e) => setNewSiteName(e.target.value)}
+                    placeholder="e.g. Pioneer Mall Express Hub"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="text-slate-400 block mb-1">Physical Site Location</label>
+                <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                  <span>Physical Street / Building Location</span>
+                  <span className="text-[10px] text-cyan-400 font-normal">Plotted on Regional Fleet Map</span>
+                </label>
                 <input
                   type="text"
                   required
-                  value={newSiteName}
-                  onChange={(e) => setNewSiteName(e.target.value)}
-                  placeholder="e.g. Roma Campus Student Center"
+                  value={newPhysicalAddress}
+                  onChange={(e) => setNewPhysicalAddress(e.target.value)}
+                  placeholder="e.g. Shop 14, Kingsway Rd, Maseru CBD"
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                 />
               </div>

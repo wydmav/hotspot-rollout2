@@ -564,6 +564,13 @@ class StorageService {
           if (!parsed.tenantGroups || !Array.isArray(parsed.tenantGroups) || parsed.tenantGroups.length === 0) {
             parsed.tenantGroups = STARTER_TENANT_GROUPS;
           }
+          if (parsed.routers && Array.isArray(parsed.routers)) {
+            parsed.routers = parsed.routers.map((r: any) => ({
+              ...r,
+              district: r.district || 'Maseru',
+              physicalAddress: r.physicalAddress || r.siteName || 'Maseru Central Hub'
+            }));
+          }
           if (!parsed.activeSessions || !Array.isArray(parsed.activeSessions) || parsed.activeSessions.length === 0) {
             parsed.activeSessions = INITIAL_ACTIVE_SESSIONS;
           }
@@ -699,6 +706,8 @@ class StorageService {
     const newRouter: RouterDevice = {
       ...router,
       id: newId,
+      district: router.district || 'Maseru',
+      physicalAddress: router.physicalAddress || router.siteName || 'Maseru Central Hub',
       status: 'pending_adoption',
       uptime: '0m',
       cpuLoad: 2,

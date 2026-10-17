@@ -19,11 +19,38 @@ export interface VerticalConfig {
 
 export type RouterAccessMode = 'PAID_ONLY' | 'FREE_TRIAL_AND_PAID' | 'COMPLETELY_FREE';
 
+export type LesothoDistrict = 
+  | 'Maseru'
+  | 'Berea'
+  | 'Leribe'
+  | 'Butha-Buthe'
+  | 'Mokhotlong'
+  | 'Thaba-Tseka'
+  | "Qacha's Nek"
+  | 'Quthing'
+  | "Mohale's Hoek"
+  | 'Mafeteng';
+
+export const LESOTHO_DISTRICTS: LesothoDistrict[] = [
+  'Maseru',
+  'Berea',
+  'Leribe',
+  'Butha-Buthe',
+  'Mokhotlong',
+  'Thaba-Tseka',
+  "Qacha's Nek",
+  'Quthing',
+  "Mohale's Hoek",
+  'Mafeteng'
+];
+
 export interface RouterDevice {
   id: string;
   name: string;
   vertical: VerticalType;
   siteName: string;
+  district?: LesothoDistrict;
+  physicalAddress?: string;
   model: string;
   boardName: string;
   rosVersion: 'v7' | 'v6';
