@@ -101,7 +101,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
     provider: 'ottvoucher',
     name: 'OTT Voucher Lesotho',
-    subtitle: '12-Digit PIN & Retail Voucher Redemption (portal.ottlesotho.com)',
+    subtitle: '16-Digit PIN & Retail Voucher Redemption (portal.ottlesotho.com)',
     currency: 'M',
     isLive: false,
     isSandbox: true,

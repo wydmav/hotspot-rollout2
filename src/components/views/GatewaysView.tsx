@@ -70,8 +70,8 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
   const [webhookSecret, setWebhookSecret] = useState(selectedGateway?.webhookSecret || '');
 
-  // OTT Voucher Generation & Quick Redemption Tester
-  const [generatedTestPin, setGeneratedTestPin] = useState('8921-3482-9011');
+  // OTT Voucher Generation & Quick Redemption Tester (16-Digit PINs)
+  const [generatedTestPin, setGeneratedTestPin] = useState('');
   const [redeemTestResult, setRedeemTestResult] = useState<any>(null);
   const [isRedeemingTest, setIsRedeemingTest] = useState(false);
 
@@ -172,24 +172,33 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     const p1 = Math.floor(Math.random() * 9000 + 1000);
     const p2 = Math.floor(Math.random() * 9000 + 1000);
     const p3 = Math.floor(Math.random() * 9000 + 1000);
-    const newPin = `${p1}-${p2}-${p3}`;
-    setGeneratedTestPin(newPin);
+    const p4 = Math.floor(Math.random() * 9000 + 1000);
+    const formattedPin = `${p1} ${p2} ${p3} ${p4}`;
+    const rawPin = `${p1}${p2}${p3}${p4}`;
+    setGeneratedTestPin(formattedPin);
     setRedeemTestResult(null);
     try {
-      await fetch('/api/gateways/ottvoucher/register-pin', {
+      const res = await fetch('/api/gateways/ottvoucher/register-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: newPin, amount: 10, planName: 'Daily Pass' })
+        body: JSON.stringify({ pin: rawPin, amount: 10, planName: 'Daily Pass' })
       });
+      const data = await res.json();
+      if (data.success) {
+        setRedeemTestResult({
+          success: true,
+          message: `16-digit PIN ${formattedPin} generated and authorized in platform ledger for testing.`
+        });
+      }
     } catch {}
   };
 
   const handleRegisterPinForSplash = async () => {
     const cleanPin = generatedTestPin.replace(/\D/g, '');
-    if (cleanPin.length !== 12) {
+    if (cleanPin.length !== 16) {
       setRedeemTestResult({
         success: false,
-        message: 'OTT Voucher PIN must be exactly 12 digits (0-9).'
+        message: `OTT Voucher PIN must be exactly 16 digits (${cleanPin.length}/16 digits entered).`
       });
       return;
     }
@@ -201,14 +210,15 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       });
       const data = await res.json();
       if (data.success) {
+        const formatted = cleanPin.match(/.{1,4}/g)?.join(' ') || cleanPin;
         setRedeemTestResult({
           success: true,
-          message: `12-digit PIN ${cleanPin} is now registered as an active OTT Voucher PIN. You can redeem it once on the Splash Page or click Test Redeem.`
+          message: `16-digit PIN ${formatted} is now registered as an active OTT Voucher PIN. You can redeem it once on the Splash Page or click Test Redeem.`
         });
       } else {
         setRedeemTestResult({
           success: false,
-          message: data.message || 'Failed to register 12-digit OTT PIN.'
+          message: data.message || 'Failed to register 16-digit OTT PIN.'
         });
       }
     } catch (err: any) {
@@ -288,7 +298,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
         <div>
           <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (EcoCash &amp; OTT Voucher)</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Strict 12-digit OTT Voucher API + Supabase validation &amp; EcoCash Lesotho USSD Push
+            Strict 16-digit OTT Voucher API + Supabase validation &amp; EcoCash Lesotho USSD Push
           </p>
         </div>
 
@@ -651,14 +661,17 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                 /* Specialized Voucher PIN Generator & Live Redemption Engine */
                 <div className="space-y-4">
                   <p className="text-slate-300">
-                    Hotspot guests purchase 12-digit OTT Voucher PINs at retail stores (Shoprite, Pick n Pay, spaza shops) or online, and enter them on your captive portal. You can generate and test redeem PINs directly below:
+                    Hotspot guests purchase 16-digit OTT Voucher PINs at retail stores (Shoprite, Pick n Pay, spaza shops) or online, and enter them on your captive portal. You can generate and test redeem 16-digit PINs directly below:
                   </p>
 
                   <div className="p-4 bg-[#121829] rounded-xl border border-blue-500/30 space-y-3">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2">
                       <span className="font-bold text-white flex items-center gap-1.5">
                         <Ticket className="w-4 h-4 text-blue-400" />
-                        <span>Strict 12-Digit OTT Voucher PIN Validator &amp; Authorizer</span>
+                        <span>Strict 16-Digit OTT Voucher PIN Validator &amp; Authorizer</span>
+                        <span className="ml-2 text-[11px] font-mono text-emerald-400">
+                          ({generatedTestPin.replace(/\D/g, '').length}/16 digits)
+                        </span>
                       </span>
 
                       <button
@@ -667,7 +680,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         className="px-3 py-1 bg-white/10 hover:bg-white/20 text-amber-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>Generate &amp; Register 12-Digit PIN</span>
+                        <span>Generate &amp; Register 16-Digit PIN</span>
                       </button>
                     </div>
 
@@ -676,10 +689,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         <input
                           type="text"
                           inputMode="numeric"
-                          maxLength={12}
-                          value={generatedTestPin.replace(/\D/g, '').slice(0, 12)}
-                          onChange={(e) => setGeneratedTestPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                          placeholder="Enter 12-digit OTT PIN"
+                          maxLength={19}
+                          value={generatedTestPin}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                            const formatted = digits.match(/.{1,4}/g)?.join(' ') || '';
+                            setGeneratedTestPin(formatted);
+                          }}
+                          placeholder="1234 5678 9012 3456"
                           className="w-full px-3 py-2 bg-black/60 border border-blue-400/40 rounded-lg text-emerald-400 font-mono text-base tracking-widest font-extrabold text-center sm:text-left"
                         />
                       </div>
@@ -710,7 +727,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Random 12-digit numbers typed on the Splash Page are strictly <strong className="text-rose-400">rejected</strong>. Only 12-digit PINs verified by the live OTT Lesotho API (<code className="text-cyan-300">portal.ottlesotho.com</code> using your API Key &amp; Password in Step 1) or explicitly authorized in the platform / Supabase <code className="text-emerald-300">vouchers</code> table are accepted.
+                      Random 16-digit numbers typed on the Splash Page are strictly <strong className="text-rose-400">rejected</strong>. Only 16-digit PINs verified by the live OTT Lesotho API (<code className="text-cyan-300">portal.ottlesotho.com</code> using your API Key &amp; Password in Step 1) or explicitly authorized in the platform / Supabase <code className="text-emerald-300">vouchers</code> table are accepted.
                     </p>
                   </div>
 

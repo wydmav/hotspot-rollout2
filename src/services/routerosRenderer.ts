@@ -128,28 +128,33 @@ export class RouterOSRenderer {
       `:do { /system identity set name="TC-${router.name.replace(/[^a-zA-Z0-9_-]/g, '_')}" } on-error={}`,
       `/log info "T-Connect: [1/7] System Identity configured."`,
       ``,
-      `# 2. Isolate WAN (ether1) from All Bridges so 192.168.1.x Never Leaks to WiFi/LAN`,
+      `# 2. Isolate WAN (ether1) from All Bridges & Ensure ether2-ether5 Are Never Treated as WAN`,
       `:do { /interface bridge port remove [find interface="ether1"] } on-error={}`,
+      `:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}`,
       `:do { /interface list add name=WAN comment="T-Connect WAN Interfaces" } on-error={}`,
       `:do { /interface list add name=LAN comment="T-Connect Hotspot LAN Interfaces" } on-error={}`,
+      `:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}`,
       `:do { /interface list member add list=WAN interface=ether1 comment="T-Connect WAN1: Starlink / ISP" } on-error={}`,
       `:do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface=ether1 disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="Starlink WAN1 DHCP Client" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}`,
       ``,
-      `# 3. Hotspot Bridge Configuration (Aligned with bridgeLocal & 10.10.0.0/22)`,
-      `:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={ /interface bridge add name="bridgeLocal" comment="T-Connect Hotspot & AP Local Bridge" };`,
+      `# 3. Hotspot & AP Bridge Configuration (bridgeLocal & 10.10.0.0/22 across ether2-ether5 + wifi1-wifi2)`,
+      `:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={ /interface bridge add name="bridgeLocal" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Local Bridge" } else={ /interface bridge set [find name="bridgeLocal"] arp=enabled protocol-mode=rstp disabled=no };`,
       `:do { /interface list member add list=LAN interface=bridgeLocal comment="T-Connect Hotspot LAN Bridge" } on-error={}`,
-      `# Reassign ether2..ether5 & wifi1..wifi2 into bridgeLocal (handles ports already in default "bridge")`,
-      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p disabled=no } } on-error={} };`,
-      `# Remove Conflicting LAN IP / DHCP / Hotspot on Factory Bridges (Preserves ether1 WAN)`,
+      `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}`,
+      `# Reassign ether2..ether5 & wifi1..wifi2 into bridgeLocal with horizon=none (transparent L2 AP bridging)`,
+      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" horizon=none disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p horizon=none disabled=no } } on-error={} };`,
+      `# Remove Conflicting LAN IP / DHCP / Hotspot on Factory Bridges or Direct Ethernet Ports (Preserves ether1 WAN)`,
       `:do { /ip dhcp-server remove [find interface!="bridgeLocal"] } on-error={}`,
       `:do { /ip hotspot remove [find interface!="bridgeLocal"] } on-error={}`,
+      `:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}`,
+      `:do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5"] } on-error={}`,
       `:do { /ip address remove [find interface="bridgeLocal"] } on-error={}`,
       `:do { /ip address remove [find interface="bridge"] } on-error={}`,
       `/ip address add address=10.10.0.1/22 network=10.10.0.0 interface="bridgeLocal" comment="tc-hotspot-lan-gateway"`,
       `# High-Density DHCP IP Pool (10.10.0.50 to 10.10.3.250)`,
       `:do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}`,
       `/ip pool add name="tc-hotspot-pool" ranges=10.10.0.50-10.10.3.250`,
-      `# DHCP Server on bridgeLocal (Strictly 10.10.0.1 DNS so OS Captive Portal Detection always triggers)`,
+      `# DHCP Server on bridgeLocal (Strictly 10.10.0.1 DNS so OS Captive Portal Detection always triggers on WiFi & APs)`,
       `:do { /ip dhcp-server remove [find interface="bridgeLocal"] } on-error={}`,
       `:do { /ip dhcp-server network remove [find] } on-error={}`,
       `/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1 comment="T-Connect Hotspot Guest Network"`,
@@ -161,12 +166,12 @@ export class RouterOSRenderer {
       `# NAT Firewall Masquerade on WAN ether1`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
-      `# Hotspot Server Profile & Server on bridgeLocal (Cookies & MAC-Cookies disabled so devices always redirect immediately)`,
+      `# Hotspot Server Profile & Server on bridgeLocal (Cookies & MAC-Cookies disabled; addresses-per-mac=unlimited for APs)`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
-      `:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} use-radius=no } on-error={}`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
+      `:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none use-radius=no } on-error={}`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
-      `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no`,
+      `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=5m keepalive-timeout=2m disabled=no`,
       `# Pre-Provisioned Hotspot Auth Users`,
       `:do { /ip hotspot user remove [find name="test"] } on-error={}`,
       `/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"`,
@@ -527,24 +532,41 @@ export class RouterOSRenderer {
     const ap2Name = options.ap2Name || 'AP2-UniFi-Omada';
 
     return `# ============================================================
-# T-CONNECT ACCESS POINTS & WINBOX BRIDGE CONFIGURATION
+# T-CONNECT ACCESS POINTS (ether2-ether5) & WINBOX BRIDGE CONFIGURATION
 # Hardware: MikroTik hAP ax3 / RouterOS 7.16.2 (wifi-qcom)
-# Targets: ${bridge} | MIKROTIK-TC WiFi
+# Targets: ${bridge} (ether2, ether3, ether4, ether5 + MIKROTIK-TC WiFi)
 # ============================================================
 
-:log info "[T-Connect] Configuring Access Point bridge ports and MIKROTIK-TC wireless interface...";
+:log info "[T-Connect] Configuring Access Point bridge ports (ether2-ether5) and MIKROTIK-TC wireless interface...";
 
 # 1. Ensure Target Bridge "${bridge}" Exists & Isolate ether1 WAN
 :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-  /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
+  /interface bridge add name="${bridge}" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Bridge";
+} else={
+  /interface bridge set [find name="${bridge}"] arp=enabled protocol-mode=rstp disabled=no;
 };
 :do { /interface bridge port remove [find interface="ether1"] } on-error={}
+:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}
+:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}
+:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}
+:do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5"] } on-error={}
 
-# 2. Reassign Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to "${bridge}"
-:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}"]] > 0) do={ /interface bridge port set [find interface="${options.ap1Port}"] bridge="${bridge}" disabled=no } else={ /interface bridge port add bridge="${bridge}" interface="${options.ap1Port}" disabled=no comment="tc-ap-port-${options.ap1Port}" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}"]] > 0) do={ /interface bridge port set [find interface="${options.ap2Port}"] bridge="${bridge}" disabled=no } else={ /interface bridge port add bridge="${bridge}" interface="${options.ap2Port}" disabled=no comment="tc-ap-port-${options.ap2Port}" } } on-error={}
+# 2. Enable & Bind All AP Ethernet Ports (ether2, ether3, ether4, ether5) + WiFi into "${bridge}"
+:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
+:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
+  :do {
+    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
+      /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
+    } else={
+      /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no comment="tc-ap-port-$p"
+    }
+  } on-error={}
+};
 
-# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom Optimized)
+# 3. Ensure Hotspot Server on "${bridge}" Allows Unlimited Client MACs Behind External APs
+:do { /ip hotspot set [find interface="${bridge}"] addresses-per-mac=unlimited disabled=no } on-error={}
+
+# 4. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom Optimized)
 :do {
   :foreach w in=[/interface wifi find] do={
     /interface wifi set $w configuration.ssid="MIKROTIK-TC" configuration.mode=ap datapath.bridge="${bridge}" disabled=no
@@ -553,17 +575,17 @@ export class RouterOSRenderer {
   };
 } on-error={}
 
-# 4. Bypass AP Static Management IPs in Hotspot (Clients on APs still get 10.10.0.x & Splash Page)
-:do { /ip hotspot ip-binding remove [find comment~"${ap1Name}"] } on-error={}
-:do { /ip hotspot ip-binding add address="${options.ap1Ip}" type=bypassed comment="tc-bypass-${ap1Name}" } on-error={}
+# 5. Bypass Static AP Management IPs in Hotspot (Wireless clients on APs still get 10.10.0.50+ & Splash Page)
+:do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}
+:do { /ip hotspot ip-binding add address="${options.ap1Ip}" type=bypassed comment="tc-bypass-${ap1Name}-ether2" } on-error={}
+:do { /ip hotspot ip-binding add address="${options.ap2Ip}" type=bypassed comment="tc-bypass-${ap2Name}-ether3" } on-error={}
+:do { /ip hotspot ip-binding add address="10.10.0.4" type=bypassed comment="tc-bypass-AP3-ether4" } on-error={}
+:do { /ip hotspot ip-binding add address="10.10.0.5" type=bypassed comment="tc-bypass-AP4-ether5" } on-error={}
 
-:do { /ip hotspot ip-binding remove [find comment~"${ap2Name}"] } on-error={}
-:do { /ip hotspot ip-binding add address="${options.ap2Ip}" type=bypassed comment="tc-bypass-${ap2Name}" } on-error={}
-
-# 5. Verify WinBox Management Service
+# 6. Verify WinBox Management Service
 :do { /ip service set winbox disabled=no port=8291 } on-error={}
 
-:log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients & wireless guests redirected to captive portal.";
+:log info "[T-Connect] Access Points (ether2-ether5) & MIKROTIK-TC WiFi setup active. All AP & WiFi clients redirected to captive portal.";
 `;
   }
 
@@ -608,29 +630,36 @@ export class RouterOSRenderer {
 
 :log info "[T-Connect] Starting full-stack alignment...";
 
-# 1. Ensure Target Bridge "${bridge}" Exists
+# 1. Ensure Target Bridge "${bridge}" Exists with ARP & RSTP Enabled
 :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-  /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Local Bridge"
+  /interface bridge add name="${bridge}" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Local Bridge"
+} else={
+  /interface bridge set [find name="${bridge}"] arp=enabled protocol-mode=rstp disabled=no
 };
 
-# 2. Isolate WAN Port (ether1) from ALL Bridges (Fixes 192.168.1.x DHCP leak onto WiFi/LAN)
+# 2. Isolate WAN Port (ether1) & Clean Any WAN/DHCP-Client Rules on ether2-ether5
 :do { /interface bridge port remove [find interface="ether1"] } on-error={}
+:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}
+:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}
 :do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface="ether1" disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="T-Connect WAN ether1" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}
 
-# 3. Move ether2, ether3, ether4, ether5, wifi1, wifi2 into "${bridge}" (Updates port if already in factory "bridge")
+# 3. Enable & Move ether2, ether3, ether4, ether5, wifi1, wifi2 into "${bridge}" (Transparent L2 AP Bridge)
+:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
 :foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
   :do {
     :if ([:len [/interface bridge port find interface=$p]] > 0) do={
-      /interface bridge port set [find interface=$p] bridge="${bridge}" disabled=no
+      /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
     } else={
-      /interface bridge port add bridge="${bridge}" interface=$p disabled=no
+      /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no
     }
   } on-error={}
 };
 
-# 4. Clean Conflicting LAN IP / DHCP / Hotspot on Factory Bridges & Set ${gateway}/22 on "${bridge}"
+# 4. Clean Conflicting LAN IP / DHCP / Hotspot on Factory Bridges or Direct Ethernet Ports & Set ${gateway}/22 on "${bridge}"
 :do { /ip dhcp-server remove [find interface!="${bridge}"] } on-error={}
 :do { /ip hotspot remove [find interface!="${bridge}"] } on-error={}
+:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}
+:do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5"] } on-error={}
 :do { /ip address remove [find interface="${bridge}"] } on-error={}
 :do { /ip address remove [find interface="bridge"] } on-error={}
 /ip address add address=${gateway}/22 network=10.10.0.0 interface="${bridge}" comment="tc-hotspot-lan-gateway"
@@ -655,12 +684,12 @@ export class RouterOSRenderer {
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}
 
-# 8. Configure Hotspot Profile & Server on "${bridge}" (Cookies & MAC-Cookies Disabled for Immediate Splash Redirection)
+# 8. Configure Hotspot Profile & Server on "${bridge}" (Cookies Disabled; addresses-per-mac=unlimited for APs on ether2-ether5)
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
-:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
+:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
 :do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
-/ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no
+/ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=5m keepalive-timeout=2m disabled=no
 
 # 9. VPS & EcoCash/OTT Walled Garden Rules (Purges OS captive probe domains so phones/laptops redirect immediately)
 :do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}

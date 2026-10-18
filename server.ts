@@ -467,8 +467,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
         </div>
         <div class="field" id="payField">
-          <label class="lbl" id="payInputLabel">12-Digit OTT Voucher PIN *</label>
-          <input class="inp" type="text" inputmode="numeric" maxlength="12" id="payInputVal" value="" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,12)" placeholder="Enter 12-digit OTT PIN" required>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <label class="lbl" id="payInputLabel" style="margin-bottom:0;">16-Digit OTT Voucher PIN *</label>
+            <span id="ottDigitCounter" style="font-size:10px;font-family:monospace;color:#34d399;font-weight:700;">0 / 16 digits</span>
+          </div>
+          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="1234 5678 9012 3456" style="font-family:monospace;letter-spacing:1.5px;" required>
         </div>
         <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay &amp; Connect Internet &rarr;</button>
       </form>
@@ -546,6 +549,20 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (el) el.classList.add('selected');
   }
 
+  function handlePayInputFormat(inp) {
+    var raw = inp.value.replace(/\\D/g, '');
+    if (selectedGw === 'ottvoucher') {
+      raw = raw.slice(0, 16);
+      var groups = raw.match(/.{1,4}/g);
+      inp.value = groups ? groups.join(' ') : '';
+      var ctr = document.getElementById('ottDigitCounter');
+      if (ctr) ctr.textContent = raw.length + ' / 16 digits';
+    } else {
+      raw = raw.slice(0, 12);
+      inp.value = raw;
+    }
+  }
+
   function selectGw(gw, el) {
     showErr('');
     selectedGw = gw;
@@ -554,15 +571,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (el) el.classList.add('active');
     var lbl = document.getElementById('payInputLabel');
     var inp = document.getElementById('payInputVal');
+    var ctr = document.getElementById('ottDigitCounter');
     inp.value = '';
     if (gw === 'ottvoucher') {
-      lbl.textContent = '12-Digit OTT Voucher PIN *';
-      inp.placeholder = 'Enter 12-digit OTT PIN';
-      inp.maxLength = 12;
+      lbl.textContent = '16-Digit OTT Voucher PIN *';
+      inp.placeholder = '1234 5678 9012 3456';
+      inp.maxLength = 19;
+      if (ctr) { ctr.style.display = 'inline'; ctr.textContent = '0 / 16 digits'; }
     } else {
       lbl.textContent = 'EcoCash Mobile Number (+266) *';
       inp.placeholder = '5xxxxxxx / 6xxxxxxx';
       inp.maxLength = 12;
+      if (ctr) ctr.style.display = 'none';
     }
   }
 
@@ -607,8 +627,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     e.preventDefault();
     if (!validateGuestFields()) return false;
     var val = document.getElementById('payInputVal').value.replace(/\\D/g, '');
-    if (selectedGw === 'ottvoucher' && val.length !== 12) {
-      showErr('OTT Voucher PIN must be exactly 12 digits (' + val.length + '/12 digits entered).');
+    if (selectedGw === 'ottvoucher' && val.length !== 16) {
+      showErr('OTT Voucher PIN must be exactly 16 digits (' + val.length + '/16 digits entered).');
       return false;
     }
     if (selectedGw === 'ecocash' && val.length < 8) {
@@ -722,12 +742,12 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-// Register valid 12-digit OTT PINs for testing or retail stock in the server ledger
+// Register valid 16-digit OTT PINs for testing or retail stock in the server ledger
 app.post('/api/gateways/ottvoucher/register-pin', (req: Request, res: Response) => {
   const { pin, amount = 10, planName = 'Daily Pass' } = req.body || {};
   const cleanPin = String(pin || '').replace(/\D/g, '');
-  if (!/^\d{12}$/.test(cleanPin)) {
-    return res.status(400).json({ success: false, message: 'OTT Voucher PIN must be exactly 12 digits.' });
+  if (!/^\d{16}$/.test(cleanPin)) {
+    return res.status(400).json({ success: false, message: 'OTT Voucher PIN must be exactly 16 digits.' });
   }
   serverStore.redeemedOttPins = serverStore.redeemedOttPins.filter((p) => p !== cleanPin);
   const existing = serverStore.registeredOttPins.find((p) => p.pin === cleanPin);
@@ -2584,13 +2604,13 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
   } = req.body || {};
 
   const pinToRedeem = String(ottPin || voucherPin || '').replace(/\D/g, '');
-  console.log(`[OTT Voucher Redeem] Verifying 12-digit PIN: ${pinToRedeem.slice(0, 4)}**** from MAC: ${mac || 'unknown'}`);
+  console.log(`[OTT Voucher Redeem] Verifying 16-digit PIN: ${pinToRedeem.slice(0, 4)}****${pinToRedeem.slice(-4)} from MAC: ${mac || 'unknown'}`);
 
-  // 1. Strict 12-Digit Numeric Format Enforcement
-  if (!/^\d{12}$/.test(pinToRedeem)) {
+  // 1. Strict 16-Digit Numeric Format Enforcement
+  if (!/^\d{16}$/.test(pinToRedeem)) {
     return res.status(400).json({
       success: false,
-      message: 'OTT Voucher PIN must be exactly 12 numeric digits.',
+      message: 'OTT Voucher PIN must be exactly 16 numeric digits.',
       diagnostic: 'INVALID_PIN_FORMAT'
     });
   }
@@ -2599,7 +2619,7 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
   if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
     return res.status(400).json({
       success: false,
-      message: 'This 12-digit OTT Voucher PIN has already been redeemed.',
+      message: 'This 16-digit OTT Voucher PIN has already been redeemed.',
       diagnostic: 'PIN_ALREADY_USED'
     });
   }
@@ -2707,15 +2727,15 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     }
   }
 
-  // 6. Strictly Reject Any Unverified / Random 12-Digit PIN!
+  // 6. Strictly Reject Any Unverified / Random 16-Digit PIN!
   if (!isPinVerified) {
     return res.status(400).json({
       success: false,
       provider: 'ottvoucher',
       diagnostic: hasLiveOttCredentials ? 'OTT_PIN_REJECTED' : 'UNVERIFIED_OTT_PIN',
       message: hasLiveOttCredentials
-        ? 'Invalid OTT Voucher PIN: Rejected by OTT Lesotho (portal.ottlesotho.com). Please check your 12-digit voucher slip and try again.'
-        : 'Invalid OTT Voucher PIN: This 12-digit PIN was not found in active vouchers, and live OTT Lesotho API credentials (API Key & Password for TCONNECTLES1) have not been configured in Payment Gateways yet.'
+        ? 'Invalid OTT Voucher PIN: Rejected by OTT Lesotho (portal.ottlesotho.com). Please check your 16-digit voucher slip and try again.'
+        : 'Invalid OTT Voucher PIN: This 16-digit PIN was not found in active vouchers, and live OTT Lesotho API credentials (API Key & Password for TCONNECTLES1) have not been configured in Payment Gateways yet.'
     });
   }
 

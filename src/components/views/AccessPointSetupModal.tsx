@@ -123,11 +123,11 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   Access Points and Winbox Setup Assistant
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
-                  ether2/ether3 Ethernet Bridge · MIKROTIK-TC WiFi
+                  ether2–ether5 Bridge · MIKROTIK-TC WiFi
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Connect APs or test wired Ethernet on ports <span className="text-amber-300 font-mono">ether2 &amp; ether3</span> or open SSID <span className="text-amber-300 font-mono">MIKROTIK-TC</span> with independent WiFi CLI controls.
+                Connect APs in Bridge Mode or test wired Ethernet on ports <span className="text-amber-300 font-mono">ether2, ether3, ether4 &amp; ether5</span> or open SSID <span className="text-amber-300 font-mono">MIKROTIK-TC</span>.
               </p>
             </div>
           </div>
@@ -572,7 +572,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                       </h3>
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Configures everything in one pass: binds <strong className="text-amber-300 font-mono">ether2, 3, 5, wifi1, wifi2</strong> to <strong className="text-white font-mono">bridgeLocal</strong>, sets <strong className="text-emerald-400 font-mono">10.10.0.1/22</strong> gateway (1,022 IPs), deploys DHCP &amp; Hotspot, and bypasses APs.
+                      Configures everything in one pass: binds <strong className="text-amber-300 font-mono">ether2, ether3, ether4, ether5, wifi1, wifi2</strong> to <strong className="text-white font-mono">bridgeLocal</strong>, sets <strong className="text-emerald-400 font-mono">10.10.0.1/22</strong> gateway (1,022 IPs), deploys DHCP &amp; Hotspot (`addresses-per-mac=unlimited`), and bypasses AP static management IPs.
                     </p>
                   </div>
 
@@ -626,19 +626,19 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
               {/* Individual Snippets */}
               <div className="space-y-4">
                 
-                {/* 1. Bridge Port Command (Ethernet ether2 & ether3) */}
+                {/* 1. Bridge Port Command (Ethernet ether2 - ether5) */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to bridgeLocal
+                        1. Bind All AP Ethernet Ports (ether2, ether3, ether4, ether5) to {bridgeName}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => copyToClipboard(
-                          `/interface bridge port add bridge=${bridgeName} interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=${bridgeName} interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"`,
+                          `:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}\n:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}\n:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}\n:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}\n:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no } else={ /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no } } on-error={} }\n:do { /ip hotspot set [find interface="${bridgeName}"] addresses-per-mac=unlimited disabled=no } on-error={}`,
                           'port-direct'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-amber-300 hover:text-white px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 transition-colors cursor-pointer"
@@ -646,43 +646,31 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                         {copiedKey === 'port-direct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         <span>{copiedKey === 'port-direct' ? 'Copied' : `Copy Direct ("${bridgeName}")`}</span>
                       </button>
-                      <button
-                        onClick={() => copyToClipboard(
-                          `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={\n    :set targetBridge "bridgeLocal";\n  } else={\n    :if ([:len [/interface bridge find name="bridge"]] > 0) do={\n      :set targetBridge "bridge";\n    } else={\n      :if ([:len [/interface bridge find]] > 0) do={\n        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];\n      };\n    };\n  };\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
-                          'port-script'
-                        )}
-                        className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        {copiedKey === 'port-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'port-script' ? 'Copied' : 'Copy Auto Script'}</span>
-                      </button>
                     </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`# Direct command (for "${bridgeName}"):
-/interface bridge port add bridge=${bridgeName} interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"
-/interface bridge port add bridge=${bridgeName} interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"
+{`# Ensure ether2-ether5 are pure Layer-2 Hotspot Bridge Ports (No WAN/DHCP-Client conflicts):
+:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}
+:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}
+:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}
+:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
 
-# Or auto-detect existing bridge script:
-:local targetBridge "${bridgeName}";
-:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={
-  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={
-    :set targetBridge "bridgeLocal";
-  } else={
-    :if ([:len [/interface bridge find name="bridge"]] > 0) do={
-      :set targetBridge "bridge";
+# Bind ether2, ether3, ether4, ether5, wifi1, wifi2 to ${bridgeName}:
+:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
+  :do {
+    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
+      /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no
     } else={
-      :if ([:len [/interface bridge find]] > 0) do={
-        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
-      };
-    };
-  };
-};
-/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"
-/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`}
+      /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no
+    }
+  } on-error={}
+}
+
+# Allow unlimited wireless client MACs per AP port on the Hotspot server:
+:do { /ip hotspot set [find interface="${bridgeName}"] addresses-per-mac=unlimited disabled=no } on-error={}`}
                   </pre>
                   <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800/80 text-[11px] text-slate-400">
-                    🔌 <strong>Wired Ethernet Testing:</strong> Connecting an Ethernet cable directly to <span className="font-mono text-amber-300">{ap1Port}</span> or <span className="font-mono text-amber-300">{ap2Port}</span> redirects wired clients directly to the T-Connect captive portal.
+                    🔌 <strong>Access Point &amp; Wired Ethernet Parity:</strong> Any Bridge-mode Access Point or Ethernet client connected to <span className="font-mono text-amber-300">ether2, ether3, ether4, or ether5</span> receives a <span className="font-mono text-emerald-400">10.10.0.x</span> IP and redirects immediately to the On-Router Splash Page.
                   </div>
                 </div>
 

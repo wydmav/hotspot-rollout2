@@ -379,7 +379,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Complete EcoCash or 12-Digit OTT Voucher Payment (Strict API + Supabase Validation)
+  // Complete EcoCash or 16-Digit OTT Voucher Payment (Strict API + Supabase Validation)
   const handleCompletePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
@@ -393,8 +393,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const cleanPin = ottPin.replace(/\D/g, '');
 
     if (selectedGateway === 'ottvoucher') {
-      if (cleanPin.length !== 12) {
-        setPaymentError(`OTT Voucher PIN must be exactly 12 digits (${cleanPin.length}/12 digits entered).`);
+      if (cleanPin.length !== 16) {
+        setPaymentError(`OTT Voucher PIN must be exactly 16 digits (${cleanPin.length}/16 digits entered).`);
         return;
       }
     } else if (selectedGateway === 'ecocash') {
@@ -408,7 +408,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     setIsConnecting(true);
     setStatusBanner(
       selectedGateway === 'ottvoucher'
-        ? 'Verifying 12-digit OTT Voucher PIN with OTT Lesotho...'
+        ? 'Verifying 16-digit OTT Voucher PIN with OTT Lesotho...'
         : `Sending EcoCash (*199#) payment prompt to ${guestCountryCode} ${guestPhone}...`
     );
 
@@ -444,7 +444,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setPaymentError(
           data.message ||
             (selectedGateway === 'ottvoucher'
-              ? 'OTT Voucher PIN verification failed. Please enter a valid 12-digit OTT Voucher PIN.'
+              ? 'OTT Voucher PIN verification failed. Please enter a valid 16-digit OTT Voucher PIN.'
               : 'EcoCash payment authorization failed. Please check your number and try again.')
         );
         return;
@@ -913,24 +913,25 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] font-medium text-slate-300">
-                      12-Digit OTT Voucher PIN <span className="text-red-400">*</span>
+                      16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
                     </label>
-                    <span className="text-[11px] font-mono tabular-nums text-slate-400">
-                      {ottPin.length}/12 digits
+                    <span className="text-[11px] font-mono tabular-nums text-emerald-400 font-bold">
+                      {ottPin.replace(/\D/g, '').length}/16 digits
                     </span>
                   </div>
                   <input
                     type="text"
                     inputMode="numeric"
-                    maxLength={12}
+                    maxLength={19}
                     required
                     value={ottPin}
                     onChange={(e) => {
-                      const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 12);
-                      setOttPin(onlyDigits);
+                      const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                      const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
+                      setOttPin(formatted);
                       setPaymentError(null);
                     }}
-                    placeholder="Enter 12-digit OTT PIN"
+                    placeholder="1234 5678 9012 3456"
                     className="w-full px-3.5 py-2.5 bg-black/50 border border-white/25 focus:border-[#f05e17] rounded-xl text-white text-sm font-mono tabular-nums tracking-widest focus:outline-none"
                   />
                 </div>

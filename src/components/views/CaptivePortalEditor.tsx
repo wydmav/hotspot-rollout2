@@ -837,13 +837,17 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
 
                     {selectedGateway === 'ottvoucher' && (
                       <div className="pt-1 space-y-1">
-                        <label className="text-[10px] font-mono text-slate-300 block">12-Digit OTT Voucher PIN</label>
+                        <label className="text-[10px] font-mono text-slate-300 block">16-Digit OTT Voucher PIN</label>
                         <input
                           type="text"
                           inputMode="numeric"
-                          maxLength={12}
-                          placeholder="12-digit OTT PIN"
-                          className="w-full px-2.5 py-1.5 bg-black/50 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold"
+                          maxLength={19}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                            e.target.value = digits.match(/.{1,4}/g)?.join(' ') || '';
+                          }}
+                          placeholder="1234 5678 9012 3456"
+                          className="w-full px-2.5 py-1.5 bg-black/50 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-widest"
                         />
                       </div>
                     )}

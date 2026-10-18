@@ -1487,25 +1487,26 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                       {selectedGateway === 'ottvoucher' && (
                         <div className="pt-1 space-y-1.5">
                           <div className="flex items-center justify-between text-[10px] font-mono">
-                            <label className="text-slate-300 font-bold">12-Digit OTT Voucher PIN</label>
-                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/12 digits</span>
+                            <label className="text-slate-300 font-bold">16-Digit OTT Voucher PIN</label>
+                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/16 digits</span>
                           </div>
 
                           <input
                             type="text"
                             inputMode="numeric"
-                            value={ottPin.replace(/\D/g, '').slice(0, 12)}
+                            value={ottPin}
                             onChange={(e) => {
-                              const raw = e.target.value.replace(/\D/g, '').slice(0, 12);
-                              setOttPin(raw);
+                              const raw = e.target.value.replace(/\D/g, '').slice(0, 16);
+                              const formatted = raw.match(/.{1,4}/g)?.join(' ') || '';
+                              setOttPin(formatted);
                             }}
-                            placeholder="12-digit OTT PIN"
-                            maxLength={12}
+                            placeholder="1234 5678 9012 3456"
+                            maxLength={19}
                             className="w-full px-3 py-2.5 bg-black/60 border border-blue-400/50 rounded-xl text-emerald-400 font-mono text-sm tracking-widest font-extrabold focus:outline-none focus:border-blue-400 text-center"
                           />
 
                           <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between pt-0.5">
-                            <span>Strict 12-digit OTT API &amp; DB check</span>
+                            <span>Strict 16-digit OTT API &amp; DB check</span>
                             <span className="text-blue-300">TCONNECTLES1 Partner</span>
                           </div>
                         </div>

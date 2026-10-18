@@ -1351,7 +1351,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
                     </div>
                     <p className="text-[10px] opacity-80 mt-1">
-                      EcoCash and 12-Digit OTT Voucher self-service plans.
+                      EcoCash and 16-Digit OTT Voucher self-service plans.
                     </p>
                   </div>
                 </div>
@@ -2518,16 +2518,20 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       {selectedGateway === 'ottvoucher' ? (
                         <div className="space-y-1.5 bg-blue-950/30 p-2.5 rounded-xl border border-blue-500/30">
                           <div className="flex justify-between items-center text-[10px] font-mono text-slate-300">
-                            <span>12-Digit OTT Voucher PIN</span>
-                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/12 digits</span>
+                            <span>16-Digit OTT Voucher PIN</span>
+                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/16 digits</span>
                           </div>
                           <input
                             type="text"
                             inputMode="numeric"
-                            maxLength={12}
-                            value={ottPin.replace(/\D/g, '').slice(0, 12)}
-                            onChange={(e) => setOttPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                            placeholder="12-digit OTT PIN"
+                            maxLength={19}
+                            value={ottPin}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                              const formatted = digits.match(/.{1,4}/g)?.join(' ') || '';
+                              setOttPin(formatted);
+                            }}
+                            placeholder="1234 5678 9012 3456"
                             className="w-full px-2 py-1.5 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
                           />
                           <div className="text-[9px] text-slate-400 font-mono text-center">

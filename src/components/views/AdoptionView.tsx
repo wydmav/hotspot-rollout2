@@ -1319,7 +1319,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                          Harmonizes ports <span className="font-mono text-amber-300">ether2, 3, 5, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
+                          Harmonizes ports <span className="font-mono text-amber-300">ether2, ether3, ether4, ether5, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
                         </p>
                       </div>
                     </div>
