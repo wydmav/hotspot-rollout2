@@ -487,12 +487,20 @@ export class RouterOSRenderer {
 # 1. Auto-Detect Existing Active Bridge or Create Target Bridge
 :local targetBridge "${bridge}";
 :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-  :if ([:len [/interface bridge find]] > 0) do={
-    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];
+  :if ([:len [/interface bridge find name="bridge"]] > 0) do={
+    :set targetBridge "bridge";
   } else={
-    /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
-    :set targetBridge "${bridge}";
-  }
+    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
+      :set targetBridge "bridge1";
+    } else={
+      :if ([:len [/interface bridge find]] > 0) do={
+        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
+      } else={
+        /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
+        :set targetBridge "${bridge}";
+      };
+    };
+  };
 }
 
 # 2. Add Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to Target Bridge
@@ -502,19 +510,19 @@ export class RouterOSRenderer {
 # 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS v6 & v7 Compatible)
 :do {
   :if ([:len [/interface wireless find]] > 0) do={
-    /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
+    /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
   }
 } on-error={}
 
 :do {
   :if ([:len [/interface wifi find]] > 0) do={
-    /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+    /interface wifi set [:pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
   }
 } on-error={}
 
 :do {
   :if ([:len [/interface wifiwave2 find]] > 0) do={
-    /interface wifiwave2 set [pick [/interface wifiwave2 find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
+    /interface wifiwave2 set [:pick [/interface wifiwave2 find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
   }
 } on-error={}
 
