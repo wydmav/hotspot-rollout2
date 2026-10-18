@@ -1,246 +1,141 @@
-# MikroTik RouterOS 7.16.2 (`wifi-qcom`) Port & WiFi Configuration (`port config.md`)
+# MikroTik RouterOS 7.16.2 Full-Stack Alignment & Port Configuration (`port config.md`)
 
-Verified, bulletproof RouterOS CLI setup commands for **RouterOS 7.16.2** with the **`wifi-qcom`** package (Qualcomm WiFi 6/ax architecture, e.g., hAP ax², hAP ax³, Chateau, L009).
+Unified, all-in-one setup script tailored specifically to your **MikroTik hAP ax³** (`TC-MikroTik-435225`) running **RouterOS 7.16.2** with the **`wifi-qcom`** package.
 
-Configures Ethernet ports **ether2**, **ether3**, **ether5**, and wireless radios (**wifi1** & **wifi2**) with the open WiFi SSID `"MIKROTIK-TC"`.
-
----
-
-## 1. Direct Copy-Paste Commands (Recommended for Fast Setup)
-
-Open **WinBox > New Terminal** or SSH into your router (`admin@TC-MikroTik-435225`).  
-Choose **Option A** (default on standard MikroTik routers) or **Option B** (if your bridge was named `bridge1`).
-
-### Option A: If your default bridge is named `bridge`
-
-```routeros
-# 1. Add Ethernet Ports to main "bridge"
-/interface bridge port add bridge=bridge interface=ether2 comment="tc-ap-ethernet-ether2"
-/interface bridge port add bridge=bridge interface=ether3 comment="tc-ap-ethernet-ether3"
-/interface bridge port add bridge=bridge interface=ether5 comment="tc-ap-ethernet-ether5"
-
-# 2. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom)
-/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no
-
-# 3. Bypass AP Static Management IPs from Captive Portal
-/ip hotspot ip-binding add address=192.168.88.2 type=bypassed comment="tc-bypass-AP-ether2"
-/ip hotspot ip-binding add address=192.168.88.3 type=bypassed comment="tc-bypass-AP-ether3"
-/ip hotspot ip-binding add address=192.168.88.5 type=bypassed comment="tc-bypass-AP-ether5"
-
-# 4. Verify WinBox Port Service is Enabled
-/ip service set winbox disabled=no port=8291
-```
+Aligns everything from WAN adoption to **`bridgeLocal`** ports, high-capacity **`10.10.0.0/22`** DHCP pool (1,022 usable IPs), Hotspot captive portal, UniFi/Omada AP bypasses, and PC LAN testing.
 
 ---
 
-### Option B: If your default bridge is named `bridge1`
+## 1. Master Full-Stack Alignment Script (Recommended - Run in WinBox Terminal)
 
-```routeros
-# 1. Add Ethernet Ports to "bridge1"
-/interface bridge port add bridge=bridge1 interface=ether2 comment="tc-ap-ethernet-ether2"
-/interface bridge port add bridge=bridge1 interface=ether3 comment="tc-ap-ethernet-ether3"
-/interface bridge port add bridge=bridge1 interface=ether5 comment="tc-ap-ethernet-ether5"
-
-# 2. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom)
-/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no
-
-# 3. Bypass AP Static Management IPs from Captive Portal
-/ip hotspot ip-binding add address=192.168.88.2 type=bypassed comment="tc-bypass-AP-ether2"
-/ip hotspot ip-binding add address=192.168.88.3 type=bypassed comment="tc-bypass-AP-ether3"
-/ip hotspot ip-binding add address=192.168.88.5 type=bypassed comment="tc-bypass-AP-ether5"
-
-# 4. Verify WinBox Port Service is Enabled
-/ip service set winbox disabled=no port=8291
-```
-
----
-
-## 2. All-in-One Auto-Detecting RouterOS 7.16.2 Script
-
-This script automatically:
-1. Detects your existing bridge (`bridge`, `bridge1`, or first available bridge) using valid RouterOS syntax (`[:pick ...]` with leading colons).
-2. Adds ports `ether2`, `ether3`, and `ether5` to the active bridge safely (won't error if already added).
-3. Automatically iterates through all active Qualcomm WiFi radios (`wifi1`, `wifi2`) and applies SSID `"MIKROTIK-TC"`.
-4. Adds IP bypasses for static AP management so AP controllers don't get trapped by the captive portal.
-5. Verifies WinBox service (port 8291) is active.
+Open **WinBox > New Terminal** (or SSH `admin@10.99.1.50` / `admin@192.168.1.x`) and paste this complete block:
 
 ```routeros
 # ============================================================
-# T-CONNECT AUTO-DETECTING CONFIGURATION SCRIPT
-# RouterOS 7.16.2 (wifi-qcom) Optimized
+# T-CONNECT MASTER FULL-STACK ALIGNMENT SCRIPT
+# Hardware: MikroTik hAP ax³ (ARM64)
+# RouterOS: v7.16.2 (wifi-qcom)
+# Bridge: bridgeLocal | LAN Subnet: 10.10.0.0/22 (1,022 Hosts)
 # ============================================================
 
-:log info "[T-Connect] Initiating RouterOS 7.16.2 port & WiFi configuration...";
+:log info "[T-Connect] Starting full-stack alignment...";
 
-# 1. Determine Target Bridge (bridge, bridge1, or first available bridge)
-:local targetBridge "";
-:if ([:len [/interface bridge find name="bridge"]] > 0) do={
-  :set targetBridge "bridge";
-} else={
-  :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
-    :set targetBridge "bridge1";
-  } else={
-    :if ([:len [/interface bridge find name="tctower-bridge"]] > 0) do={
-      :set targetBridge "tctower-bridge";
-    } else={
-      :if ([:len [/interface bridge find]] > 0) do={
-        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
-      } else={
-        /interface bridge add name="bridge" comment="T-Connect Hotspot & AP Bridge";
-        :set targetBridge "bridge";
-      };
-    };
-  };
+# 1. Ensure Target Bridge "bridgeLocal" Exists
+:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={
+  /interface bridge add name="bridgeLocal" comment="T-Connect Hotspot & AP Local Bridge"
 };
 
-:log info ("[T-Connect] Using target bridge: " . $targetBridge);
+# 2. Bind Local Ethernet Ports & Wireless Radios to "bridgeLocal"
+:do { :if ([:len [/interface bridge port find interface="ether2" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether3" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether4" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether4" comment="tc-ap-ethernet-ether4" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether5" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="wifi1" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="wifi1" comment="tc-wifi1-radio-5ghz" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="wifi2" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="wifi2" comment="tc-wifi2-radio-2ghz" } } on-error={}
 
-# 2. Add Ethernet Ports (ether2, ether3, ether5) to Target Bridge
-:do { :if ([:len [/interface bridge port find interface="ether2" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={ :log warning "Port ether2 already in bridge or unavailable" }
-:do { :if ([:len [/interface bridge port find interface="ether3" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={ :log warning "Port ether3 already in bridge or unavailable" }
-:do { :if ([:len [/interface bridge port find interface="ether5" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={ :log warning "Port ether5 already in bridge or unavailable" }
+# 3. Configure High-Capacity IP Address (10.10.0.1/22 - 1,022 usable hosts)
+# Remove old or conflicting addresses on bridgeLocal
+:do { /ip address remove [find interface="bridgeLocal"] } on-error={}
+/ip address add address=10.10.0.1/22 network=10.10.0.0 interface="bridgeLocal" comment="tc-hotspot-lan-gateway"
 
-# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (Iterates all RouterOS 7.16.2 wifi-qcom radios)
-:do {
-  :if ([:len [/interface wifi find]] > 0) do={
-    :foreach w in=[/interface wifi find] do={
-      /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
-    };
-    :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi interfaces with SSID MIKROTIK-TC";
-  } else={
-    :if ([:len [/interface wireless find]] > 0) do={
-      /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
-      :log info "[T-Connect] Legacy wireless interface configured with SSID MIKROTIK-TC";
-    };
-  };
-} on-error={ :log warning "Could not auto-configure wireless interface" }
+# 4. Configure High-Density DHCP IP Pool (10.10.0.50 to 10.10.3.250)
+:do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}
+/ip pool add name="tc-hotspot-pool" ranges=10.10.0.50-10.10.3.250
 
-# 4. Bypass Static Management IPs for Access Points
+# 5. Configure DHCP Server on "bridgeLocal"
+:do { /ip dhcp-server remove [find interface="bridgeLocal"] } on-error={}
+:do { /ip dhcp-server network remove [find address="10.10.0.0/22"] } on-error={}
+/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1,1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
+/ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
+
+# 6. Enable DNS Resolver for Hotspot Interception
+/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
+:do { /ip dns static remove [find name="login.tconnect.ls"] } on-error={}
+/ip dns static add name="login.tconnect.ls" address=10.10.0.1 comment="T-Connect Hotspot Login FQDN"
+
+# 7. Configure NAT Firewall Masquerade for Internet Access
+:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
+
+# 8. Configure Hotspot Profile & Server on "bridgeLocal"
+:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="login.tconnect.ls" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes
+:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}
+/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no
+
+# 9. Bypass AP Static Management IPs from Captive Portal
 :do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}
-:do { /ip hotspot ip-binding add address=192.168.88.2 type=bypassed comment="tc-bypass-AP-ether2" } on-error={}
-:do { /ip hotspot ip-binding add address=192.168.88.3 type=bypassed comment="tc-bypass-AP-ether3" } on-error={}
-:do { /ip hotspot ip-binding add address=192.168.88.5 type=bypassed comment="tc-bypass-AP-ether5" } on-error={}
+/ip hotspot ip-binding add address=10.10.0.2 type=bypassed comment="tc-bypass-AP1-ether2"
+/ip hotspot ip-binding add address=10.10.0.3 type=bypassed comment="tc-bypass-AP2-ether3"
+/ip hotspot ip-binding add address=10.10.0.5 type=bypassed comment="tc-bypass-AP3-ether5"
+/ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="tc-bypass-admin-pc"
 
-# 5. Enable WinBox Management Service (Port 8291)
-:do { /ip service set winbox disabled=no port=8291 } on-error={}
+# 10. Configure RouterOS 7.16.2 wifi-qcom Radios with SSID "MIKROTIK-TC"
+:do {
+  :foreach w in=[/interface wifi find] do={
+    /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+  };
+  :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC";
+} on-error={ :log warning "Could not auto-configure wifi radios" }
 
-:log info "[T-Connect] Configuration complete! Ethernet clients on ether2, ether3, ether5 and wireless guests on MIKROTIK-TC are active.";
+# 11. Ensure WinBox Management Service (Port 8291) is Enabled
+/ip service set winbox disabled=no port=8291
+
+:log info "[T-Connect] Alignment complete! bridgeLocal is active with 10.10.0.1/22 gateway.";
+:put "T-Connect: Alignment complete! Bridge bridgeLocal configured with 10.10.0.1/22 and MIKROTIK-TC WiFi.";
 ```
 
 ---
 
-## 3. Independent WiFi CLI Controls (Disable & Enable)
+## 2. High-Capacity IP Addressing Plan (`10.10.0.0/22`)
 
-> [!NOTE]
-> **Disabling WiFi radio broadcasting ONLY turns off wireless broadcasting.**  
-> Wired Ethernet clients connected via **ether2**, **ether3**, and **ether5** as well as the T-Connect WireGuard controller connection remain **100% active and connected**.
-
-### RouterOS 7.16.2 (`wifi-qcom`) Commands:
-
-#### Turn OFF Wireless Radio Broadcasting (All Radios):
-```routeros
-/interface wifi disable [find]
-```
-
-#### Turn OFF Specific Wireless Radio:
-```routeros
-# Disable 5 GHz Radio (wifi1):
-/interface wifi disable [find name=wifi1]
-
-# Disable 2.4 GHz Radio (wifi2):
-/interface wifi disable [find name=wifi2]
-```
-
-#### Turn ON Wireless Radio Broadcasting:
-```routeros
-/interface wifi enable [find]
-```
+| Purpose | IP Range / Value | Netmask | Notes |
+| :--- | :--- | :--- | :--- |
+| **Subnet Network** | `10.10.0.0/22` | `255.255.252.0` | Broadcast: `10.10.3.255` |
+| **MikroTik Router (`bridgeLocal`)** | `10.10.0.1` | `255.255.252.0` | Default Gateway & Captive Portal Intercept |
+| **AP 1 Static IP (ether2)** | `10.10.0.2` | `255.255.252.0` | Bypassed from Captive Portal |
+| **AP 2 Static IP (ether3)** | `10.10.0.3` | `255.255.252.0` | Bypassed from Captive Portal |
+| **AP 3 Static IP (ether5)** | `10.10.0.5` | `255.255.252.0` | Bypassed from Captive Portal |
+| **Admin PC Static Bypass (Optional)** | `10.10.0.254` | `255.255.252.0` | Direct admin work without voucher login |
+| **Guest DHCP Dynamic Leases** | `10.10.0.50` – `10.10.3.250` | `255.255.252.0` | **970 concurrent guest leases** |
 
 ---
 
-### Legacy RouterOS v6 Reference (Older Hardware):
-```routeros
-# Disable v6 wireless
-/interface wireless disable [find]
+## 3. How to Test from your PC / Mac
 
-# Enable v6 wireless
-/interface wireless enable [find]
-```
+### 1. Fix macOS Network Settings (from your Screenshot)
+1. Open **System Settings > Network > USB 10/100/1000 LAN**.
+2. Change **Configure IPv4** to **Using DHCP** (Automatic).
+3. Click **OK** / **Apply**.
 
----
+### 2. Plug in Ethernet Cable
+1. Connect Ethernet cable between your Mac USB adapter and MikroTik **ether2**, **ether3**, or **ether5**.
+2. The indicator turns **green ("Connected")**.
+3. Mac receives an IP like `10.10.0.55`, Subnet `255.255.252.0`, Gateway `10.10.0.1`.
 
-## 4. Why the Previous Errors Occurred
+### 3. Open Captive Portal
+- The Apple Captive Network Assistant pops up automatically with the T-Connect splash screen.
+- Or visit in browser: **`http://neverssl.com`** or **`http://10.10.0.1`**.
 
-1. **`expected end of command (line 1 column 35)`**:  
-   This occurred because RouterOS 7.16.2 with `wifi-qcom` uses the `/interface wifi` menu. The old `/interface wireless` command syntax does not exist or has different parameters under the `wifi-qcom` package.
-2. **`bad command name pick`**:  
-   In RouterOS scripting syntax, built-in functions require a leading colon inside bracket expressions: `[:pick ...]` instead of `[pick ...]`.
-3. **`input does not match any value of bridge` / `ambiguous value of bridge`**:  
-   Occurred when the local variable was empty due to the syntax error, or when targeting `tctower-bridge` before that bridge was created. Targeting the router's existing default bridge (`bridge` or `bridge1`) resolves this completely.
-
----
-
-## 5. How to Test from your PC / Mac (Step-by-Step)
-
-### ⚠️ Immediate Fix for your macOS Network Screenshot:
-
-In your macOS System Settings for **USB 10/100/1000 LAN**:
-1. **Change "Configure IPv4" from "Manually" to "Using DHCP"** (Automatic):
-   - **Why?** Real hotspot guests receive their IP automatically via DHCP from the MikroTik router.
-   - **Critical Warning:** Setting your PC manually to `192.168.88.3` intentionally **bypasses** the captive portal (because `192.168.88.3` was added to Hotspot IP-Bindings with `type=bypassed` for Access Points). If your PC uses `192.168.88.3`, the captive portal will never show!
-   - Also, the subnet mask was entered as `255` instead of `255.255.255.0`, which is why macOS showed the yellow warning triangle ⚠️.
-2. Click **Apply / OK**.
-3. **Connect the Ethernet Cable**:
-   - Ensure the cable is plugged firmly between your USB LAN adapter and MikroTik port **ether2**, **ether3**, or **ether5**.
-   - The red dot "Not connected" will turn **green** ("Connected") with an assigned IP like `192.168.88.24x`.
+### 4. Admin Access via WinBox
+- Open WinBox and connect to `10.10.0.1:8291` (or your WireGuard IP `10.99.1.50:8291`).
+- Port 8291 is unaffected by the captive portal.
 
 ---
 
-### Test Method 1: Testing Guest Captive Portal via Wired Ethernet
+## 4. Independent Wireless Radio Controls
 
-1. **Verify macOS Network Status**:
-   - **Configure IPv4**: `Using DHCP`
-   - **IP Address**: Should be in the `192.168.88.x` range (e.g. `192.168.88.245`)
-   - **Router**: `192.168.88.1`
-2. **Trigger the Captive Portal**:
-   - macOS will usually pop up the **Captive Network Assistant** automatically.
-   - If not, open your web browser (Safari or Chrome in an Incognito window) and navigate to an unencrypted HTTP trigger URL:
-     - `http://neverssl.com`
-     - or `http://192.168.88.1`
-     - or `http://detectportal.firefox.com`
-3. **Log In**:
-   - The T-Connect hotspot login page will load.
-   - Enter a test voucher code, M-Pesa phone number, or click Free Trial to test the authenticated guest redirect.
+*Disabling wireless broadcasting does not disrupt wired Ethernet ports or controller WireGuard link.*
 
----
-
-### Test Method 2: Testing Guest Captive Portal via WiFi (`MIKROTIK-TC`)
-
-1. Turn on Wi-Fi on your Mac/PC.
-2. Open the Wi-Fi network list and connect to:
-   - **SSID**: `MIKROTIK-TC` (Open network, no password required)
-3. Upon connection, macOS/Windows will automatically display the captive login prompt.
-4. Enter test credentials or vouchers to verify wireless guest authentication.
-
----
-
-### Test Method 3: Testing Admin / WinBox Management Access
-
-To manage the MikroTik router without interference from the captive portal:
-
-1. **Via WinBox**:
-   - Open WinBox.
-   - In the **Connect To** field, enter: `192.168.88.1:8291` (or click the **Neighbors** tab and select your MikroTik's MAC address).
-   - **Login**: `admin`
-   - **Password**: *(your password, or leave blank if factory default)*
-   - Click **Connect**.
-2. **Via WebFig (Web Browser Admin)**:
-   - Go to `http://192.168.88.1` from a device that is already logged in or bypassed, or temporarily disable hotspot on that interface:
-     ```routeros
-     /ip service set www disabled=no port=80
-     ```
-3. **Static Admin IP Bypass (Optional)**:
-   - If you want your PC to always bypass the hotspot for dedicated admin work, set your static IP to `192.168.88.200`, Subnet Mask `255.255.255.0`, Router `192.168.88.1`, and run this in MikroTik terminal:
-     ```routeros
-     /ip hotspot ip-binding add address=192.168.88.200 type=bypassed comment="admin-laptop-bypass"
-     ```
+- **Turn OFF all wireless broadcasting**:
+  ```routeros
+  /interface wifi disable [find]
+  ```
+- **Turn ON all wireless broadcasting**:
+  ```routeros
+  /interface wifi enable [find]
+  ```
+- **Control individual radios**:
+  ```routeros
+  /interface wifi disable [find name=wifi1]   # 5 GHz radio
+  /interface wifi disable [find name=wifi2]   # 2.4 GHz radio
+  ```

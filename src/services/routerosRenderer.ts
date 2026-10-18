@@ -471,37 +471,40 @@ export class RouterOSRenderer {
     ap1Name?: string;
     ap2Name?: string;
   }): string {
-    const bridge = options.bridgeName?.trim() || 'tctower-bridge';
+    const bridge = options.bridgeName?.trim() || 'bridgeLocal';
     const ap1Name = options.ap1Name || 'AP1-UniFi-Omada';
     const ap2Name = options.ap2Name || 'AP2-UniFi-Omada';
 
     return `# ============================================================
 # T-CONNECT ACCESS POINTS & WINBOX BRIDGE CONFIGURATION
-# Adds Ethernet Ports to the active Hotspot Bridge,
-# configures open Test WiFi SSID "MIKROTIK-TC", and provides
-# independent WiFi CLI enable/disable controls.
+# Hardware: MikroTik hAP ax3 / RouterOS 7.16.2 (wifi-qcom)
+# Targets: ${bridge} | MIKROTIK-TC WiFi
 # ============================================================
 
 :log info "[T-Connect] Configuring Access Point bridge ports and MIKROTIK-TC wireless interface...";
 
-# 1. Auto-Detect Existing Active Bridge or Create Target Bridge
+# 1. Auto-Detect Existing Active Bridge (Prioritizes bridgeLocal, then bridge, bridge1)
 :local targetBridge "${bridge}";
 :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-  :if ([:len [/interface bridge find name="bridge"]] > 0) do={
-    :set targetBridge "bridge";
+  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={
+    :set targetBridge "bridgeLocal";
   } else={
-    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
-      :set targetBridge "bridge1";
+    :if ([:len [/interface bridge find name="bridge"]] > 0) do={
+      :set targetBridge "bridge";
     } else={
-      :if ([:len [/interface bridge find]] > 0) do={
-        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
+      :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
+        :set targetBridge "bridge1";
       } else={
-        /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
-        :set targetBridge "${bridge}";
+        :if ([:len [/interface bridge find]] > 0) do={
+          :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
+        } else={
+          /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
+          :set targetBridge "${bridge}";
+        };
       };
     };
   };
-}
+};
 
 # 2. Add Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to Target Bridge
 :do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
@@ -551,6 +554,101 @@ export class RouterOSRenderer {
 
 :log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients & wireless guests redirected to captive portal.";
 `;
+  }
+
+  /**
+   * Generates the Master Full-Stack Alignment Script:
+   * Aligns bridgeLocal, attaches ports ether2, ether3, ether4, ether5, wifi1, wifi2,
+   * configures high-capacity 10.10.0.1/22 subnet (1,022 usable IPs), DHCP server,
+   * DNS resolver, NAT masquerade, Hotspot server, AP bypasses, and WinBox service.
+   */
+  static renderFullStackAlignmentScript(options?: {
+    bridgeName?: string;
+    gatewayIp?: string;
+    subnetCidr?: string;
+    dhcpRange?: string;
+    ap1Ip?: string;
+    ap2Ip?: string;
+    ap3Ip?: string;
+  }): string {
+    const bridge = options?.bridgeName || 'bridgeLocal';
+    const gateway = options?.gatewayIp || '10.10.0.1';
+    const cidr = options?.subnetCidr || '10.10.0.0/22';
+    const dhcpRange = options?.dhcpRange || '10.10.0.50-10.10.3.250';
+    const ap1 = options?.ap1Ip || '10.10.0.2';
+    const ap2 = options?.ap2Ip || '10.10.0.3';
+    const ap3 = options?.ap3Ip || '10.10.0.5';
+
+    return `# ============================================================
+# T-CONNECT MASTER FULL-STACK ALIGNMENT SCRIPT
+# Hardware: MikroTik hAP ax3 (ARM64)
+# RouterOS: v7.16.2 (wifi-qcom)
+# Bridge: ${bridge} | LAN Subnet: ${cidr} (1,022 Hosts)
+# ============================================================
+
+:log info "[T-Connect] Starting full-stack alignment...";
+
+# 1. Ensure Target Bridge "${bridge}" Exists
+:if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
+  /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Local Bridge"
+};
+
+# 2. Bind Local Ethernet Ports & Wireless Radios to "${bridge}"
+:do { :if ([:len [/interface bridge port find interface="ether2" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether3" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether4" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether4" comment="tc-ap-ethernet-ether4" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="ether5" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="wifi1" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="wifi1" comment="tc-wifi1-radio-5ghz" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="wifi2" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="wifi2" comment="tc-wifi2-radio-2ghz" } } on-error={}
+
+# 3. Configure High-Capacity IP Address (${gateway}/22 - 1,022 usable hosts)
+:do { /ip address remove [find interface="${bridge}"] } on-error={}
+/ip address add address=${gateway}/22 network=10.10.0.0 interface="${bridge}" comment="tc-hotspot-lan-gateway"
+
+# 4. Configure High-Density DHCP IP Pool (${dhcpRange})
+:do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}
+/ip pool add name="tc-hotspot-pool" ranges=${dhcpRange}
+
+# 5. Configure DHCP Server on "${bridge}"
+:do { /ip dhcp-server remove [find interface="${bridge}"] } on-error={}
+:do { /ip dhcp-server network remove [find address="${cidr}"] } on-error={}
+/ip dhcp-server network add address=${cidr} gateway=${gateway} dns-server=${gateway},1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
+/ip dhcp-server add name="tc-dhcp-server" interface="${bridge}" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
+
+# 6. Enable DNS Resolver for Hotspot Interception
+/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
+:do { /ip dns static remove [find name="login.tconnect.ls"] } on-error={}
+/ip dns static add name="login.tconnect.ls" address=${gateway} comment="T-Connect Hotspot Login FQDN"
+
+# 7. Configure NAT Firewall Masquerade for Internet Access
+:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
+
+# 8. Configure Hotspot Profile & Server on "${bridge}"
+:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="login.tconnect.ls" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes
+:do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
+/ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no
+
+# 9. Bypass AP Static Management IPs from Captive Portal
+:do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}
+/ip hotspot ip-binding add address=${ap1} type=bypassed comment="tc-bypass-AP1-ether2"
+/ip hotspot ip-binding add address=${ap2} type=bypassed comment="tc-bypass-AP2-ether3"
+/ip hotspot ip-binding add address=${ap3} type=bypassed comment="tc-bypass-AP3-ether5"
+/ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="tc-bypass-admin-pc"
+
+# 10. Configure RouterOS 7.16.2 wifi-qcom Radios with SSID "MIKROTIK-TC"
+:do {
+  :foreach w in=[/interface wifi find] do={
+    /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+  };
+  :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC";
+} on-error={ :log warning "Could not auto-configure wifi radios" }
+
+# 11. Ensure WinBox Management Service (Port 8291) is Enabled
+/ip service set winbox disabled=no port=8291
+
+:log info "[T-Connect] Alignment complete! ${bridge} is active with ${gateway}/22 gateway.";
+:put "T-Connect: Alignment complete! Bridge ${bridge} configured with ${gateway}/22 and MIKROTIK-TC WiFi.";`;
   }
 }
 

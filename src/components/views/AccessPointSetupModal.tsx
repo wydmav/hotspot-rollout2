@@ -37,22 +37,22 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
   const [activeTab, setActiveTab] = useState<'topology' | 'scripts' | 'vendors' | 'winbox' | 'pc_test'>('topology');
   const [selectedVendor, setSelectedVendor] = useState<'unifi' | 'omada'>('unifi');
   
-  // Network parameters
-  const [routerGatewayIp, setRouterGatewayIp] = useState('192.168.88.1');
-  const [subnetMask, setSubnetMask] = useState('255.255.255.0');
-  const [bridgeName, setBridgeName] = useState('tctower-bridge');
+  // Network parameters (Aligned to high-capacity 10.10.0.0/22 subnet & bridgeLocal)
+  const [routerGatewayIp, setRouterGatewayIp] = useState('10.10.0.1');
+  const [subnetMask, setSubnetMask] = useState('255.255.252.0');
+  const [bridgeName, setBridgeName] = useState('bridgeLocal');
   
   // AP 1 configuration
   const [ap1Name, setAp1Name] = useState('AP1-Ubiquiti-UniFi');
   const [ap1Vendor, setAp1Vendor] = useState<'unifi' | 'omada'>('unifi');
   const [ap1Port, setAp1Port] = useState('ether2');
-  const [ap1Ip, setAp1Ip] = useState('192.168.88.2');
+  const [ap1Ip, setAp1Ip] = useState('10.10.0.2');
 
   // AP 2 configuration
   const [ap2Name, setAp2Name] = useState('AP2-TPLink-Omada');
   const [ap2Vendor, setAp2Vendor] = useState<'unifi' | 'omada'>('omada');
   const [ap2Port, setAp2Port] = useState('ether3');
-  const [ap2Ip, setAp2Ip] = useState('192.168.88.3');
+  const [ap2Ip, setAp2Ip] = useState('10.10.0.3');
 
   // Clipboard & Interactive State
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -94,6 +94,17 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
     ap2Ip,
     ap1Name,
     ap2Name
+  });
+
+  // Master full-stack alignment script (bridgeLocal + 10.10.0.0/22 + DHCP + Hotspot)
+  const masterAlignmentScript = RouterOSRenderer.renderFullStackAlignmentScript({
+    bridgeName,
+    gatewayIp: routerGatewayIp,
+    subnetCidr: '10.10.0.0/22',
+    dhcpRange: '10.10.0.50-10.10.3.250',
+    ap1Ip,
+    ap2Ip,
+    ap3Ip: '10.10.0.5'
   });
 
   return (
@@ -548,29 +559,65 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
           {activeTab === 'scripts' && (
             <div className="space-y-5">
               
-              <div className="flex items-center justify-between">
+              {/* Master Full-Stack Alignment Script Banner */}
+              <div className="bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-emerald-500/15 border border-amber-500/40 rounded-xl p-4.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="px-2 py-0.5 text-[10px] font-bold font-mono bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded">
+                        RECOMMENDED FOR YOUR HAP AX³
+                      </span>
+                      <h3 className="text-sm font-bold text-white">
+                        Master Full-Stack Alignment Script (bridgeLocal + 10.10.0.0/22)
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Configures everything in one pass: binds <strong className="text-amber-300 font-mono">ether2, 3, 5, wifi1, wifi2</strong> to <strong className="text-white font-mono">bridgeLocal</strong>, sets <strong className="text-emerald-400 font-mono">10.10.0.1/22</strong> gateway (1,022 IPs), deploys DHCP &amp; Hotspot, and bypasses APs.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => copyToClipboard(masterAlignmentScript, 'master-alignment-script')}
+                    className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold rounded-lg text-xs transition-all shadow-lg shadow-orange-500/20 cursor-pointer"
+                  >
+                    {copiedKey === 'master-alignment-script' ? (
+                      <>
+                        <Check className="w-4 h-4 text-slate-950" />
+                        <span>Copied Master Script!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy Master Alignment Script</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
                 <div>
                   <h3 className="text-sm font-semibold text-white">
-                    MikroTik WinBox Terminal Scripts
+                    Individual Setup Snippets
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Open <strong>WinBox &gt; New Terminal</strong>, paste these commands, and press Enter.
+                    Use these smaller snippets if you only wish to reconfigure specific subsystems.
                   </p>
                 </div>
 
                 <button
                   onClick={() => copyToClipboard(fullScript, 'full-script')}
-                  className="flex items-center space-x-2 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold rounded-lg text-xs transition-colors shadow-sm"
+                  className="flex items-center space-x-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg text-xs transition-colors border border-slate-700 shadow-sm"
                 >
                   {copiedKey === 'full-script' ? (
                     <>
-                      <Check className="w-4 h-4 text-slate-950" />
-                      <span>Copied All Commands!</span>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span>Copied Bridge Script!</span>
                     </>
                   ) : (
                     <>
                       <Copy className="w-4 h-4" />
-                      <span>Copy Full Script</span>
+                      <span>Copy Ports Script</span>
                     </>
                   )}
                 </button>
@@ -585,23 +632,23 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-amber-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to Hotspot Bridge (Auto-Detects Bridge)
+                        1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to bridgeLocal
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => copyToClipboard(
-                          `/interface bridge port add bridge=bridge interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=bridge interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"`,
+                          `/interface bridge port add bridge=${bridgeName} interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=${bridgeName} interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"`,
                           'port-direct'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-amber-300 hover:text-white px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 transition-colors cursor-pointer"
                       >
                         {copiedKey === 'port-direct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedKey === 'port-direct' ? 'Copied' : 'Copy Direct ("bridge")'}</span>
+                        <span>{copiedKey === 'port-direct' ? 'Copied' : `Copy Direct ("${bridgeName}")`}</span>
                       </button>
                       <button
                         onClick={() => copyToClipboard(
-                          `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find name="bridge"]] > 0) do={\n    :set targetBridge "bridge";\n  } else={\n    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={\n      :set targetBridge "bridge1";\n    } else={\n      :if ([:len [/interface bridge find]] > 0) do={\n        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];\n      } else={\n        /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";\n      };\n    };\n  };\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
+                          `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={\n    :set targetBridge "bridgeLocal";\n  } else={\n    :if ([:len [/interface bridge find name="bridge"]] > 0) do={\n      :set targetBridge "bridge";\n    } else={\n      :if ([:len [/interface bridge find]] > 0) do={\n        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];\n      };\n    };\n  };\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
                           'port-script'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
@@ -612,18 +659,18 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`# Direct command (if default bridge is "bridge"):
-/interface bridge port add bridge=bridge interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"
-/interface bridge port add bridge=bridge interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"
+{`# Direct command (for "${bridgeName}"):
+/interface bridge port add bridge=${bridgeName} interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"
+/interface bridge port add bridge=${bridgeName} interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"
 
 # Or auto-detect existing bridge script:
 :local targetBridge "${bridgeName}";
 :if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={
-  :if ([:len [/interface bridge find name="bridge"]] > 0) do={
-    :set targetBridge "bridge";
+  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={
+    :set targetBridge "bridgeLocal";
   } else={
-    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
-      :set targetBridge "bridge1";
+    :if ([:len [/interface bridge find name="bridge"]] > 0) do={
+      :set targetBridge "bridge";
     } else={
       :if ([:len [/interface bridge find]] > 0) do={
         :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
@@ -1106,11 +1153,10 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
                       <div className="bg-rose-950/30 border border-rose-500/30 rounded-lg p-3 space-y-1">
                         <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider">
-                          Current Setting (Preventing Captive Portal)
+                          Previous Setting (Causing Conflict)
                         </span>
                         <div className="font-mono text-slate-300 space-y-0.5 text-[11px]">
                           <div>• Configure IPv4: <span className="text-rose-300">Manually</span></div>
-                          <div>• IP: <span className="text-rose-300">192.168.88.3</span> <em className="text-slate-400">(Hotspot AP Bypass IP!)</em></div>
                           <div>• Subnet mask: <span className="text-rose-300">255</span> <em className="text-rose-400">(Incomplete &rarr; ⚠️ Warning)</em></div>
                           <div>• Router: <span className="text-rose-300">(Empty)</span></div>
                         </div>
@@ -1123,7 +1169,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                         <div className="font-mono text-slate-200 space-y-0.5 text-[11px]">
                           <div>• Configure IPv4: <span className="text-emerald-400 font-bold">Using DHCP</span></div>
                           <div className="text-slate-300 text-[10px] pt-1">
-                            Sets IP, Subnet, and Gateway automatically from MikroTik, exactly like a real guest.
+                            Receives dynamic IP from <strong className="text-emerald-400 font-mono">10.10.0.0/22</strong> pool with Gateway <strong className="text-emerald-400 font-mono">10.10.0.1</strong>.
                           </div>
                         </div>
                       </div>
@@ -1154,7 +1200,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                       <li>Set Mac IPv4 to <strong>Using DHCP</strong> and click OK.</li>
                       <li>Plug Ethernet into port <strong className="text-amber-400 font-mono">ether2</strong>, <strong className="text-amber-400 font-mono">ether3</strong>, or <strong className="text-amber-400 font-mono">ether5</strong>.</li>
                       <li>Red dot changes to green (&quot;Connected&quot;).</li>
-                      <li>Mac receives IP (e.g., <code className="text-slate-200">192.168.88.24x</code>).</li>
+                      <li>Mac receives IP (e.g., <code className="text-emerald-400">10.10.0.55</code>).</li>
                       <li>Captive login window appears automatically!</li>
                     </ol>
                   </div>
@@ -1237,9 +1283,9 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
                     💡 <em>Optional Admin Laptop Permanent Bypass:</em>
                     <div className="mt-1 flex items-center justify-between bg-black/60 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[10px] text-sky-300">
-                      <span className="truncate">/ip hotspot ip-binding add address=192.168.88.200 type=bypassed</span>
+                      <span className="truncate">/ip hotspot ip-binding add address=10.10.0.254 type=bypassed</span>
                       <button
-                        onClick={() => copyToClipboard('/ip hotspot ip-binding add address=192.168.88.200 type=bypassed comment="admin-laptop"', 'cmd-admin-bp')}
+                        onClick={() => copyToClipboard('/ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="admin-laptop"', 'cmd-admin-bp')}
                         className="text-slate-400 hover:text-white shrink-0 ml-1"
                       >
                         {copiedKey === 'cmd-admin-bp' ? 'Copied' : 'Copy'}
