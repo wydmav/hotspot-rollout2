@@ -24,7 +24,8 @@ import {
   Sliders,
   Download,
   Flame,
-  Globe
+  Globe,
+  Network
 } from 'lucide-react';
 import { RouterDevice, VerticalType } from '../../types';
 import { auditService } from '../../services/audit';
@@ -113,6 +114,7 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
 
   // Option 4: Config Export State
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
+  const [exportScriptType, setExportScriptType] = useState<'alignment' | 'provisioning'>('alignment');
 
   // Fleet Execution Results State
   const [fleetResults, setFleetResults] = useState<{
@@ -594,6 +596,19 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
       setIsTestingSpeed(false);
     }
   };
+
+  // Render Master Full-Stack Alignment Script (bridgeLocal + 10.10.0.0/22)
+  const renderedAlignmentScript = useMemo(() => {
+    return RouterOSRenderer.renderFullStackAlignmentScript({
+      bridgeName: 'bridgeLocal',
+      gatewayIp: '10.10.0.1',
+      subnetCidr: '10.10.0.0/22',
+      dhcpRange: '10.10.0.50-10.10.3.250',
+      ap1Ip: '10.10.0.2',
+      ap2Ip: '10.10.0.3',
+      ap3Ip: '10.10.0.5'
+    });
+  }, []);
 
   // Render RSC Script for Config Export
   const renderedRscScript = useMemo(() => {
@@ -1543,39 +1558,68 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
       {/* ========================================================================= */}
       {activeOption === 'config_export' && (
         <div className="bg-[#090d16] border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4 font-mono">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-emerald-400" />
-                <span>RouterOS 7.x Hardened Configuration Script (.rsc)</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Idempotent RouterOS command script tailored for {currentRouter.name} ({currentRouter.model}).
-              </p>
+          
+          {/* Sub-selector between Master Full-Stack Alignment Script and Remote Provisioning Script */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-2 p-1 bg-[#121829] rounded-xl border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setExportScriptType('alignment')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  exportScriptType === 'alignment'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-orange-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Network className="w-3.5 h-3.5" />
+                <span>Master Full-Stack Alignment Script (bridgeLocal + 10.10.0.0/22)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setExportScriptType('provisioning')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  exportScriptType === 'provisioning'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                <span>Remote Sentinel Provisioning Script (.rsc)</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(renderedRscScript);
+                  const activeScript = exportScriptType === 'alignment' ? renderedAlignmentScript : renderedRscScript;
+                  navigator.clipboard.writeText(activeScript);
                   setCopiedScript(true);
                   setTimeout(() => setCopiedScript(false), 2000);
                 }}
-                className="px-3.5 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all ${
+                  exportScriptType === 'alignment'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold'
+                    : 'bg-[#f05e17] hover:bg-[#d94c0b] text-white'
+                }`}
               >
-                {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedScript ? 'Copied Script!' : 'Copy Script'}</span>
+                {copiedScript ? <Check className="w-3.5 h-3.5 text-slate-950" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript ? 'Copied Script!' : exportScriptType === 'alignment' ? 'Copy Alignment Script' : 'Copy .rsc Script'}</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => {
-                  const blob = new Blob([renderedRscScript], { type: 'text/plain;charset=utf-8' });
+                  const activeScript = exportScriptType === 'alignment' ? renderedAlignmentScript : renderedRscScript;
+                  const filename = exportScriptType === 'alignment'
+                    ? `tconnect-alignment-${currentRouter.name.toLowerCase().replace(/\s+/g, '-')}.rsc`
+                    : `tconnect-provisioning-${currentRouter.name.toLowerCase().replace(/\s+/g, '-')}.rsc`;
+                  const blob = new Blob([activeScript], { type: 'text/plain;charset=utf-8' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `tconnect-${currentRouter.name.toLowerCase().replace(/\s+/g, '-')}.rsc`;
+                  a.download = filename;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
@@ -1587,24 +1631,57 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
             </div>
           </div>
 
-          <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-slate-400">Architecture: <strong className="text-white">{currentRouter.rosVersion.toUpperCase()}</strong></span>
-              <span>·</span>
-              <span className="text-slate-400">District: <strong className="text-cyan-300">{currentRouter.district || 'Maseru'}</strong></span>
-              <span>·</span>
-              <span className="text-slate-400">Overlay IP: <strong className="text-emerald-400">{currentRouter.wireguardIp || '10.99.1.50'}</strong></span>
-            </div>
-            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold">
-              WireGuard + RADIUS AAA Hardened
-            </span>
-          </div>
+          {exportScriptType === 'alignment' ? (
+            <div className="space-y-3">
+              <div className="p-3 bg-gradient-to-r from-amber-500/10 via-[#121829] to-emerald-500/10 rounded-xl border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-400 font-bold">RECOMMENDED ALL-IN-ONE SCRIPT FOR HAP AX³</span>
+                    <span className="text-slate-500">·</span>
+                    <span className="text-emerald-400 font-bold">1,022 Hosts Subnet (10.10.0.0/22)</span>
+                  </div>
+                  <p className="text-slate-400 text-[11px]">
+                    Binds <strong className="text-white">ether2, ether3, ether4, ether5, wifi1, wifi2</strong> to <strong className="text-amber-300 font-mono">bridgeLocal</strong>, sets gateway <strong className="text-emerald-400 font-mono">10.10.0.1/22</strong>, deploys Hotspot DHCP, NAT, AP bypasses, and Qualcomm WiFi 6 SSID.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold font-mono">
+                    Target: bridgeLocal
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold font-mono">
+                    Pool: .50 - .3.250
+                  </span>
+                </div>
+              </div>
 
-          <div className="relative">
-            <pre className="p-4 bg-[#05070c] rounded-xl border border-slate-800 text-[11px] text-cyan-300 font-mono max-h-[440px] overflow-y-auto whitespace-pre leading-relaxed select-all">
-              {renderedRscScript}
-            </pre>
-          </div>
+              <div className="relative">
+                <pre className="p-4 bg-[#05070c] rounded-xl border border-slate-800 text-[11px] text-amber-300 font-mono max-h-[460px] overflow-y-auto whitespace-pre leading-relaxed select-all">
+                  {renderedAlignmentScript}
+                </pre>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-slate-400">Architecture: <strong className="text-white">{currentRouter.rosVersion.toUpperCase()}</strong></span>
+                  <span>·</span>
+                  <span className="text-slate-400">District: <strong className="text-cyan-300">{currentRouter.district || 'Maseru'}</strong></span>
+                  <span>·</span>
+                  <span className="text-slate-400">Overlay IP: <strong className="text-emerald-400">{currentRouter.wireguardIp || '10.99.1.50'}</strong></span>
+                </div>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold">
+                  WireGuard + RADIUS AAA Hardened
+                </span>
+              </div>
+
+              <div className="relative">
+                <pre className="p-4 bg-[#05070c] rounded-xl border border-slate-800 text-[11px] text-cyan-300 font-mono max-h-[460px] overflow-y-auto whitespace-pre leading-relaxed select-all">
+                  {renderedRscScript}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

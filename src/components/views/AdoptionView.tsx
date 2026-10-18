@@ -104,8 +104,9 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [showApAssistantModal, setShowApAssistantModal] = useState(false);
   const [showOfficeReadinessModal, setShowOfficeReadinessModal] = useState(false);
   const [selectedExtraPort, setSelectedExtraPort] = useState('ether3');
-  const [selectedBridgeName, setSelectedBridgeName] = useState('tctower-bridge');
+  const [selectedBridgeName, setSelectedBridgeName] = useState('bridgeLocal');
   const [copiedBridgeCmd, setCopiedBridgeCmd] = useState(false);
+  const [copiedMasterScript, setCopiedMasterScript] = useState(false);
 
   // Automated WAN Failover State (MKController Feature)
   const [wan1Port, setWan1Port] = useState('ether1');
@@ -1215,31 +1216,65 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     </pre>
                   </div>
 
-                  {/* Dual AP Fast Launcher Banner */}
-                  <div className="p-3 bg-gradient-to-r from-amber-500/10 via-[#161d31] to-sky-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
-                        <Network className="w-4 h-4" />
+                  {/* Dual AP & Master Full-Stack Alignment Launcher Banner */}
+                  <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-[#161d31] to-emerald-500/15 border border-amber-500/40 rounded-xl flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-[280px] flex-1">
+                      <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
+                        <Network className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span>Access Points and Winbox Setup Assistant</span>
-                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                            Gateway: 192.168.88.1
+                        <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                          <span>Master Full-Stack Alignment Script &amp; AP Assistant</span>
+                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20 font-bold">
+                            10.10.0.1/22 · bridgeLocal (1,022 Hosts)
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-300">
-                          Bridge ports ether2 &amp; ether3 to <span className="font-mono text-amber-300">tctower-bridge</span>, setup open test SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>, and control WiFi broadcasting via CLI.
+                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                          Harmonizes ports <span className="font-mono text-amber-300">ether2, 3, 5, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowApAssistantModal(true)}
-                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors shadow-sm shrink-0 whitespace-nowrap"
-                    >
-                      Open 2 AP Assistant
-                    </button>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const masterScript = RouterOSRenderer.renderFullStackAlignmentScript({
+                            bridgeName: 'bridgeLocal',
+                            gatewayIp: '10.10.0.1',
+                            subnetCidr: '10.10.0.0/22',
+                            dhcpRange: '10.10.0.50-10.10.3.250',
+                            ap1Ip: '10.10.0.2',
+                            ap2Ip: '10.10.0.3',
+                            ap3Ip: '10.10.0.5'
+                          });
+                          navigator.clipboard.writeText(masterScript);
+                          setCopiedMasterScript(true);
+                          setTimeout(() => setCopiedMasterScript(false), 2500);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs rounded-lg transition-all shadow-md shadow-orange-500/20 cursor-pointer"
+                      >
+                        {copiedMasterScript ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-slate-950" />
+                            <span>Copied Master Script!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-950" />
+                            <span>Copy Master Script</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowApAssistantModal(true)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-lg border border-slate-700 transition-colors shadow-sm shrink-0 whitespace-nowrap cursor-pointer"
+                      >
+                        Open AP &amp; Winbox Assistant &rarr;
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
