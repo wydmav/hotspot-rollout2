@@ -34,7 +34,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
   onClose,
   router
 }) => {
-  const [activeTab, setActiveTab] = useState<'topology' | 'scripts' | 'vendors' | 'winbox'>('topology');
+  const [activeTab, setActiveTab] = useState<'topology' | 'scripts' | 'vendors' | 'winbox' | 'pc_test'>('topology');
   const [selectedVendor, setSelectedVendor] = useState<'unifi' | 'omada'>('unifi');
   
   // Network parameters
@@ -177,6 +177,18 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
           >
             <Server className="w-4 h-4" />
             <span>4. WinBox Direct Launcher</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('pc_test')}
+            className={`flex items-center space-x-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors ${
+              activeTab === 'pc_test'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
+            }`}
+          >
+            <Laptop className="w-4 h-4" />
+            <span>5. PC &amp; Mac Testing Guide</span>
           </button>
         </div>
 
@@ -1064,6 +1076,192 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </ol>
                 </div>
 
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 5: PC & MAC TESTING GUIDE */}
+          {activeTab === 'pc_test' && (
+            <div className="space-y-6">
+              
+              {/* Alert / Fix Banner for Screenshot */}
+              <div className="bg-gradient-to-r from-amber-500/10 via-slate-900 to-rose-500/10 border border-amber-500/30 rounded-xl p-4.5 space-y-3">
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 bg-amber-500/20 text-amber-300 rounded-lg shrink-0 mt-0.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-white">
+                        macOS Network Settings Fix (Required for Testing)
+                      </h4>
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded">
+                        Action Required in System Settings
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      In your Mac&apos;s <strong>USB 10/100/1000 LAN</strong> window (from your screenshot):
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+                      <div className="bg-rose-950/30 border border-rose-500/30 rounded-lg p-3 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider">
+                          Current Setting (Preventing Captive Portal)
+                        </span>
+                        <div className="font-mono text-slate-300 space-y-0.5 text-[11px]">
+                          <div>• Configure IPv4: <span className="text-rose-300">Manually</span></div>
+                          <div>• IP: <span className="text-rose-300">192.168.88.3</span> <em className="text-slate-400">(Hotspot AP Bypass IP!)</em></div>
+                          <div>• Subnet mask: <span className="text-rose-300">255</span> <em className="text-rose-400">(Incomplete &rarr; ⚠️ Warning)</em></div>
+                          <div>• Router: <span className="text-rose-300">(Empty)</span></div>
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-3 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">
+                          Correct Setting for Testing (Recommended)
+                        </span>
+                        <div className="font-mono text-slate-200 space-y-0.5 text-[11px]">
+                          <div>• Configure IPv4: <span className="text-emerald-400 font-bold">Using DHCP</span></div>
+                          <div className="text-slate-300 text-[10px] pt-1">
+                            Sets IP, Subnet, and Gateway automatically from MikroTik, exactly like a real guest.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Step-by-Step Test Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                {/* Test Card 1: Wired Ethernet */}
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4.5 flex flex-col justify-between space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                        <Laptop className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/20">
+                        Wired Ethernet
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-semibold text-white">
+                      1. Test Wired Captive Portal
+                    </h4>
+                    <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                      <li>Set Mac IPv4 to <strong>Using DHCP</strong> and click OK.</li>
+                      <li>Plug Ethernet into port <strong className="text-amber-400 font-mono">ether2</strong>, <strong className="text-amber-400 font-mono">ether3</strong>, or <strong className="text-amber-400 font-mono">ether5</strong>.</li>
+                      <li>Red dot changes to green (&quot;Connected&quot;).</li>
+                      <li>Mac receives IP (e.g., <code className="text-slate-200">192.168.88.24x</code>).</li>
+                      <li>Captive login window appears automatically!</li>
+                    </ol>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+                    💡 <em>Browser trigger if popup doesn&apos;t open:</em>
+                    <div className="mt-1 flex items-center justify-between bg-black/60 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[10px] text-indigo-300">
+                      <span>http://neverssl.com</span>
+                      <button
+                        onClick={() => copyToClipboard('http://neverssl.com', 'url-neverssl')}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        {copiedKey === 'url-neverssl' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Test Card 2: WiFi MIKROTIK-TC */}
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4.5 flex flex-col justify-between space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="p-2 bg-teal-500/10 text-teal-400 rounded-lg">
+                        <Wifi className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] font-mono bg-teal-500/10 text-teal-300 px-2 py-0.5 rounded border border-teal-500/20">
+                        Open Wireless
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-semibold text-white">
+                      2. Test WiFi Captive Portal
+                    </h4>
+                    <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                      <li>Click the Wi-Fi icon in your Mac top menu bar.</li>
+                      <li>Select SSID: <strong className="text-amber-300 font-mono">MIKROTIK-TC</strong>.</li>
+                      <li>No Wi-Fi password required (Open Network).</li>
+                      <li>The Apple Captive Assistant opens with the T-Connect portal.</li>
+                      <li>Enter voucher code or click Free Trial.</li>
+                    </ol>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+                    💡 <em>Direct Router Gateway trigger URL:</em>
+                    <div className="mt-1 flex items-center justify-between bg-black/60 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[10px] text-teal-300">
+                      <span>http://{routerGatewayIp}</span>
+                      <button
+                        onClick={() => copyToClipboard(`http://${routerGatewayIp}`, 'url-gw')}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        {copiedKey === 'url-gw' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Test Card 3: Admin WinBox Access */}
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4.5 flex flex-col justify-between space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="p-2 bg-sky-500/10 text-sky-400 rounded-lg">
+                        <Server className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] font-mono bg-sky-500/10 text-sky-300 px-2 py-0.5 rounded border border-sky-500/20">
+                        Port 8291
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-semibold text-white">
+                      3. Test Admin / WinBox Access
+                    </h4>
+                    <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                      <li>Launch WinBox on your Mac or Windows PC.</li>
+                      <li>In <strong>Connect To</strong>, type: <strong className="text-sky-300 font-mono">{routerGatewayIp}:8291</strong>.</li>
+                      <li>Login: <code className="text-slate-200">admin</code> (Password: blank or your router password).</li>
+                      <li>WinBox connects directly over port 8291, bypassing the captive portal!</li>
+                    </ol>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+                    💡 <em>Optional Admin Laptop Permanent Bypass:</em>
+                    <div className="mt-1 flex items-center justify-between bg-black/60 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[10px] text-sky-300">
+                      <span className="truncate">/ip hotspot ip-binding add address=192.168.88.200 type=bypassed</span>
+                      <button
+                        onClick={() => copyToClipboard('/ip hotspot ip-binding add address=192.168.88.200 type=bypassed comment="admin-laptop"', 'cmd-admin-bp')}
+                        className="text-slate-400 hover:text-white shrink-0 ml-1"
+                      >
+                        {copiedKey === 'cmd-admin-bp' ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Troubleshooting Tips */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div className="font-semibold text-white flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Quick Troubleshooting Checklist:</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-300 text-[11px]">
+                  <div>• <strong>Red dot &quot;Not connected&quot;?</strong> Check USB LAN adapter seating and Ethernet cable connection to MikroTik router.</div>
+                  <div>• <strong>Portal doesn&apos;t appear?</strong> Open Safari or Chrome Incognito and visit an HTTP site like <code>http://neverssl.com</code>.</div>
+                  <div>• <strong>Connected but no IP?</strong> Make sure IPv4 is set to &quot;Using DHCP&quot; so the MikroTik DHCP server can assign you an address.</div>
+                  <div>• <strong>Need to reset testing?</strong> In WinBox, go to <em>IP &gt; Hotspot &gt; Active</em> and remove your PC&apos;s lease to re-trigger the portal.</div>
+                </div>
               </div>
 
             </div>

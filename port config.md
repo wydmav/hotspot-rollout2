@@ -177,3 +177,70 @@ This script automatically:
    In RouterOS scripting syntax, built-in functions require a leading colon inside bracket expressions: `[:pick ...]` instead of `[pick ...]`.
 3. **`input does not match any value of bridge` / `ambiguous value of bridge`**:  
    Occurred when the local variable was empty due to the syntax error, or when targeting `tctower-bridge` before that bridge was created. Targeting the router's existing default bridge (`bridge` or `bridge1`) resolves this completely.
+
+---
+
+## 5. How to Test from your PC / Mac (Step-by-Step)
+
+### ⚠️ Immediate Fix for your macOS Network Screenshot:
+
+In your macOS System Settings for **USB 10/100/1000 LAN**:
+1. **Change "Configure IPv4" from "Manually" to "Using DHCP"** (Automatic):
+   - **Why?** Real hotspot guests receive their IP automatically via DHCP from the MikroTik router.
+   - **Critical Warning:** Setting your PC manually to `192.168.88.3` intentionally **bypasses** the captive portal (because `192.168.88.3` was added to Hotspot IP-Bindings with `type=bypassed` for Access Points). If your PC uses `192.168.88.3`, the captive portal will never show!
+   - Also, the subnet mask was entered as `255` instead of `255.255.255.0`, which is why macOS showed the yellow warning triangle ⚠️.
+2. Click **Apply / OK**.
+3. **Connect the Ethernet Cable**:
+   - Ensure the cable is plugged firmly between your USB LAN adapter and MikroTik port **ether2**, **ether3**, or **ether5**.
+   - The red dot "Not connected" will turn **green** ("Connected") with an assigned IP like `192.168.88.24x`.
+
+---
+
+### Test Method 1: Testing Guest Captive Portal via Wired Ethernet
+
+1. **Verify macOS Network Status**:
+   - **Configure IPv4**: `Using DHCP`
+   - **IP Address**: Should be in the `192.168.88.x` range (e.g. `192.168.88.245`)
+   - **Router**: `192.168.88.1`
+2. **Trigger the Captive Portal**:
+   - macOS will usually pop up the **Captive Network Assistant** automatically.
+   - If not, open your web browser (Safari or Chrome in an Incognito window) and navigate to an unencrypted HTTP trigger URL:
+     - `http://neverssl.com`
+     - or `http://192.168.88.1`
+     - or `http://detectportal.firefox.com`
+3. **Log In**:
+   - The T-Connect hotspot login page will load.
+   - Enter a test voucher code, M-Pesa phone number, or click Free Trial to test the authenticated guest redirect.
+
+---
+
+### Test Method 2: Testing Guest Captive Portal via WiFi (`MIKROTIK-TC`)
+
+1. Turn on Wi-Fi on your Mac/PC.
+2. Open the Wi-Fi network list and connect to:
+   - **SSID**: `MIKROTIK-TC` (Open network, no password required)
+3. Upon connection, macOS/Windows will automatically display the captive login prompt.
+4. Enter test credentials or vouchers to verify wireless guest authentication.
+
+---
+
+### Test Method 3: Testing Admin / WinBox Management Access
+
+To manage the MikroTik router without interference from the captive portal:
+
+1. **Via WinBox**:
+   - Open WinBox.
+   - In the **Connect To** field, enter: `192.168.88.1:8291` (or click the **Neighbors** tab and select your MikroTik's MAC address).
+   - **Login**: `admin`
+   - **Password**: *(your password, or leave blank if factory default)*
+   - Click **Connect**.
+2. **Via WebFig (Web Browser Admin)**:
+   - Go to `http://192.168.88.1` from a device that is already logged in or bypassed, or temporarily disable hotspot on that interface:
+     ```routeros
+     /ip service set www disabled=no port=80
+     ```
+3. **Static Admin IP Bypass (Optional)**:
+   - If you want your PC to always bypass the hotspot for dedicated admin work, set your static IP to `192.168.88.200`, Subnet Mask `255.255.255.0`, Router `192.168.88.1`, and run this in MikroTik terminal:
+     ```routeros
+     /ip hotspot ip-binding add address=192.168.88.200 type=bypassed comment="admin-laptop-bypass"
+     ```
