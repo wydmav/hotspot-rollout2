@@ -507,24 +507,20 @@ export class RouterOSRenderer {
 :do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
 :do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap2Port}" comment="tc-ap-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge" }
 
-# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS v6 & v7 Compatible)
-:do {
-  :if ([:len [/interface wireless find]] > 0) do={
-    /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
-  }
-} on-error={}
-
+# 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom Optimized)
 :do {
   :if ([:len [/interface wifi find]] > 0) do={
-    /interface wifi set [:pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
-  }
-} on-error={}
-
-:do {
-  :if ([:len [/interface wifiwave2 find]] > 0) do={
-    /interface wifiwave2 set [:pick [/interface wifiwave2 find] 0] configuration.ssid="MIKROTIK-TC" disabled=no
-  }
-} on-error={}
+    :foreach w in=[/interface wifi find] do={
+      /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+    };
+    :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi-qcom interfaces with SSID MIKROTIK-TC";
+  } else={
+    :if ([:len [/interface wireless find]] > 0) do={
+      /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
+      :log info "[T-Connect] Configured legacy RouterOS v6 wireless interface with SSID MIKROTIK-TC";
+    };
+  };
+} on-error={ :log warning "Could not auto-configure wireless interface" }
 
 # 4. Bypass AP Static Management IPs in Hotspot
 :do { /ip hotspot ip-binding remove [find comment~"${ap1Name}"] } on-error={}
@@ -539,13 +535,18 @@ export class RouterOSRenderer {
 # ============================================================
 # INDEPENDENT WIFI CLI CONTROLS (Disabling WiFi does NOT stop platform/Ethernet)
 # ============================================================
-# To turn OFF WiFi radio broadcasting:
-#   /interface wireless disable [find]  (RouterOS v6)
-#   /interface wifi disable [find]      (RouterOS v7)
+# RouterOS 7.16.2 (wifi-qcom - wifi1 & wifi2):
+#   To turn OFF WiFi radio broadcasting:
+#     /interface wifi disable [find]
+#   To turn ON WiFi radio broadcasting:
+#     /interface wifi enable [find]
+#   To control specific radios:
+#     /interface wifi disable [find name=wifi1]
+#     /interface wifi disable [find name=wifi2]
 #
-# To turn ON WiFi radio broadcasting:
-#   /interface wireless enable [find]   (RouterOS v6)
-#   /interface wifi enable [find]       (RouterOS v7)
+# Legacy RouterOS v6:
+#   /interface wireless disable [find]
+#   /interface wireless enable [find]
 # ============================================================
 
 :log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients & wireless guests redirected to captive portal.";

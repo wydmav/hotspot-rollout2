@@ -624,6 +624,9 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
 
   // Quick CLI presets
   const quickCliPresets = [
+    { label: '/system package print', cmd: '/system package print' },
+    { label: '/interface wifi print', cmd: '/interface wifi print' },
+    { label: '/interface bridge port print', cmd: '/interface bridge port print' },
     { label: '/system resource print', cmd: '/system resource print' },
     { label: '/ip address print', cmd: '/ip address print' },
     { label: '/interface print', cmd: '/interface print' },
@@ -1134,6 +1137,78 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
                 className="w-full py-2 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-colors cursor-pointer"
               >
                 Print Interfaces
+              </button>
+            </div>
+
+            {/* Action 7: RouterOS 7.16.2 Package Status */}
+            <div className="bg-[#121829] p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-emerald-400" />
+                    <span>Package Version Audit</span>
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 rounded">v7.16.2</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Verifies installed RouterOS version and packages such as <strong>wifi-qcom</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => runQuickOp('Installed Packages', '/system package print')}
+                disabled={loading}
+                className="w-full py-2 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Check Packages
+              </button>
+            </div>
+
+            {/* Action 8: Qualcomm WiFi Radios (wifi-qcom) */}
+            <div className="bg-[#121829] p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <Radio className="w-4 h-4 text-cyan-400" />
+                    <span>WiFi Radios (wifi-qcom)</span>
+                  </span>
+                  <span className="text-[10px] bg-cyan-500/10 text-cyan-300 px-1.5 py-0.5 rounded">wifi1 / wifi2</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Inspects active Qualcomm wireless interfaces, current SSID, channel, and clients.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => runQuickOp('WiFi Interfaces', '/interface wifi print')}
+                disabled={loading}
+                className="w-full py-2 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Inspect WiFi Radios
+              </button>
+            </div>
+
+            {/* Action 9: Bridge Ports Membership */}
+            <div className="bg-[#121829] p-4 rounded-xl border border-slate-700/60 flex flex-col justify-between space-y-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <Server className="w-4 h-4 text-amber-400" />
+                    <span>Bridge Port Table</span>
+                  </span>
+                  <span className="text-[10px] bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded">ether2/3/5</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                  Confirms ethernet ports (ether2, ether3, ether5) and wifi radios bound to main bridge.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => runQuickOp('Bridge Ports', '/interface bridge port print')}
+                disabled={loading}
+                className="w-full py-2 bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              >
+                Inspect Bridge Ports
               </button>
             </div>
           </div>

@@ -576,25 +576,48 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                         1. Add Ethernet Ports ({ap1Port} &amp; {ap2Port}) to Hotspot Bridge (Auto-Detects Bridge)
                       </span>
                     </div>
-                    <button
-                      onClick={() => copyToClipboard(
-                        `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find]] > 0) do={\n    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];\n  } else={\n    /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";\n  }\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
-                        'port-script'
-                      )}
-                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      {copiedKey === 'port-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'port-script' ? 'Copied' : 'Copy Auto-Bridge Script'}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => copyToClipboard(
+                          `/interface bridge port add bridge=bridge interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=bridge interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"`,
+                          'port-direct'
+                        )}
+                        className="flex items-center space-x-1.5 text-xs text-amber-300 hover:text-white px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 transition-colors cursor-pointer"
+                      >
+                        {copiedKey === 'port-direct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedKey === 'port-direct' ? 'Copied' : 'Copy Direct ("bridge")'}</span>
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(
+                          `:local targetBridge "${bridgeName}";\n:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={\n  :if ([:len [/interface bridge find name="bridge"]] > 0) do={\n    :set targetBridge "bridge";\n  } else={\n    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={\n      :set targetBridge "bridge1";\n    } else={\n      :if ([:len [/interface bridge find]] > 0) do={\n        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];\n      } else={\n        /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";\n      };\n    };\n  };\n};\n/interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"\n/interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`,
+                          'port-script'
+                        )}
+                        className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        {copiedKey === 'port-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedKey === 'port-script' ? 'Copied' : 'Copy Auto Script'}</span>
+                      </button>
+                    </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`:local targetBridge "${bridgeName}";
+{`# Direct command (if default bridge is "bridge"):
+/interface bridge port add bridge=bridge interface=${ap1Port} comment="tc-ap-ethernet-${ap1Port}"
+/interface bridge port add bridge=bridge interface=${ap2Port} comment="tc-ap-ethernet-${ap2Port}"
+
+# Or auto-detect existing bridge script:
+:local targetBridge "${bridgeName}";
 :if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={
-  :if ([:len [/interface bridge find]] > 0) do={
-    :set targetBridge [/interface bridge get [pick [/interface bridge find] 0] name];
+  :if ([:len [/interface bridge find name="bridge"]] > 0) do={
+    :set targetBridge "bridge";
   } else={
-    /interface bridge add name="${bridgeName}" comment="T-Connect Hotspot & AP Bridge";
-  }
+    :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
+      :set targetBridge "bridge1";
+    } else={
+      :if ([:len [/interface bridge find]] > 0) do={
+        :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
+      };
+    };
+  };
 };
 /interface bridge port add bridge=$targetBridge interface="${ap1Port}" comment="tc-ap-ethernet-${ap1Port}"
 /interface bridge port add bridge=$targetBridge interface="${ap2Port}" comment="tc-ap-ethernet-${ap2Port}"`}
@@ -604,29 +627,46 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </div>
                 </div>
 
-                {/* 2. Configure Open Test WiFi SSID "MIKROTIK-TC" */}
+                {/* 2. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom) */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot; (RouterOS v6 &amp; v7)
+                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot; (RouterOS 7.16.2 wifi-qcom)
                       </span>
                     </div>
-                    <button
-                      onClick={() => copyToClipboard(
-                        `:do { :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } on-error={};\n:do { :if ([:len [/interface wifi find]] > 0) do={ /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no } } on-error={};`,
-                        'wifi-setup-script'
-                      )}
-                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
-                    >
-                      {copiedKey === 'wifi-setup-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedKey === 'wifi-setup-script' ? 'Copied' : 'Copy WiFi Script'}</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => copyToClipboard(
+                          `/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no`,
+                          'wifi-direct'
+                        )}
+                        className="flex items-center space-x-1.5 text-xs text-emerald-300 hover:text-white px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 transition-colors cursor-pointer"
+                      >
+                        {copiedKey === 'wifi-direct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedKey === 'wifi-direct' ? 'Copied' : 'Copy Direct CLI'}</span>
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(
+                          `:do { :if ([:len [/interface wifi find]] > 0) do={ :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no } } else={ :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } } on-error={};`,
+                          'wifi-setup-script'
+                        )}
+                        className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        {copiedKey === 'wifi-setup-script' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedKey === 'wifi-setup-script' ? 'Copied' : 'Copy Auto Script'}</span>
+                      </button>
+                    </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed bg-black/40">
-{`:do { :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } on-error={};
-:do { :if ([:len [/interface wifi find]] > 0) do={ /interface wifi set [pick [/interface wifi find] 0] configuration.ssid="MIKROTIK-TC" disabled=no } } on-error={};`}
+{`# RouterOS 7.16.2 (wifi-qcom - wifi1 & wifi2):
+/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no
+
+# Multi-radio auto-configuration script:
+:foreach w in=[/interface wifi find] do={
+  /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+};`}
                   </pre>
                 </div>
 
@@ -636,18 +676,18 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-rose-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        3. Independent Wireless Control CLI Snippets
+                        3. Independent Wireless Control CLI (RouterOS 7.16.2 wifi-qcom)
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => copyToClipboard(`/interface wireless disable [find name=wlan1]`, 'wifi-off')}
+                        onClick={() => copyToClipboard(`/interface wifi disable [find]`, 'wifi-off')}
                         className="text-xs text-rose-300 hover:text-white px-2 py-1 bg-rose-500/10 border border-rose-500/20 rounded transition-colors"
                       >
                         {copiedKey === 'wifi-off' ? 'Copied Disable' : 'Copy Disable CLI'}
                       </button>
                       <button
-                        onClick={() => copyToClipboard(`/interface wireless enable [find name=wlan1]`, 'wifi-on')}
+                        onClick={() => copyToClipboard(`/interface wifi enable [find]`, 'wifi-on')}
                         className="text-xs text-emerald-300 hover:text-white px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded transition-colors"
                       >
                         {copiedKey === 'wifi-on' ? 'Copied Enable' : 'Copy Enable CLI'}
@@ -656,16 +696,24 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </div>
                   <div className="p-4 bg-black/40 space-y-2 text-xs font-mono">
                     <div className="flex items-center justify-between">
-                      <span className="text-rose-400"># Disable WiFi Broadcasting:</span>
-                      <span className="text-slate-300">/interface wireless disable [find name=wlan1]</span>
+                      <span className="text-rose-400"># Disable All WiFi Broadcasting:</span>
+                      <span className="text-slate-300">/interface wifi disable [find]</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-emerald-400"># Enable WiFi Broadcasting:</span>
-                      <span className="text-slate-300">/interface wireless enable [find name=wlan1]</span>
+                      <span className="text-emerald-400"># Enable All WiFi Broadcasting:</span>
+                      <span className="text-slate-300">/interface wifi enable [find]</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800">
+                      <span># Disable 5GHz (wifi1) only:</span>
+                      <span className="text-slate-300">/interface wifi disable [find name=wifi1]</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span># Disable 2.4GHz (wifi2) only:</span>
+                      <span className="text-slate-300">/interface wifi disable [find name=wifi2]</span>
                     </div>
                   </div>
                   <div className="px-4 py-2 bg-slate-900/80 border-t border-slate-800/80 text-[11px] text-slate-300">
-                    💡 <strong>Independent Radio Control:</strong> Disabling WiFi radio (<code className="text-rose-400">wlan1</code>) only turns off wireless broadcasting. Ethernet clients connected via <span className="text-amber-300 font-mono">ether2 &amp; ether3</span> and the T-Connect controller platform remain 100% active over WireGuard.
+                    💡 <strong>Independent Radio Control:</strong> Disabling WiFi radios (<code className="text-rose-400">wifi1/wifi2</code>) only turns off wireless broadcasting. Ethernet clients connected via <span className="text-amber-300 font-mono">ether2 &amp; ether3</span> and the T-Connect controller platform remain 100% active over WireGuard.
                   </div>
                 </div>
 
