@@ -48,17 +48,16 @@ Open **WinBox > New Terminal** (or SSH `admin@10.99.1.50` / `admin@192.168.1.x`)
 /ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1,1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
 /ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
 
-# 6. Enable DNS Resolver for Hotspot Interception
+# 6. Enable DNS Resolver for Hotspot Clients
 /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
 :do { /ip dns static remove [find name="login.tconnect.ls"] } on-error={}
-/ip dns static add name="login.tconnect.ls" address=10.10.0.1 comment="T-Connect Hotspot Login FQDN"
 
 # 7. Configure NAT Firewall Masquerade for Internet Access
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
 
-# 8. Configure Hotspot Profile & Server on "bridgeLocal"
+# 8. Configure Hotspot Profile & Server on "bridgeLocal" (Direct IP Interception on VPS)
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="login.tconnect.ls" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes
 :do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}
 /ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no
 
