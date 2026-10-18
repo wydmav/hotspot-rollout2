@@ -60,22 +60,22 @@ export class RouterOSRenderer {
    */
   static buildSplashPageFileCommands(portalBaseUrl: string, allowFreeAccess: boolean = true): string {
     const cleanBaseUrl = portalBaseUrl.replace(/\/+$/, '');
-    const freeFormHtml = allowFreeAccess
-      ? `<form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"username\\" value=\\"T-TRIAL\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"\\$(link-orig-esc)\\"><label class=\\"lbl\\">First Name &amp; Surname</label><input class=\\"inp\\" type=\\"text\\" name=\\"guest_name\\" placeholder=\\"Enter your full name\\" required><label class=\\"lbl\\">Mobile Number (+266 / +27)</label><input class=\\"inp\\" type=\\"tel\\" name=\\"guest_phone\\" placeholder=\\"Enter mobile number\\" required><button type=\\"submit\\" class=\\"btn-free\\">&#9889; Connect Free Trial &rarr;</button></form><div class=\\"div\\">Or Use Voucher / Buy Pass</div>`
-      : ``;
-
-    const fallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>T-Connect Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#080b14;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;padding:16px;background-image:radial-gradient(circle at 50% 0%,rgba(240,94,23,0.28),transparent 70%)}.top{text-align:center;padding-top:12px}.badge{display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(240,94,23,0.18);border:1px solid rgba(240,94,23,0.45);color:#fb923c;font-size:11px;font-weight:800;letter-spacing:1px;margin-bottom:8px}h1{font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#fff}.card{width:100%;max-width:400px;margin:auto;background:rgba(15,20,34,0.92);border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,0.6)}.lbl{font-size:11px;color:#cbd5e1;margin-bottom:4px;display:block;font-weight:600}.inp{width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.45);color:#fff;font-size:13px;margin-bottom:10px}.btn-free{width:100%;padding:13px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-size:13px;font-weight:900;cursor:pointer;margin-top:4px}.btn-vch{width:100%;padding:12px;border-radius:14px;border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.15);color:#34d399;font-size:12px;font-weight:800;cursor:pointer;margin-top:4px}.div{text-align:center;font-size:10px;color:#94a3b8;margin:12px 0;text-transform:uppercase;letter-spacing:1px}.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}.pl{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 4px;text-align:center;font-size:11px;color:#e2e8f0;text-decoration:none;display:block}.pl b{display:block;color:#fbbf24;font-size:13px}.vps{display:block;text-align:center;font-size:12px;font-weight:700;color:#fff;text-decoration:none;margin-top:10px;padding:11px;border-radius:12px;background:#f05e17}.ftr{text-align:center;font-size:10px;color:#64748b;padding-bottom:6px}</style></head><body><div class=\\"top\\"><div class=\\"badge\\">T-CONNECT HIGH-SPEED WIFI</div><h1>WELCOME TO T-CONNECT</h1></div><div class=\\"card\\">${freeFormHtml}<form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"\\$(link-orig-esc)\\"><label class=\\"lbl\\">Voucher or Access Code</label><input class=\\"inp\\" type=\\"text\\" name=\\"username\\" value=\\"\\" placeholder=\\"Enter voucher code\\" required><button type=\\"submit\\" class=\\"btn-vch\\">&#127903; Activate Voucher &amp; Connect</button></form><div class=\\"div\\">Buy High-Speed Pass (EcoCash / M-Pesa / OTT)</div><div class=\\"plans\\"><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Daily<b>M10</b>24 Hrs</a><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Weekly<b>M60</b>7 Days</a><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Monthly<b>M280</b>30 Days</a></div><a class=\\"vps\\" href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Buy Pass with Mobile Money / OTT &rarr;</a></div><div class=\\"ftr\\">IP: \\$(ip) &middot; MAC: \\$(mac) &middot; T-Connect</div></body></html>`;
+    const redirectAndFallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>Wi-Fi Login</title><script>window.location.replace(\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\");</script><meta http-equiv=\\"refresh\\" content=\\"0; url=${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\"></head><body style=\\"background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center\\"><div style=\\"background:#0f1422;border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:24px;max-width:360px;width:100%\\"><h2 style=\\"margin:0 0 8px;font-size:18px\\">Opening Wi-Fi Portal...</h2><p style=\\"font-size:12px;color:#94a3b8;margin:0 0 16px\\">Redirecting to the hotspot splash page...</p><a href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\" style=\\"display:block;padding:12px;background:#f05e17;color:#fff;text-decoration:none;border-radius:12px;font-weight:800;font-size:13px\\">Tap Here if Not Redirected &rarr;</a></div></body></html>`;
 
     return [
       `# Ensure default hotspot HTML directory files exist on router storage`,
       `:do { :if ([:len [/file find name~"login.html"]] = 0) do={ /ip hotspot reset-html [find] } } on-error={}`,
-      `# Apply immediate fallback splash HTML to existing login.html files (no /file add used)`,
-      `:do { /file set [find name~"hotspot/login.html"] contents="${fallbackHtml}" } on-error={}`,
+      `# Apply immediate redirect/splash HTML to existing login.html files (no /file add used)`,
+      `:do { /file set [find name~"hotspot/login.html"] contents="${redirectAndFallbackHtml}" } on-error={}`,
+      `:do { /file set [find name~"hotspot/rlogin.html"] contents="${redirectAndFallbackHtml}" } on-error={}`,
       `# Fetch live Portal Builder Splash Page directly from VPS controller`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="hotspot/rlogin.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/rlogin.html" check-certificate=no } on-error={}`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-alogin.html" dst-path="hotspot/alogin.html" check-certificate=no } on-error={}`,
-      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-alogin.html" dst-path="flash/hotspot/alogin.html" check-certificate=no } on-error={}`
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-alogin.html" dst-path="flash/hotspot/alogin.html" check-certificate=no } on-error={}`,
+      `:if ([:len [/file find name="flash/hotspot/login.html"]] > 0) do={ :do { /ip hotspot profile set [find name="tc-hotspot-profile"] html-directory=flash/hotspot } on-error={} } else={ :do { /ip hotspot profile set [find name="tc-hotspot-profile"] html-directory=hotspot } on-error={} }`
     ].join('\n');
   }
 
@@ -149,10 +149,10 @@ export class RouterOSRenderer {
       `# High-Density DHCP IP Pool (10.10.0.50 to 10.10.3.250)`,
       `:do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}`,
       `/ip pool add name="tc-hotspot-pool" ranges=10.10.0.50-10.10.3.250`,
-      `# DHCP Server on bridgeLocal`,
+      `# DHCP Server on bridgeLocal (Strictly 10.10.0.1 DNS so OS Captive Portal Detection always triggers)`,
       `:do { /ip dhcp-server remove [find interface="bridgeLocal"] } on-error={}`,
       `:do { /ip dhcp-server network remove [find] } on-error={}`,
-      `/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1,1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"`,
+      `/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1 comment="T-Connect Hotspot Guest Network"`,
       `/ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no`,
       `# Enable DNS Resolver & Intercept DNS for Captive Portal Probes`,
       `/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8`,
@@ -161,9 +161,10 @@ export class RouterOSRenderer {
       `# NAT Firewall Masquerade on WAN ether1`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
-      `# Hotspot Server Profile & Server on bridgeLocal`,
+      `# Hotspot Server Profile & Server on bridgeLocal (Cookies & MAC-Cookies disabled so devices always redirect immediately)`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
+      `:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} use-radius=no } on-error={}`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
       `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no`,
       `# Pre-Provisioned Hotspot Auth Users`,
@@ -232,7 +233,8 @@ export class RouterOSRenderer {
       `:do { /radius incoming set accept=yes port=3799 } on-error={}`,
       `/log info "T-Connect: [5/7] Central RADIUS configured."`,
       ``,
-      `# 7. VPS & Payment Walled Garden Rules (Placed BEFORE Splash Fetch so assets & APIs resolve)`,
+      `# 7. VPS & Payment Walled Garden Rules (Purge any OS captive probe domains so Captive Portal pops up immediately!)`,
+      `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}`,
       `:do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}`,
       `/ip hotspot walled-garden ip add dst-address=169.58.98.92 action=accept comment="tc-vps-server-access"`,
       /^\d+\.\d+\.\d+\.\d+$/.test(cleanDomain) && cleanDomain !== '169.58.98.92'
@@ -246,11 +248,13 @@ export class RouterOSRenderer {
       RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree)
     );
 
-    walledGardenDomains.forEach((domain) => {
-      scriptLines.push(
-        `:do { /ip hotspot walled-garden add dst-host="*${domain}" action=allow comment="T-Connect Walled Garden - ${domain}" } on-error={}`
-      );
-    });
+    walledGardenDomains
+      .filter((d) => !/apple|gstatic|google|msft|firefox|vodacom|mywallet/i.test(d))
+      .forEach((domain) => {
+        scriptLines.push(
+          `:do { /ip hotspot walled-garden add dst-host="*${domain}" action=allow comment="T-Connect Walled Garden - ${domain}" } on-error={}`
+        );
+      });
 
     if (blockDoH) {
       scriptLines.push(
@@ -266,9 +270,10 @@ export class RouterOSRenderer {
     }
 
     scriptLines.push(
-      `# Flush any stale active hotspot sessions or cookies so test devices immediately see the Splash Page`,
+      `# Flush any stale active hotspot sessions, hosts, or cookies so test devices immediately see the Splash Page`,
       `:do { /ip hotspot active remove [find] } on-error={}`,
       `:do { /ip hotspot cookie remove [find] } on-error={}`,
+      `:do { /ip hotspot host remove [find] } on-error={}`,
       `/log info "T-Connect: [6/7] Hotspot portal, walled garden & DNS filters configured."`,
       ``,
       `# 10. Clean Any Legacy Broken Routes on ether2 (ether2..ether5 are LAN/AP ports in bridgeLocal)`,
@@ -312,21 +317,23 @@ export class RouterOSRenderer {
 
     if (accessMode === 'PAID_ONLY') {
       lines.push(
-        `# Policy: Strictly Paid Vouchers & Mobile Money (Free Access Hidden)`,
+        `# Policy: Strictly Paid Vouchers & EcoCash/OTT (Free Access Hidden, Cookies Disabled)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
         `:do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie use-radius=no } on-error={}`,
-        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,cookie,mac-cookie use-radius=no } on-error={}`,
+        `:do { /ip hotspot cookie remove [find] } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap use-radius=no } on-error={}`,
         RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, false),
         `:log info "[T-Connect Policy] Router configured for PAID_ONLY access. Free trial removed from Splash Page.";`
       );
     } else if (accessMode === 'FREE_TRIAL_AND_PAID') {
       lines.push(
-        `# Policy: Hybrid Access (Free Trial + Paid Vouchers + Mobile Money)`,
+        `# Policy: Hybrid Access (Free Trial + Paid Vouchers + EcoCash/OTT, Cookies Disabled)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
         `:do { /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=${duration}m comment="T-Connect Free Trial (${duration}m)" } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
-        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
+        `:do { /ip hotspot cookie remove [find] } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
         RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true),
         `:log info "[T-Connect Policy] Hybrid mode active: ${duration}m free trial enabled on Splash Page.";`
       );
@@ -335,7 +342,8 @@ export class RouterOSRenderer {
         `# Policy: 100% Free Open Access (Community Sponsored)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
         `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Open Pool" } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie rate-limit="${rateLimit}" use-radius=no } on-error={}`,
+        `:do { /ip hotspot cookie remove [find] } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial rate-limit="${rateLimit}" use-radius=no } on-error={}`,
         RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true),
         `:log info "[T-Connect Policy] COMPLETELY_FREE mode active on router.";`
       );
@@ -627,12 +635,12 @@ export class RouterOSRenderer {
 :do { /ip address remove [find interface="bridge"] } on-error={}
 /ip address add address=${gateway}/22 network=10.10.0.0 interface="${bridge}" comment="tc-hotspot-lan-gateway"
 
-# 5. Configure High-Density DHCP IP Pool (${dhcpRange}) & DHCP Server on "${bridge}"
+# 5. Configure High-Density DHCP IP Pool (${dhcpRange}) & DHCP Server on "${bridge}" (Strictly ${gateway} DNS for Captive Detection)
 :do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}
 /ip pool add name="tc-hotspot-pool" ranges=${dhcpRange}
 :do { /ip dhcp-server remove [find interface="${bridge}"] } on-error={}
 :do { /ip dhcp-server network remove [find] } on-error={}
-/ip dhcp-server network add address=${cidr} gateway=${gateway} dns-server=${gateway},1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
+/ip dhcp-server network add address=${cidr} gateway=${gateway} dns-server=${gateway} comment="T-Connect Hotspot Guest Network"
 /ip dhcp-server add name="tc-dhcp-server" interface="${bridge}" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
 
 # 6. Enable DNS Resolver, Intercept DNS & Remove Any Legacy Blocking Routes/Filters
@@ -647,21 +655,23 @@ export class RouterOSRenderer {
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}
 
-# 8. Configure Hotspot Profile & Server on "${bridge}"
+# 8. Configure Hotspot Profile & Server on "${bridge}" (Cookies & MAC-Cookies Disabled for Immediate Splash Redirection)
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
-:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
+:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
 :do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
 /ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no
 
-# 9. VPS Walled Garden Rules (Allows unauthenticated clients to load Portal Builder assets & Mobile Money APIs)
+# 9. VPS & EcoCash/OTT Walled Garden Rules (Purges OS captive probe domains so phones/laptops redirect immediately)
+:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}
 :do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}
 /ip hotspot walled-garden ip add dst-address=${vpsIpOnly} action=accept comment="tc-vps-server-access"
 :do { /ip hotspot walled-garden remove [find comment~"tc-vps"] } on-error={}
 /ip hotspot walled-garden add dst-host="*${vpsIpOnly}*" action=allow comment="tc-vps-portal-domain"
-/ip hotspot walled-garden add dst-host="*vodacom.co.ls" action=allow comment="tc-mpesa-walled-garden"
 /ip hotspot walled-garden add dst-host="*econet.co.ls" action=allow comment="tc-ecocash-walled-garden"
+/ip hotspot walled-garden add dst-host="*ecocash.co.ls" action=allow comment="tc-ecocash-api-walled-garden"
 /ip hotspot walled-garden add dst-host="*ottlesotho.com" action=allow comment="tc-ott-walled-garden"
+/ip hotspot walled-garden add dst-host="*ottvoucher.com" action=allow comment="tc-ottvoucher-walled-garden"
 
 # 10. Deploy Portal Builder On-Router Splash Page (hotspot/login.html & flash/hotspot/login.html)
 ${RouterOSRenderer.buildSplashPageFileCommands(`http://${vpsCleanHost}`, allowFree)}
@@ -689,9 +699,10 @@ ${allowFree ? `/ip hotspot user add name="T-TRIAL" password="123" limit-uptime=3
   :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC on ${bridge}";
 } on-error={ :log warning "Could not auto-configure wifi radios" }
 
-# 14. Flush Active Sessions/Cookies & Ensure WinBox Management Service (Port 8291) is Enabled
+# 14. Flush Active Sessions, Cookies & Hosts so Connecting Devices Trigger Captive Portal Immediately
 :do { /ip hotspot active remove [find] } on-error={}
 :do { /ip hotspot cookie remove [find] } on-error={}
+:do { /ip hotspot host remove [find] } on-error={}
 /ip service set www disabled=no port=80
 /ip service set winbox disabled=no port=8291
 

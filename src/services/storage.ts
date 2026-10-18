@@ -99,27 +99,9 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     testPassedOnce: false
   },
   {
-    provider: 'mywallet',
-    name: 'MyWallet Lesotho',
-    subtitle: 'Vodacom Lesotho M-Pesa / MyWallet Gateway',
-    currency: 'M',
-    isLive: false,
-    isSandbox: true,
-    status: 'not_configured',
-    apiKey: '',
-    apiSecret: '',
-    bearerToken: '',
-    merchantId: '',
-    webhookSecret: '',
-    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/mywallet',
-    successRate24h: 0,
-    avgLatencyMs: 0,
-    testPassedOnce: false
-  },
-  {
     provider: 'ottvoucher',
-    name: 'OTTvoucher Lesotho',
-    subtitle: 'Digital PIN & Retail Voucher Token Redemption (portal.ottlesotho.com)',
+    name: 'OTT Voucher Lesotho',
+    subtitle: '12-Digit PIN & Retail Voucher Redemption (portal.ottlesotho.com)',
     currency: 'M',
     isLive: false,
     isSandbox: true,
@@ -133,24 +115,6 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     merchantId: 'TCONNECTLES1',
     webhookSecret: '',
     webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ottvoucher',
-    successRate24h: 0,
-    avgLatencyMs: 0,
-    testPassedOnce: false
-  },
-  {
-    provider: 'xpayments',
-    name: 'xPayments Lesotho',
-    subtitle: 'xpayments.paylesotho.co.ls Aggregator & OTT Hub',
-    currency: 'M',
-    isLive: false,
-    isSandbox: true,
-    status: 'not_configured',
-    apiKey: '',
-    apiSecret: '',
-    bearerToken: '',
-    merchantId: '',
-    webhookSecret: '',
-    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/xpayments',
     successRate24h: 0,
     avgLatencyMs: 0,
     testPassedOnce: false
@@ -214,7 +178,7 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
 export const STARTER_TENANT_GROUPS: TenantGroup[] = [];
 
 export const WALLED_GARDEN_DOMAINS = [
-  // Payment Providers
+  // Payment Providers (EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)
   'portal.ottlesotho.com',
   'ottlesotho.com',
   'api.ottvoucher.com',
@@ -222,20 +186,7 @@ export const WALLED_GARDEN_DOMAINS = [
   'callpay.com',
   'vouchers.ott-mobile.com',
   'api.ecocash.co.ls',
-  'ecocash.co.ls',
-  'api.mywallet.co.ls',
-  'mywallet.co.ls',
-  'xpayments.paylesotho.co.ls',
-  'paylesotho.co.ls',
-  // Captive Portal Detection Endpoints (OS-Specific for instant login prompt)
-  'captive.apple.com',
-  'apple.com',
-  'connectivitycheck.gstatic.com',
-  'clients3.google.com',
-  'play.googleapis.com',
-  'msftconnecttest.com',
-  'www.msftncsi.com',
-  'detectportal.firefox.com'
+  'ecocash.co.ls'
 ];
 
 export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [];
@@ -306,6 +257,14 @@ class StorageService {
             parsed.team = INITIAL_TEAM;
           }
 
+          if (Array.isArray(parsed.gateways)) {
+            parsed.gateways = parsed.gateways.filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
+            if (parsed.gateways.length === 0) {
+              parsed.gateways = UNCONFIGURED_GATEWAYS;
+            }
+          } else {
+            parsed.gateways = UNCONFIGURED_GATEWAYS;
+          }
           if (!Array.isArray(parsed.tenantGroups)) parsed.tenantGroups = [];
           if (!Array.isArray(parsed.activeSessions)) parsed.activeSessions = [];
           if (!Array.isArray(parsed.captiveLeads)) parsed.captiveLeads = [];
@@ -361,11 +320,124 @@ class StorageService {
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        // Sync gateways and vouchers to backend server so /portal & OTT Voucher API have live state
+        fetch('/api/gateways/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gateways: this.state.gateways,
+            vouchers: this.state.vouchers
+          })
+        }).catch(() => {});
       } catch (e) {
         // quiet fallback
       }
     }
     this.notify();
+  }
+
+  /**
+   * Ingests live guest leads, sessions, and payment transactions captured on the public Splash Page
+   * so they immediately reflect on the Admin Dashboard across devices.
+   */
+  ingestServerPortalEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>) {
+    let mutated = false;
+
+    if (Array.isArray(events)) {
+      for (const ev of events) {
+        if (!ev || !ev.id) continue;
+        const sessionExists = this.state.activeSessions.some((s) => s.id === ev.id);
+        if (!sessionExists) {
+          const newSession: ActiveSession = {
+            id: ev.id,
+            voucherCode: ev.voucherCode || (ev.mode === 'free' ? 'FREE-PASS' : 'PAID-PASS'),
+            clientMac: ev.mac || ev.clientMac || 'Unknown-MAC',
+            clientIp: ev.ip || ev.clientIp || '10.10.0.x',
+            deviceType: ev.deviceType || 'Guest Device',
+            siteName: ev.siteName || 'T-Connect Hotspot',
+            vertical: ev.scope || ev.vertical || 'hotspot',
+            routerName: ev.routerName || 'MIKROTIK-TC',
+            planName: ev.planName || 'Hotspot Pass',
+            startedAt: ev.capturedAt || new Date().toISOString(),
+            expiresAt: new Date(Date.now() + (ev.durationSeconds || 1800) * 1000).toISOString(),
+            remainingSeconds: ev.durationSeconds || 1800,
+            bytesDown: 0,
+            bytesUp: 0,
+            speedLimit: ev.speedLimit || '25M/10M',
+            guestName: ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User',
+            guestPhone: ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '',
+            guestEmail: ev.email || ev.guestEmail || ''
+          };
+          this.state.activeSessions.unshift(newSession);
+          mutated = true;
+
+          // Also record in captiveLeads if guest contact info was provided
+          if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
+            const leadId = `lead_${ev.id}`;
+            if (!this.state.captiveLeads.some((l) => l.id === leadId)) {
+              const parts = newSession.guestName.trim().split(' ');
+              const fName = ev.firstName || parts[0] || 'Guest';
+              const lName = ev.lastName || parts.slice(1).join(' ') || '';
+              this.state.captiveLeads.unshift({
+                id: leadId,
+                firstName: fName,
+                lastName: lName,
+                fullName: newSession.guestName,
+                countryCode: ev.countryCode === '+27' ? '+27' : '+266',
+                phone: ev.phone || newSession.guestPhone,
+                fullPhone: newSession.guestPhone,
+                email: newSession.guestEmail,
+                capturedAt: newSession.startedAt,
+                routerName: newSession.routerName,
+                siteName: newSession.siteName,
+                vertical: newSession.vertical,
+                clientMac: newSession.clientMac,
+                clientIp: newSession.clientIp,
+                deviceType: newSession.deviceType,
+                durationMinutes: Math.round((newSession.remainingSeconds || 1800) / 60),
+                status: 'active'
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(serverTransactions)) {
+      for (const stx of serverTransactions) {
+        if (!stx || !stx.transactionRef) continue;
+        if (!this.state.transactions.some((t) => t.transactionRef === stx.transactionRef || t.id === stx.id)) {
+          this.state.transactions.unshift(stx);
+          mutated = true;
+        }
+      }
+    }
+
+    if (mutated) {
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        } catch {}
+      }
+      this.notify();
+    }
+  }
+
+  ingestServerGuestEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>) {
+    this.ingestServerPortalEvents(events, serverTransactions);
+  }
+
+  syncGatewaysAndVouchersWithServer() {
+    try {
+      fetch('/api/gateways/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gateways: this.state.gateways,
+          vouchers: this.state.vouchers
+        })
+      }).catch(() => {});
+    } catch {}
   }
 
   private notify() {

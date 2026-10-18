@@ -423,7 +423,7 @@ export const OfficeReadinessModal: React.FC<OfficeReadinessModalProps> = ({
                       </span>
                     </div>
                     <p className="text-xs text-slate-300">
-                      Pre-auth access enabled for M-Pesa, EcoCash, OTT Voucher, and T-Connect CDN endpoints.
+                      Pre-auth access enabled for EcoCash, OTT Voucher, and T-Connect controller endpoints.
                     </p>
                     <div className="flex flex-wrap gap-1 pt-1">
                       {WALLED_GARDEN_DOMAINS.slice(0, 4).map(d => (

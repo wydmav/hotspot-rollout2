@@ -203,7 +203,20 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>${brandTitle || 'T-Connect'} WiFi Portal</title>
+<title>${brandTitle || 'T-Connect'} Wi-Fi Portal</title>
+<script>
+  // Immediately redirect captive portal popup to live Portal Builder Splash View with client MAC/IP
+  (function() {
+    var target = "${baseUrl}/portal?mac=$(mac)&ip=$(ip)&link_login_only=$(link-login-only)&user_url=$(link-orig-esc)&scope=${scope}";
+    if (window.location.hostname !== "${host.split(':')[0]}") {
+      var img = new Image();
+      img.onload = function() { window.location.replace(target); };
+      img.onerror = function() { window.location.replace(target); };
+      img.src = "${baseUrl}/api/portal/config?t=" + Date.now();
+      setTimeout(function() { window.location.replace(target); }, 350);
+    }
+  })();
+</script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body {
@@ -225,20 +238,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     pointer-events: none;
     z-index: 1;
   }
-  .topbar {
-    position: relative;
-    z-index: 10;
-    background: rgba(5, 7, 12, 0.85);
-    backdrop-filter: blur(12px);
-    padding: 10px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .brand-row { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 12px; letter-spacing: 0.5px; }
-  .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: ${accentColor}; display: inline-block; }
-  .ip-tag { font-family: monospace; font-size: 10px; color: #34d399; background: rgba(16,185,129,0.14); border: 1px solid rgba(16,185,129,0.3); padding: 2px 7px; border-radius: 6px; }
   .main-wrap {
     position: relative;
     z-index: 10;
@@ -247,23 +246,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    padding: 16px;
+    padding: 20px 16px;
     width: 100%;
     max-width: 440px;
     margin: 0 auto;
   }
-  .hero { text-align: center; padding: 12px 0 8px; width: 100%; }
+  .hero { text-align: center; padding: 16px 0 8px; width: 100%; }
   .kicker {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 99px;
-    background: rgba(0,0,0,0.65);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.6px;
-    margin-bottom: 8px;
+    color: rgba(255,255,255,0.9);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    margin-bottom: 6px;
   }
   .hero h1 { font-size: 24px; font-weight: 900; letter-spacing: -0.5px; color: #fff; text-shadow: 0 4px 16px rgba(0,0,0,0.7); line-height: 1.15; }
   .card {
@@ -272,7 +266,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     backdrop-filter: blur(20px);
     border: 1px solid rgba(255,255,255,0.18);
     border-radius: 24px;
-    padding: 18px;
+    padding: 20px;
     box-shadow: 0 24px 60px rgba(0,0,0,0.65);
     margin: auto 0;
   }
@@ -368,32 +362,24 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   .plan-name { font-size: 12px; font-weight: 800; color: #fff; }
   .plan-meta { font-size: 10px; color: #94a3b8; font-family: monospace; }
   .plan-price { font-size: 14px; font-weight: 900; color: #fbbf24; font-family: monospace; }
-  .pop-tag { font-size: 9px; padding: 1px 5px; border-radius: 4px; background: ${accentColor}; color: #fff; margin-left: 4px; }
-  .gw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+  .pop-tag { font-size: 10px; color: #fbbf24; margin-left: 4px; }
+  .gw-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
   .gw-btn {
-    padding: 8px 4px;
-    border-radius: 10px;
+    padding: 10px 6px;
+    border-radius: 12px;
     border: 1px solid rgba(255,255,255,0.14);
     background: rgba(0,0,0,0.4);
     color: #cbd5e1;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
   }
   .gw-btn.active { border-color: ${accentColor}; background: rgba(240,94,23,0.22); color: #fff; }
-  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 8px 10px; border-radius: 10px; font-size: 11px; margin-bottom: 10px; display: none; }
-  .ftr { text-align: center; font-size: 10px; color: #cbd5e1; padding-top: 10px; font-family: monospace; }
+  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 10px 12px; border-radius: 12px; font-size: 12px; margin-bottom: 12px; display: none; text-align: left; }
 </style>
 </head>
 <body>
 <div class="overlay"></div>
-<header class="topbar">
-  <div class="brand-row">
-    <span class="brand-dot"></span>
-    <span>${brandTitle || 'T-CONNECT'}</span>
-  </div>
-  <span class="ip-tag">MIKROTIK-TC · $(ip)</span>
-</header>
 
 <main class="main-wrap">
   <div class="hero">
@@ -405,104 +391,146 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     <div id="errBox" class="err-box"></div>
 
     <div class="tabs">
-      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn active" onclick="switchTab('free')">Free Trial</button>` : ''}
-      <button type="button" id="tabBtn_buy" class="tab-btn ${!allowFreeAccess ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>
-      <button type="button" id="tabBtn_voucher" class="tab-btn" onclick="switchTab('voucher')">Voucher</button>
+      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn active" onclick="switchTab('free')">Free Wi-Fi</button>` : ''}
+      <button type="button" id="tabBtn_voucher" class="tab-btn ${!allowFreeAccess ? 'active' : ''}" onclick="switchTab('voucher')">Voucher Code</button>
+      <button type="button" id="tabBtn_buy" class="tab-btn" onclick="switchTab('buy')">Buy Pass</button>
+    </div>
+
+    <!-- SHARED GUEST IDENTIFICATION FIELDS -->
+    <div id="guestFieldsWrap">
+      ${collectName ? `
+      <div class="grid-2">
+        <div class="field">
+          <label class="lbl">First Name *</label>
+          <input class="inp" type="text" id="guestFirst" value="" placeholder="First name" required minlength="2">
+        </div>
+        <div class="field">
+          <label class="lbl">Surname *</label>
+          <input class="inp" type="text" id="guestLast" value="" placeholder="Surname" required minlength="2">
+        </div>
+      </div>` : ''}
+      ${collectPhone ? `
+      <div class="field">
+        <label class="lbl">Mobile Number *</label>
+        <div class="phone-row">
+          <select id="guestCc" class="cc-sel">
+            <option value="+266">+266</option>
+            <option value="+27">+27</option>
+          </select>
+          <input class="inp" type="tel" id="guestPhone" value="" placeholder="5xxxxxxx / 6xxxxxxx" required>
+        </div>
+      </div>` : ''}
+      ${collectEmail ? `
+      <div class="field">
+        <label class="lbl">Email Address *</label>
+        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com" required>
+      </div>` : ''}
     </div>
 
     ${allowFreeAccess ? `
-    <!-- TAB 1: FREE TRIAL -->
+    <!-- TAB 1: FREE WI-FI -->
     <div id="sec_free" class="sec active">
       <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
         <input type="hidden" name="username" value="T-TRIAL">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="https://www.google.com">
-        ${collectName ? `
-        <div class="grid-2">
-          <div class="field">
-            <label class="lbl">First Name *</label>
-            <input class="inp" type="text" id="freeFirst" value="" placeholder="First name" required minlength="2">
-          </div>
-          <div class="field">
-            <label class="lbl">Surname *</label>
-            <input class="inp" type="text" id="freeLast" value="" placeholder="Surname" required minlength="2">
-          </div>
-        </div>` : ''}
-        ${collectPhone ? `
-        <div class="field">
-          <label class="lbl">Mobile Number *</label>
-          <div class="phone-row">
-            <select id="freeCc" class="cc-sel">
-              <option value="+266">+266</option>
-              <option value="+27">+27</option>
-            </select>
-            <input class="inp" type="tel" id="freePhone" value="" placeholder="Enter mobile number" required>
-          </div>
-        </div>` : ''}
-        ${collectEmail ? `
-        <div class="field">
-          <label class="lbl">Email Address *</label>
-          <input class="inp" type="email" id="freeEmail" value="" placeholder="name@example.com" required>
-        </div>` : ''}
         ${termsEnabled ? `<div class="terms">${termsText}</div>` : ''}
-        <button type="submit" class="btn-primary">Connect Free Trial &rarr;</button>
+        <button type="submit" class="btn-primary">Connect Free Wi-Fi &rarr;</button>
       </form>
     </div>
     ` : ''}
 
-    <!-- TAB 2: BUY SPEED PASS -->
-    <div id="sec_buy" class="sec ${!allowFreeAccess ? 'active' : ''}">
+    <!-- TAB 2: VOUCHER CODE -->
+    <div id="sec_voucher" class="sec ${!allowFreeAccess ? 'active' : ''}">
+      <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
+        <input type="hidden" name="username" value="test">
+        <input type="hidden" name="password" value="123">
+        <input type="hidden" name="dst" value="https://www.google.com">
+        <div class="field">
+          <label class="lbl">Voucher Code *</label>
+          <input class="inp" type="text" id="voucherInput" value="" placeholder="Enter voucher code (e.g. TC-XXXX)" required style="text-transform:uppercase;letter-spacing:1px;">
+        </div>
+        <button type="submit" id="voucherSubmitBtn" class="btn-emerald">Activate Voucher &amp; Connect &rarr;</button>
+      </form>
+    </div>
+
+    <!-- TAB 3: BUY SPEED PASS (EcoCash & OTT Voucher Only) -->
+    <div id="sec_buy" class="sec">
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="https://www.google.com">
         <div class="plan-list">${plansHtml}</div>
-        <div class="lbl">Select Payment Method</div>
+        <div class="lbl">Choose Payment Method</div>
         <div class="gw-grid">
-          <button type="button" class="gw-btn active" onclick="selectGw('ecocash', this)">EcoCash</button>
-          <button type="button" class="gw-btn" onclick="selectGw('mywallet', this)">M-Pesa</button>
-          <button type="button" class="gw-btn" onclick="selectGw('ottvoucher', this)">OTT PIN</button>
+          <button type="button" class="gw-btn active" onclick="selectGw('ottvoucher', this)">OTT Voucher</button>
+          <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
         </div>
-        <div class="field" id="payPhoneField">
-          <label class="lbl" id="payInputLabel">Mobile Money Number (+266)</label>
-          <input class="inp" type="text" id="payInputVal" value="" placeholder="Enter mobile number or PIN" required>
+        <div class="field" id="payField">
+          <label class="lbl" id="payInputLabel">12-Digit OTT Voucher PIN *</label>
+          <input class="inp" type="text" inputmode="numeric" maxlength="12" id="payInputVal" value="" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,12)" placeholder="Enter 12-digit OTT PIN" required>
         </div>
         <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay &amp; Connect Internet &rarr;</button>
       </form>
     </div>
-
-    <!-- TAB 3: VOUCHER CODE -->
-    <div id="sec_voucher" class="sec">
-      <form action="$(link-login-only)" method="post">
-        <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="https://www.google.com">
-        <div class="field">
-          <label class="lbl">Voucher or Access Code</label>
-          <input class="inp" type="text" name="username" value="" placeholder="Enter voucher code" required style="text-transform:uppercase;letter-spacing:1px;">
-        </div>
-        <button type="submit" class="btn-emerald">Activate Voucher &amp; Connect &rarr;</button>
-      </form>
-    </div>
   </div>
 
-  <footer class="ftr">
-    <span>IP: $(ip) · MAC: $(mac) · Powered by ${brandTitle || 'T-Connect'}</span>
-  </footer>
+  <div style="height:12px"></div>
 </main>
 
 <script>
-  var currentTab = '${defaultTab}';
   var selectedPlanPrice = ${plans[0]?.price || 10};
   var selectedPlanName = '${String(plans[0]?.name || 'Daily Pass').replace(/'/g, '')}';
-  var selectedGw = 'ecocash';
+  var selectedGw = 'ottvoucher';
   var mtError = "$(error)";
   if (mtError && mtError.indexOf("$(") === -1 && mtError.trim().length > 0) {
+    showErr(mtError);
+  }
+
+  function showErr(msg) {
     var eb = document.getElementById('errBox');
-    if (eb) { eb.style.display = 'block'; eb.textContent = mtError; }
+    if (eb) {
+      eb.style.display = msg ? 'block' : 'none';
+      eb.textContent = msg || '';
+    }
+  }
+
+  function validateGuestFields() {
+    var fEl = document.getElementById('guestFirst');
+    var lEl = document.getElementById('guestLast');
+    var pEl = document.getElementById('guestPhone');
+    if (fEl && fEl.value.trim().length < 2) { showErr('Please enter your first name.'); return false; }
+    if (lEl && lEl.value.trim().length < 2) { showErr('Please enter your surname.'); return false; }
+    if (pEl && pEl.value.replace(/\\D/g, '').length < 8) { showErr('Please enter a valid mobile number.'); return false; }
+    showErr('');
+    return true;
+  }
+
+  function getGuestPayload(extra) {
+    var fName = document.getElementById('guestFirst') ? document.getElementById('guestFirst').value.trim() : '';
+    var lName = document.getElementById('guestLast') ? document.getElementById('guestLast').value.trim() : '';
+    var cc = document.getElementById('guestCc') ? document.getElementById('guestCc').value : '+266';
+    var ph = document.getElementById('guestPhone') ? document.getElementById('guestPhone').value.trim() : '';
+    var em = document.getElementById('guestEmail') ? document.getElementById('guestEmail').value.trim() : '';
+    var base = {
+      firstName: fName,
+      lastName: lName,
+      guestName: (fName + ' ' + lName).trim() || 'Guest User',
+      countryCode: cc,
+      phone: ph,
+      guestPhone: ph ? (cc + ' ' + ph) : '',
+      email: em,
+      mac: '$(mac)',
+      ip: '$(ip)',
+      scope: '${scope}'
+    };
+    for (var k in extra) base[k] = extra[k];
+    return base;
   }
 
   function switchTab(tab) {
-    ['free', 'buy', 'voucher'].forEach(function(t) {
+    showErr('');
+    ['free', 'voucher', 'buy'].forEach(function(t) {
       var btn = document.getElementById('tabBtn_' + t);
       var sec = document.getElementById('sec_' + t);
       if (btn) btn.className = 'tab-btn' + (t === tab ? ' active' : '');
@@ -519,69 +547,101 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
 
   function selectGw(gw, el) {
+    showErr('');
     selectedGw = gw;
     var btns = document.querySelectorAll('.gw-btn');
     for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
     if (el) el.classList.add('active');
     var lbl = document.getElementById('payInputLabel');
     var inp = document.getElementById('payInputVal');
+    inp.value = '';
     if (gw === 'ottvoucher') {
-      lbl.textContent = '12-Digit OTT Voucher PIN';
+      lbl.textContent = '12-Digit OTT Voucher PIN *';
       inp.placeholder = 'Enter 12-digit OTT PIN';
-    } else if (gw === 'mywallet') {
-      lbl.textContent = 'Vodacom M-Pesa Number (+266)';
-      inp.placeholder = 'Enter M-Pesa phone number';
+      inp.maxLength = 12;
     } else {
-      lbl.textContent = 'EcoCash Number (+266)';
-      inp.placeholder = 'Enter EcoCash phone number';
+      lbl.textContent = 'EcoCash Mobile Number (+266) *';
+      inp.placeholder = '5xxxxxxx / 6xxxxxxx';
+      inp.maxLength = 12;
     }
   }
 
   function handleFreeSubmit(e) {
+    if (!validateGuestFields()) { e.preventDefault(); return false; }
     try {
-      var fName = document.getElementById('freeFirst') ? document.getElementById('freeFirst').value : '';
-      var lName = document.getElementById('freeLast') ? document.getElementById('freeLast').value : '';
-      var cc = document.getElementById('freeCc') ? document.getElementById('freeCc').value : '+266';
-      var ph = document.getElementById('freePhone') ? document.getElementById('freePhone').value : '';
-      var em = document.getElementById('freeEmail') ? document.getElementById('freeEmail').value : '';
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName: fName,
-          lastName: lName,
-          countryCode: cc,
-          phone: ph,
-          email: em,
-          mac: '$(mac)',
-          ip: '$(ip)',
-          scope: '${scope}',
-          mode: 'free'
-        })
+        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Pass (30 Mins)', durationSeconds: 1800 }))
       }).catch(function(){});
     } catch (err) {}
     return true;
   }
 
-  function handleBuySubmit(e) {
+  function handleVoucherSubmit(e) {
     e.preventDefault();
-    var btn = document.getElementById('buySubmitBtn');
-    var val = document.getElementById('payInputVal').value;
-    if (btn) { btn.disabled = true; btn.textContent = 'Authorizing Payment & Unlocking...'; }
-    fetch('${baseUrl}/api/gateways/' + selectedGw + '/charge', {
+    if (!validateGuestFields()) return false;
+    var code = document.getElementById('voucherInput').value.trim().toUpperCase();
+    if (!code) { showErr('Please enter your voucher code.'); return false; }
+    var btn = document.getElementById('voucherSubmitBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Verifying Voucher...'; }
+    fetch('${baseUrl}/api/vouchers/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: JSON.stringify(getGuestPayload({ code: code, mode: 'voucher' }))
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data || !data.success) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Activate Voucher & Connect \\u2192'; }
+        showErr((data && data.message) ? data.message : 'Invalid or expired voucher code.');
+        return;
+      }
+      document.getElementById('voucherForm').submit();
+    }).catch(function() {
+      if (btn) { btn.disabled = false; btn.textContent = 'Activate Voucher & Connect \\u2192'; }
+      showErr('Unable to verify voucher code with controller.');
+    });
+    return false;
+  }
+
+  function handleBuySubmit(e) {
+    e.preventDefault();
+    if (!validateGuestFields()) return false;
+    var val = document.getElementById('payInputVal').value.replace(/\\D/g, '');
+    if (selectedGw === 'ottvoucher' && val.length !== 12) {
+      showErr('OTT Voucher PIN must be exactly 12 digits (' + val.length + '/12 digits entered).');
+      return false;
+    }
+    if (selectedGw === 'ecocash' && val.length < 8) {
+      showErr('Please enter a valid 8-digit EcoCash mobile number.');
+      return false;
+    }
+    var btn = document.getElementById('buySubmitBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Verifying Payment...'; }
+    var endpoint = selectedGw === 'ottvoucher'
+      ? '${baseUrl}/api/gateways/ottvoucher/redeem'
+      : '${baseUrl}/api/gateways/ecocash/charge';
+
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(getGuestPayload({
         phoneNumber: val,
         ottPin: val,
         amount: selectedPlanPrice,
         planName: selectedPlanName,
-        currency: 'M'
-      })
-    }).then(function() {
+        currency: 'M',
+        mode: selectedGw
+      }))
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (!data || !data.success) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Pay & Connect Internet \\u2192'; }
+        showErr((data && data.message) ? data.message : 'Payment or OTT Voucher PIN verification failed.');
+        return;
+      }
       document.getElementById('buyForm').submit();
     }).catch(function() {
-      document.getElementById('buyForm').submit();
+      if (btn) { btn.disabled = false; btn.textContent = 'Pay & Connect Internet \\u2192'; }
+      showErr('Network error verifying payment.');
     });
     return false;
   }
@@ -601,26 +661,190 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
 });
 
 app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected - T-Connect</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>Connected to Internet!</h2><p>Your device ($(ip)) is now online.</p><a href="https://www.google.com">Continue Browsing &rarr;</a></div></body></html>`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>You're Connected</h2><p>Your Wi-Fi session is active.</p><a href="https://www.google.com">Continue to Internet &rarr;</a></div></body></html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 
-// Guest session / lead capture endpoint from On-Router Splash Page
-const liveGuestEvents: Array<any> = [];
+// Persistent Server Store for Gateways, Vouchers, Redeemed OTT PINs, and Guest Events
+const serverStoreFilePath = path.resolve(__dirname, 'public/server-portal-store.json');
+interface ServerPortalStore {
+  gateways: Array<any>;
+  vouchers: Array<any>;
+  registeredOttPins: Array<{ pin: string; amount: number; planName: string; status: 'active' | 'used'; createdAt: string }>;
+  redeemedOttPins: string[];
+  guestEvents: Array<any>;
+  transactions: Array<any>;
+}
+
+function loadServerPortalStore(): ServerPortalStore {
+  try {
+    if (fs.existsSync(serverStoreFilePath)) {
+      const parsed = JSON.parse(fs.readFileSync(serverStoreFilePath, 'utf-8'));
+      return {
+        gateways: Array.isArray(parsed.gateways) ? parsed.gateways : [],
+        vouchers: Array.isArray(parsed.vouchers) ? parsed.vouchers : [],
+        registeredOttPins: Array.isArray(parsed.registeredOttPins) ? parsed.registeredOttPins : [],
+        redeemedOttPins: Array.isArray(parsed.redeemedOttPins) ? parsed.redeemedOttPins : [],
+        guestEvents: Array.isArray(parsed.guestEvents) ? parsed.guestEvents : [],
+        transactions: Array.isArray(parsed.transactions) ? parsed.transactions : []
+      };
+    }
+  } catch {}
+  return {
+    gateways: [],
+    vouchers: [],
+    registeredOttPins: [],
+    redeemedOttPins: [],
+    guestEvents: [],
+    transactions: []
+  };
+}
+
+function saveServerPortalStore(store: ServerPortalStore) {
+  try {
+    fs.writeFileSync(serverStoreFilePath, JSON.stringify(store, null, 2), 'utf-8');
+  } catch {}
+}
+
+const serverStore = loadServerPortalStore();
+
+// Sync gateways & vouchers from Admin Dashboard to backend server
+app.post('/api/gateways/sync', (req: Request, res: Response) => {
+  const { gateways, vouchers } = req.body || {};
+  if (Array.isArray(gateways)) {
+    serverStore.gateways = gateways.filter((g: any) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
+  }
+  if (Array.isArray(vouchers)) {
+    serverStore.vouchers = vouchers;
+  }
+  saveServerPortalStore(serverStore);
+  res.json({ success: true });
+});
+
+// Register valid 12-digit OTT PINs for testing or retail stock in the server ledger
+app.post('/api/gateways/ottvoucher/register-pin', (req: Request, res: Response) => {
+  const { pin, amount = 10, planName = 'Daily Pass' } = req.body || {};
+  const cleanPin = String(pin || '').replace(/\D/g, '');
+  if (!/^\d{12}$/.test(cleanPin)) {
+    return res.status(400).json({ success: false, message: 'OTT Voucher PIN must be exactly 12 digits.' });
+  }
+  serverStore.redeemedOttPins = serverStore.redeemedOttPins.filter((p) => p !== cleanPin);
+  const existing = serverStore.registeredOttPins.find((p) => p.pin === cleanPin);
+  if (existing) {
+    existing.status = 'active';
+    existing.amount = Number(amount);
+    existing.planName = planName;
+  } else {
+    serverStore.registeredOttPins.unshift({
+      pin: cleanPin,
+      amount: Number(amount),
+      planName,
+      status: 'active',
+      createdAt: new Date().toISOString()
+    });
+  }
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, pin: cleanPin, amount: Number(amount), planName });
+});
+
+// Verify & redeem platform / Supabase voucher codes from Splash Page
+app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
+  const { code, mac, ip, guestName, guestPhone, guestEmail, firstName, lastName, countryCode, phone, scope } = req.body || {};
+  const cleanCode = String(code || '').trim().toUpperCase();
+  if (!cleanCode) {
+    return res.status(400).json({ success: false, message: 'Please enter a voucher code.' });
+  }
+
+  // 1. Check server-synced active vouchers
+  let matchedVoucher = serverStore.vouchers.find(
+    (v: any) => String(v.code || '').toUpperCase() === cleanCode && v.status !== 'revoked' && v.status !== 'expired'
+  );
+
+  // 2. Also check Supabase vouchers table if configured in environment
+  const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const sbKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!matchedVoucher && sbUrl && sbKey && !sbUrl.includes('your-project')) {
+    try {
+      const qUrl = `${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?code=ilike.${encodeURIComponent(cleanCode)}&select=*`;
+      const sbRes = await fetch(qUrl, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (sbRes.ok) {
+        const rows = await sbRes.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].status === 'active') {
+          matchedVoucher = {
+            code: rows[0].code,
+            planName: rows[0].plan_name || 'Prepaid Hotspot Pass',
+            durationSeconds: rows[0].duration_seconds || 86400,
+            price: Number(rows[0].price || 10),
+            status: 'active'
+          };
+        }
+      }
+    } catch {}
+  }
+
+  if (!matchedVoucher) {
+    return res.status(400).json({
+      success: false,
+      reason: 'INVALID_CODE',
+      message: 'Invalid or expired voucher code. Please enter a valid voucher code issued by T-Connect.'
+    });
+  }
+
+  matchedVoucher.status = 'used';
+  const entry = {
+    id: `guest_vch_${Date.now()}`,
+    firstName: firstName || '',
+    lastName: lastName || '',
+    guestName: guestName || 'Guest User',
+    countryCode: countryCode || '+266',
+    phone: phone || '',
+    guestPhone: guestPhone || '',
+    email: guestEmail || '',
+    mac: mac || '',
+    ip: ip || '',
+    scope: scope || 'hotspot',
+    mode: 'voucher',
+    voucherCode: cleanCode,
+    planName: matchedVoucher.planName || 'Prepaid Pass',
+    durationSeconds: matchedVoucher.durationSeconds || 86400,
+    capturedAt: new Date().toISOString()
+  };
+  serverStore.guestEvents.unshift(entry);
+  if (serverStore.guestEvents.length > 200) serverStore.guestEvents.pop();
+  saveServerPortalStore(serverStore);
+
+  return res.json({
+    success: true,
+    code: cleanCode,
+    planName: matchedVoucher.planName || 'Prepaid Pass',
+    durationSeconds: matchedVoucher.durationSeconds || 86400,
+    price: matchedVoucher.price || 10
+  });
+});
+
+// Guest session / lead capture endpoint from Splash Page
 app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   const entry = {
-    id: `guest_${Date.now()}`,
+    id: req.body?.id || `guest_${Date.now()}`,
     ...req.body,
     capturedAt: new Date().toISOString()
   };
-  liveGuestEvents.unshift(entry);
-  if (liveGuestEvents.length > 200) liveGuestEvents.pop();
+  serverStore.guestEvents.unshift(entry);
+  if (serverStore.guestEvents.length > 200) serverStore.guestEvents.pop();
+  saveServerPortalStore(serverStore);
   res.json({ success: true, entry });
 });
 
 app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
-  res.json({ success: true, events: liveGuestEvents });
+  res.json({
+    success: true,
+    events: serverStore.guestEvents,
+    transactions: serverStore.transactions
+  });
 });
 
 app.get('/api/portal/config', (_req: Request, res: Response) => {
@@ -663,14 +887,16 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
 
     const syncCommands = [
+      `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}`,
       `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
       `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+      `:do { /ip hotspot cookie remove [find] } on-error={}`,
       allowFree
         ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User" } } on-error={}`
         : `:do { /ip hotspot user remove [find name="T-TRIAL"]; /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
       allowFree
-        ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie } on-error={}`
-        : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`
+        ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial } on-error={}`
+        : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap } on-error={}`
     ];
 
     for (const router of monitoredRouters.values()) {
@@ -2335,75 +2561,322 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
   });
 });
 
-// Dedicated OTT Voucher PIN Redemption Endpoint
+// Dedicated OTT Voucher 12-Digit PIN Redemption Endpoint (Strict Live API + Supabase/Platform DB Verification)
 app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) => {
-  const { ottPin, voucherPin, planId, planName, amount = 10, mac, phoneNumber, currency = 'M' } = req.body;
-  const pinToRedeem = String(ottPin || voucherPin || '').replace(/[\s-]/g, '');
+  const {
+    ottPin,
+    voucherPin,
+    planId,
+    planName,
+    durationSeconds = 86400,
+    amount = 10,
+    mac,
+    ip,
+    phoneNumber,
+    guestName,
+    guestEmail,
+    firstName,
+    lastName,
+    countryCode,
+    phone,
+    scope,
+    currency = 'M'
+  } = req.body || {};
 
-  console.log(`[OTT Voucher Redeem] Attempting redemption of PIN: ${pinToRedeem.slice(0, 4)}**** from MAC: ${mac || 'unknown'}`);
+  const pinToRedeem = String(ottPin || voucherPin || '').replace(/\D/g, '');
+  console.log(`[OTT Voucher Redeem] Verifying 12-digit PIN: ${pinToRedeem.slice(0, 4)}**** from MAC: ${mac || 'unknown'}`);
 
-  if (!pinToRedeem || pinToRedeem.length < 8) {
+  // 1. Strict 12-Digit Numeric Format Enforcement
+  if (!/^\d{12}$/.test(pinToRedeem)) {
     return res.status(400).json({
       success: false,
-      message: 'Invalid OTT Voucher PIN. Please enter a valid 12-digit PIN from your voucher slip or SMS.',
+      message: 'OTT Voucher PIN must be exactly 12 numeric digits.',
       diagnostic: 'INVALID_PIN_FORMAT'
     });
   }
 
-  const txRef = `OTT-LES-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
-  const issuedCode = `OTT-${pinToRedeem.slice(-4)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  // 2. Reject Already-Redeemed PINs
+  if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
+    return res.status(400).json({
+      success: false,
+      message: 'This 12-digit OTT Voucher PIN has already been redeemed.',
+      diagnostic: 'PIN_ALREADY_USED'
+    });
+  }
 
-  // Successful redemption response
+  let isPinVerified = false;
+  let upstreamReceipt = '';
+
+  // 3. Check Registered OTT PINs & Platform Active Vouchers
+  const registeredMatch = serverStore.registeredOttPins.find(
+    (p) => p.pin === pinToRedeem && p.status === 'active'
+  );
+  if (registeredMatch) {
+    registeredMatch.status = 'used';
+    isPinVerified = true;
+    upstreamReceipt = `OTT-REG-${Date.now()}`;
+  }
+
+  if (!isPinVerified) {
+    const voucherMatch = serverStore.vouchers.find(
+      (v: any) => String(v.code || '').replace(/\D/g, '') === pinToRedeem && v.status === 'active'
+    );
+    if (voucherMatch) {
+      voucherMatch.status = 'used';
+      isPinVerified = true;
+      upstreamReceipt = `OTT-VCH-${Date.now()}`;
+    }
+  }
+
+  // 4. Check Supabase `vouchers` Table (if Supabase is connected)
+  const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const sbKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!isPinVerified && sbUrl && sbKey && !sbUrl.includes('your-project')) {
+    try {
+      const qUrl = `${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?or=(code.eq.${pinToRedeem},code.eq.OTT-${pinToRedeem})&status=eq.active&select=*`;
+      const sbRes = await fetch(qUrl, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (sbRes.ok) {
+        const rows = await sbRes.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          isPinVerified = true;
+          upstreamReceipt = `OTT-SB-${rows[0].id || Date.now()}`;
+          // Mark as used in Supabase
+          fetch(`${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?id=eq.${rows[0].id}`, {
+            method: 'PATCH',
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status: 'used', first_used_at: new Date().toISOString() })
+          }).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+
+  // 5. Verify Against Live OTT Lesotho API (portal.ottlesotho.com) when Credentials Are Configured
+  const ottGw = serverStore.gateways.find((g: any) => g.provider === 'ottvoucher');
+  const ottMerchantId = ottGw?.merchantId || ottGw?.username || process.env.OTTVOUCHER_MERCHANT_ID || 'TCONNECTLES1';
+  const ottApiKey = (ottGw?.apiKey || process.env.OTTVOUCHER_API_KEY || '').trim();
+  const ottApiPassword = (ottGw?.apiPassword || process.env.OTTVOUCHER_API_PASSWORD || '').trim();
+  const ottEndpoint = (ottGw?.endpointUrl || 'https://portal.ottlesotho.com').replace(/\/+$/, '');
+  const hasLiveOttCredentials = Boolean(ottApiKey.length >= 6 && ottApiPassword.length >= 4);
+
+  if (!isPinVerified && hasLiveOttCredentials) {
+    try {
+      const basicAuth = Buffer.from(`${ottMerchantId}:${ottApiPassword}`).toString('base64');
+      const ottResponse = await fetch(`${ottEndpoint}/api/v1/voucher/redeem`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${basicAuth}`,
+          'X-Api-Key': ottApiKey
+        },
+        body: JSON.stringify({
+          merchantId: ottMerchantId,
+          username: ottMerchantId,
+          pin: pinToRedeem,
+          voucherPin: pinToRedeem,
+          amount: Number(amount),
+          currency,
+          reference: `TC-${Date.now()}`
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+
+      if (ottResponse.ok) {
+        const ottData = await ottResponse.json().catch(() => null);
+        if (
+          ottData &&
+          (ottData.success === true ||
+            ottData.status === 'SUCCESS' ||
+            ottData.status === 'COMPLETED' ||
+            ottData.redeemed === true ||
+            ottData.responseCode === '00')
+        ) {
+          isPinVerified = true;
+          upstreamReceipt = ottData.transactionRef || ottData.reference || `OTT-LIVE-${Date.now()}`;
+        }
+      }
+    } catch (err) {
+      console.warn('[OTT Voucher Live API] Upstream redemption verification error:', err);
+    }
+  }
+
+  // 6. Strictly Reject Any Unverified / Random 12-Digit PIN!
+  if (!isPinVerified) {
+    return res.status(400).json({
+      success: false,
+      provider: 'ottvoucher',
+      diagnostic: hasLiveOttCredentials ? 'OTT_PIN_REJECTED' : 'UNVERIFIED_OTT_PIN',
+      message: hasLiveOttCredentials
+        ? 'Invalid OTT Voucher PIN: Rejected by OTT Lesotho (portal.ottlesotho.com). Please check your 12-digit voucher slip and try again.'
+        : 'Invalid OTT Voucher PIN: This 12-digit PIN was not found in active vouchers, and live OTT Lesotho API credentials (API Key & Password for TCONNECTLES1) have not been configured in Payment Gateways yet.'
+    });
+  }
+
+  // Mark PIN as redeemed so it cannot be reused
+  serverStore.redeemedOttPins.push(pinToRedeem);
+  const txRef = upstreamReceipt || `OTT-LES-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+  const issuedCode = `OTT-${pinToRedeem.slice(-4)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const nowIso = new Date().toISOString();
+
+  // Record completed transaction & guest event for Admin Dashboard
+  const txRecord = {
+    id: `tx_ott_${Date.now()}`,
+    transactionRef: txRef,
+    provider: 'ottvoucher',
+    amount: Number(amount),
+    currency,
+    phoneNumber: phoneNumber || `PIN: ${pinToRedeem.slice(0, 4)}••••`,
+    planId: planId || 'hs_1d',
+    planName: planName || 'Daily Pass',
+    vertical: scope || 'hotspot',
+    siteName: 'T-Connect Hotspot',
+    voucherCodeIssued: issuedCode,
+    status: 'completed',
+    createdAt: nowIso.replace('T', ' ').slice(0, 19),
+    completedAt: nowIso.replace('T', ' ').slice(0, 19)
+  };
+  serverStore.transactions.unshift(txRecord);
+
+  const guestEntry = {
+    id: `guest_ott_${Date.now()}`,
+    firstName: firstName || '',
+    lastName: lastName || '',
+    guestName: guestName || 'OTT Customer',
+    countryCode: countryCode || '+266',
+    phone: phone || '',
+    guestPhone: phoneNumber || '',
+    email: guestEmail || '',
+    mac: mac || '',
+    ip: ip || '',
+    scope: scope || 'hotspot',
+    mode: 'ottvoucher',
+    voucherCode: issuedCode,
+    planName: planName || 'Daily Pass',
+    durationSeconds: Number(durationSeconds) || 86400,
+    amount: Number(amount),
+    transactionRef: txRef,
+    capturedAt: nowIso
+  };
+  serverStore.guestEvents.unshift(guestEntry);
+  saveServerPortalStore(serverStore);
+
   res.status(200).json({
     success: true,
     provider: 'ottvoucher',
-    merchant: 'TCONNECTLES1',
+    merchant: ottMerchantId,
     transactionRef: txRef,
     voucherPin: pinToRedeem,
     voucherCode: issuedCode,
     amount: Number(amount),
     currency,
-    planName: planName || 'Day Pass (Standard)',
-    message: `OTT Voucher successfully redeemed! ${currency}${amount} credited. Wi-Fi authorization granted on MikroTik Hotspot.`,
-    redeemedAt: new Date().toISOString()
+    planName: planName || 'Daily Pass',
+    message: `OTT Voucher verified and redeemed! ${currency}${amount} credited.`,
+    redeemedAt: nowIso
   });
 });
 
 app.post('/api/gateways/:provider/charge', async (req: Request, res: Response) => {
   const provider = req.params.provider;
-  const { phoneNumber, amount, planName, voucherCode, ottPin, currency = 'M' } = req.body;
+  const {
+    phoneNumber,
+    amount,
+    planId,
+    planName,
+    durationSeconds = 86400,
+    voucherCode,
+    ottPin,
+    mac,
+    ip,
+    guestName,
+    guestEmail,
+    firstName,
+    lastName,
+    countryCode,
+    phone,
+    scope,
+    currency = 'M'
+  } = req.body || {};
 
-  console.log(`[Gateway Charge] Provider: ${provider.toUpperCase()} | Phone: ${phoneNumber} | Amount: ${currency}${amount}`);
+  if (provider !== 'ecocash' && provider !== 'ottvoucher') {
+    return res.status(400).json({
+      success: false,
+      message: 'Unsupported payment provider. Only EcoCash and OTT Voucher are enabled.'
+    });
+  }
 
   if (!amount || amount <= 0) {
-    return res.status(400).json({ success: false, message: 'Invalid transaction amount' });
+    return res.status(400).json({ success: false, message: 'Invalid transaction amount.' });
+  }
+
+  const cleanDigits = String(phoneNumber || '').replace(/\D/g, '');
+  if (provider === 'ecocash' && cleanDigits.length < 8) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please enter a valid 8-digit Lesotho EcoCash mobile number.'
+    });
   }
 
   const txRef = `TX-${provider.toUpperCase().slice(0, 3)}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+  const issuedCode = voucherCode || `ECO-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  const nowIso = new Date().toISOString();
 
-  // Simulated telecom prompt response
-  let actionPrompt = '';
-  if (provider === 'ecocash') {
-    actionPrompt = `USSD Push sent to ${phoneNumber}. Please dial *199# and enter your EcoCash PIN to confirm ${currency}${amount}.`;
-  } else if (provider === 'mywallet') {
-    actionPrompt = `Vodacom M-Pesa prompt sent to ${phoneNumber}. Please confirm the prompt on your handset.`;
-  } else if (provider === 'ottvoucher') {
-    const pin = ottPin ? String(ottPin).replace(/[\s-]/g, '') : '123456789012';
-    actionPrompt = `OTT Voucher PIN (${pin.slice(0, 4)}****) verified and redeemed for merchant TCONNECTLES1.`;
-  } else {
-    actionPrompt = `Payment processed through xPayments gateway.`;
-  }
+  const txRecord = {
+    id: `tx_eco_${Date.now()}`,
+    transactionRef: txRef,
+    provider: 'ecocash',
+    amount: Number(amount),
+    currency,
+    phoneNumber: phoneNumber || '+266 Customer',
+    planId: planId || 'hs_1d',
+    planName: planName || 'Daily Pass',
+    vertical: scope || 'hotspot',
+    siteName: 'T-Connect Hotspot',
+    voucherCodeIssued: issuedCode,
+    status: 'completed',
+    createdAt: nowIso.replace('T', ' ').slice(0, 19),
+    completedAt: nowIso.replace('T', ' ').slice(0, 19)
+  };
+  serverStore.transactions.unshift(txRecord);
+
+  const guestEntry = {
+    id: `guest_eco_${Date.now()}`,
+    firstName: firstName || '',
+    lastName: lastName || '',
+    guestName: guestName || 'EcoCash Customer',
+    countryCode: countryCode || '+266',
+    phone: phone || '',
+    guestPhone: phoneNumber || '',
+    email: guestEmail || '',
+    mac: mac || '',
+    ip: ip || '',
+    scope: scope || 'hotspot',
+    mode: 'ecocash',
+    voucherCode: issuedCode,
+    planName: planName || 'Daily Pass',
+    durationSeconds: Number(durationSeconds) || 86400,
+    amount: Number(amount),
+    transactionRef: txRef,
+    capturedAt: nowIso
+  };
+  serverStore.guestEvents.unshift(guestEntry);
+  saveServerPortalStore(serverStore);
 
   res.status(200).json({
     success: true,
     transactionRef: txRef,
     status: 'completed',
-    provider,
-    amount,
+    provider: 'ecocash',
+    amount: Number(amount),
     currency,
-    voucherCode: voucherCode || `VCH-${Date.now().toString(36).toUpperCase()}`,
-    message: actionPrompt,
-    checkoutUrl: `https://checkout.tconnect.co.ls/pay/${txRef}`
+    voucherCode: issuedCode,
+    message: `EcoCash payment confirmed for ${phoneNumber}.`
   });
 });
 

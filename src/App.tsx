@@ -400,6 +400,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, [state.routers.length]);
 
+  // Live Captive Portal Guest & Payment Synchronization (Syncs leads, active sessions, and OTT/EcoCash transactions from any Wi-Fi client device to Admin Dashboard)
+  useEffect(() => {
+    storage.syncGatewaysAndVouchersWithServer();
+
+    const pollGuestPortalEvents = async () => {
+      try {
+        const res = await fetch('/api/portal/guest-connect');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.success) {
+          storage.ingestServerGuestEvents(data.events || [], data.transactions || []);
+        }
+      } catch {}
+    };
+
+    pollGuestPortalEvents();
+    const guestInterval = setInterval(pollGuestPortalEvents, 4000);
+    return () => clearInterval(guestInterval);
+  }, []);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);

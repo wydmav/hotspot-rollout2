@@ -56,7 +56,7 @@
   }
 } on-error={}
 
-# 4. Configure 10.10.0.1/22 Gateway & DHCP Server on bridgeLocal
+# 4. Configure 10.10.0.1/22 Gateway & DHCP Server on bridgeLocal (Sole DNS = 10.10.0.1)
 :do { /ip address remove [find interface="bridgeLocal" address!="10.10.0.1/22"] } on-error={}
 :if ([:len [/ip address find address="10.10.0.1/22" interface="bridgeLocal"]] = 0) do={
   /ip address add address=10.10.0.1/22 interface="bridgeLocal" network=10.10.0.0 comment="T-Connect Hotspot Gateway"
@@ -68,23 +68,27 @@
 :do { /ip dhcp-server network remove [find address="10.10.0.0/22"] } on-error={}
 /ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1 domain="portal.tconnect.local" comment="T-Connect Hotspot Network"
 
-# 5. DNS & NAT Masquerade for 10.10.0.0/22
+# 5. DNS Interception & NAT Masquerade for 10.10.0.0/22
 /ip dns set servers=1.1.1.1,8.8.8.8 allow-remote-requests=yes
 :do { /ip dns static remove [find name="portal.tconnect.local"] } on-error={}
 /ip dns static add name="portal.tconnect.local" address=10.10.0.1 ttl=5m
+:do { /ip firewall nat remove [find comment~"T-Connect: Prevent"] } on-error={}
+/ip firewall nat add chain=dstnat in-interface="bridgeLocal" protocol=udp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent DNS Leaks"
+/ip firewall nat add chain=dstnat in-interface="bridgeLocal" protocol=tcp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent TCP DNS Leaks"
 :do { /ip firewall nat remove [find comment="T-Connect Hotspot Masquerade"] } on-error={}
 /ip firewall nat add chain=srcnat src-address=10.10.0.0/22 action=masquerade comment="T-Connect Hotspot Masquerade"
 :do { /ip firewall nat remove [find comment="T-Connect Global WAN Masquerade"] } on-error={}
 /ip firewall nat add chain=srcnat out-interface="ether1" action=masquerade comment="T-Connect Global WAN Masquerade"
 
-# 6. Enable MikroTik Captive Portal Hotspot on bridgeLocal & Clear Bypasses
+# 6. Enable MikroTik Captive Portal Hotspot on bridgeLocal (Cookies Disabled for Instant Redirect)
 :do { /ip hotspot ip-binding remove [find type=bypassed] } on-error={}
+:do { /ip hotspot cookie remove [find] } on-error={}
 :do { /ip hotspot active remove [find] } on-error={}
 :do { /ip hotspot host remove [find] } on-error={}
 :if ([:len [/ip hotspot profile find name="tc-hotspot-profile"]] = 0) do={
-  /ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="portal.tconnect.local" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=30m/1d use-radius=yes
+  /ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="portal.tconnect.local" html-directory=hotspot login-by=http-chap,http-pap,trial http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m/1d use-radius=yes
 } else={
-  /ip hotspot profile set [find name="tc-hotspot-profile"] hotspot-address=10.10.0.1 dns-name="portal.tconnect.local" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=30m/1d disabled=no
+  /ip hotspot profile set [find name="tc-hotspot-profile"] hotspot-address=10.10.0.1 dns-name="portal.tconnect.local" html-directory=hotspot login-by=http-chap,http-pap,trial http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m/1d disabled=no
 }
 :if ([:len [/ip hotspot find interface="bridgeLocal"]] = 0) do={
   /ip hotspot add name="tc-hotspot-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=1 disabled=no
@@ -92,7 +96,8 @@
   /ip hotspot set [find interface="bridgeLocal"] profile="tc-hotspot-profile" address-pool="tc-hotspot-pool" disabled=no
 }
 
-# 7. Walled Garden for T-Connect Platform (169.58.98.92) & Payment Gateways
+# 7. Walled Garden: Allow Controller (169.58.98.92) & EcoCash/OTT Only — Purge OS Probe Domains!
+:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"icloud" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"microsoft" or dst-host~"firefox" or dst-host~"cloudflare" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}
 :do { /ip hotspot walled-garden ip remove [find comment~"T-Connect"] } on-error={}
 /ip hotspot walled-garden ip add action=accept dst-address=169.58.98.92 comment="T-Connect Controller IP"
 /ip hotspot walled-garden ip add action=accept dst-address=10.10.0.1 comment="T-Connect Local Gateway"

@@ -107,9 +107,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           >
             <option value="all">All Gateways</option>
             <option value="ecocash">EcoCash</option>
-            <option value="mywallet">MyWallet</option>
-            <option value="ottvoucher">OTTvoucher</option>
-            <option value="xpayments">xPayments</option>
+            <option value="ottvoucher">OTT Voucher</option>
           </select>
 
           <select

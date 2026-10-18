@@ -1351,7 +1351,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
                     </div>
                     <p className="text-[10px] opacity-80 mt-1">
-                      EcoCash, M-Pesa, and OTT Voucher self-service plans.
+                      EcoCash and 12-Digit OTT Voucher self-service plans.
                     </p>
                   </div>
                 </div>
@@ -2519,38 +2519,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         <div className="space-y-1.5 bg-blue-950/30 p-2.5 rounded-xl border border-blue-500/30">
                           <div className="flex justify-between items-center text-[10px] font-mono text-slate-300">
                             <span>12-Digit OTT Voucher PIN</span>
-                            <span className="text-emerald-400 font-bold">{currency}{chosenPlan.price} Denomination</span>
+                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/12 digits</span>
                           </div>
                           <input
                             type="text"
-                            value={ottPin}
-                            onChange={(e) => setOttPin(e.target.value)}
-                            placeholder="e.g. 8921 3482 9011"
+                            inputMode="numeric"
+                            maxLength={12}
+                            value={ottPin.replace(/\D/g, '').slice(0, 12)}
+                            onChange={(e) => setOttPin(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                            placeholder="12-digit OTT PIN"
                             className="w-full px-2 py-1.5 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
                           />
-                          <div className="flex items-center gap-1 text-[9px] text-slate-400 font-mono">
-                            <span>Quick PINs:</span>
-                            <button
-                              type="button"
-                              onClick={() => setOttPin('8921 3482 9011')}
-                              className="px-1.5 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-400/30"
-                            >
-                              M10 PIN
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setOttPin('7412 5896 3320')}
-                              className="px-1.5 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-400/30"
-                            >
-                              M60 PIN
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setOttPin('6301 9428 1154')}
-                              className="px-1.5 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-400/30"
-                            >
-                              M280 PIN
-                            </button>
+                          <div className="text-[9px] text-slate-400 font-mono text-center">
+                            Verified against OTT Lesotho API &amp; Supabase DB ({currency}{chosenPlan.price})
                           </div>
                         </div>
                       ) : (

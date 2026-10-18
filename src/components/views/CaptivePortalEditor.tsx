@@ -840,8 +840,9 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                         <label className="text-[10px] font-mono text-slate-300 block">12-Digit OTT Voucher PIN</label>
                         <input
                           type="text"
-                          defaultValue="8921 3482 9011"
-                          placeholder="8921 3482 9011"
+                          inputMode="numeric"
+                          maxLength={12}
+                          placeholder="12-digit OTT PIN"
                           className="w-full px-2.5 py-1.5 bg-black/50 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold"
                         />
                       </div>

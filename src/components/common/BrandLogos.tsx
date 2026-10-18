@@ -99,37 +99,6 @@ export const EcoCashLogo: React.FC<{ className?: string; variant?: 'card' | 'tra
   </svg>
 );
 
-/**
- * Vodacom M-Pesa / MyWallet Lesotho Logo
- */
-export const MyWalletLogo: React.FC<{ className?: string }> = ({ className = 'w-28 h-9' }) => (
-  <svg viewBox="0 0 240 76" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="240" height="76" rx="10" fill="#E60000" stroke="#CC0000" strokeWidth="1" />
-    <g transform="translate(12, 10)">
-      <circle cx="28" cy="28" r="18" fill="#FFFFFF" />
-      <path d="M28 19C23 19 19 23 19 28C19 33 23 37 28 37C33 37 37 33 37 28C37 23 33 19 28 19ZM28 34C24.7 34 22 31.3 22 28C22 24.7 24.7 22 28 22C31.3 22 34 24.7 34 28C34 31.3 31.3 34 28 34Z" fill="#E60000"/>
-      <circle cx="28" cy="27" r="3.5" fill="#E60000"/>
-      <text x="56" y="30" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">MyWallet</text>
-      <text x="56" y="44" fontFamily="sans-serif" fontWeight="700" fontSize="9.5" fill="#FFE5E5" letterSpacing="1">VODACOM M-PESA</text>
-    </g>
-  </svg>
-);
-
-/**
- * xPayments Lesotho FinTech Hub Logo
- */
-export const XpaymentsLogo: React.FC<{ className?: string }> = ({ className = 'w-28 h-9' }) => (
-  <svg viewBox="0 0 240 76" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="240" height="76" rx="10" fill="#0B132B" stroke="#1F293D" strokeWidth="1" />
-    <g transform="translate(14, 10)">
-      <path d="M12 18L26 32L40 18" stroke="#10B981" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M40 38L26 24L12 38" stroke="#06B6D4" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <text x="52" y="30" fontFamily="sans-serif" fontWeight="900" fontSize="18" fill="#FFFFFF">xPayments</text>
-      <text x="52" y="44" fontFamily="sans-serif" fontWeight="700" fontSize="9.5" fill="#10B981" letterSpacing="1">PAYLESOTHO HUB</text>
-    </g>
-  </svg>
-);
-
 export const MikroTikLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
   <svg viewBox="0 0 120 120" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="120" height="120" rx="24" fill="#1E293B"/>
@@ -150,10 +119,6 @@ export const ProviderLogo: React.FC<{ provider: GatewayProvider; className?: str
       return <EcoCashLogo className={className} variant={variant} />;
     case 'ottvoucher':
       return <OttVoucherLogo className={className} variant={variant} />;
-    case 'mywallet':
-      return <MyWalletLogo className={className} />;
-    case 'xpayments':
-      return <XpaymentsLogo className={className} />;
     default:
       return null;
   }

@@ -625,7 +625,7 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
       hubPublicKey: 'aHViX3B1YmxpY19rZXlfY3VydmUyNTUxOV90Y29ubmVjdA==',
       radiusSecret: 'radsec_tconnect_lesotho_99120',
       apiPassword: 'tc_pass_crypto_random_32char',
-      walledGardenDomains: ['mpesa.vodacom.co.ls', 'ecocash.econet.co.ls'],
+      walledGardenDomains: ['portal.ottlesotho.com', 'api.ecocash.co.ls'],
       blockDoH: true
     });
   }, [currentRouter]);

@@ -510,40 +510,39 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
     }, 800);
   };
 
-  // Strict CNA Lockdown Script (Anti-Bypass)
+  // Strict CNA Lockdown & Instant Captive Portal Redirect Script (RouterOS v7.16.2)
   const strictCnaLockdownScript = `# ==============================================================================
-# T-Connect Strict Captive Network Assistant (CNA) Lockdown
-# Prevents Android & iOS "Use network as is" or "Connect anyway" bypass options
+# T-Connect Instant Captive Portal Redirect & Zero-Bypass Lockdown (RouterOS v7.16.2)
+# Ensures devices connecting to MIKROTIK-TC or APs on ether2-ether5 redirect immediately
 # ==============================================================================
 
-# 1. Provide RFC 8910 / RFC 8908 Captive Portal API via DHCP Option 114
-# Modern iOS 14+ and Android 11+ query this URL and lock directly into CNA modal
-/ip dhcp-server option
-:do { remove [find name="cna-cap-port"] } on-error={}
-add name="cna-cap-port" code=114 value="s'https://app.tconnect.co.ls/api/cna/status'"
+# 1. CRITICAL: Remove OS Captive Probe Domains & M-Pesa from Walled Garden
+# Whitelisting apple.com / gstatic.com / msftconnecttest.com tricks phones/PCs into thinking
+# they already have full internet, suppressing the captive portal popup!
+/ip hotspot walled-garden
+:do { remove [find dst-host~"apple" or dst-host~"icloud" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"microsoft" or dst-host~"firefox" or dst-host~"cloudflare" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}
 
-# 2. Assign Option 114 to your Hotspot DHCP Server
-/ip dhcp-server
-set [find name="default"] dhcp-option="cna-cap-port"
+# 2. Enforce Local Router (10.10.0.1) as Sole DHCP DNS Server
+/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
+/ip dhcp-server network
+:do { set [find address="10.10.0.0/22"] gateway=10.10.0.1 dns-server=10.10.0.1 } on-error={
+  add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1 comment="T-Connect Hotspot Network"
+}
 
-# 3. Intercept ALL DNS Port 53 (TCP & UDP) to Local Router
+# 3. Disable MAC/Browser Cookies so Reconnecting Devices Always Redirect Immediately
+/ip hotspot profile
+:do { set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial http-cookie-lifetime=none split-user-domain=no } on-error={}
+
+# 4. Intercept ALL DNS Port 53 (TCP & UDP) to Local Router
 /ip firewall nat
-add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent DNS Leaks"
-add chain=dstnat protocol=tcp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent TCP DNS Leaks"
+:do { remove [find comment~"T-Connect: Prevent"] } on-error={}
+add chain=dstnat in-interface=bridgeLocal protocol=udp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent DNS Leaks"
+add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Prevent TCP DNS Leaks"
 
-# 4. Block DNS-over-TLS (Port 853) & Drop DoH Bypass Queries
-/ip firewall filter
-add chain=forward protocol=tcp dst-port=853 action=reject reject-with=tcp-reset comment="T-Connect: Block DoT Port 853"
-add chain=forward protocol=udp dst-port=853 action=drop comment="T-Connect: Block DoT UDP Port 853"
-/ip firewall raw
-add chain=prerouting protocol=tcp dst-port=443 content="dns-query" action=drop comment="T-Connect: Block DoH Queries"
-
-# 5. Fast-Fail Unauthenticated WAN Forwarding with TCP-RESET
-# When unauthenticated traffic fails with immediate TCP-RESET rather than timing out,
-# Android and iOS do NOT show "Use network as is" — they immediately display the captive portal!
-/ip firewall filter
-add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-state=new \\
-  hotspot=!auth in-interface-list=LAN out-interface-list=WAN comment="T-Connect: Fast-Fail Unauth TCP"
+# 5. Clear Cached Sessions, Cookies & Hosts to Trigger Immediate Splash Popup
+:do { /ip hotspot cookie remove [find] } on-error={}
+:do { /ip hotspot active remove [find] } on-error={}
+:do { /ip hotspot host remove [find] } on-error={}
 `;
 
   const handleCopyLockdownScript = () => {
@@ -1482,48 +1481,6 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                           </div>
                           <span className="text-[10px] font-mono font-bold text-red-300">Spache-Fono</span>
                         </label>
-
-                        {/* Vodacom MyWallet (M-Pesa) */}
-                        <label
-                          className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            selectedGateway === 'mywallet'
-                              ? 'bg-red-600/20 border-red-500'
-                              : 'bg-black/40 border-white/10 hover:border-white/30'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <input
-                              type="radio"
-                              name="gateway"
-                              checked={selectedGateway === 'mywallet'}
-                              onChange={() => setSelectedGateway('mywallet')}
-                              className="accent-red-500"
-                            />
-                            <ProviderLogo provider="mywallet" className="w-24 h-7" />
-                          </div>
-                          <span className="text-[10px] font-mono font-bold text-red-300">M-Pesa STK</span>
-                        </label>
-
-                        {/* xPayments */}
-                        <label
-                          className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            selectedGateway === 'xpayments'
-                              ? 'bg-emerald-600/20 border-emerald-500'
-                              : 'bg-black/40 border-white/10 hover:border-white/30'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <input
-                              type="radio"
-                              name="gateway"
-                              checked={selectedGateway === 'xpayments'}
-                              onChange={() => setSelectedGateway('xpayments')}
-                              className="accent-emerald-500"
-                            />
-                            <ProviderLogo provider="xpayments" className="w-24 h-7" />
-                          </div>
-                          <span className="text-[10px] font-mono font-bold text-emerald-300">Card &amp; OTT</span>
-                        </label>
                       </div>
 
                       {/* Provider Specific Input */}
@@ -1531,32 +1488,24 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                         <div className="pt-1 space-y-1.5">
                           <div className="flex items-center justify-between text-[10px] font-mono">
                             <label className="text-slate-300 font-bold">12-Digit OTT Voucher PIN</label>
-                            <button
-                              type="button"
-                              onClick={() => setOttPin('8921 3482 9011')}
-                              className="text-amber-300 hover:text-amber-200 font-bold flex items-center gap-1"
-                            >
-                              <Sparkles className="w-3 h-3" />
-                              <span>✨ Use Sample PIN</span>
-                            </button>
+                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/12 digits</span>
                           </div>
 
                           <input
                             type="text"
-                            value={ottPin}
+                            inputMode="numeric"
+                            value={ottPin.replace(/\D/g, '').slice(0, 12)}
                             onChange={(e) => {
-                              // Auto-format into 4-4-4 blocks
-                              const raw = e.target.value.replace(/[^0-9]/g, '').slice(0, 12);
-                              const parts = raw.match(/.{1,4}/g);
-                              setOttPin(parts ? parts.join(' ') : raw);
+                              const raw = e.target.value.replace(/\D/g, '').slice(0, 12);
+                              setOttPin(raw);
                             }}
-                            placeholder="e.g. 8921 3482 9011"
-                            maxLength={14}
+                            placeholder="12-digit OTT PIN"
+                            maxLength={12}
                             className="w-full px-3 py-2.5 bg-black/60 border border-blue-400/50 rounded-xl text-emerald-400 font-mono text-sm tracking-widest font-extrabold focus:outline-none focus:border-blue-400 text-center"
                           />
 
                           <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between pt-0.5">
-                            <span>Kenya linomoro tse 12 tsa slip ea hao</span>
+                            <span>Strict 12-digit OTT API &amp; DB check</span>
                             <span className="text-blue-300">TCONNECTLES1 Partner</span>
                           </div>
                         </div>
@@ -2254,7 +2203,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                             )}
                           </div>
                           <p className="text-[10px] text-slate-400 leading-normal">
-                            Zero free access. Guests must purchase a voucher or pay via EcoCash/MyWallet.
+                            Zero free access. Guests must purchase a voucher or pay via EcoCash or OTT Voucher.
                           </p>
                         </div>
 

@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
     operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
     site_id UUID REFERENCES public.sites(id) ON DELETE SET NULL,
     transaction_ref TEXT NOT NULL,
-    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash', 'mywallet', 'xpayments')),
+    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash')),
     amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
     fee_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
     net_amount NUMERIC(10,2) GENERATED ALWAYS AS (amount - fee_amount) STORED,
@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 CREATE TABLE IF NOT EXISTS public.gateway_configs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash', 'mywallet', 'xpayments')),
+    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash')),
     name TEXT NOT NULL,
     currency TEXT NOT NULL DEFAULT 'M',
     is_live BOOLEAN NOT NULL DEFAULT FALSE,
