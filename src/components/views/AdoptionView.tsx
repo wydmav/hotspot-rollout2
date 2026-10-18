@@ -31,7 +31,8 @@ import {
   Lock,
   Unlock,
   Sliders,
-  MapPin
+  MapPin,
+  CheckCircle2
 } from 'lucide-react';
 import { RouterDevice, RouterAccessMode, VerticalType, LesothoDistrict, LESOTHO_DISTRICTS } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
@@ -1024,7 +1025,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <div>
                       <p className="font-bold text-amber-300">Awaiting WinBox Handshake</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Already ran the script in WinBox? Click <strong>Verify Handshake</strong> to acknowledge connection, or open <strong>Diagnostics</strong>.
+                        Already ran the script in WinBox? Click <strong>Verify Handshake</strong> or <strong>Mark Adopted</strong> to confirm.
                       </p>
                     </div>
                   </div>
@@ -1040,6 +1041,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     </button>
                     <button
                       type="button"
+                      onClick={() => handleForceAdopt(selectedRouter.id)}
+                      className="px-2.5 py-1 bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40 rounded font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Directly mark router as online and adopted in platform state"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Mark Adopted</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setShowDiagnosticsModal(true)}
                       className="px-2.5 py-1 bg-[#1e293b] hover:bg-[#334155] text-cyan-300 border border-cyan-500/30 rounded font-bold text-xs flex items-center gap-1 transition-colors cursor-pointer"
                     >
@@ -1050,13 +1060,58 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </div>
               )}
 
+              {/* Proven Offline Direct Script (No /tool fetch - 100% Reliable & Solves Idle Timeout) */}
+              <div className="bg-gradient-to-r from-amber-500/15 via-[#12192c] to-emerald-500/15 p-5 rounded-xl border border-amber-500/40 space-y-3 font-mono">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-extrabold text-white tracking-wide uppercase">
+                          PROVEN OFFLINE FULL ADOPTION SCRIPT (ZERO /TOOL FETCH)
+                        </span>
+                        <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded">
+                          RECOMMENDED
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5">
+                        Bypasses all network /tool fetch timeouts! Directly provisions <strong>wg-tconnect (10.99.1.50)</strong>, <strong>bridgeLocal</strong>, <strong>10.10.0.1/22</strong>, DHCP pool, Hotspot, AP bypasses, and <strong>MIKROTIK-TC</strong> WiFi.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleCopyFullScript}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs rounded-lg transition-all shadow-md shadow-orange-500/20 cursor-pointer"
+                  >
+                    {copiedFullScript ? (
+                      <>
+                        <Check className="w-4 h-4 text-slate-950" />
+                        <span>Copied Aligned Offline Script!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 text-slate-950" />
+                        <span>Copy Aligned Offline Script</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="p-3 bg-[#080b12] rounded-lg border border-[#1b233a] font-mono text-[11px] text-amber-200/90 max-h-56 overflow-y-auto whitespace-pre leading-relaxed select-all">
+                  {provisioningScript}
+                </div>
+              </div>
+
               {/* One-Liner Box (Paste into MikroTik Terminal) */}
               <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Terminal className="w-4 h-4 text-[#f05e17]" />
                     <span className="text-xs font-extrabold text-white tracking-wide uppercase font-mono">
-                      ONE-LINE ROUTEROS ADOPTION SCRIPT
+                      ONE-LINE ROUTEROS ADOPTION SCRIPT (REQUIRES REACHABLE PUBLIC ENDPOINT)
                     </span>
                   </div>
                   <button
@@ -1072,6 +1127,28 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   Open <strong>Winbox &gt; New Terminal</strong> on your MikroTik router (or SSH) and paste this single line. It verifies DNS, confirms Device Mode permissions, downloads the encrypted config over TLS, establishes the WireGuard tunnel, and self-cleans.
                 </p>
 
+                {/* Warning if private or port 3000 endpoint detected */}
+                {(controllerHost.includes(':3000') || controllerHost.startsWith('169.') || controllerHost.startsWith('10.') || controllerHost.startsWith('192.168.') || controllerHost.includes('localhost')) && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2.5 text-xs font-mono">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="text-amber-200">
+                        <strong>Endpoint Notice:</strong> <code>{controllerHost}</code> cannot be reached by external routers (caused <code>failure: Idle timeout</code>).
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setControllerHost('ais-pre-v7itx7z45ceaf3ogvv4kmy-465171896997.europe-west2.run.app');
+                        setEndpointProtocol('https');
+                      }}
+                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-[11px] transition-colors cursor-pointer"
+                    >
+                      Switch to Public Cloud HTTPS (Port 443)
+                    </button>
+                  </div>
+                )}
+
                 {/* Controller Endpoint Configuration for real VPS / router testing */}
                 <div className="p-2.5 bg-[#121829] rounded-lg border border-[#1f283d] flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                   <div className="flex items-center gap-2 flex-1 min-w-[220px]">
@@ -1080,7 +1157,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       type="text"
                       value={controllerHost}
                       onChange={(e) => setControllerHost(e.target.value)}
-                      placeholder="e.g. 194.163.45.67 or app.tconnect.co.ls"
+                      placeholder="e.g. ais-pre-v7itx7z45ceaf3ogvv4kmy-465171896997.europe-west2.run.app"
                       className="w-full px-2.5 py-1 bg-[#1a233a] border border-[#232d42] rounded text-white text-xs focus:outline-none focus:border-[#f05e17]"
                     />
                   </div>

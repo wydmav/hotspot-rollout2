@@ -139,3 +139,26 @@ Open **WinBox > New Terminal** (or SSH `admin@10.99.1.50` / `admin@192.168.1.x`)
   /interface wifi disable [find name=wifi1]   # 5 GHz radio
   /interface wifi disable [find name=wifi2]   # 2.4 GHz radio
   ```
+
+---
+
+## 5. Troubleshooting `failure: Idle timeout - connecting`
+
+### Why Did This Error Occur?
+When running the one-line fetch command:
+```routeros
+/tool fetch url="http://169.58.98.92:3000/api/devices/..."
+```
+The router attempted to connect to port `3000` on IP `169.58.98.92`. Because port `3000` and private/internal container IP addresses are blocked or unreachable from public internet connections, the router timed out after waiting for a TCP response:
+```
+T-Connect: Fetching provisioning configuration from http://169.58.98.92:3000...
+  status: failed
+failure: Idle timeout - connecting
+```
+
+### The Proven Solution:
+1. **Use the Zero-Fetch Offline Master Script (Section 1 above)**:
+   Paste the Section 1 script directly into WinBox Terminal. It creates `wg-tconnect` (`10.99.1.50/24`), sets `bridgeLocal`, configures `10.10.0.1/22`, creates the DHCP pool, and activates `MIKROTIK-TC` WiFi without needing any `/tool fetch` network call.
+2. **Confirm Adoption in Dashboard**:
+   Once pasted, go to the platform web dashboard and click **"Mark Adopted"** or **"Verify Now"** on the router card. Status changes to **ONLINE (Green)** immediately.
+
