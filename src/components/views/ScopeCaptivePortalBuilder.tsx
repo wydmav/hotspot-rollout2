@@ -766,13 +766,13 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ottvoucher');
   
-  // Guest Sign-up State with First Name & Surname Separation
-  const [guestFirstName, setGuestFirstName] = useState('Katleho');
-  const [guestSurname, setGuestSurname] = useState('Molapo');
+  // Guest Sign-up State (100% empty initial state — zero pre-filled sample data)
+  const [guestFirstName, setGuestFirstName] = useState('');
+  const [guestSurname, setGuestSurname] = useState('');
   const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
-  const [guestPhone, setGuestPhone] = useState('58001234');
-  const [guestEmail, setGuestEmail] = useState('katleho@tconnect.ls');
-  const [ottPin, setOttPin] = useState('8921 3482 9011');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [ottPin, setOttPin] = useState('');
   const [savedToast, setSavedToast] = useState<string | null>(null);
   
   // Real-time Connection Duration Telemetry (Stopwatch & Countdown)
@@ -824,8 +824,38 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     return routers.find((r) => r.vertical === selectedScope) || routers[0];
   }, [previewClientGroupId, routers, selectedScope]);
 
-  // Per-hotspot Free Access Mode: router's freeModeEnabled or scope allowFreeAccess
-  const isFreeModeActive = Boolean(activeRouter?.freeModeEnabled ?? currentConfig.allowFreeAccess);
+  // Per-hotspot Free Access Mode driven directly by Portal Builder allowFreeAccess toggle
+  const isFreeModeActive = currentConfig.allowFreeAccess !== false;
+
+  // Toggle Free Access Mode across this scope and push to all routers in real time
+  const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
+    handleUpdateCurrent({ allowFreeAccess: enableFree });
+    if (!enableFree && previewStep === 'identification') {
+      setPreviewStep('plan');
+    } else if (enableFree && previewStep === 'plan') {
+      setPreviewStep('identification');
+    }
+    try {
+      await fetch('/api/devices/fleet/access-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vertical: 'all',
+          accessMode: enableFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          freeRateLimit: activeRouter?.freeRateLimit || '10M/30M'
+        })
+      });
+      setSavedToast(
+        enableFree
+          ? 'Free Access Mode ENABLED across all routers & splash pages in real time!'
+          : 'Free Access Mode HIDDEN & DISABLED across all routers in real time!'
+      );
+      setTimeout(() => setSavedToast(null), 4000);
+    } catch {
+      // Handled via local + portal config sync
+    }
+  };
 
   // Strict Validation Rules:
   // 1. First name has 2 characters or more
@@ -1270,6 +1300,63 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           {/* TAB: VISUAL BUILDER */}
           {activeBuilderTab === 'builder' && (
             <div className="space-y-4">
+              {/* REAL-TIME PUBLIC LOGIN MODES & FREE ACCESS MASTER SWITCH */}
+              <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1b233a] pb-3">
+                  <div>
+                    <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-[#f05e17]" />
+                      Public Splash Login Modes (Real-Time Fleet Control)
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Control whether public users see Free Wi-Fi Registration alongside Voucher Code &amp; Buy Pass on the router splash page.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFreeAccessRealtime(!isFreeModeActive)}
+                    className={`px-3.5 py-2 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer shrink-0 border ${
+                      isFreeModeActive
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-rose-500/25'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isFreeModeActive ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                    <span>{isFreeModeActive ? 'Free Access: VISIBLE (ON)' : 'Free Access: HIDDEN (OFF)'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
+                  <div className={`p-2.5 rounded-lg border ${isFreeModeActive ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-500'}`}>
+                    <div className="font-bold flex items-center justify-between">
+                      <span>1. Free Wi-Fi Signup</span>
+                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40">{isFreeModeActive ? 'Shown' : 'Hidden'}</span>
+                    </div>
+                    <p className="text-[10px] opacity-80 mt-1">
+                      {isFreeModeActive ? 'Captures Name + Phone for 30m trial.' : 'Completely hidden from public splash page.'}
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-lg border bg-amber-950/15 border-amber-500/30 text-amber-200">
+                    <div className="font-bold flex items-center justify-between">
+                      <span>2. Voucher Login</span>
+                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
+                    </div>
+                    <p className="text-[10px] opacity-80 mt-1">
+                      Authenticates TC-XXXX &amp; MikroTik Hotspot vouchers.
+                    </p>
+                  </div>
+                  <div className="p-2.5 rounded-lg border bg-blue-950/15 border-blue-500/30 text-blue-200">
+                    <div className="font-bold flex items-center justify-between">
+                      <span>3. Buy Speed Pass</span>
+                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
+                    </div>
+                    <p className="text-[10px] opacity-80 mt-1">
+                      EcoCash, M-Pesa, and OTT Voucher self-service plans.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Wallpaper Picker Quick Selector for This Scope */}
               <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
                 <div className="flex items-center justify-between border-b border-[#1b233a] pb-2">
@@ -2133,7 +2220,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             required
                             value={guestFirstName}
                             onChange={(e) => setGuestFirstName(e.target.value)}
-                            placeholder="Katleho"
+                            placeholder="First name"
                             className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                               guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                             }`}
@@ -2154,7 +2241,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             required
                             value={guestSurname}
                             onChange={(e) => setGuestSurname(e.target.value)}
-                            placeholder="Molapo"
+                            placeholder="Surname"
                             className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                               guestSurname && !isSurnameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                             }`}
@@ -2187,7 +2274,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             required
                             value={guestPhone}
                             onChange={(e) => setGuestPhone(e.target.value)}
-                            placeholder={guestCountryCode === '+266' ? '58001234 (8 digits)' : '0712345678 (10 digits)'}
+                            placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
                             className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                               guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                             }`}
@@ -2216,7 +2303,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           type="email"
                           value={guestEmail}
                           onChange={(e) => setGuestEmail(e.target.value)}
-                          placeholder="katleho@tconnect.ls"
+                          placeholder="name@example.com"
                           className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                             guestEmail && !isEmailValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                           }`}

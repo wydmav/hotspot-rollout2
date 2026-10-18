@@ -165,12 +165,12 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   // Enforces at least 2 chars for name/surname, 8 digits for Lesotho (+266),
   // 10 digits starting with 0 for SA (+27), and email with '@' and '.'
   const validation = useConnectFreeValidation({
-    initialFirstName: 'Katleho',
-    initialLastName: 'Molapo',
-    initialPhone: '58001234',
+    initialFirstName: '',
+    initialLastName: '',
+    initialPhone: '',
     initialCountryCode: COUNTRY_CODES[0].code,
-    initialEmail: 'katleho.molapo@gmail.com',
-    initialTermsAccepted: true,
+    initialEmail: '',
+    initialTermsAccepted: false,
     isEmailRequired: collectEmail,
     isTermsRequired: termsEnabled
   });
@@ -1239,7 +1239,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               required
                               value={guestFirstName}
                               onChange={(e) => setGuestFirstName(e.target.value)}
-                              placeholder="Katleho"
+                              placeholder="First name"
                               className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                                 guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                               }`}
@@ -1260,7 +1260,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               required
                               value={guestSurname}
                               onChange={(e) => setGuestSurname(e.target.value)}
-                              placeholder="Molapo"
+                              placeholder="Surname"
                               className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                                 guestSurname && !isSurnameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
                               }`}
@@ -1301,7 +1301,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                               type="tel"
                               value={guestPhone}
                               onChange={(e) => setGuestPhone(e.target.value)}
-                              placeholder={guestCountry.code === '+266' ? '58001234 (8 digits)' : '0712345678 (10 digits)'}
+                              placeholder={guestCountry.code === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
                               required
                               className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                                 guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
@@ -1332,7 +1332,7 @@ add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-st
                             type="email"
                             value={guestEmail}
                             onChange={(e) => setGuestEmail(e.target.value)}
-                            placeholder="katleho@tconnect.ls"
+                            placeholder="name@example.com"
                             required
                             className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                               guestEmail && !isEmailValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'

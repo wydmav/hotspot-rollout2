@@ -154,10 +154,10 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
   };
 
   const handleFillSample = () => {
-    setTestName('Katleho Molapo');
-    setTestPhone('5912 3456');
-    setTestEmail('katleho.molapo@gmail.com');
-    setTestTermsAccepted(true);
+    setTestName('');
+    setTestPhone('');
+    setTestEmail('');
+    setTestTermsAccepted(false);
   };
 
   const handleSave = () => {
@@ -681,7 +681,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                           type="text"
                           value={testName}
                           onChange={(e) => setTestName(e.target.value)}
-                          placeholder="e.g. Katleho Molapo"
+                          placeholder="Full name"
                           required={config.nameRequired}
                           className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
                         />
@@ -714,7 +714,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                             type="tel"
                             value={testPhone}
                             onChange={(e) => setTestPhone(e.target.value)}
-                            placeholder="5800 1234"
+                            placeholder="5xxxxxxx / 6xxxxxxx"
                             required={config.phoneRequired}
                             className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
                           />
@@ -732,7 +732,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                           type="email"
                           value={testEmail}
                           onChange={(e) => setTestEmail(e.target.value)}
-                          placeholder="katleho@example.com"
+                          placeholder="name@example.com"
                           required={config.emailRequired}
                           className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17]"
                         />

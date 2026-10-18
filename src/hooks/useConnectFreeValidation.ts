@@ -78,7 +78,7 @@ export function validatePhoneNumber(phone: string, countryCode: string): { isVal
     }
     return {
       isValid: false,
-      error: `Lesotho (+266) numbers must have exactly 8 digits (${lsDigits.length}/8 digits entered, e.g. 58001234)`,
+      error: `Lesotho (+266) numbers must have exactly 8 digits (${lsDigits.length}/8 digits entered)`,
       formattedPhone: digitsOnly
     };
   }
@@ -254,11 +254,11 @@ export function useConnectFreeValidation(options: UseConnectFreeValidationOption
     email?: string;
   }) => {
     const isLesotho = (preset?.countryCode || countryCode) === '+266';
-    setFirstName(preset?.firstName || (isLesotho ? 'Katleho' : 'Sipho'));
-    setLastName(preset?.lastName || (isLesotho ? 'Molapo' : 'Dlamini'));
+    setFirstName(preset?.firstName || '');
+    setLastName(preset?.lastName || '');
     setCountryCode(preset?.countryCode || (isLesotho ? '+266' : '+27'));
-    setPhone(preset?.phone || (isLesotho ? '58001234' : '0821234567'));
-    setEmail(preset?.email || (isLesotho ? 'katleho.molapo@tconnect.ls' : 'sipho.dlamini@vodamail.co.za'));
+    setPhone(preset?.phone || '');
+    setEmail(preset?.email || '');
     setTermsAccepted(true);
     setTouched({
       firstName: true,

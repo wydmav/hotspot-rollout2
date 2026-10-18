@@ -137,9 +137,491 @@ app.get(['/hotspot-detect.html', '/generate_204', '/ncsi.txt', '/connecttest.txt
 });
 
 // -----------------------------------------------------------------------------
-// LIVE CAPTIVE PORTAL SPLASH PAGE CONFIG SYNC (Across Admin & Guest Devices)
+// LIVE CAPTIVE PORTAL SPLASH PAGE CONFIG SYNC & ON-ROUTER HTML COMPILER
 // -----------------------------------------------------------------------------
 const portalConfigFilePath = path.resolve(__dirname, 'public/portal-configs.json');
+
+function loadSavedPortalConfigs(): Record<string, any> {
+  try {
+    if (fs.existsSync(portalConfigFilePath)) {
+      return JSON.parse(fs.readFileSync(portalConfigFilePath, 'utf-8'));
+    }
+  } catch {}
+  return {};
+}
+
+function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot'): string {
+  const allConfigs = loadSavedPortalConfigs();
+  const cfg = allConfigs[scope] || allConfigs['hotspot'] || {};
+  const baseUrl = `${protocol}://${host}`;
+
+  const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
+  const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'STARLINK HIGH-SPEED';
+  const welcomeHeadline = cfg.welcomeHeadline !== undefined ? String(cfg.welcomeHeadline) : 'WHAT DO YOU CONNECT FOR?';
+  const accentColor = cfg.accentColor || '#f05e17';
+  const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 38;
+  const glassOpacity = typeof cfg.glassOpacity === 'number' ? cfg.glassOpacity : 88;
+  const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : true;
+  const collectName = cfg.collectName !== undefined ? Boolean(cfg.collectName) : true;
+  const collectPhone = cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true;
+  const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : false;
+  const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
+  const termsText = cfg.termsText || 'By connecting, you agree to the T-Connect acceptable use policy.';
+
+  let bgImage = cfg.bgImage || 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?auto=format&fit=crop&w=1400&q=80';
+  if (bgImage.startsWith('/')) {
+    bgImage = `${baseUrl}${bgImage}`;
+  }
+
+  const defaultPlans = [
+    { id: 'hs_1d', name: 'Daily Pass', price: 10, durationLabel: '24 Hours', downloadSpeedMbps: 20, enabled: true },
+    { id: 'hs_7d', name: 'Weekly Pass', price: 60, durationLabel: '7 Days', downloadSpeedMbps: 25, enabled: true, isPopular: true },
+    { id: 'hs_30d', name: 'Monthly Pass', price: 280, durationLabel: '30 Days', downloadSpeedMbps: 35, enabled: true }
+  ];
+  const plans = Array.isArray(cfg.plans) && cfg.plans.length > 0
+    ? cfg.plans.filter((p: any) => p.enabled !== false)
+    : defaultPlans;
+
+  const badgeText = [brandTitle.trim(), tagline.trim()].filter(Boolean).join(' · ');
+  const defaultTab = allowFreeAccess ? 'free' : 'buy';
+
+  const plansHtml = plans.map((p: any, idx: number) => `
+    <label class="plan-item ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${String(p.name).replace(/'/g, '')}', this)">
+      <div class="plan-left">
+        <input type="radio" name="selected_plan" value="${p.id}" ${idx === 0 ? 'checked' : ''} />
+        <div>
+          <div class="plan-name">${p.name} ${p.isPopular ? '<span class="pop-tag">POPULAR</span>' : ''}</div>
+          <div class="plan-meta">${p.durationLabel || '24 Hours'} · ${p.downloadSpeedMbps || 20} Mbps</div>
+        </div>
+      </div>
+      <div class="plan-price">M${p.price}</div>
+    </label>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>${brandTitle || 'T-Connect'} WiFi Portal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body {
+    min-height: 100vh;
+    background-color: #05070c;
+    background-image: url('${bgImage}');
+    background-size: cover;
+    background-position: center;
+    color: #f8fafc;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, ${(bgDarken / 100).toFixed(2)});
+    pointer-events: none;
+    z-index: 1;
+  }
+  .topbar {
+    position: relative;
+    z-index: 10;
+    background: rgba(5, 7, 12, 0.85);
+    backdrop-filter: blur(12px);
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand-row { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 12px; letter-spacing: 0.5px; }
+  .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: ${accentColor}; display: inline-block; }
+  .ip-tag { font-family: monospace; font-size: 10px; color: #34d399; background: rgba(16,185,129,0.14); border: 1px solid rgba(16,185,129,0.3); padding: 2px 7px; border-radius: 6px; }
+  .main-wrap {
+    position: relative;
+    z-index: 10;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+  }
+  .hero { text-align: center; padding: 12px 0 8px; width: 100%; }
+  .kicker {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 99px;
+    background: rgba(0,0,0,0.65);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    margin-bottom: 8px;
+  }
+  .hero h1 { font-size: 24px; font-weight: 900; letter-spacing: -0.5px; color: #fff; text-shadow: 0 4px 16px rgba(0,0,0,0.7); line-height: 1.15; }
+  .card {
+    width: 100%;
+    background: rgba(15, 20, 34, ${(glassOpacity / 100).toFixed(2)});
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 24px;
+    padding: 18px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+    margin: auto 0;
+  }
+  .tabs {
+    display: grid;
+    grid-template-columns: ${allowFreeAccess ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'};
+    gap: 6px;
+    background: rgba(0,0,0,0.45);
+    padding: 4px;
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 14px;
+  }
+  .tab-btn {
+    padding: 9px 6px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn.active { background: ${accentColor}; color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
+  .sec { display: none; }
+  .sec.active { display: block; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .field { margin-bottom: 10px; text-align: left; }
+  .lbl { display: block; font-size: 11px; color: #cbd5e1; margin-bottom: 4px; font-weight: 600; }
+  .inp {
+    width: 100%;
+    padding: 11px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+  }
+  .inp:focus { border-color: ${accentColor}; }
+  .phone-row { display: flex; gap: 6px; }
+  .cc-sel {
+    padding: 11px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    width: 86px;
+    flex-shrink: 0;
+  }
+  .terms { font-size: 10px; color: #94a3b8; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; line-height: 1.4; }
+  .btn-primary {
+    width: 100%;
+    min-height: 44px;
+    padding: 12px;
+    border-radius: 14px;
+    border: none;
+    background: ${accentColor};
+    color: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+  }
+  .btn-emerald {
+    width: 100%;
+    min-height: 44px;
+    padding: 12px;
+    border-radius: 14px;
+    border: none;
+    background: #10b981;
+    color: #052e16;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  .plan-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; max-height: 195px; overflow-y: auto; }
+  .plan-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.4);
+    cursor: pointer;
+  }
+  .plan-item.selected { border-color: ${accentColor}; background: rgba(240,94,23,0.18); }
+  .plan-left { display: flex; align-items: center; gap: 9px; text-align: left; }
+  .plan-name { font-size: 12px; font-weight: 800; color: #fff; }
+  .plan-meta { font-size: 10px; color: #94a3b8; font-family: monospace; }
+  .plan-price { font-size: 14px; font-weight: 900; color: #fbbf24; font-family: monospace; }
+  .pop-tag { font-size: 9px; padding: 1px 5px; border-radius: 4px; background: ${accentColor}; color: #fff; margin-left: 4px; }
+  .gw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+  .gw-btn {
+    padding: 8px 4px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.4);
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .gw-btn.active { border-color: ${accentColor}; background: rgba(240,94,23,0.22); color: #fff; }
+  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 8px 10px; border-radius: 10px; font-size: 11px; margin-bottom: 10px; display: none; }
+  .ftr { text-align: center; font-size: 10px; color: #cbd5e1; padding-top: 10px; font-family: monospace; }
+</style>
+</head>
+<body>
+<div class="overlay"></div>
+<header class="topbar">
+  <div class="brand-row">
+    <span class="brand-dot"></span>
+    <span>${brandTitle || 'T-CONNECT'}</span>
+  </div>
+  <span class="ip-tag">MIKROTIK-TC · $(ip)</span>
+</header>
+
+<main class="main-wrap">
+  <div class="hero">
+    ${badgeText ? `<div class="kicker">${badgeText}</div>` : ''}
+    ${welcomeHeadline ? `<h1>${welcomeHeadline}</h1>` : ''}
+  </div>
+
+  <div class="card">
+    <div id="errBox" class="err-box"></div>
+
+    <div class="tabs">
+      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn active" onclick="switchTab('free')">Free Trial</button>` : ''}
+      <button type="button" id="tabBtn_buy" class="tab-btn ${!allowFreeAccess ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>
+      <button type="button" id="tabBtn_voucher" class="tab-btn" onclick="switchTab('voucher')">Voucher</button>
+    </div>
+
+    ${allowFreeAccess ? `
+    <!-- TAB 1: FREE TRIAL -->
+    <div id="sec_free" class="sec active">
+      <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
+        <input type="hidden" name="username" value="T-TRIAL">
+        <input type="hidden" name="password" value="123">
+        <input type="hidden" name="dst" value="https://www.google.com">
+        ${collectName ? `
+        <div class="grid-2">
+          <div class="field">
+            <label class="lbl">First Name *</label>
+            <input class="inp" type="text" id="freeFirst" value="" placeholder="First name" required minlength="2">
+          </div>
+          <div class="field">
+            <label class="lbl">Surname *</label>
+            <input class="inp" type="text" id="freeLast" value="" placeholder="Surname" required minlength="2">
+          </div>
+        </div>` : ''}
+        ${collectPhone ? `
+        <div class="field">
+          <label class="lbl">Mobile Number *</label>
+          <div class="phone-row">
+            <select id="freeCc" class="cc-sel">
+              <option value="+266">+266</option>
+              <option value="+27">+27</option>
+            </select>
+            <input class="inp" type="tel" id="freePhone" value="" placeholder="Enter mobile number" required>
+          </div>
+        </div>` : ''}
+        ${collectEmail ? `
+        <div class="field">
+          <label class="lbl">Email Address *</label>
+          <input class="inp" type="email" id="freeEmail" value="" placeholder="name@example.com" required>
+        </div>` : ''}
+        ${termsEnabled ? `<div class="terms">${termsText}</div>` : ''}
+        <button type="submit" class="btn-primary">Connect Free Trial &rarr;</button>
+      </form>
+    </div>
+    ` : ''}
+
+    <!-- TAB 2: BUY SPEED PASS -->
+    <div id="sec_buy" class="sec ${!allowFreeAccess ? 'active' : ''}">
+      <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
+        <input type="hidden" name="username" value="test">
+        <input type="hidden" name="password" value="123">
+        <input type="hidden" name="dst" value="https://www.google.com">
+        <div class="plan-list">${plansHtml}</div>
+        <div class="lbl">Select Payment Method</div>
+        <div class="gw-grid">
+          <button type="button" class="gw-btn active" onclick="selectGw('ecocash', this)">EcoCash</button>
+          <button type="button" class="gw-btn" onclick="selectGw('mywallet', this)">M-Pesa</button>
+          <button type="button" class="gw-btn" onclick="selectGw('ottvoucher', this)">OTT PIN</button>
+        </div>
+        <div class="field" id="payPhoneField">
+          <label class="lbl" id="payInputLabel">Mobile Money Number (+266)</label>
+          <input class="inp" type="text" id="payInputVal" value="" placeholder="Enter mobile number or PIN" required>
+        </div>
+        <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay &amp; Connect Internet &rarr;</button>
+      </form>
+    </div>
+
+    <!-- TAB 3: VOUCHER CODE -->
+    <div id="sec_voucher" class="sec">
+      <form action="$(link-login-only)" method="post">
+        <input type="hidden" name="password" value="123">
+        <input type="hidden" name="dst" value="https://www.google.com">
+        <div class="field">
+          <label class="lbl">Voucher or Access Code</label>
+          <input class="inp" type="text" name="username" value="" placeholder="Enter voucher code" required style="text-transform:uppercase;letter-spacing:1px;">
+        </div>
+        <button type="submit" class="btn-emerald">Activate Voucher &amp; Connect &rarr;</button>
+      </form>
+    </div>
+  </div>
+
+  <footer class="ftr">
+    <span>IP: $(ip) · MAC: $(mac) · Powered by ${brandTitle || 'T-Connect'}</span>
+  </footer>
+</main>
+
+<script>
+  var currentTab = '${defaultTab}';
+  var selectedPlanPrice = ${plans[0]?.price || 10};
+  var selectedPlanName = '${String(plans[0]?.name || 'Daily Pass').replace(/'/g, '')}';
+  var selectedGw = 'ecocash';
+  var mtError = "$(error)";
+  if (mtError && mtError.indexOf("$(") === -1 && mtError.trim().length > 0) {
+    var eb = document.getElementById('errBox');
+    if (eb) { eb.style.display = 'block'; eb.textContent = mtError; }
+  }
+
+  function switchTab(tab) {
+    ['free', 'buy', 'voucher'].forEach(function(t) {
+      var btn = document.getElementById('tabBtn_' + t);
+      var sec = document.getElementById('sec_' + t);
+      if (btn) btn.className = 'tab-btn' + (t === tab ? ' active' : '');
+      if (sec) sec.className = 'sec' + (t === tab ? ' active' : '');
+    });
+  }
+
+  function selectPlan(id, price, name, el) {
+    selectedPlanPrice = price;
+    selectedPlanName = name;
+    var items = document.querySelectorAll('.plan-item');
+    for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
+    if (el) el.classList.add('selected');
+  }
+
+  function selectGw(gw, el) {
+    selectedGw = gw;
+    var btns = document.querySelectorAll('.gw-btn');
+    for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+    if (el) el.classList.add('active');
+    var lbl = document.getElementById('payInputLabel');
+    var inp = document.getElementById('payInputVal');
+    if (gw === 'ottvoucher') {
+      lbl.textContent = '12-Digit OTT Voucher PIN';
+      inp.placeholder = 'Enter 12-digit OTT PIN';
+    } else if (gw === 'mywallet') {
+      lbl.textContent = 'Vodacom M-Pesa Number (+266)';
+      inp.placeholder = 'Enter M-Pesa phone number';
+    } else {
+      lbl.textContent = 'EcoCash Number (+266)';
+      inp.placeholder = 'Enter EcoCash phone number';
+    }
+  }
+
+  function handleFreeSubmit(e) {
+    try {
+      var fName = document.getElementById('freeFirst') ? document.getElementById('freeFirst').value : '';
+      var lName = document.getElementById('freeLast') ? document.getElementById('freeLast').value : '';
+      var cc = document.getElementById('freeCc') ? document.getElementById('freeCc').value : '+266';
+      var ph = document.getElementById('freePhone') ? document.getElementById('freePhone').value : '';
+      var em = document.getElementById('freeEmail') ? document.getElementById('freeEmail').value : '';
+      fetch('${baseUrl}/api/portal/guest-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: fName,
+          lastName: lName,
+          countryCode: cc,
+          phone: ph,
+          email: em,
+          mac: '$(mac)',
+          ip: '$(ip)',
+          scope: '${scope}',
+          mode: 'free'
+        })
+      }).catch(function(){});
+    } catch (err) {}
+    return true;
+  }
+
+  function handleBuySubmit(e) {
+    e.preventDefault();
+    var btn = document.getElementById('buySubmitBtn');
+    var val = document.getElementById('payInputVal').value;
+    if (btn) { btn.disabled = true; btn.textContent = 'Authorizing Payment & Unlocking...'; }
+    fetch('${baseUrl}/api/gateways/' + selectedGw + '/charge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: val,
+        ottPin: val,
+        amount: selectedPlanPrice,
+        planName: selectedPlanName,
+        currency: 'M'
+      })
+    }).then(function() {
+      document.getElementById('buyForm').submit();
+    }).catch(function() {
+      document.getElementById('buyForm').submit();
+    });
+    return false;
+  }
+</script>
+</body>
+</html>`;
+}
+
+// Serve compiled On-Router Splash Page HTML directly to MikroTik (/tool fetch)
+app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const scope = (req.query.scope as string) || 'hotspot';
+  const html = compileRouterSplashHtml(host, protocol, scope);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
+
+app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected - T-Connect</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>Connected to Internet!</h2><p>Your device ($(ip)) is now online.</p><a href="https://www.google.com">Continue Browsing &rarr;</a></div></body></html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
+
+// Guest session / lead capture endpoint from On-Router Splash Page
+const liveGuestEvents: Array<any> = [];
+app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
+  const entry = {
+    id: `guest_${Date.now()}`,
+    ...req.body,
+    capturedAt: new Date().toISOString()
+  };
+  liveGuestEvents.unshift(entry);
+  if (liveGuestEvents.length > 200) liveGuestEvents.pop();
+  res.json({ success: true, entry });
+});
+
+app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
+  res.json({ success: true, events: liveGuestEvents });
+});
 
 app.get('/api/portal/config', (_req: Request, res: Response) => {
   try {
@@ -155,20 +637,49 @@ app.get('/api/portal/config', (_req: Request, res: Response) => {
 
 app.post('/api/portal/config', (req: Request, res: Response) => {
   try {
-    const { scope, config, configs } = req.body || {};
-    let existing: Record<string, any> = {};
-    if (fs.existsSync(portalConfigFilePath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(portalConfigFilePath, 'utf-8'));
-      } catch {}
-    }
+    const { scope, config, configs, applyToAllRouters } = req.body || {};
+    const host = req.get('host') || '169.58.98.92:3000';
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const portalBaseUrl = `${protocol}://${host}`;
+
+    let existing: Record<string, any> = loadSavedPortalConfigs();
     if (configs && typeof configs === 'object') {
       existing = { ...existing, ...configs };
     } else if (scope && config) {
       existing[scope] = config;
+      // If admin toggled Free Access with applyToAllRouters, propagate allowFreeAccess across all scopes
+      if (applyToAllRouters && typeof config.allowFreeAccess === 'boolean') {
+        Object.keys(existing).forEach((k) => {
+          if (existing[k] && typeof existing[k] === 'object') {
+            existing[k].allowFreeAccess = config.allowFreeAccess;
+          }
+        });
+      }
     }
     fs.writeFileSync(portalConfigFilePath, JSON.stringify(existing, null, 2), 'utf-8');
-    res.json({ success: true, configs: existing });
+
+    // Determine effective Free Access state and queue real-time sync commands to all monitored routers
+    const activeCfg = (scope && config) ? config : (existing.hotspot || Object.values(existing)[0] || {});
+    const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
+
+    const syncCommands = [
+      `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+      allowFree
+        ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User" } } on-error={}`
+        : `:do { /ip hotspot user remove [find name="T-TRIAL"]; /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
+      allowFree
+        ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie } on-error={}`
+        : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`
+    ];
+
+    for (const router of monitoredRouters.values()) {
+      router.accessMode = allowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+      router.pendingCommands = syncCommands;
+      router.policyLastSyncedAt = new Date().toISOString();
+    }
+
+    res.json({ success: true, configs: existing, allowFreeAccess: allowFree, syncedRouters: monitoredRouters.size });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -418,6 +929,8 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   res.send(script);
 };
 
+app.get('/adopt.rsc', handleAdoptRsc);
+app.post('/adopt.rsc', handleAdoptRsc);
 app.get('/api/devices/:routerId/adopt.rsc', handleAdoptRsc);
 app.post('/api/devices/:routerId/adopt.rsc', handleAdoptRsc);
 
@@ -503,6 +1016,66 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
     receivedAt: new Date().toISOString(),
     commands: pendingCmds
   });
+});
+
+// RouterOS .rsc Heartbeat & Real-Time Command Sync Endpoint (Imported every 15s by tc-heartbeat)
+app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const body = req.body || {};
+  const query = req.query || {};
+
+  const cpu = Number(body.cpu ?? query.cpu ?? 3);
+  const memory = Number(body.mem ?? body.memory ?? query.mem ?? 22);
+  const uptime = String(body.uptime ?? query.uptime ?? '1h');
+  const sessions = Number(body.sessions ?? body.activeSessions ?? query.sessions ?? 0);
+  const wanIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
+  const now = Date.now();
+
+  let router = monitoredRouters.get(routerId);
+  if (!router) {
+    router = {
+      id: routerId,
+      name: `MikroTik-${routerId.slice(-6)}`,
+      siteName: 'Hotspot Site',
+      status: 'online',
+      publicWanIp: wanIp,
+      wireguardIp: '10.99.1.50',
+      lastHeartbeat: 'Just now',
+      lastHeartbeatTimestamp: now,
+      uptime,
+      cpuLoad: cpu,
+      memoryUsage: memory,
+      activeSessions: sessions,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291
+    };
+    monitoredRouters.set(routerId, router);
+  } else {
+    router.status = 'online';
+    router.lastHeartbeat = 'Just now';
+    router.lastHeartbeatTimestamp = now;
+    router.uptime = uptime;
+    router.cpuLoad = cpu;
+    router.memoryUsage = memory;
+    router.activeSessions = sessions;
+    router.missedBeats = 0;
+    router.publicWanIp = wanIp;
+    router.offlineSince = undefined;
+    router.offlineReason = undefined;
+  }
+
+  const pendingCmds = router.pendingCommands && router.pendingCommands.length > 0
+    ? [...router.pendingCommands]
+    : [];
+  router.pendingCommands = [];
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  if (pendingCmds.length > 0) {
+    res.send(`# T-Connect Real-Time Policy Sync\n${pendingCmds.join('\n')}\n`);
+  } else {
+    res.send(`# T-Connect Heartbeat OK\n`);
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -965,6 +1538,21 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     router.pendingCommands = commands;
   }
 
+  // Also synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
+  try {
+    const existingConfigs = loadSavedPortalConfigs();
+    const allowFree = validMode !== 'PAID_ONLY';
+    Object.keys(existingConfigs).forEach((k) => {
+      if (existingConfigs[k] && typeof existingConfigs[k] === 'object') {
+        existingConfigs[k].allowFreeAccess = allowFree;
+      }
+    });
+    if (!existingConfigs.hotspot) {
+      existingConfigs.hotspot = { allowFreeAccess: allowFree };
+    }
+    fs.writeFileSync(portalConfigFilePath, JSON.stringify(existingConfigs, null, 2), 'utf-8');
+  } catch {}
+
   recordServerAudit({
     category: 'router_config',
     action: 'router.access_policy_push',
@@ -1001,11 +1589,41 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
 
 app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   const { routerIds, vertical, accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb } = req.body;
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = `${protocol}://${host}`;
+
   const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const duration = Number(freeDurationMinutes) || 30;
   const rateLimit = freeRateLimit || '10M/30M';
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
+  const allowFree = validMode !== 'PAID_ONLY';
+
+  // Synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal immediately hide/show Free Trial
+  try {
+    const existingConfigs = loadSavedPortalConfigs();
+    Object.keys(existingConfigs).forEach((k) => {
+      if (existingConfigs[k] && typeof existingConfigs[k] === 'object') {
+        existingConfigs[k].allowFreeAccess = allowFree;
+      }
+    });
+    if (!existingConfigs.hotspot) {
+      existingConfigs.hotspot = { allowFreeAccess: allowFree };
+    }
+    fs.writeFileSync(portalConfigFilePath, JSON.stringify(existingConfigs, null, 2), 'utf-8');
+  } catch {}
+
+  const syncCommands = [
+    `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
+    `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+    allowFree
+      ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=${duration}m comment="T-Connect Free Trial Auth User" } } on-error={}`
+      : `:do { /ip hotspot user remove [find name="T-TRIAL"]; /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
+    allowFree
+      ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie } on-error={}`
+      : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`
+  ];
 
   let affectedRouters: MonitoredRouter[] = [];
 
@@ -1018,6 +1636,7 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
       router.freeRateLimit = rateLimit;
       router.freeDailyQuotaMb = quota;
       router.policyLastSyncedAt = now;
+      router.pendingCommands = syncCommands;
       affectedRouters.push(router);
     }
   }
@@ -1038,6 +1657,7 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   res.json({
     success: true,
     accessMode: validMode,
+    allowFreeAccess: allowFree,
     updatedCount: affectedRouters.length,
     routerIds: affectedRouters.map(r => r.id),
     appliedAt: now,

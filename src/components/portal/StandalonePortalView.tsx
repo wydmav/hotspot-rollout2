@@ -57,27 +57,38 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     stadium: loadLocalScopeConfig('stadium')
   }));
 
-  // Fetch live splash configuration saved on the VPS server so guest phones see the admin's exact customization
+  // Poll live splash configuration saved on the VPS server so guest phones see admin customization & Free Access toggle in real time
   useEffect(() => {
-    fetch('/api/portal/config')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.success && data?.configs && typeof data.configs === 'object') {
-          setScopeConfigs((prev) => ({
-            ...prev,
-            ...data.configs
-          }));
-        }
-      })
-      .catch(() => {});
+    let mounted = true;
+    const fetchConfig = () => {
+      fetch('/api/portal/config')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted) return;
+          if (data?.success && data?.configs && typeof data.configs === 'object') {
+            setScopeConfigs((prev) => ({
+              ...prev,
+              ...data.configs
+            }));
+          }
+        })
+        .catch(() => {});
+    };
+    fetchConfig();
+    const timer = setInterval(fetchConfig, 4000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, []);
 
   const currentConfig = scopeConfigs[activeScope] || DEFAULT_SCOPE_CONFIGS.hotspot;
   const activeMeta = SCOPE_LIST.find((s) => s.id === activeScope) || SCOPE_LIST[0];
+  const isFreeAccessAllowed = currentConfig.allowFreeAccess !== false;
 
   // MikroTik Hotspot URL Parameters passed from hotspot/login.html redirect
-  const [clientMac, setClientMac] = useState('AA:BB:CC:DD:EE:FF');
-  const [clientIp, setClientIp] = useState('10.10.0.55');
+  const [clientMac, setClientMac] = useState('');
+  const [clientIp, setClientIp] = useState('');
   const [linkLoginOnly, setLinkLoginOnly] = useState(`http://${routerGatewayIp}/login`);
   const [userOrigUrl, setUserOrigUrl] = useState('https://www.google.com');
 
@@ -101,14 +112,23 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   }, [routerGatewayIp]);
 
   // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'usage'
-  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'usage'>('identification');
+  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'usage'>(
+    isFreeAccessAllowed ? 'identification' : 'voucher'
+  );
 
-  // Guest Registration Fields
-  const [guestFirstName, setGuestFirstName] = useState('Katleho');
-  const [guestSurname, setGuestSurname] = useState('Molapo');
+  // Immediately hide Free Access step if Admin turns off Free Access Mode in real time
+  useEffect(() => {
+    if (!isFreeAccessAllowed && portalStep === 'identification') {
+      setPortalStep('voucher');
+    }
+  }, [isFreeAccessAllowed, portalStep]);
+
+  // Guest Registration Fields (100% empty initial state — zero pre-filled names or numbers)
+  const [guestFirstName, setGuestFirstName] = useState('');
+  const [guestSurname, setGuestSurname] = useState('');
   const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
-  const [guestPhone, setGuestPhone] = useState('58001234');
-  const [guestEmail, setGuestEmail] = useState('katleho@gmail.com');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
 
   // Plan & Payment State
   const enabledPlans = currentConfig.plans.filter((p) => p.enabled);
@@ -392,9 +412,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* STEP 1: GUEST SIGN-UP & INSTANT ACCESS                            */}
+          {/* STEP 1: GUEST SIGN-UP & INSTANT ACCESS (Only when Free Access ON) */}
           {/* ================================================================= */}
-          {portalStep === 'identification' && (
+          {portalStep === 'identification' && isFreeAccessAllowed && (
             <div
               className="rounded-3xl p-5 sm:p-6 border border-white/20 shadow-2xl backdrop-blur-xl space-y-3.5 text-left"
               style={{
@@ -409,7 +429,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Zap className="w-3.5 h-3.5" />
-                  <span>Guest Login</span>
+                  <span>Free Wi-Fi</span>
                 </button>
                 <button
                   type="button"
@@ -440,7 +460,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       required
                       value={guestFirstName}
                       onChange={(e) => setGuestFirstName(e.target.value)}
-                      placeholder="Katleho"
+                      placeholder="First name"
                       className="w-full px-3 py-2 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-xl text-white text-xs font-mono focus:outline-none"
                     />
                   </div>
@@ -453,7 +473,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       required
                       value={guestSurname}
                       onChange={(e) => setGuestSurname(e.target.value)}
-                      placeholder="Molapo"
+                      placeholder="Surname"
                       className="w-full px-3 py-2 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-xl text-white text-xs font-mono focus:outline-none"
                     />
                   </div>
@@ -479,7 +499,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       required
                       value={guestPhone}
                       onChange={(e) => setGuestPhone(e.target.value)}
-                      placeholder={guestCountryCode === '+266' ? '58001234' : '0712345678'}
+                      placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
                       className="w-full px-3 py-2 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-xl text-white text-xs font-mono focus:outline-none"
                     />
                   </div>
@@ -516,7 +536,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 text-white font-black text-xs font-mono rounded-xl shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Zap className="w-4 h-4 fill-current text-white" />
-                  <span>{isConnecting ? 'Connecting...' : 'Connect Free (30 Mins Trial) \u2192'}</span>
+                  <span>{isConnecting ? 'Connecting...' : (currentConfig.buttonText || 'Connect Free (30 Mins Trial) \u2192')}</span>
                 </button>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -540,7 +560,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* STEP 2: VOUCHER / TEST USER LOGIN                                 */}
+          {/* STEP 2: VOUCHER / ACCESS CODE LOGIN                               */}
           {/* ================================================================= */}
           {portalStep === 'voucher' && (
             <form
@@ -550,6 +570,36 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 88) / 100})`
               }}
             >
+              {/* Mode Quick Tabs */}
+              <div className={`grid ${isFreeAccessAllowed ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10 font-mono text-[11px]`}>
+                {isFreeAccessAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPortalStep('identification')}
+                    className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Free Wi-Fi</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPortalStep('voucher')}
+                  className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Ticket className="w-3.5 h-3.5" />
+                  <span>Voucher Code</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortalStep('plan')}
+                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Buy Pass</span>
+                </button>
+              </div>
+
               <div className="flex items-center justify-between border-b border-white/10 pb-2">
                 <div className="flex items-center gap-2">
                   <Ticket className="w-4 h-4 text-emerald-400" />
@@ -557,31 +607,33 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     Redeem Voucher or Access Code
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('identification')}
-                  className="text-xs text-slate-400 hover:text-white font-mono cursor-pointer"
-                >
-                  &larr; Back
-                </button>
+                {isFreeAccessAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPortalStep('identification')}
+                    className="text-xs text-slate-400 hover:text-white font-mono cursor-pointer"
+                  >
+                    &larr; Back
+                  </button>
+                )}
               </div>
 
               <div>
                 <label className="text-[11px] font-mono text-slate-300 block mb-1.5">
-                  Voucher Code or Test Username
+                  Voucher Code
                 </label>
                 <input
                   type="text"
                   value={voucherCode}
                   onChange={(e) => setVoucherCode(e.target.value)}
-                  placeholder="Enter voucher or type: test"
+                  placeholder="Enter voucher code (e.g. TC-XXXX)"
                   className="w-full px-3.5 py-2.5 bg-black/50 border border-white/25 focus:border-emerald-400 rounded-xl text-white text-sm font-mono tracking-wider uppercase focus:outline-none"
                 />
                 {voucherError && (
                   <p className="text-[11px] text-red-400 font-mono mt-1.5">{voucherError}</p>
                 )}
                 <p className="text-[10px] text-slate-400 font-mono mt-1.5">
-                  Tip: Enter <strong className="text-emerald-300">test</strong> or any active <strong className="text-amber-300">TC-XXXX</strong> voucher code.
+                  Enter your active T-Connect voucher code to unlock high-speed access.
                 </p>
               </div>
 
@@ -606,13 +658,43 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 88) / 100})`
               }}
             >
+              {/* Mode Quick Tabs */}
+              <div className={`grid ${isFreeAccessAllowed ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10 font-mono text-[11px]`}>
+                {isFreeAccessAllowed && (
+                  <button
+                    type="button"
+                    onClick={() => setPortalStep('identification')}
+                    className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Free Wi-Fi</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPortalStep('voucher')}
+                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Ticket className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Voucher Code</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortalStep('plan')}
+                  className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Buy Pass</span>
+                </button>
+              </div>
+
               <div className="flex items-center justify-between border-b border-white/10 pb-2">
                 <span className="text-xs font-bold text-white font-mono uppercase">
                   Select {activeMeta.label} Pass
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPortalStep('identification')}
+                  onClick={() => setPortalStep(isFreeAccessAllowed ? 'identification' : 'voucher')}
                   className="text-xs text-slate-400 hover:text-white font-mono cursor-pointer"
                 >
                   &larr; Back

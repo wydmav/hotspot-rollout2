@@ -19,8 +19,8 @@ import {
   PlatformRole
 } from '../types';
 
-// Updated storage key for pristine scratch state
-const STORAGE_KEY = 'tconnect_controller_scratch_state_v4';
+// Updated storage key for 100% clean state (zero sample sessions, leads, tenants, or logs)
+const STORAGE_KEY = 'tconnect_controller_clean_state_v5';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
@@ -93,7 +93,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     bearerToken: '',
     merchantId: '',
     webhookSecret: '',
-    webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/ecocash',
+    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ecocash',
     successRate24h: 0,
     avgLatencyMs: 0,
     testPassedOnce: false
@@ -111,7 +111,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     bearerToken: '',
     merchantId: '',
     webhookSecret: '',
-    webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/mywallet',
+    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/mywallet',
     successRate24h: 0,
     avgLatencyMs: 0,
     testPassedOnce: false
@@ -132,7 +132,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     bearerToken: '',
     merchantId: 'TCONNECTLES1',
     webhookSecret: '',
-    webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/ottvoucher',
+    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ottvoucher',
     successRate24h: 0,
     avgLatencyMs: 0,
     testPassedOnce: false
@@ -150,7 +150,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     bearerToken: '',
     merchantId: '',
     webhookSecret: '',
-    webhookUrl: 'https://app.tconnect.co.ls/api/webhooks/xpayments',
+    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/xpayments',
     successRate24h: 0,
     avgLatencyMs: 0,
     testPassedOnce: false
@@ -168,18 +168,6 @@ export const INITIAL_TEAM: TeamMember[] = [
     status: 'active',
     invitedAt: '2026-10-02',
     lastLoginAt: 'Just now'
-  },
-  {
-    id: 'tm_backup_bern',
-    name: 'Raphooko Backup',
-    email: 'bernphooko@proton.me',
-    role: 'Viewer',
-    scopedSites: ['Maseru Golf Course'],
-    mfaEnabled: false,
-    status: 'invited',
-    invitedAt: '2026-10-17',
-    inviteToken: 'inv_backup_bernphooko',
-    tempPassword: 'TC-2849-BKUP!'
   }
 ];
 
@@ -222,38 +210,8 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
   }
 ];
 
-export const STARTER_TENANT_GROUPS: TenantGroup[] = [
-  {
-    id: 'grp_maluti_resorts',
-    name: 'Maluti Mountain Resorts',
-    tag: 'client:maluti-resorts',
-    customBgUrl: 'https://images.unsplash.com/photo-1542314831-c6a4d2720967?auto=format&fit=crop&w=1200&q=80',
-    clientContact: 'hospitality@malutiresorts.co.ls',
-    accentColor: '#3b82f6',
-    description: 'Luxury highlands resort chain with tailored mountain lodge welcome screen.',
-    createdAt: '2026-10-01'
-  },
-  {
-    id: 'grp_cafe_nero',
-    name: 'Café Nero Maseru',
-    tag: 'client:cafe-nero',
-    customBgUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80',
-    clientContact: 'gm@cafenero.ls',
-    accentColor: '#f59e0b',
-    description: 'Artisan espresso bars across Pioneer Mall & Maseru Mall.',
-    createdAt: '2026-10-05'
-  },
-  {
-    id: 'grp_lesotho_transit',
-    name: 'Maseru Metro Coaches',
-    tag: 'client:metro-coaches',
-    customBgUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80',
-    clientContact: 'fleet@metrocoaches.co.ls',
-    accentColor: '#10b981',
-    description: 'Inter-district bus fleet with branded transit passenger splash portal.',
-    createdAt: '2026-10-08'
-  }
-];
+// Clean empty arrays: only user-created records exist
+export const STARTER_TENANT_GROUPS: TenantGroup[] = [];
 
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers
@@ -277,239 +235,14 @@ export const WALLED_GARDEN_DOMAINS = [
   'play.googleapis.com',
   'msftconnecttest.com',
   'www.msftncsi.com',
-  'detectportal.firefox.com',
-  // Controller Endpoints
-  'app.tconnect.co.ls',
-  'hub.tconnect.co.ls'
+  'detectportal.firefox.com'
 ];
 
-export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [
-  {
-    id: 'sess_live_01',
-    voucherCode: 'FREE-1234',
-    clientMac: 'F4:D4:88:51:22:90',
-    clientIp: '10.89.1.50',
-    deviceType: 'Apple iPhone (iOS 17)',
-    siteName: 'Maseru Central Cafe',
-    vertical: 'hotspot',
-    routerName: 'Hotspot-Maseru-01',
-    planName: 'Free Access (30 Mins)',
-    startedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
-    expiresAt: new Date(Date.now() + 16 * 60 * 1000).toISOString(),
-    remainingSeconds: 16 * 60,
-    bytesDown: 48200000,
-    bytesUp: 9400000,
-    speedLimit: '5M/2.5M',
-    guestName: 'Katleho Molapo',
-    guestPhone: '+266 5800 1234',
-    guestEmail: 'katleho.molapo@gmail.com',
-    authMode: 'free'
-  },
-  {
-    id: 'sess_live_02',
-    voucherCode: 'VCH-7821-M10',
-    clientMac: '40:B0:76:A2:99:31',
-    clientIp: '10.89.2.14',
-    deviceType: 'Samsung Galaxy A54 (Android 14)',
-    siteName: 'Thaba-Tseka Community Mesh',
-    vertical: 'village',
-    routerName: 'Village-Mesh-01',
-    planName: 'Daily Pass (Unlimited)',
-    startedAt: new Date(Date.now() - 48 * 60 * 1000).toISOString(),
-    expiresAt: new Date(Date.now() + 23 * 3600 * 1000).toISOString(),
-    remainingSeconds: 23 * 3600,
-    bytesDown: 185000000,
-    bytesUp: 34000000,
-    speedLimit: '10M/5M',
-    guestName: 'Tsepiso Lerotholi',
-    guestPhone: '+266 6200 4567',
-    guestEmail: 'tsepiso.lerotholi@tconnect.ls',
-    authMode: 'voucher'
-  },
-  {
-    id: 'sess_live_03',
-    voucherCode: 'FREE-5678',
-    clientMac: 'B8:27:EB:04:19:D2',
-    clientIp: '10.89.3.88',
-    deviceType: 'HP Spectre x360 (Windows 11)',
-    siteName: 'Setsoto Stadium Arena',
-    vertical: 'stadium',
-    routerName: 'Stadium-Arena-02',
-    planName: 'Free Access (30 Mins)',
-    startedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 1000).toISOString(),
-    remainingSeconds: 24 * 60,
-    bytesDown: 22100000,
-    bytesUp: 4100000,
-    speedLimit: '5M/2.5M',
-    guestName: 'Sipho Dlamini',
-    guestPhone: '+27 71 234 5678',
-    guestEmail: 'sipho.dlamini@vodamail.co.za',
-    authMode: 'free'
-  }
-];
+export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [];
 
-export const INITIAL_CAPTIVE_LEADS: CaptivePortalLead[] = [
-  {
-    id: 'lead_cna_01',
-    firstName: 'Katleho',
-    lastName: 'Molapo',
-    fullName: 'Katleho Molapo',
-    countryCode: '+266',
-    phone: '58001234',
-    fullPhone: '+266 5800 1234',
-    email: 'katleho.molapo@gmail.com',
-    capturedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
-    routerName: 'Hotspot-Maseru-01',
-    siteName: 'Maseru Central Cafe',
-    vertical: 'hotspot',
-    clientMac: 'F4:D4:88:51:22:90',
-    clientIp: '10.89.1.50',
-    deviceType: 'Apple iPhone (iOS 17)',
-    durationMinutes: 30,
-    status: 'active'
-  },
-  {
-    id: 'lead_cna_02',
-    firstName: 'Sipho',
-    lastName: 'Dlamini',
-    fullName: 'Sipho Dlamini',
-    countryCode: '+27',
-    phone: '0712345678',
-    fullPhone: '+27 071 234 5678',
-    email: 'sipho.dlamini@vodamail.co.za',
-    capturedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
-    routerName: 'Stadium-Arena-02',
-    siteName: 'Setsoto Stadium Arena',
-    vertical: 'stadium',
-    clientMac: 'B8:27:EB:04:19:D2',
-    clientIp: '10.89.3.88',
-    deviceType: 'HP Spectre x360 (Windows 11)',
-    durationMinutes: 30,
-    status: 'active'
-  },
-  {
-    id: 'lead_cna_03',
-    firstName: 'Lerato',
-    lastName: 'Khatleli',
-    fullName: 'Lerato Khatleli',
-    countryCode: '+266',
-    phone: '62009876',
-    fullPhone: '+266 6200 9876',
-    email: 'lerato.k@outlook.com',
-    capturedAt: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
-    routerName: 'MikroTik-Node',
-    siteName: 'Pioneer Mall Express',
-    vertical: 'hotspot',
-    clientMac: '7A:91:02:11:44:99',
-    clientIp: '10.89.1.45',
-    deviceType: 'Samsung Galaxy A54 (Android 14)',
-    durationMinutes: 30,
-    status: 'expired'
-  }
-];
+export const INITIAL_CAPTIVE_LEADS: CaptivePortalLead[] = [];
 
-export const INITIAL_CONNECTION_ATTEMPTS: ConnectionAttemptLog[] = [
-  {
-    id: 'att_01',
-    timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-    routerId: 'rt_central_01',
-    routerName: 'Maseru Central hAP ax³',
-    clientMac: 'F4:D4:88:51:22:90',
-    clientIp: '10.89.1.50',
-    deviceType: 'Apple iPhone 15 Pro (iOS 17.4)',
-    clientOs: 'ios',
-    destinationUrl: 'http://captive.apple.com/hotspot-detect.html',
-    redirectStatus: 'portal_loaded',
-    httpCode: 200,
-    reachedPortal: true,
-    latencyMs: 14,
-    debugHint: 'RFC 8910 Option 114 CNA discovery triggered system splash window successfully.',
-    assignedSpeedLimit: '30M/10M'
-  },
-  {
-    id: 'att_02',
-    timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    routerId: 'rt_central_01',
-    routerName: 'Maseru Central hAP ax³',
-    clientMac: '2C:54:CF:88:12:04',
-    clientIp: '10.89.1.52',
-    deviceType: 'Samsung Galaxy S24 (Android 14)',
-    clientOs: 'android',
-    destinationUrl: 'http://connectivitycheck.gstatic.com/generate_204',
-    redirectStatus: 'portal_loaded',
-    httpCode: 200,
-    reachedPortal: true,
-    latencyMs: 18,
-    debugHint: 'Android CaptivePortalLogin component intercepted HTTP 302 and displayed portal.',
-    assignedSpeedLimit: '30M/10M'
-  },
-  {
-    id: 'att_03',
-    timestamp: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
-    routerId: 'rt_leribe_02',
-    routerName: 'Leribe Pitso Hub (v7)',
-    clientMac: '7A:91:02:11:44:99',
-    clientIp: '10.89.2.14',
-    deviceType: 'Dell XPS 15 (Windows 11)',
-    clientOs: 'windows',
-    destinationUrl: 'http://www.msftconnecttest.com/connecttest.txt',
-    redirectStatus: 'cna_302_issued',
-    httpCode: 302,
-    reachedPortal: true,
-    latencyMs: 22,
-    debugHint: 'Windows NCSI active probe received HTTP 302 redirect to central controller URL.',
-    assignedSpeedLimit: '30M/10M'
-  },
-  {
-    id: 'att_04',
-    timestamp: new Date(Date.now() - 19 * 60 * 1000).toISOString(),
-    routerId: 'rt_central_01',
-    routerName: 'Maseru Central hAP ax³',
-    clientMac: '48:D7:05:92:41:BB',
-    clientIp: '10.89.1.61',
-    deviceType: 'Apple iPad Air (iPadOS 17)',
-    clientOs: 'ios',
-    destinationUrl: 'http://8.8.8.8/test',
-    redirectStatus: 'dns_timeout',
-    httpCode: 504,
-    reachedPortal: false,
-    latencyMs: 1240,
-    debugHint: 'Client configured with hardcoded static DNS (8.8.8.8). DNS intercept dstnat rule intercepted query.',
-  },
-  {
-    id: 'att_05',
-    timestamp: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-    routerId: 'rt_central_01',
-    routerName: 'Maseru Central hAP ax³',
-    clientMac: '90:B6:86:14:8A:71',
-    clientIp: '10.89.1.68',
-    deviceType: 'Google Pixel 8 (Android 14)',
-    clientOs: 'android',
-    destinationUrl: 'https://bank.fnb.co.za/login',
-    redirectStatus: 'ssl_blocked',
-    httpCode: 495,
-    reachedPortal: false,
-    latencyMs: 310,
-    debugHint: 'Client attempted direct HTTPS navigation before splash authentication. CNA fallback initiated.',
-  },
-  {
-    id: 'att_06',
-    timestamp: new Date(Date.now() - 36 * 60 * 1000).toISOString(),
-    routerId: 'rt_central_01',
-    routerName: 'Maseru Central hAP ax³',
-    clientMac: 'F4:D4:88:51:22:90',
-    clientIp: '10.89.1.50',
-    deviceType: 'Apple iPhone 15 Pro (iOS 17.4)',
-    clientOs: 'ios',
-    destinationUrl: 'https://mpesa.vodacom.co.ls/ipg/pay',
-    redirectStatus: 'walled_garden_allowed',
-    httpCode: 200,
-    reachedPortal: false,
-    latencyMs: 16,
-    debugHint: 'Vodacom M-Pesa Lesotho payment API accessed under pre-auth walled garden whitelist.',
-  }
-];
+export const INITIAL_CONNECTION_ATTEMPTS: ConnectionAttemptLog[] = [];
 
 class StorageService {
   private state: {
@@ -573,32 +306,40 @@ class StorageService {
             parsed.team = INITIAL_TEAM;
           }
 
-          if (!parsed.tenantGroups || !Array.isArray(parsed.tenantGroups) || parsed.tenantGroups.length === 0) {
-            parsed.tenantGroups = STARTER_TENANT_GROUPS;
-          }
-          if (parsed.routers && Array.isArray(parsed.routers)) {
-            parsed.routers = parsed.routers.map((r: any) => ({
-              ...r,
-              district: r.district || 'Maseru',
-              physicalAddress: r.physicalAddress || r.siteName || 'Maseru Central Hub'
-            }));
-          }
-          if (!parsed.activeSessions || !Array.isArray(parsed.activeSessions) || parsed.activeSessions.length === 0) {
-            parsed.activeSessions = INITIAL_ACTIVE_SESSIONS;
-          }
-          if (!parsed.captiveLeads || !Array.isArray(parsed.captiveLeads) || parsed.captiveLeads.length === 0) {
-            parsed.captiveLeads = INITIAL_CAPTIVE_LEADS;
-          }
-          if (!parsed.connectionAttempts || !Array.isArray(parsed.connectionAttempts) || parsed.connectionAttempts.length === 0) {
-            parsed.connectionAttempts = INITIAL_CONNECTION_ATTEMPTS;
-          }
+          if (!Array.isArray(parsed.tenantGroups)) parsed.tenantGroups = [];
+          if (!Array.isArray(parsed.activeSessions)) parsed.activeSessions = [];
+          if (!Array.isArray(parsed.captiveLeads)) parsed.captiveLeads = [];
+          if (!Array.isArray(parsed.connectionAttempts)) parsed.connectionAttempts = [];
           return parsed;
+        }
+
+        // Migrate only user-adopted routers and vouchers from v4 if present, dropping all sample sessions/leads/tenants
+        const prevStored = window.localStorage.getItem('tconnect_controller_scratch_state_v4');
+        if (prevStored) {
+          const prev = JSON.parse(prevStored);
+          const cleanMigrated = {
+            plans: Array.isArray(prev.plans) && prev.plans.length > 0 ? prev.plans : STARTER_PLANS,
+            routers: Array.isArray(prev.routers) ? prev.routers : [],
+            gateways: Array.isArray(prev.gateways) && prev.gateways.length > 0 ? prev.gateways : UNCONFIGURED_GATEWAYS,
+            transactions: Array.isArray(prev.transactions) ? prev.transactions : [],
+            vouchers: Array.isArray(prev.vouchers) ? prev.vouchers : [],
+            alerts: [],
+            team: INITIAL_TEAM,
+            auditLogs: [],
+            contentFilters: INITIAL_CONTENT_FILTERS,
+            tenantGroups: [],
+            activeSessions: [],
+            captiveLeads: [],
+            connectionAttempts: []
+          };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanMigrated));
+          return cleanMigrated;
         }
       } catch {
         // ignore
       }
     }
-    // Clean scratch state: 0 routers, 0 vouchers, 0 transactions, clean unconfigured gateways
+    // Clean state: 0 fake sessions, 0 fake leads, 0 fake tenants, 0 fake logs
     return {
       plans: STARTER_PLANS,
       routers: [],
@@ -609,10 +350,10 @@ class StorageService {
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
-      tenantGroups: STARTER_TENANT_GROUPS,
-      activeSessions: INITIAL_ACTIVE_SESSIONS,
-      captiveLeads: INITIAL_CAPTIVE_LEADS,
-      connectionAttempts: INITIAL_CONNECTION_ATTEMPTS
+      tenantGroups: [],
+      activeSessions: [],
+      captiveLeads: [],
+      connectionAttempts: []
     };
   }
 

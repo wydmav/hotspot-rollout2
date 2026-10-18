@@ -54,13 +54,28 @@ export class RouterOSRenderer {
   }
 
   /**
-   * Builds RouterOS commands to write the interactive T-Connect Starlink Splash Page
-   * to both hotspot/login.html and flash/hotspot/login.html (for hAP ax3 RouterOS v7).
+   * Builds RouterOS v7.16.2 compatible commands to deploy the Portal Builder Splash Page
+   * directly onto the MikroTik router (hotspot/login.html and flash/hotspot/login.html).
+   * Uses /ip hotspot reset-html and /tool fetch from the VPS (never uses invalid /file add).
    */
-  static buildSplashPageFileCommands(portalBaseUrl: string): string {
-    const html = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>T-Connect Starlink Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#080b14;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;padding:16px;background-image:radial-gradient(circle at 50% 0%,rgba(240,94,23,0.28),transparent 70%)}.top{text-align:center;padding-top:12px}.badge{display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(240,94,23,0.18);border:1px solid rgba(240,94,23,0.45);color:#fb923c;font-size:11px;font-weight:800;letter-spacing:1px;margin-bottom:8px}h1{font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#fff}.card{width:100%;max-width:390px;margin:auto;background:rgba(15,20,34,0.92);border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,0.6)}.lbl{font-size:11px;color:#cbd5e1;margin-bottom:4px;display:block;font-weight:600}.inp{width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.45);color:#fff;font-size:13px;margin-bottom:10px}.btn-free{width:100%;padding:13px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-size:13px;font-weight:900;cursor:pointer;margin-top:4px;box-shadow:0 8px 20px rgba(240,94,23,0.35)}.btn-vch{width:100%;padding:11px;border-radius:14px;border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.15);color:#34d399;font-size:12px;font-weight:800;cursor:pointer;margin-top:6px}.div{text-align:center;font-size:10px;color:#64748b;margin:12px 0;text-transform:uppercase;letter-spacing:1px}.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}.pl{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 4px;text-align:center;font-size:11px}.pl b{display:block;color:#fbbf24;font-size:13px}.vps{display:block;text-align:center;font-size:11px;color:#38bdf8;text-decoration:none;margin-top:10px;padding:8px;border-radius:10px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25)}.ftr{text-align:center;font-size:10px;color:#64748b;padding-bottom:6px}</style></head><body><div class=\\"top\\"><div class=\\"badge\\">T-CONNECT &middot; STARLINK HIGH-SPEED</div><h1>WHAT DO YOU CONNECT FOR?</h1></div><div class=\\"card\\"><form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"username\\" value=\\"T-TRIAL\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"https://www.google.com\\"><label class=\\"lbl\\">Full Name</label><input class=\\"inp\\" type=\\"text\\" placeholder=\\"Katleho Molapo\\" required><label class=\\"lbl\\">Mobile Number (Lesotho +266)</label><input class=\\"inp\\" type=\\"tel\\" placeholder=\\"+266 5800 1234\\" required><button type=\\"submit\\" class=\\"btn-free\\">&#9889; Connect Free (30 Mins Trial) &rarr;</button></form><div class=\\"div\\">Or Redeem Voucher / Access Code</div><form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"https://www.google.com\\"><input class=\\"inp\\" type=\\"text\\" name=\\"username\\" value=\\"test\\" placeholder=\\"Voucher code or type: test\\"><button type=\\"submit\\" class=\\"btn-vch\\">&#127903; Activate Voucher &amp; Unlock Internet</button></form><div class=\\"div\\">High-Speed Starlink Passes</div><div class=\\"plans\\"><div class=\\"pl\\">Daily<b>M10</b>24 Hrs</div><div class=\\"pl\\">Weekly<b>M60</b>7 Days</div><div class=\\"pl\\">Monthly<b>M280</b>30 Days</div></div><a class=\\"vps\\" href=\\"${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\">Open Full Portal &amp; Mobile Money (${portalBaseUrl.replace(/^https?:\/\//, '')}) &rarr;</a></div><div class=\\"ftr\\">IP: \\$(ip) &middot; MAC: \\$(mac) &middot; Powered by T-Connect</div></body></html>`;
+  static buildSplashPageFileCommands(portalBaseUrl: string, allowFreeAccess: boolean = true): string {
+    const cleanBaseUrl = portalBaseUrl.replace(/\/+$/, '');
+    const freeFormHtml = allowFreeAccess
+      ? `<form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"username\\" value=\\"T-TRIAL\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"\\$(link-orig-esc)\\"><label class=\\"lbl\\">First Name &amp; Surname</label><input class=\\"inp\\" type=\\"text\\" name=\\"guest_name\\" placeholder=\\"Enter your full name\\" required><label class=\\"lbl\\">Mobile Number (+266 / +27)</label><input class=\\"inp\\" type=\\"tel\\" name=\\"guest_phone\\" placeholder=\\"Enter mobile number\\" required><button type=\\"submit\\" class=\\"btn-free\\">&#9889; Connect Free Trial &rarr;</button></form><div class=\\"div\\">Or Use Voucher / Buy Pass</div>`
+      : ``;
+
+    const fallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>T-Connect Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#080b14;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;padding:16px;background-image:radial-gradient(circle at 50% 0%,rgba(240,94,23,0.28),transparent 70%)}.top{text-align:center;padding-top:12px}.badge{display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(240,94,23,0.18);border:1px solid rgba(240,94,23,0.45);color:#fb923c;font-size:11px;font-weight:800;letter-spacing:1px;margin-bottom:8px}h1{font-size:22px;font-weight:900;letter-spacing:-0.5px;color:#fff}.card{width:100%;max-width:400px;margin:auto;background:rgba(15,20,34,0.92);border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,0.6)}.lbl{font-size:11px;color:#cbd5e1;margin-bottom:4px;display:block;font-weight:600}.inp{width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.45);color:#fff;font-size:13px;margin-bottom:10px}.btn-free{width:100%;padding:13px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-size:13px;font-weight:900;cursor:pointer;margin-top:4px}.btn-vch{width:100%;padding:12px;border-radius:14px;border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.15);color:#34d399;font-size:12px;font-weight:800;cursor:pointer;margin-top:4px}.div{text-align:center;font-size:10px;color:#94a3b8;margin:12px 0;text-transform:uppercase;letter-spacing:1px}.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}.pl{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 4px;text-align:center;font-size:11px;color:#e2e8f0;text-decoration:none;display:block}.pl b{display:block;color:#fbbf24;font-size:13px}.vps{display:block;text-align:center;font-size:12px;font-weight:700;color:#fff;text-decoration:none;margin-top:10px;padding:11px;border-radius:12px;background:#f05e17}.ftr{text-align:center;font-size:10px;color:#64748b;padding-bottom:6px}</style></head><body><div class=\\"top\\"><div class=\\"badge\\">T-CONNECT HIGH-SPEED WIFI</div><h1>WELCOME TO T-CONNECT</h1></div><div class=\\"card\\">${freeFormHtml}<form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"\\$(link-orig-esc)\\"><label class=\\"lbl\\">Voucher or Access Code</label><input class=\\"inp\\" type=\\"text\\" name=\\"username\\" value=\\"\\" placeholder=\\"Enter voucher code\\" required><button type=\\"submit\\" class=\\"btn-vch\\">&#127903; Activate Voucher &amp; Connect</button></form><div class=\\"div\\">Buy High-Speed Pass (EcoCash / M-Pesa / OTT)</div><div class=\\"plans\\"><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Daily<b>M10</b>24 Hrs</a><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Weekly<b>M60</b>7 Days</a><a class=\\"pl\\" href=\\"${cleanBaseUrl}/portal?step=plan&amp;mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Monthly<b>M280</b>30 Days</a></div><a class=\\"vps\\" href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&amp;ip=\\$(ip)&amp;link_login_only=\\$(link-login-only)&amp;user_url=\\$(link-orig-esc)\\">Buy Pass with Mobile Money / OTT &rarr;</a></div><div class=\\"ftr\\">IP: \\$(ip) &middot; MAC: \\$(mac) &middot; T-Connect</div></body></html>`;
+
     return [
-      `:do { :if ([:len [/file find name~"hotspot/login.html"]] > 0) do={ /file set [find name~"hotspot/login.html"] contents="${html}" } else={ /file add name="hotspot/login.html" contents="${html}" } } on-error={ :do { /file set [find name~"login.html"] contents="${html}" } on-error={} }`
+      `# Ensure default hotspot HTML directory files exist on router storage`,
+      `:do { :if ([:len [/file find name~"login.html"]] = 0) do={ /ip hotspot reset-html [find] } } on-error={}`,
+      `# Apply immediate fallback splash HTML to existing login.html files (no /file add used)`,
+      `:do { /file set [find name~"hotspot/login.html"] contents="${fallbackHtml}" } on-error={}`,
+      `# Fetch live Portal Builder Splash Page directly from VPS controller`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-alogin.html" dst-path="hotspot/alogin.html" check-certificate=no } on-error={}`,
+      `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-alogin.html" dst-path="flash/hotspot/alogin.html" check-certificate=no } on-error={}`
     ].join('\n');
   }
 
@@ -90,6 +105,7 @@ export class RouterOSRenderer {
     const protocol = endpointProtocol || (effectiveHost.includes(':') || effectiveHost.includes('localhost') || /^\d+\.\d+\.\d+\.\d+/.test(effectiveHost) ? 'http' : 'https');
     const portalBaseUrl = `${protocol}://${effectiveHost}`;
     const cleanDomain = effectiveHost.split(':')[0];
+    const allowFree = router.accessMode !== 'PAID_ONLY' && (router.freeModeEnabled ?? true);
 
     // Helper to validate Base64 32-byte WireGuard key
     const isValidWgKey = (k?: string) => typeof k === 'string' && /^[A-Za-z0-9+/]{42,43}=*$/.test(k.trim()) && k.trim().length >= 40;
@@ -112,58 +128,59 @@ export class RouterOSRenderer {
       `:do { /system identity set name="TC-${router.name.replace(/[^a-zA-Z0-9_-]/g, '_')}" } on-error={}`,
       `/log info "T-Connect: [1/7] System Identity configured."`,
       ``,
-      `# 2. Port Configuration: Port 1 = WAN (Starlink) & Local Client Bridge`,
+      `# 2. Isolate WAN (ether1) from All Bridges so 192.168.1.x Never Leaks to WiFi/LAN`,
+      `:do { /interface bridge port remove [find interface="ether1"] } on-error={}`,
       `:do { /interface list add name=WAN comment="T-Connect WAN Interfaces" } on-error={}`,
       `:do { /interface list add name=LAN comment="T-Connect Hotspot LAN Interfaces" } on-error={}`,
-      `:do { /interface list member add list=WAN interface=ether1 comment="T-Connect WAN1: Starlink LEO Dishy" } on-error={}`,
-      `:do { /ip dhcp-client add interface=ether1 disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="Starlink WAN1 DHCP Client" } on-error={}`,
+      `:do { /interface list member add list=WAN interface=ether1 comment="T-Connect WAN1: Starlink / ISP" } on-error={}`,
+      `:do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface=ether1 disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="Starlink WAN1 DHCP Client" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}`,
       ``,
       `# 3. Hotspot Bridge Configuration (Aligned with bridgeLocal & 10.10.0.0/22)`,
       `:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={ /interface bridge add name="bridgeLocal" comment="T-Connect Hotspot & AP Local Bridge" };`,
-      `:do { /interface bridge add name="mkcontroller-bridge" fast-forward=yes comment="T-Connect Hotspot Bridge" } on-error={}`,
       `:do { /interface list member add list=LAN interface=bridgeLocal comment="T-Connect Hotspot LAN Bridge" } on-error={}`,
-      `# Bridge available local LAN ports & wireless radios for hotspot clients and access points`,
-      `:do { :if ([:len [/interface bridge port find interface="ether2" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={}`,
-      `:do { :if ([:len [/interface bridge port find interface="ether3" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={}`,
-      `:do { :if ([:len [/interface bridge port find interface="ether4" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether4" comment="tc-ap-ethernet-ether4" } } on-error={}`,
-      `:do { :if ([:len [/interface bridge port find interface="ether5" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={}`,
-      `:do { :if ([:len [/interface bridge port find interface="wifi1" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="wifi1" comment="tc-wifi1-radio-5ghz" } } on-error={}`,
-      `:do { :if ([:len [/interface bridge port find interface="wifi2" bridge="bridgeLocal"]] = 0) do={ /interface bridge port add bridge="bridgeLocal" interface="wifi2" comment="tc-wifi2-radio-2ghz" } } on-error={}`,
-      `# High-Capacity IP Address (10.10.0.1/22 - 1,022 usable hosts)`,
+      `# Reassign ether2..ether5 & wifi1..wifi2 into bridgeLocal (handles ports already in default "bridge")`,
+      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p disabled=no } } on-error={} };`,
+      `# Remove Conflicting LAN IP / DHCP / Hotspot on Factory Bridges (Preserves ether1 WAN)`,
+      `:do { /ip dhcp-server remove [find interface!="bridgeLocal"] } on-error={}`,
+      `:do { /ip hotspot remove [find interface!="bridgeLocal"] } on-error={}`,
       `:do { /ip address remove [find interface="bridgeLocal"] } on-error={}`,
+      `:do { /ip address remove [find interface="bridge"] } on-error={}`,
       `/ip address add address=10.10.0.1/22 network=10.10.0.0 interface="bridgeLocal" comment="tc-hotspot-lan-gateway"`,
       `# High-Density DHCP IP Pool (10.10.0.50 to 10.10.3.250)`,
       `:do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}`,
       `/ip pool add name="tc-hotspot-pool" ranges=10.10.0.50-10.10.3.250`,
       `# DHCP Server on bridgeLocal`,
       `:do { /ip dhcp-server remove [find interface="bridgeLocal"] } on-error={}`,
-      `:do { /ip dhcp-server network remove [find address="10.10.0.0/22"] } on-error={}`,
+      `:do { /ip dhcp-server network remove [find] } on-error={}`,
       `/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1,1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"`,
       `/ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no`,
-      `# Enable DNS Resolver & Intercept UDP DNS for Captive Portal Probes`,
+      `# Enable DNS Resolver & Intercept DNS for Captive Portal Probes`,
       `/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8`,
+      `:do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept"]] = 0) do={ /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept" } } on-error={}`,
       `# NAT Firewall Masquerade on WAN ether1`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
-      `# Hotspot Server Profile & Server on bridgeLocal (Direct IP Interception on VPS)`,
+      `# Hotspot Server Profile & Server on bridgeLocal`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
-      `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no`,
-      `# Pre-Provisioned Hotspot Auth Users for Portal & Testing (User: test / Pass: 123 & User: T-TRIAL / Pass: 123)`,
+      `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no`,
+      `# Pre-Provisioned Hotspot Auth Users`,
       `:do { /ip hotspot user remove [find name="test"] } on-error={}`,
       `/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"`,
       `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
-      `/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Trial Auth User"`,
-      `# Static Management Bypasses for APs & Admin PC`,
-      `:do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}`,
+      allowFree
+        ? `/ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User"`
+        : `# Free Trial Disabled by Admin Policy (T-TRIAL user omitted)`,
+      `# Static Management Bypasses Strictly for AP Hardware IPs (No PC bypass so test PC sees Splash Page)`,
+      `:do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}`,
       `/ip hotspot ip-binding add address=10.10.0.2 type=bypassed comment="tc-bypass-AP1-ether2"`,
       `/ip hotspot ip-binding add address=10.10.0.3 type=bypassed comment="tc-bypass-AP2-ether3"`,
-      `/ip hotspot ip-binding add address=10.10.0.5 type=bypassed comment="tc-bypass-AP3-ether5"`,
-      `/ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="tc-bypass-admin-pc"`,
-      `# RouterOS 7.16.2 wifi-qcom Radios with SSID MIKROTIK-TC`,
-      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no } } on-error={}`,
+      `/ip hotspot ip-binding add address=10.10.0.4 type=bypassed comment="tc-bypass-AP3-ether4"`,
+      `/ip hotspot ip-binding add address=10.10.0.5 type=bypassed comment="tc-bypass-AP4-ether5"`,
+      `# RouterOS 7.16.2 wifi-qcom Radios with Open SSID MIKROTIK-TC Bound to bridgeLocal`,
+      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="MIKROTIK-TC" configuration.mode=ap datapath.bridge="bridgeLocal" disabled=no; :do { /interface wifi unset $w security } on-error={}; :do { /interface wifi unset $w security.passphrase } on-error={} } } on-error={}`,
       `/log info "T-Connect: [2/7] Hotspot Bridge bridgeLocal, 10.10.0.1/22, DHCP, and Radios configured."`,
       ``,
     ];
@@ -195,11 +212,11 @@ export class RouterOSRenderer {
     }
 
     scriptLines.push(
-      `# 5. Secure Router Management (Never expose unauthenticated services to public internet)`,
+      `# 5. Secure Router Management`,
       `:do { /ip service set telnet disabled=yes } on-error={}`,
       `:do { /ip service set ftp disabled=yes } on-error={}`,
-      `:do { /ip service set www disabled=no address="10.99.0.0/16,192.168.88.0/24,10.0.0.0/8" port=80 } on-error={ :do { /ip service set www disabled=no port=80 } on-error={} }`,
-      `:do { /ip service set winbox disabled=no address="10.99.0.0/16,192.168.88.0/24,10.0.0.0/8" port=8291 } on-error={ :do { /ip service set winbox disabled=no port=8291 } on-error={} }`,
+      `:do { /ip service set www disabled=no port=80 } on-error={}`,
+      `:do { /ip service set winbox disabled=no port=8291 } on-error={}`,
       `:do { /ip service set api disabled=yes } on-error={}`,
       `:do { /ip service set api-ssl address="10.99.0.0/16" port=8729 } on-error={}`,
       ``,
@@ -207,23 +224,15 @@ export class RouterOSRenderer {
       `:do { /user group add name="tc-agent" policy="read,write,api,test,password" } on-error={}`,
       `:do { /user remove [find name="tc_controller"] } on-error={}`,
       `:do { /user add name="tc_controller" group="tc-agent" password="${apiPassword}" address="10.99.0.0/16" comment="T-Connect Central Controller" } on-error={ :do { /user add name="tc_controller" group="full" password="${apiPassword}" comment="T-Connect Central Controller" } on-error={} }`,
-      `/log info "T-Connect: [4/7] Management & User security configured (WebFig & WinBox active on WireGuard tunnel)."`,
+      `/log info "T-Connect: [4/7] Management & User security configured."`,
       ``,
-      `# 6. Central RADIUS Configuration (Auth + Accounting + Roaming)`,
+      `# 6. Central RADIUS Configuration`,
       `:do { /radius remove [find comment="tc-radius"] } on-error={}`,
       `:do { /radius add service=hotspot address=${hubTunnelIp} secret="${radiusSecret}" authentication-port=1812 accounting-port=1813 timeout=3s comment="tc-radius" } on-error={}`,
       `:do { /radius incoming set accept=yes port=3799 } on-error={}`,
       `/log info "T-Connect: [5/7] Central RADIUS configured."`,
       ``,
-      `# 7. Hotspot Server Profile & External Captive Portal Redirect to VPS`,
-      `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}`,
-      `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,mac-cookie,cookie trial-uptime-limit=1h trial-uptime-reset=1d http-cookie-lifetime=1d use-radius=no } on-error={}`,
-      `:do { /ip hotspot user profile set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no } on-error={}`,
-      ``,
-      `# Interactive T-Connect Starlink Splash Page on Router + VPS Portal Link`,
-      RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl),
-      ``,
-      `# 8. VPS & Payment Walled Garden Rules (Allows unauthenticated clients to load VPS Splash Page on port 3000)`,
+      `# 7. VPS & Payment Walled Garden Rules (Placed BEFORE Splash Fetch so assets & APIs resolve)`,
       `:do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}`,
       `/ip hotspot walled-garden ip add dst-address=169.58.98.92 action=accept comment="tc-vps-server-access"`,
       /^\d+\.\d+\.\d+\.\d+$/.test(cleanDomain) && cleanDomain !== '169.58.98.92'
@@ -231,7 +240,10 @@ export class RouterOSRenderer {
         : `# Primary VPS IP 169.58.98.92 added to walled-garden ip`,
       `:do { /ip hotspot walled-garden remove [find comment~"tc-vps"] } on-error={}`,
       `/ip hotspot walled-garden add dst-host="*169.58.98.92*" action=allow comment="tc-vps-portal-domain"`,
-      `/ip hotspot walled-garden add dst-host="*${cleanDomain}*" action=allow comment="tc-vps-controller-domain"`
+      `/ip hotspot walled-garden add dst-host="*${cleanDomain}*" action=allow comment="tc-vps-controller-domain"`,
+      ``,
+      `# 8. Deploy Portal Builder On-Router Splash Page (hotspot/login.html & flash/hotspot/login.html)`,
+      RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree)
     );
 
     walledGardenDomains.forEach((domain) => {
@@ -243,11 +255,9 @@ export class RouterOSRenderer {
     if (blockDoH) {
       scriptLines.push(
         ``,
-        `# 9. CNA Captive Portal Discovery & DNS Interception (Remove any legacy TCP-blocking filter)`,
-        `:do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}`,
+        `# 9. DNS Interception for Instant Captive Portal Detection (No Option 114 override so router login.html triggers natively)`,
+        `:do { /ip dhcp-server set [find name="tc-dhcp-server"] dhcp-option="" } on-error={}`,
         `:do { /ip dhcp-server option remove [find name="cna-cap-port"] } on-error={}`,
-        `:do { /ip dhcp-server option add name="cna-cap-port" code=114 value="s'${portalBaseUrl}/api/cna/status'" } on-error={}`,
-        `:do { /ip dhcp-server set [find name="tc-dhcp-server"] dhcp-option="cna-cap-port" } on-error={}`,
         `:do { /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Intercept UDP DNS" } on-error={}`,
         `:do { /ip firewall nat add chain=dstnat protocol=tcp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Intercept TCP DNS" } on-error={}`,
         `:do { /ip firewall filter add chain=forward protocol=tcp dst-port=853 action=reject reject-with=tcp-reset comment="T-Connect: Block DoT (Port 853)" } on-error={}`,
@@ -256,23 +266,19 @@ export class RouterOSRenderer {
     }
 
     scriptLines.push(
+      `# Flush any stale active hotspot sessions or cookies so test devices immediately see the Splash Page`,
+      `:do { /ip hotspot active remove [find] } on-error={}`,
+      `:do { /ip hotspot cookie remove [find] } on-error={}`,
       `/log info "T-Connect: [6/7] Hotspot portal, walled garden & DNS filters configured."`,
       ``,
-      `# 10. Automated WAN Failover (Starlink WAN1 Primary on ether1 + LTE/Fiber WAN2 Backup on ether2)`,
-      `:do { /ip route remove [find comment="tc-wan1-canary"] } on-error={}`,
-      `:do { /ip route add dst-address=1.1.1.1/32 gateway=ether1 scope=10 comment="tc-wan1-canary" } on-error={ :do { /ip route add dst-address=1.1.1.1/32 gateway=%ether1 scope=10 comment="tc-wan1-canary" } on-error={} }`,
-      `:do { /ip route remove [find comment="tc-wan1-primary"] } on-error={}`,
-      `:do { /ip route add dst-address=0.0.0.0/0 gateway=1.1.1.1 check-gateway=ping distance=1 target-scope=30 comment="tc-wan1-primary" } on-error={}`,
+      `# 10. Clean Any Legacy Broken Routes on ether2 (ether2..ether5 are LAN/AP ports in bridgeLocal)`,
       `:do { /ip route remove [find comment="tc-wan2-backup"] } on-error={}`,
-      `:do { /ip route add dst-address=0.0.0.0/0 gateway=ether2 distance=2 comment="tc-wan2-backup" } on-error={ :do { /ip route add dst-address=0.0.0.0/0 gateway=%ether2 distance=2 comment="tc-wan2-backup" } on-error={} }`,
+      `:do { /ip route remove [find comment="tc-wan1-primary"] } on-error={}`,
+      `:do { /ip route remove [find comment="tc-wan1-canary"] } on-error={}`,
       ``,
-      `# Netwatch Sentinel: Probes Starlink every 10s and alerts controller on failover`,
-      `:do { /tool netwatch remove [find comment="tc-failover-sentinel"] } on-error={}`,
-      `:do { /tool netwatch add host=1.1.1.1 interval=10s timeout=2s down-script="/log warning \\"[T-Connect Failover] Starlink WAN1 failed. Route switched to WAN2 Backup.\\"; :do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/failover?status=FAILOVER_ACTIVE&wan=wan2\\" check-certificate=no keep-result=no } on-error={}" up-script="/log info \\"[T-Connect Failover] Starlink WAN1 online. Primary route restored.\\"; :do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/failover?status=RESTORED&wan=wan1\\" check-certificate=no keep-result=no } on-error={}" comment="tc-failover-sentinel" } on-error={ /log warning "T-Connect: Netwatch sentinel setup note" }`,
-      ``,
-      `# 11. Fast 15-Second Heartbeat Cron (Enables 30s Deadman Watchdog for Instant Starlink Disconnection Alerts)`,
+      `# 11. Fast 15-Second Heartbeat & Real-Time Portal/Policy Sync Daemon`,
       `:do { /system scheduler remove [find name="tc-heartbeat"] } on-error={}`,
-      `:do { /system scheduler add name="tc-heartbeat" interval=15s on-event=":do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/heartbeat\\" http-method=post http-data=\\"uptime=$[/system resource get uptime]&cpu=$[/system resource get cpu-load]&mem=$[/system resource get free-memory]&sessions=$[/ip hotspot active print count-only]\\" check-certificate=no keep-result=no } on-error={}" comment="T-Connect 15s Health Watchdog Agent" } on-error={}`,
+      `:do { /system scheduler add name="tc-heartbeat" interval=15s on-event=":do { /tool fetch url=\\"${portalBaseUrl}/api/devices/${router.id}/heartbeat.rsc?uptime=$[/system resource get uptime]&cpu=$[/system resource get cpu-load]&mem=$[/system resource get free-memory]&sessions=$[/ip hotspot active print count-only]\\" dst-path=\\"tc-sync.rsc\\" check-certificate=no; /import file-name=\\"tc-sync.rsc\\"; /file remove \\"tc-sync.rsc\\" } on-error={}" comment="T-Connect 15s Health & Real-Time Policy Sync Agent" } on-error={}`,
       ``,
       `# 12. Instant Adoption Handshake (Signals controller platform to promote router to ONLINE immediately)`,
       `:put "T-Connect: Dispatching instant adoption handshake to ${portalBaseUrl}...";`,
@@ -285,7 +291,7 @@ export class RouterOSRenderer {
   /**
    * Generates dynamic Access Policy script for live execution on an adopted router.
    * Gives administrators total platform control over whether the router is:
-   * 1. PAID_ONLY (strictly vouchers & mobile money, no free access)
+   * 1. PAID_ONLY (strictly vouchers & mobile money, free access completely hidden)
    * 2. FREE_TRIAL_AND_PAID (hybrid with customizable duration, rate limit & daily quota)
    * 3. COMPLETELY_FREE (open public Wi-Fi or community-sponsored)
    */
@@ -293,9 +299,10 @@ export class RouterOSRenderer {
     const { router, accessMode } = options;
     const duration = options.freeDurationMinutes || router.freeDurationMinutes || 30;
     const rateLimit = options.rateLimit || router.freeRateLimit || '10M/30M';
+    const portalBaseUrl = (options.portalBaseUrl || 'http://169.58.98.92:3000').replace(/\/+$/, '');
     const lines: string[] = [
       `# ============================================================`,
-      `# T-Connect Dynamic Access Policy Push`,
+      `# T-Connect Dynamic Access Policy & Real-Time Splash Sync`,
       `# Target Router: ${router.name} (${router.id})`,
       `# Policy Mode: ${accessMode}`,
       `# Timestamp: ${new Date().toISOString()}`,
@@ -305,38 +312,31 @@ export class RouterOSRenderer {
 
     if (accessMode === 'PAID_ONLY') {
       lines.push(
-        `# Policy: Strictly Paid Vouchers & Mobile Money`,
-        `# 1. Remove local free user profiles & free simple queues`,
-        `:do { /ip hotspot user profile remove [find name="free_trial"] } on-error={}`,
-        `:do { /queue simple remove [find name="tc-free-pool"] } on-error={}`,
-        `:do { /ip hotspot user remove [find comment~"tc-free"] } on-error={}`,
-        `# 2. Enforce RADIUS AAA authentication for all guests`,
-        `:do { /ip hotspot profile set [find default=yes] login-by=http-pap,mac-cookie,cookie use-radius=yes radius-accounting=yes } on-error={}`,
-        `:log info "[T-Connect Policy] Router successfully configured for PAID_ONLY access. Free trial deactivated.";`
+        `# Policy: Strictly Paid Vouchers & Mobile Money (Free Access Hidden)`,
+        `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
+        `:do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,cookie,mac-cookie use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, false),
+        `:log info "[T-Connect Policy] Router configured for PAID_ONLY access. Free trial removed from Splash Page.";`
       );
     } else if (accessMode === 'FREE_TRIAL_AND_PAID') {
       lines.push(
-        `# Policy: Hybrid Access (Free Trial + Paid Vouchers)`,
-        `# 1. Configure free_trial User Profile (${duration}m session timeout @ ${rateLimit})`,
-        `:do { /ip hotspot user profile set [find name="free_trial"] rate-limit="${rateLimit}" shared-users=1 keepalive-timeout=2m status-autorefresh=1m session-timeout=${duration}m transparent-proxy=no } on-error={}`,
-        `:do { :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={ /ip hotspot user profile add name="free_trial" rate-limit="${rateLimit}" shared-users=1 keepalive-timeout=2m status-autorefresh=1m session-timeout=${duration}m transparent-proxy=no comment="T-Connect Free Trial (${rateLimit})" } } on-error={}`,
-        `# 2. Configure Free Simple Queue Rate Limiter`,
-        `:do { /queue simple set [find name="tc-free-pool"] max-limit=${rateLimit} } on-error={}`,
-        `:do { :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={ /queue simple add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=${rateLimit} comment="T-Connect Free Pool Limit" } } on-error={}`,
-        `# 3. Ensure RADIUS AAA remains active for paid vouchers`,
-        `:do { /ip hotspot profile set [find default=yes] login-by=http-pap,mac-cookie,cookie use-radius=yes radius-accounting=yes } on-error={}`,
-        `:log info "[T-Connect Policy] Hybrid mode active: ${duration}m free trial enabled alongside paid vouchers.";`
+        `# Policy: Hybrid Access (Free Trial + Paid Vouchers + Mobile Money)`,
+        `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
+        `:do { /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=${duration}m comment="T-Connect Free Trial (${duration}m)" } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true),
+        `:log info "[T-Connect Policy] Hybrid mode active: ${duration}m free trial enabled on Splash Page.";`
       );
     } else if (accessMode === 'COMPLETELY_FREE') {
       lines.push(
-        `# Policy: 100% Free Open Access (Municipal / Community Sponsored)`,
-        `# 1. Configure open access profile with rate limit ${rateLimit}`,
-        `:do { /ip hotspot user profile set [find default=yes] rate-limit="${rateLimit}" keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no } on-error={}`,
-        `:do { /ip hotspot user profile set [find name="free_trial"] rate-limit="${rateLimit}" shared-users=100 keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no } on-error={}`,
-        `:do { :if ([:len [/ip hotspot user profile find name="free_trial"]] = 0) do={ /ip hotspot user profile add name="free_trial" rate-limit="${rateLimit}" shared-users=100 keepalive-timeout=5m status-autorefresh=2m transparent-proxy=no comment="T-Connect Free Open Pool" } } on-error={}`,
-        `# 2. Maintain pool bandwidth queue`,
-        `:do { /queue simple set [find name="tc-free-pool"] max-limit=${rateLimit} } on-error={}`,
-        `:do { :if ([:len [/queue simple find name="tc-free-pool"]] = 0) do={ /queue simple add name="tc-free-pool" target="10.89.0.0/16,192.168.88.0/24" max-limit=${rateLimit} comment="T-Connect Free Pool Limit" } } on-error={}`,
+        `# Policy: 100% Free Open Access (Community Sponsored)`,
+        `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
+        `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Open Pool" } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie rate-limit="${rateLimit}" use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true),
         `:log info "[T-Connect Policy] COMPLETELY_FREE mode active on router.";`
       );
     }
@@ -346,10 +346,9 @@ export class RouterOSRenderer {
 
   /**
    * Generates command to bridge extra ports to the hotspot bridge
-   * As requested: /interface bridge port add bridge=mkcontroller-bridge interface="<DESIRED_EXTRA_PORT>" comment="TConnectHotspot-bridge-port"
    */
-  static renderBridgePortCommand(bridgeName: string = 'mkcontroller-bridge', interfaceName: string): string {
-    return `/interface bridge port add bridge="${bridgeName}" interface="${interfaceName}" comment="TConnectHotspot-bridge-port"`;
+  static renderBridgePortCommand(bridgeName: string = 'bridgeLocal', interfaceName: string): string {
+    return `:do { :if ([:len [/interface bridge port find interface="${interfaceName}"]] > 0) do={ /interface bridge port set [find interface="${interfaceName}"] bridge="${bridgeName}" disabled=no } else={ /interface bridge port add bridge="${bridgeName}" interface="${interfaceName}" disabled=no comment="TConnectHotspot-bridge-port" } } on-error={}`;
   }
 
   /**
@@ -365,11 +364,11 @@ export class RouterOSRenderer {
     const wan1 = options.wan1 || 'ether1';
     const wan2 = options.wan2 || 'ether2';
     const checkHost = options.checkHost || '1.1.1.1';
-    const hubDomain = options.hubDomain || 'app.tconnect.co.ls';
+    const hubDomain = options.hubDomain || '169.58.98.92:3000';
     const routerId = options.routerId || 'rt_current';
 
     return `# ==============================================================================
-# T-Connect / MKController Automated Dual-WAN Failover (RouterOS v7)
+# T-Connect Automated Dual-WAN Failover (RouterOS v7)
 # Primary WAN1: ${wan1} (Starlink LEO Satellite)
 # Secondary WAN2: ${wan2} (LTE / 5G / Fiber Backup)
 # Verification Target: ${checkHost} (Cloudflare Secure DNS)
@@ -393,7 +392,7 @@ export class RouterOSRenderer {
 
 # 5. Netwatch Probing Sentinel (10s interval, 2s timeout)
 :do { /tool netwatch remove [find comment="tc-failover-sentinel"] } on-error={}
-:do { /tool netwatch add host=${checkHost} interval=10s timeout=2s down-script="/log warning \\"[T-Connect Failover] Starlink ${wan1} unreachable! Switching traffic to ${wan2} backup.\\"; :do { /tool fetch url=\\"https://${hubDomain}/api/devices/${routerId}/failover?status=FAILOVER_ACTIVE&wan=${wan2}\\" keep-result=no } on-error={}" up-script="/log info \\"[T-Connect Failover] Starlink ${wan1} internet restored! Primary route active.\\"; :do { /tool fetch url=\\"https://${hubDomain}/api/devices/${routerId}/failover?status=RESTORED&wan=${wan1}\\" keep-result=no } on-error={}" comment="tc-failover-sentinel" } on-error={}
+:do { /tool netwatch add host=${checkHost} interval=10s timeout=2s down-script="/log warning \\"[T-Connect Failover] Starlink ${wan1} unreachable! Switching traffic to ${wan2} backup.\\"; :do { /tool fetch url=\\"http://${hubDomain}/api/devices/${routerId}/failover?status=FAILOVER_ACTIVE&wan=${wan2}\\" keep-result=no } on-error={}" up-script="/log info \\"[T-Connect Failover] Starlink ${wan1} internet restored! Primary route active.\\"; :do { /tool fetch url=\\"http://${hubDomain}/api/devices/${routerId}/failover?status=RESTORED&wan=${wan1}\\" keep-result=no } on-error={}" comment="tc-failover-sentinel" } on-error={}
 
 /log info "T-Connect: Automated WAN Failover active. Monitoring ${wan1} -> ${wan2}."
 `;
@@ -457,20 +456,12 @@ export class RouterOSRenderer {
 
   /**
    * Generates complete RouterOS cleanup and de-adoption script.
-   * Purges WireGuard tunnels, RADIUS AAA config, walled garden entries,
-   * deadman watchdog scripts, and scheduled telemetry jobs, leaving
-   * the router in a clean state ready for future adoption.
    */
   static renderDeadoptionScript(router: RouterDevice): string {
     return `# ============================================================
 # T-CONNECT MIKROTIK DE-ADOPTION & CLEANUP SCRIPT
 # Target Router: ${router.name} (${router.id})
 # MAC: ${router.macAddress}
-# ============================================================
-# This script completely purges all T-Connect cloud configuration,
-# removing WireGuard tunnels, RADIUS AAA configs, netwatch daemons,
-# and walled-garden DNS rules so the device has zero residual links
-# to the controller, while keeping base LAN/WAN intact.
 # ============================================================
 
 :log warning "[T-Connect] Initiating complete router unbinding & configuration purge...";
@@ -511,7 +502,7 @@ export class RouterOSRenderer {
   }
 
   /**
-   * Generates RouterOS script for bridging 2 Access Points (Ubiquiti UniFi, TP-Link Omada, etc.)
+   * Generates RouterOS script for bridging Access Points (Ubiquiti UniFi, TP-Link Omada, etc.)
    * and bypassing AP management IPs from Hotspot authentication.
    */
   static renderApBridgeScript(options: {
@@ -535,49 +526,26 @@ export class RouterOSRenderer {
 
 :log info "[T-Connect] Configuring Access Point bridge ports and MIKROTIK-TC wireless interface...";
 
-# 1. Auto-Detect Existing Active Bridge (Prioritizes bridgeLocal, then bridge, bridge1)
-:local targetBridge "${bridge}";
+# 1. Ensure Target Bridge "${bridge}" Exists & Isolate ether1 WAN
 :if ([:len [/interface bridge find name="${bridge}"]] = 0) do={
-  :if ([:len [/interface bridge find name="bridgeLocal"]] > 0) do={
-    :set targetBridge "bridgeLocal";
-  } else={
-    :if ([:len [/interface bridge find name="bridge"]] > 0) do={
-      :set targetBridge "bridge";
-    } else={
-      :if ([:len [/interface bridge find name="bridge1"]] > 0) do={
-        :set targetBridge "bridge1";
-      } else={
-        :if ([:len [/interface bridge find]] > 0) do={
-          :set targetBridge [/interface bridge get [:pick [/interface bridge find] 0] name];
-        } else={
-          /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
-          :set targetBridge "${bridge}";
-        };
-      };
-    };
-  };
+  /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Bridge";
 };
+:do { /interface bridge port remove [find interface="ether1"] } on-error={}
 
-# 2. Add Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to Target Bridge
-:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap1Port}" comment="tc-ap-port-${options.ap1Port}" } } on-error={ :log warning "Port ${options.ap1Port} already in bridge" }
-:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}" bridge=$targetBridge]] = 0) do={ /interface bridge port add bridge=$targetBridge interface="${options.ap2Port}" comment="tc-ap-port-${options.ap2Port}" } } on-error={ :log warning "Port ${options.ap2Port} already in bridge" }
+# 2. Reassign Ethernet Ports (${options.ap1Port} & ${options.ap2Port}) to "${bridge}"
+:do { :if ([:len [/interface bridge port find interface="${options.ap1Port}"]] > 0) do={ /interface bridge port set [find interface="${options.ap1Port}"] bridge="${bridge}" disabled=no } else={ /interface bridge port add bridge="${bridge}" interface="${options.ap1Port}" disabled=no comment="tc-ap-port-${options.ap1Port}" } } on-error={}
+:do { :if ([:len [/interface bridge port find interface="${options.ap2Port}"]] > 0) do={ /interface bridge port set [find interface="${options.ap2Port}"] bridge="${bridge}" disabled=no } else={ /interface bridge port add bridge="${bridge}" interface="${options.ap2Port}" disabled=no comment="tc-ap-port-${options.ap2Port}" } } on-error={}
 
 # 3. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom Optimized)
 :do {
-  :if ([:len [/interface wifi find]] > 0) do={
-    :foreach w in=[/interface wifi find] do={
-      /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
-    };
-    :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi-qcom interfaces with SSID MIKROTIK-TC";
-  } else={
-    :if ([:len [/interface wireless find]] > 0) do={
-      /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no
-      :log info "[T-Connect] Configured legacy RouterOS v6 wireless interface with SSID MIKROTIK-TC";
-    };
+  :foreach w in=[/interface wifi find] do={
+    /interface wifi set $w configuration.ssid="MIKROTIK-TC" configuration.mode=ap datapath.bridge="${bridge}" disabled=no
+    :do { /interface wifi unset $w security } on-error={}
+    :do { /interface wifi unset $w security.passphrase } on-error={}
   };
-} on-error={ :log warning "Could not auto-configure wireless interface" }
+} on-error={}
 
-# 4. Bypass AP Static Management IPs in Hotspot
+# 4. Bypass AP Static Management IPs in Hotspot (Clients on APs still get 10.10.0.x & Splash Page)
 :do { /ip hotspot ip-binding remove [find comment~"${ap1Name}"] } on-error={}
 :do { /ip hotspot ip-binding add address="${options.ap1Ip}" type=bypassed comment="tc-bypass-${ap1Name}" } on-error={}
 
@@ -587,33 +555,15 @@ export class RouterOSRenderer {
 # 5. Verify WinBox Management Service
 :do { /ip service set winbox disabled=no port=8291 } on-error={}
 
-# ============================================================
-# INDEPENDENT WIFI CLI CONTROLS (Disabling WiFi does NOT stop platform/Ethernet)
-# ============================================================
-# RouterOS 7.16.2 (wifi-qcom - wifi1 & wifi2):
-#   To turn OFF WiFi radio broadcasting:
-#     /interface wifi disable [find]
-#   To turn ON WiFi radio broadcasting:
-#     /interface wifi enable [find]
-#   To control specific radios:
-#     /interface wifi disable [find name=wifi1]
-#     /interface wifi disable [find name=wifi2]
-#
-# Legacy RouterOS v6:
-#   /interface wireless disable [find]
-#   /interface wireless enable [find]
-# ============================================================
-
 :log info "[T-Connect] Access Points & MIKROTIK-TC WiFi setup active. Wired ethernet clients & wireless guests redirected to captive portal.";
 `;
   }
 
   /**
    * Generates the Master Full-Stack Alignment Script:
-   * Aligns bridgeLocal, attaches ports ether2, ether3, ether4, ether5, wifi1, wifi2,
-   * configures high-capacity 10.10.0.1/22 subnet (1,022 usable IPs), DHCP server,
-   * DNS resolver, NAT masquerade, Hotspot server with VPS walled-garden & redirect,
-   * built-in test user, AP bypasses, and WinBox service.
+   * Isolates ether1 WAN (eliminates 192.168.1.x leak), moves ether2..5 & wifi1..2 into bridgeLocal,
+   * configures 10.10.0.1/22 subnet (1,022 usable IPs), DHCP server, DNS intercept, NAT masquerade,
+   * Hotspot server with Portal Builder On-Router Splash Page, VPS walled-garden, and AP bypasses.
    */
   static renderFullStackAlignmentScript(options?: {
     bridgeName?: string;
@@ -624,6 +574,7 @@ export class RouterOSRenderer {
     ap2Ip?: string;
     ap3Ip?: string;
     vpsHost?: string;
+    allowFreeAccess?: boolean;
   }): string {
     const bridge = options?.bridgeName || 'bridgeLocal';
     const gateway = options?.gatewayIp || '10.10.0.1';
@@ -632,6 +583,7 @@ export class RouterOSRenderer {
     const ap1 = options?.ap1Ip || '10.10.0.2';
     const ap2 = options?.ap2Ip || '10.10.0.3';
     const ap3 = options?.ap3Ip || '10.10.0.5';
+    const allowFree = options?.allowFreeAccess ?? true;
     const defaultVps = (typeof window !== 'undefined' && window.location.host && !window.location.host.includes('.run.app') && !window.location.host.includes('localhost'))
       ? window.location.host
       : '169.58.98.92:3000';
@@ -641,10 +593,9 @@ export class RouterOSRenderer {
 
     return `# ============================================================
 # T-CONNECT MASTER FULL-STACK ALIGNMENT SCRIPT
-# Hardware: MikroTik hAP ax3 (ARM64)
-# RouterOS: v7.16.2 (wifi-qcom)
-# Bridge: ${bridge} | LAN Subnet: ${cidr} (1,022 Hosts)
-# VPS Controller Endpoint: http://${vpsCleanHost}
+# Hardware: MikroTik hAP ax3 (ARM64) | RouterOS: v7.16.2 (wifi-qcom)
+# WAN: ether1 (Isolated) | LAN/AP Bridge: ${bridge} (${cidr})
+# VPS Controller: http://${vpsCleanHost}
 # ============================================================
 
 :log info "[T-Connect] Starting full-stack alignment...";
@@ -654,31 +605,42 @@ export class RouterOSRenderer {
   /interface bridge add name="${bridge}" comment="T-Connect Hotspot & AP Local Bridge"
 };
 
-# 2. Bind Local Ethernet Ports & Wireless Radios to "${bridge}"
-:do { :if ([:len [/interface bridge port find interface="ether2" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether2" comment="tc-ap-ethernet-ether2" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="ether3" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether3" comment="tc-ap-ethernet-ether3" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="ether4" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether4" comment="tc-ap-ethernet-ether4" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="ether5" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="ether5" comment="tc-ap-ethernet-ether5" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="wifi1" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="wifi1" comment="tc-wifi1-radio-5ghz" } } on-error={}
-:do { :if ([:len [/interface bridge port find interface="wifi2" bridge="${bridge}"]] = 0) do={ /interface bridge port add bridge="${bridge}" interface="wifi2" comment="tc-wifi2-radio-2ghz" } } on-error={}
+# 2. Isolate WAN Port (ether1) from ALL Bridges (Fixes 192.168.1.x DHCP leak onto WiFi/LAN)
+:do { /interface bridge port remove [find interface="ether1"] } on-error={}
+:do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface="ether1" disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="T-Connect WAN ether1" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}
 
-# 3. Configure High-Capacity IP Address (${gateway}/22 - 1,022 usable hosts)
+# 3. Move ether2, ether3, ether4, ether5, wifi1, wifi2 into "${bridge}" (Updates port if already in factory "bridge")
+:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
+  :do {
+    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
+      /interface bridge port set [find interface=$p] bridge="${bridge}" disabled=no
+    } else={
+      /interface bridge port add bridge="${bridge}" interface=$p disabled=no
+    }
+  } on-error={}
+};
+
+# 4. Clean Conflicting LAN IP / DHCP / Hotspot on Factory Bridges & Set ${gateway}/22 on "${bridge}"
+:do { /ip dhcp-server remove [find interface!="${bridge}"] } on-error={}
+:do { /ip hotspot remove [find interface!="${bridge}"] } on-error={}
 :do { /ip address remove [find interface="${bridge}"] } on-error={}
+:do { /ip address remove [find interface="bridge"] } on-error={}
 /ip address add address=${gateway}/22 network=10.10.0.0 interface="${bridge}" comment="tc-hotspot-lan-gateway"
 
-# 4. Configure High-Density DHCP IP Pool (${dhcpRange})
+# 5. Configure High-Density DHCP IP Pool (${dhcpRange}) & DHCP Server on "${bridge}"
 :do { /ip pool remove [find name="tc-hotspot-pool"] } on-error={}
 /ip pool add name="tc-hotspot-pool" ranges=${dhcpRange}
-
-# 5. Configure DHCP Server on "${bridge}"
 :do { /ip dhcp-server remove [find interface="${bridge}"] } on-error={}
-:do { /ip dhcp-server network remove [find address="${cidr}"] } on-error={}
+:do { /ip dhcp-server network remove [find] } on-error={}
 /ip dhcp-server network add address=${cidr} gateway=${gateway} dns-server=${gateway},1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
 /ip dhcp-server add name="tc-dhcp-server" interface="${bridge}" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
 
-# 6. Enable DNS Resolver, Intercept UDP DNS & Remove Any Legacy TCP-Blocking Filters
+# 6. Enable DNS Resolver, Intercept DNS & Remove Any Legacy Blocking Routes/Filters
 /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
 :do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}
+:do { /ip route remove [find comment="tc-wan2-backup"] } on-error={}
+:do { /ip route remove [find comment="tc-wan1-primary"] } on-error={}
+:do { /ip route remove [find comment="tc-wan1-canary"] } on-error={}
 :do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept"]] = 0) do={ /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept" } } on-error={}
 
 # 7. Configure NAT Firewall Masquerade for Internet Access (WAN ether1)
@@ -687,49 +649,56 @@ export class RouterOSRenderer {
 
 # 8. Configure Hotspot Profile & Server on "${bridge}"
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no
-:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
+:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial,cookie,mac-cookie' : 'http-chap,http-pap,cookie,mac-cookie'} trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
 :do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
-/ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no
+/ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited disabled=no
 
-# 9. VPS Walled Garden Rules (Allows phone to load captive portal Splash Page from VPS on port 3000)
+# 9. VPS Walled Garden Rules (Allows unauthenticated clients to load Portal Builder assets & Mobile Money APIs)
 :do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}
 /ip hotspot walled-garden ip add dst-address=${vpsIpOnly} action=accept comment="tc-vps-server-access"
 :do { /ip hotspot walled-garden remove [find comment~"tc-vps"] } on-error={}
 /ip hotspot walled-garden add dst-host="*${vpsIpOnly}*" action=allow comment="tc-vps-portal-domain"
 /ip hotspot walled-garden add dst-host="*vodacom.co.ls" action=allow comment="tc-mpesa-walled-garden"
 /ip hotspot walled-garden add dst-host="*econet.co.ls" action=allow comment="tc-ecocash-walled-garden"
+/ip hotspot walled-garden add dst-host="*ottlesotho.com" action=allow comment="tc-ott-walled-garden"
 
-# 10. Interactive T-Connect Starlink Splash Page + VPS Portal Link (/portal)
-${RouterOSRenderer.buildSplashPageFileCommands(`http://${vpsCleanHost}`)}
+# 10. Deploy Portal Builder On-Router Splash Page (hotspot/login.html & flash/hotspot/login.html)
+${RouterOSRenderer.buildSplashPageFileCommands(`http://${vpsCleanHost}`, allowFree)}
 
-# 11. Instant Testing & Free Trial Users (User: test / Pass: 123 & User: T-TRIAL / Pass: 123)
+# 11. Hotspot Users (Voucher/Test User & Conditional Free Trial User)
 :do { /ip hotspot user remove [find name="test"] } on-error={}
 /ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"
 :do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}
-/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Trial Auth User"
+${allowFree ? `/ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User"` : `# Free Trial Disabled by Admin Policy`}
 
-# 12. Bypass AP Static Management IPs & Admin PC from Captive Portal
-:do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}
+# 12. Bypass Only AP Hardware Management IPs (Removed 10.10.0.254 PC bypass so test PC sees Splash Page)
+:do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}
 /ip hotspot ip-binding add address=${ap1} type=bypassed comment="tc-bypass-AP1-ether2"
 /ip hotspot ip-binding add address=${ap2} type=bypassed comment="tc-bypass-AP2-ether3"
-/ip hotspot ip-binding add address=${ap3} type=bypassed comment="tc-bypass-AP3-ether5"
-/ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="tc-bypass-admin-pc"
+/ip hotspot ip-binding add address=10.10.0.4 type=bypassed comment="tc-bypass-AP3-ether4"
+/ip hotspot ip-binding add address=${ap3} type=bypassed comment="tc-bypass-AP4-ether5"
 
-# 13. Configure RouterOS 7.16.2 wifi-qcom Radios with SSID "MIKROTIK-TC"
+# 13. Configure RouterOS 7.16.2 wifi-qcom Radios with Open SSID "MIKROTIK-TC" Bound to "${bridge}"
 :do {
   :foreach w in=[/interface wifi find] do={
-    /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+    /interface wifi set $w configuration.ssid="MIKROTIK-TC" configuration.mode=ap datapath.bridge="${bridge}" disabled=no
+    :do { /interface wifi unset $w security } on-error={}
+    :do { /interface wifi unset $w security.passphrase } on-error={}
   };
-  :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC";
+  :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC on ${bridge}";
 } on-error={ :log warning "Could not auto-configure wifi radios" }
 
-# 14. Ensure WinBox Management Service (Port 8291) is Enabled
+# 14. Flush Active Sessions/Cookies & Ensure WinBox Management Service (Port 8291) is Enabled
+:do { /ip hotspot active remove [find] } on-error={}
+:do { /ip hotspot cookie remove [find] } on-error={}
+/ip service set www disabled=no port=80
 /ip service set winbox disabled=no port=8291
 
-:log info "[T-Connect] Alignment complete! ${bridge} is active with ${gateway}/22 gateway and VPS Walled Garden.";
-:put "T-Connect: [SUCCESS] Alignment complete! Bridge ${bridge} configured with ${gateway}/22, VPS Portal Walled Garden, and MIKROTIK-TC WiFi.";`;
+:log info "[T-Connect] Alignment complete! ${bridge} is active with ${gateway}/22 gateway and Portal Builder Splash Page.";
+:put "T-Connect: [SUCCESS] Alignment complete! ether1 isolated as WAN, ether2-5 & wifi1-2 on ${bridge} (${gateway}/22), and Portal Builder Splash Page active.";`;
   }
 }
+
 
 
