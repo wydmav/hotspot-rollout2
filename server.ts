@@ -137,6 +137,44 @@ app.get(['/hotspot-detect.html', '/generate_204', '/ncsi.txt', '/connecttest.txt
 });
 
 // -----------------------------------------------------------------------------
+// LIVE CAPTIVE PORTAL SPLASH PAGE CONFIG SYNC (Across Admin & Guest Devices)
+// -----------------------------------------------------------------------------
+const portalConfigFilePath = path.resolve(__dirname, 'public/portal-configs.json');
+
+app.get('/api/portal/config', (_req: Request, res: Response) => {
+  try {
+    if (fs.existsSync(portalConfigFilePath)) {
+      const raw = fs.readFileSync(portalConfigFilePath, 'utf-8');
+      return res.json({ success: true, configs: JSON.parse(raw) });
+    }
+    res.json({ success: true, configs: null });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/portal/config', (req: Request, res: Response) => {
+  try {
+    const { scope, config, configs } = req.body || {};
+    let existing: Record<string, any> = {};
+    if (fs.existsSync(portalConfigFilePath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(portalConfigFilePath, 'utf-8'));
+      } catch {}
+    }
+    if (configs && typeof configs === 'object') {
+      existing = { ...existing, ...configs };
+    } else if (scope && config) {
+      existing[scope] = config;
+    }
+    fs.writeFileSync(portalConfigFilePath, JSON.stringify(existing, null, 2), 'utf-8');
+    res.json({ success: true, configs: existing });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 // DEADMAN WATCHDOG & ROUTER REGISTRY ENGINE
 // Tracks heartbeat pings every 15s. If silence >= 30s (2 missed beats),

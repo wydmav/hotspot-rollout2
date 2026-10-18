@@ -15,7 +15,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   PanelLeft,
-  PanelLeftClose
+  PanelLeftClose,
+  Wifi
 } from 'lucide-react';
 import { SystemAlert, PaymentTransaction, TeamMember } from '../../types';
 import { ExportService } from '../../services/exportService';
@@ -23,6 +24,7 @@ import { UserMenuDropdown } from './UserMenuDropdown';
 
 interface HeaderProps {
   currentTab: string;
+  onOpenUserPortal?: () => void;
   alerts: SystemAlert[];
   onAcknowledgeAlert: (id: string) => void;
   onToggleSidebar?: () => void;
@@ -55,6 +57,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
+  onOpenUserPortal,
   alerts,
   onAcknowledgeAlert,
   onToggleSidebar,
@@ -509,6 +512,20 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
         </div>
+
+        {/* Test as Wi-Fi User Captive Portal Quick Launch */}
+        {onOpenUserPortal && (
+          <button
+            type="button"
+            onClick={onOpenUserPortal}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-[#f05e17] to-amber-500 hover:from-[#d94c0b] hover:to-amber-600 text-white rounded-xl text-xs font-mono font-bold shadow-md shadow-orange-500/20 cursor-pointer transition-all border border-orange-400/40"
+            title="Open and test the live end-user Captive Portal (Free Trial, Voucher Login, Mobile Money)"
+          >
+            <Wifi className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Test as User</span>
+            <span className="sm:hidden">Test</span>
+          </button>
+        )}
 
         {/* User Account & Role Dropdown Menu */}
         <div className="pl-2 border-l border-[#232d42]">

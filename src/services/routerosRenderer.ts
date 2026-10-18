@@ -54,6 +54,17 @@ export class RouterOSRenderer {
   }
 
   /**
+   * Builds RouterOS commands to write the interactive T-Connect Starlink Splash Page
+   * to both hotspot/login.html and flash/hotspot/login.html (for hAP ax3 RouterOS v7).
+   */
+  static buildSplashPageFileCommands(portalBaseUrl: string): string {
+    const html = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>T-Connect Starlink Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#080b14;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;padding:16px;background-image:radial-gradient(circle at 50% 0%,rgba(240,94,23,0.28),transparent 70%)}.top{text-align:center;padding-top:12px}.badge{display:inline-block;padding:4px 12px;border-radius:99px;background:rgba(240,94,23,0.18);border:1px solid rgba(240,94,23,0.45);color:#fb923c;font-size:11px;font-weight:800;letter-spacing:1px;margin-bottom:8px}h1{font-size:24px;font-weight:900;letter-spacing:-0.5px;color:#fff}.card{width:100%;max-width:390px;margin:auto;background:rgba(15,20,34,0.92);border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,0.6)}.lbl{font-size:11px;color:#cbd5e1;margin-bottom:4px;display:block;font-weight:600}.inp{width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.45);color:#fff;font-size:13px;margin-bottom:10px}.btn-free{width:100%;padding:13px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-size:13px;font-weight:900;cursor:pointer;margin-top:4px;box-shadow:0 8px 20px rgba(240,94,23,0.35)}.btn-vch{width:100%;padding:11px;border-radius:14px;border:1px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.15);color:#34d399;font-size:12px;font-weight:800;cursor:pointer;margin-top:6px}.div{text-align:center;font-size:10px;color:#64748b;margin:12px 0;text-transform:uppercase;letter-spacing:1px}.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}.pl{background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 4px;text-align:center;font-size:11px}.pl b{display:block;color:#fbbf24;font-size:13px}.vps{display:block;text-align:center;font-size:11px;color:#38bdf8;text-decoration:none;margin-top:10px;padding:8px;border-radius:10px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25)}.ftr{text-align:center;font-size:10px;color:#64748b;padding-bottom:6px}</style></head><body><div class=\\"top\\"><div class=\\"badge\\">T-CONNECT &middot; STARLINK HIGH-SPEED</div><h1>WHAT DO YOU CONNECT FOR?</h1></div><div class=\\"card\\"><form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"username\\" value=\\"T-TRIAL\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"https://www.google.com\\"><label class=\\"lbl\\">Full Name</label><input class=\\"inp\\" type=\\"text\\" placeholder=\\"Katleho Molapo\\" required><label class=\\"lbl\\">Mobile Number (Lesotho +266)</label><input class=\\"inp\\" type=\\"tel\\" placeholder=\\"+266 5800 1234\\" required><button type=\\"submit\\" class=\\"btn-free\\">&#9889; Connect Free (30 Mins Trial) &rarr;</button></form><div class=\\"div\\">Or Redeem Voucher / Access Code</div><form action=\\"\\$(link-login-only)\\" method=\\"post\\"><input type=\\"hidden\\" name=\\"password\\" value=\\"123\\"><input type=\\"hidden\\" name=\\"dst\\" value=\\"https://www.google.com\\"><input class=\\"inp\\" type=\\"text\\" name=\\"username\\" value=\\"test\\" placeholder=\\"Voucher code or type: test\\"><button type=\\"submit\\" class=\\"btn-vch\\">&#127903; Activate Voucher &amp; Unlock Internet</button></form><div class=\\"div\\">High-Speed Starlink Passes</div><div class=\\"plans\\"><div class=\\"pl\\">Daily<b>M10</b>24 Hrs</div><div class=\\"pl\\">Weekly<b>M60</b>7 Days</div><div class=\\"pl\\">Monthly<b>M280</b>30 Days</div></div><a class=\\"vps\\" href=\\"${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\">Open Full Portal &amp; Mobile Money (${portalBaseUrl.replace(/^https?:\/\//, '')}) &rarr;</a></div><div class=\\"ftr\\">IP: \\$(ip) &middot; MAC: \\$(mac) &middot; Powered by T-Connect</div></body></html>`;
+    return [
+      `:do { :if ([:len [/file find name~"hotspot/login.html"]] > 0) do={ /file set [find name~"hotspot/login.html"] contents="${html}" } else={ /file add name="hotspot/login.html" contents="${html}" } } on-error={ :do { /file set [find name~"login.html"] contents="${html}" } on-error={} }`
+    ].join('\n');
+  }
+
+  /**
    * Generates the complete, idempotent, hardened RouterOS v7 (ARM64 hAP ax3) or v6 provisioning script.
    * Every command block is wrapped in safe error handlers to prevent partial-execution aborts.
    */
@@ -129,16 +140,22 @@ export class RouterOSRenderer {
       `:do { /ip dhcp-server network remove [find address="10.10.0.0/22"] } on-error={}`,
       `/ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1,1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"`,
       `/ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no`,
-      `# Enable DNS Resolver for Hotspot Clients`,
+      `# Enable DNS Resolver & Intercept UDP DNS for Captive Portal Probes`,
       `/ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8`,
-      `:do { /ip dns static remove [find name="login.tconnect.ls"] } on-error={}`,
+      `:do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept"]] = 0) do={ /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept" } } on-error={}`,
       `# NAT Firewall Masquerade on WAN ether1`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}`,
+      `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
       `# Hotspot Server Profile & Server on bridgeLocal (Direct IP Interception on VPS)`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
       `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no`,
+      `# Pre-Provisioned Hotspot Auth Users for Portal & Testing (User: test / Pass: 123 & User: T-TRIAL / Pass: 123)`,
+      `:do { /ip hotspot user remove [find name="test"] } on-error={}`,
+      `/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"`,
+      `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
+      `/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Trial Auth User"`,
       `# Static Management Bypasses for APs & Admin PC`,
       `:do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}`,
       `/ip hotspot ip-binding add address=10.10.0.2 type=bypassed comment="tc-bypass-AP1-ether2"`,
@@ -198,35 +215,43 @@ export class RouterOSRenderer {
       `:do { /radius incoming set accept=yes port=3799 } on-error={}`,
       `/log info "T-Connect: [5/7] Central RADIUS configured."`,
       ``,
-      `# 7. Hotspot Server Profile RADIUS & External Captive Portal Redirect`,
-      `:do { /ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes radius-interim-update=1m login-by=http-pap,mac-cookie,cookie http-cookie-lifetime=1d } on-error={ /log warning "T-Connect: Could not bind default hotspot profile to RADIUS" }`,
+      `# 7. Hotspot Server Profile & External Captive Portal Redirect to VPS`,
+      `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}`,
+      `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,mac-cookie,cookie trial-uptime-limit=1h trial-uptime-reset=1d http-cookie-lifetime=1d use-radius=no } on-error={}`,
       `:do { /ip hotspot user profile set [find default=yes] keepalive-timeout=2m status-autorefresh=1m transparent-proxy=no } on-error={}`,
       ``,
-      `# Ultra-lightweight redirect stub: 100% of portal assets, payment UI & vouchers run on VPS`,
-      `:do { /file add name="hotspot/login.html" contents="<!DOCTYPE html><html><head><meta http-equiv=\\"refresh\\" content=\\"0; url=${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\"></head><body style=\\"background:%230b0f19;color:white;font-family:sans-serif;text-align:center;padding-top:40px;\\">Connecting to T-Connect Network...</body></html>" } on-error={ :do { /file set [find name="hotspot/login.html"] contents="<!DOCTYPE html><html><head><meta http-equiv=\\"refresh\\" content=\\"0; url=${portalBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig)\\"></head><body style=\\"background:%230b0f19;color:white;font-family:sans-serif;text-align:center;padding-top:40px;\\">Connecting to T-Connect Network...</body></html>" } on-error={} }`,
+      `# Interactive T-Connect Starlink Splash Page on Router + VPS Portal Link`,
+      RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl),
       ``,
-      `# 8. Walled Garden Rules (Pre-Auth Access for Lesotho Payments & CNA Popups)`
+      `# 8. VPS & Payment Walled Garden Rules (Allows unauthenticated clients to load VPS Splash Page on port 3000)`,
+      `:do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}`,
+      `/ip hotspot walled-garden ip add dst-address=169.58.98.92 action=accept comment="tc-vps-server-access"`,
+      /^\d+\.\d+\.\d+\.\d+$/.test(cleanDomain) && cleanDomain !== '169.58.98.92'
+        ? `/ip hotspot walled-garden ip add dst-address=${cleanDomain} action=accept comment="tc-vps-controller-ip"`
+        : `# Primary VPS IP 169.58.98.92 added to walled-garden ip`,
+      `:do { /ip hotspot walled-garden remove [find comment~"tc-vps"] } on-error={}`,
+      `/ip hotspot walled-garden add dst-host="*169.58.98.92*" action=allow comment="tc-vps-portal-domain"`,
+      `/ip hotspot walled-garden add dst-host="*${cleanDomain}*" action=allow comment="tc-vps-controller-domain"`
     );
 
     walledGardenDomains.forEach((domain) => {
       scriptLines.push(
-        `:do { /ip hotspot walled-garden add dst-host="*${domain}" comment="T-Connect Walled Garden - ${domain}" } on-error={}`
+        `:do { /ip hotspot walled-garden add dst-host="*${domain}" action=allow comment="T-Connect Walled Garden - ${domain}" } on-error={}`
       );
     });
 
     if (blockDoH) {
       scriptLines.push(
         ``,
-        `# 9. Strict CNA Zero-Bypass Lockdown & Anti-Leak Rules`,
+        `# 9. CNA Captive Portal Discovery & DNS Interception (Remove any legacy TCP-blocking filter)`,
+        `:do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}`,
         `:do { /ip dhcp-server option remove [find name="cna-cap-port"] } on-error={}`,
         `:do { /ip dhcp-server option add name="cna-cap-port" code=114 value="s'${portalBaseUrl}/api/cna/status'" } on-error={}`,
-        `:do { /ip dhcp-server set [find default=yes] dhcp-option="cna-cap-port" } on-error={}`,
+        `:do { /ip dhcp-server set [find name="tc-dhcp-server"] dhcp-option="cna-cap-port" } on-error={}`,
         `:do { /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Intercept UDP DNS" } on-error={}`,
         `:do { /ip firewall nat add chain=dstnat protocol=tcp dst-port=53 action=redirect to-ports=53 comment="T-Connect: Intercept TCP DNS" } on-error={}`,
         `:do { /ip firewall filter add chain=forward protocol=tcp dst-port=853 action=reject reject-with=tcp-reset comment="T-Connect: Block DoT (Port 853)" } on-error={}`,
-        `:do { /ip firewall filter add chain=forward protocol=udp dst-port=853 action=drop comment="T-Connect: Block DoT UDP (Port 853)" } on-error={}`,
-        `:do { /ip firewall filter add chain=forward action=reject reject-with=tcp-reset protocol=tcp connection-state=new hotspot=from-client comment="T-Connect: Fast-Fail Unauth TCP" } on-error={}`,
-        `:do { /ip firewall raw add chain=prerouting protocol=tcp dst-port=443 content="dns-query" action=drop comment="T-Connect: Heuristic DoH Drop" } on-error={}`
+        `:do { /ip firewall filter add chain=forward protocol=udp dst-port=853 action=drop comment="T-Connect: Block DoT UDP (Port 853)" } on-error={}`
       );
     }
 
@@ -587,7 +612,8 @@ export class RouterOSRenderer {
    * Generates the Master Full-Stack Alignment Script:
    * Aligns bridgeLocal, attaches ports ether2, ether3, ether4, ether5, wifi1, wifi2,
    * configures high-capacity 10.10.0.1/22 subnet (1,022 usable IPs), DHCP server,
-   * DNS resolver, NAT masquerade, Hotspot server, AP bypasses, and WinBox service.
+   * DNS resolver, NAT masquerade, Hotspot server with VPS walled-garden & redirect,
+   * built-in test user, AP bypasses, and WinBox service.
    */
   static renderFullStackAlignmentScript(options?: {
     bridgeName?: string;
@@ -597,6 +623,7 @@ export class RouterOSRenderer {
     ap1Ip?: string;
     ap2Ip?: string;
     ap3Ip?: string;
+    vpsHost?: string;
   }): string {
     const bridge = options?.bridgeName || 'bridgeLocal';
     const gateway = options?.gatewayIp || '10.10.0.1';
@@ -605,12 +632,19 @@ export class RouterOSRenderer {
     const ap1 = options?.ap1Ip || '10.10.0.2';
     const ap2 = options?.ap2Ip || '10.10.0.3';
     const ap3 = options?.ap3Ip || '10.10.0.5';
+    const defaultVps = (typeof window !== 'undefined' && window.location.host && !window.location.host.includes('.run.app') && !window.location.host.includes('localhost'))
+      ? window.location.host
+      : '169.58.98.92:3000';
+    const rawVpsHost = options?.vpsHost || defaultVps;
+    const vpsCleanHost = rawVpsHost.trim();
+    const vpsIpOnly = vpsCleanHost.split(':')[0];
 
     return `# ============================================================
 # T-CONNECT MASTER FULL-STACK ALIGNMENT SCRIPT
 # Hardware: MikroTik hAP ax3 (ARM64)
 # RouterOS: v7.16.2 (wifi-qcom)
 # Bridge: ${bridge} | LAN Subnet: ${cidr} (1,022 Hosts)
+# VPS Controller Endpoint: http://${vpsCleanHost}
 # ============================================================
 
 :log info "[T-Connect] Starting full-stack alignment...";
@@ -642,27 +676,47 @@ export class RouterOSRenderer {
 /ip dhcp-server network add address=${cidr} gateway=${gateway} dns-server=${gateway},1.1.1.1,8.8.8.8 comment="T-Connect Hotspot Guest Network"
 /ip dhcp-server add name="tc-dhcp-server" interface="${bridge}" address-pool="tc-hotspot-pool" lease-time=1h disabled=no
 
-# 6. Enable DNS Resolver for Hotspot Clients
+# 6. Enable DNS Resolver, Intercept UDP DNS & Remove Any Legacy TCP-Blocking Filters
 /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
-:do { /ip dns static remove [find name="login.tconnect.ls"] } on-error={}
+:do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}
+:do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept"]] = 0) do={ /ip firewall nat add chain=dstnat protocol=udp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept" } } on-error={}
 
-# 7. Configure NAT Firewall Masquerade for Internet Access
+# 7. Configure NAT Firewall Masquerade for Internet Access (WAN ether1)
 :do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}
+:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}
 
-# 8. Configure Hotspot Profile & Server on "${bridge}" (Direct IP Interception on VPS)
+# 8. Configure Hotspot Profile & Server on "${bridge}"
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=http-chap,http-pap rate-limit="" use-radius=yes
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no
+:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial,cookie,mac-cookie trial-uptime-limit=1h trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
 :do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
 /ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" disabled=no
 
-# 9. Bypass AP Static Management IPs from Captive Portal
+# 9. VPS Walled Garden Rules (Allows phone to load captive portal Splash Page from VPS on port 3000)
+:do { /ip hotspot walled-garden ip remove [find comment~"tc-vps"] } on-error={}
+/ip hotspot walled-garden ip add dst-address=${vpsIpOnly} action=accept comment="tc-vps-server-access"
+:do { /ip hotspot walled-garden remove [find comment~"tc-vps"] } on-error={}
+/ip hotspot walled-garden add dst-host="*${vpsIpOnly}*" action=allow comment="tc-vps-portal-domain"
+/ip hotspot walled-garden add dst-host="*vodacom.co.ls" action=allow comment="tc-mpesa-walled-garden"
+/ip hotspot walled-garden add dst-host="*econet.co.ls" action=allow comment="tc-ecocash-walled-garden"
+
+# 10. Interactive T-Connect Starlink Splash Page + VPS Portal Link (/portal)
+${RouterOSRenderer.buildSplashPageFileCommands(`http://${vpsCleanHost}`)}
+
+# 11. Instant Testing & Free Trial Users (User: test / Pass: 123 & User: T-TRIAL / Pass: 123)
+:do { /ip hotspot user remove [find name="test"] } on-error={}
+/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"
+:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}
+/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Trial Auth User"
+
+# 12. Bypass AP Static Management IPs & Admin PC from Captive Portal
 :do { /ip hotspot ip-binding remove [find comment~"tc-bypass-AP"] } on-error={}
 /ip hotspot ip-binding add address=${ap1} type=bypassed comment="tc-bypass-AP1-ether2"
 /ip hotspot ip-binding add address=${ap2} type=bypassed comment="tc-bypass-AP2-ether3"
 /ip hotspot ip-binding add address=${ap3} type=bypassed comment="tc-bypass-AP3-ether5"
 /ip hotspot ip-binding add address=10.10.0.254 type=bypassed comment="tc-bypass-admin-pc"
 
-# 10. Configure RouterOS 7.16.2 wifi-qcom Radios with SSID "MIKROTIK-TC"
+# 13. Configure RouterOS 7.16.2 wifi-qcom Radios with SSID "MIKROTIK-TC"
 :do {
   :foreach w in=[/interface wifi find] do={
     /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
@@ -670,11 +724,12 @@ export class RouterOSRenderer {
   :log info "[T-Connect] Configured all RouterOS 7.16.2 wifi radios with SSID MIKROTIK-TC";
 } on-error={ :log warning "Could not auto-configure wifi radios" }
 
-# 11. Ensure WinBox Management Service (Port 8291) is Enabled
+# 14. Ensure WinBox Management Service (Port 8291) is Enabled
 /ip service set winbox disabled=no port=8291
 
-:log info "[T-Connect] Alignment complete! ${bridge} is active with ${gateway}/22 gateway.";
-:put "T-Connect: Alignment complete! Bridge ${bridge} configured with ${gateway}/22 and MIKROTIK-TC WiFi.";`;
+:log info "[T-Connect] Alignment complete! ${bridge} is active with ${gateway}/22 gateway and VPS Walled Garden.";
+:put "T-Connect: [SUCCESS] Alignment complete! Bridge ${bridge} configured with ${gateway}/22, VPS Portal Walled Garden, and MIKROTIK-TC WiFi.";`;
   }
 }
+
 

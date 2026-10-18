@@ -15,6 +15,7 @@ import { BillingView } from './components/views/BillingView';
 import { NetworkSecurityView } from './components/views/NetworkSecurityView';
 import { DatabaseModal } from './components/common/DatabaseModal';
 import { LoginView } from './components/auth/LoginView';
+import { StandalonePortalView } from './components/portal/StandalonePortalView';
 import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight, PanelLeftOpen } from 'lucide-react';
 import { simulateInviteEmail } from './services/auth';
 import { browserNotificationService } from './services/browserNotifications';
@@ -22,6 +23,15 @@ import { browserNotificationService } from './services/browserNotifications';
 export default function App() {
   const [state, setState] = useState(() => storage.getState());
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => storage.getAuthSession());
+  const [isUserTestingPortal, setIsUserTestingPortal] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.location.pathname.startsWith('/portal') ||
+             window.location.hash === '#portal' ||
+             new URLSearchParams(window.location.search).get('view') === 'portal' ||
+             new URLSearchParams(window.location.search).get('mode') === 'portal';
+    }
+    return false;
+  });
   const [effectiveRole, setEffectiveRole] = useState<TeamMember['role']>(() => {
     const s = storage.getAuthSession();
     if (!s) return 'Super Admin';
@@ -158,6 +168,29 @@ export default function App() {
     window.addEventListener('hashchange', handleUrlAuth);
     return () => {
       window.removeEventListener('hashchange', handleUrlAuth);
+    };
+  }, []);
+
+  // Listen for portal mode URL transitions (#portal or ?view=portal)
+  useEffect(() => {
+    const handleLocationChange = () => {
+      if (typeof window !== 'undefined') {
+        if (
+          window.location.pathname.startsWith('/portal') ||
+          window.location.hash === '#portal' ||
+          new URLSearchParams(window.location.search).get('view') === 'portal' ||
+          new URLSearchParams(window.location.search).get('mode') === 'portal'
+        ) {
+          setIsUserTestingPortal(true);
+        }
+      }
+    };
+
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
     };
   }, []);
 
@@ -639,6 +672,22 @@ export default function App() {
     .reduce((acc, curr) => acc + curr.amount, 0);
   const activeSessions = state.routers.reduce((acc, curr) => acc + curr.activeSessions, 0);
   const unusedVoucherCount = state.vouchers.filter(v => v.status === 'active').length;
+
+  // Render full-screen Guest Captive Portal Splash Page when visiting /portal, #portal, or ?view=portal
+  if (isUserTestingPortal) {
+    return (
+      <StandalonePortalView
+        routerGatewayIp="10.10.0.1"
+        isAdminLoggedIn={Boolean(authSession)}
+        onBackToDashboard={() => {
+          setIsUserTestingPortal(false);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/');
+          }
+        }}
+      />
+    );
+  }
 
   // Enforce full-screen authentication gate before dashboard entry
   if (!authSession) {

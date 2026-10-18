@@ -884,6 +884,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
   }, [selectedScope, currentConfig.plans]);
 
+  // Sync initial scope configurations with VPS server so guest phones on WiFi receive the exact splash page
+  useEffect(() => {
+    fetch('/api/portal/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ configs: scopeConfigs })
+    }).catch(() => {});
+  }, []);
+
   // Save current scope configuration
   const saveScopeConfig = (updated: ScopePortalConfig) => {
     setScopeConfigs((prev) => ({
@@ -895,6 +904,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         window.localStorage.setItem(`tconnect_portal_scope_${updated.scope}`, JSON.stringify(updated));
       } catch {}
     }
+    fetch('/api/portal/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: updated.scope, config: updated })
+    }).catch(() => {});
     setSavedToast(`Saved ${updated.scopeLabel} portal profile!`);
     setTimeout(() => setSavedToast(null), 2500);
   };

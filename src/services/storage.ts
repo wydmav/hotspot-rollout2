@@ -1230,6 +1230,10 @@ class StorageService {
 
 
   // Plan & Voucher Methods
+  getPlans(): HotspotPlan[] {
+    return this.state.plans && this.state.plans.length > 0 ? this.state.plans : STARTER_PLANS;
+  }
+
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
     const newPlan: HotspotPlan = {
       ...plan,

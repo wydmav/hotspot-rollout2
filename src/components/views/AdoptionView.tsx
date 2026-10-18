@@ -242,18 +242,29 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         return r.vertical === effectiveFilter;
       });
 
-  // Controller VPS Host Endpoint (Defaults to current browser host or custom VPS IP)
+  // Controller VPS Host Endpoint (Defaults to VPS 169.58.98.92:3000 or custom browser host)
   const [controllerHost, setControllerHost] = useState<string>(() => {
-    if (typeof window !== 'undefined' && window.location.host) {
+    if (
+      typeof window !== 'undefined' &&
+      window.location.host &&
+      !window.location.host.includes('.run.app') &&
+      !window.location.host.includes('localhost')
+    ) {
       return window.location.host;
     }
-    return 'app.tconnect.co.ls';
+    return '169.58.98.92:3000';
   });
   const [endpointProtocol, setEndpointProtocol] = useState<'https' | 'http'>(() => {
-    if (typeof window !== 'undefined' && window.location.protocol === 'http:') {
-      return 'http';
+    if (
+      typeof window !== 'undefined' &&
+      window.location.host &&
+      !window.location.host.includes('.run.app') &&
+      !window.location.host.includes('localhost') &&
+      window.location.protocol === 'https:'
+    ) {
+      return 'https';
     }
-    return 'https';
+    return 'http';
   });
 
   // Generate real one-liner for selected router
@@ -1244,6 +1255,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         onChange={(e) => setSelectedBridgeName(e.target.value)}
                         className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white text-xs"
                       >
+                        <option value="bridgeLocal">bridgeLocal (hAP ax³ Default)</option>
                         <option value="tctower-bridge">tctower-bridge (Tower AP Bridge)</option>
                         <option value="mkcontroller-bridge">mkcontroller-bridge (Standard)</option>
                         <option value="tconnect-bridge">tconnect-bridge</option>
@@ -1323,7 +1335,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                             dhcpRange: '10.10.0.50-10.10.3.250',
                             ap1Ip: '10.10.0.2',
                             ap2Ip: '10.10.0.3',
-                            ap3Ip: '10.10.0.5'
+                            ap3Ip: '10.10.0.5',
+                            vpsHost: controllerHost.trim() || '169.58.98.92:3000'
                           });
                           navigator.clipboard.writeText(masterScript);
                           setCopiedMasterScript(true);

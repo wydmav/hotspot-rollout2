@@ -612,10 +612,11 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
 
   // Render RSC Script for Config Export
   const renderedRscScript = useMemo(() => {
+    const currentHost = typeof window !== 'undefined' && window.location.host ? window.location.host : '169.58.98.92:3000';
     return RouterOSRenderer.renderProvisioningScript({
       router: currentRouter,
-      hubDomain: 'hub.tconnect.ls',
-      controllerHost: window.location.host,
+      hubDomain: currentHost,
+      controllerHost: currentHost,
       endpointProtocol: window.location.protocol.replace(':', '') as any,
       hubWgPort: 51820,
       hubTunnelIp: '10.99.0.1',
@@ -624,7 +625,7 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
       hubPublicKey: 'aHViX3B1YmxpY19rZXlfY3VydmUyNTUxOV90Y29ubmVjdA==',
       radiusSecret: 'radsec_tconnect_lesotho_99120',
       apiPassword: 'tc_pass_crypto_random_32char',
-      walledGardenDomains: ['mpesa.vodacom.co.ls', 'ecocash.econet.co.ls', 'tconnect.ls'],
+      walledGardenDomains: ['mpesa.vodacom.co.ls', 'ecocash.econet.co.ls'],
       blockDoH: true
     });
   }, [currentRouter]);
