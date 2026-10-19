@@ -320,13 +320,19 @@ class StorageService {
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-        // Sync gateways and vouchers to backend server so /portal & OTT Voucher API have live state
+        // Sync gateways, vouchers, and Supabase config to backend server so /portal & OTT Voucher API have live state
+        let supabaseConfig: any = undefined;
+        try {
+          const rawSb = window.localStorage.getItem('tconnect_supabase_config_v2');
+          if (rawSb) supabaseConfig = JSON.parse(rawSb);
+        } catch {}
         fetch('/api/gateways/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             gateways: this.state.gateways,
-            vouchers: this.state.vouchers
+            vouchers: this.state.vouchers,
+            supabaseConfig
           })
         }).catch(() => {});
       } catch (e) {
@@ -429,12 +435,20 @@ class StorageService {
 
   syncGatewaysAndVouchersWithServer() {
     try {
+      let supabaseConfig: any = undefined;
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          const rawSb = window.localStorage.getItem('tconnect_supabase_config_v2');
+          if (rawSb) supabaseConfig = JSON.parse(rawSb);
+        } catch {}
+      }
       fetch('/api/gateways/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           gateways: this.state.gateways,
-          vouchers: this.state.vouchers
+          vouchers: this.state.vouchers,
+          supabaseConfig
         })
       }).catch(() => {});
     } catch {}

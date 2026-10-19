@@ -773,6 +773,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [ottPin, setOttPin] = useState('');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
   const [savedToast, setSavedToast] = useState<string | null>(null);
   
   // Real-time Connection Duration Telemetry (Stopwatch & Countdown)
@@ -1091,17 +1093,61 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     setPreviewStep('usage');
   };
 
-  // Simulating Guest Payment Flow
-  const handleSimulatePayment = () => {
+  // Execute & Verify Guest Payment Flow (Strict 16-Digit OTT Voucher Verification)
+  const handleSimulatePayment = async () => {
+    setPaymentError(null);
     const chosenPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
     const fullPhone = `${guestCountryCode} ${guestPhone}`;
+
+    if (selectedGateway === 'ottvoucher') {
+      const cleanPin = ottPin.replace(/\D/g, '');
+      if (cleanPin.length !== 16) {
+        setPaymentError(`OTT Voucher PIN must be exactly 16 numeric digits (${cleanPin.length}/16 digits entered).`);
+        return;
+      }
+
+      setIsVerifyingPayment(true);
+      try {
+        const res = await fetch('/api/gateways/ottvoucher/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ottPin: cleanPin,
+            phoneNumber: fullPhone,
+            amount: chosenPlan.price,
+            planId: chosenPlan.id,
+            planName: chosenPlan.name,
+            durationSeconds: chosenPlan.durationSeconds || 86400,
+            currency,
+            guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim(),
+            guestEmail: guestEmail.trim(),
+            scope: selectedScope,
+            mac: '7A:91:02:11:44:99'
+          })
+        });
+        const data = await res.json().catch(() => ({ success: false }));
+        setIsVerifyingPayment(false);
+
+        if (!res.ok || !data.success) {
+          setPaymentError(
+            data.message || 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho and Supabase verification check.'
+          );
+          return;
+        }
+      } catch {
+        setIsVerifyingPayment(false);
+        setPaymentError('Unable to reach OTT Voucher verification server.');
+        return;
+      }
+    }
+
     if (onProcessPayment) {
       try {
         onProcessPayment(
           selectedGateway, 
           chosenPlan.id, 
           fullPhone, 
-          selectedGateway === 'ottvoucher' ? ottPin : undefined,
+          selectedGateway === 'ottvoucher' ? ottPin.replace(/\D/g, '') : undefined,
           chosenPlan
         );
       } catch {}
@@ -2550,12 +2596,21 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </div>
                       )}
 
+                      {paymentError && (
+                        <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[10px] font-mono font-bold text-center">
+                          {paymentError}
+                        </div>
+                      )}
+
                       <button
                         type="button"
                         onClick={handleSimulatePayment}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-colors"
+                        disabled={isVerifyingPayment}
+                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-colors"
                       >
-                        Authorize &amp; Connect ({currency}{chosenPlan.price}) &rarr;
+                        {isVerifyingPayment
+                          ? 'Verifying 16-Digit OTT Voucher...'
+                          : `Authorize & Connect (${currency}${chosenPlan.price}) →`}
                       </button>
                     </div>
                   );

@@ -135,6 +135,9 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
   );
   const [testTermsAccepted, setTestTermsAccepted] = useState(true);
   const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ecocash');
+  const [ottPin, setOttPin] = useState('');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isVerifyingOtt, setIsVerifyingOtt] = useState(false);
 
   // Handle local image upload via FileReader
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -837,14 +840,18 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
 
                     {selectedGateway === 'ottvoucher' && (
                       <div className="pt-1 space-y-1">
-                        <label className="text-[10px] font-mono text-slate-300 block">16-Digit OTT Voucher PIN</label>
+                        <div className="flex justify-between items-center text-[10px] font-mono text-slate-300">
+                          <label>16-Digit OTT Voucher PIN</label>
+                          <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/16 digits</span>
+                        </div>
                         <input
                           type="text"
                           inputMode="numeric"
                           maxLength={19}
+                          value={ottPin}
                           onChange={(e) => {
                             const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                            e.target.value = digits.match(/.{1,4}/g)?.join(' ') || '';
+                            setOttPin(digits.match(/.{1,4}/g)?.join(' ') || '');
                           }}
                           placeholder="1234 5678 9012 3456"
                           className="w-full px-2.5 py-1.5 bg-black/50 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-widest"
@@ -852,11 +859,46 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                       </div>
                     )}
 
+                    {paymentError && (
+                      <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[10px] font-mono font-bold text-center">
+                        {paymentError}
+                      </div>
+                    )}
+
                     <button
-                      onClick={() => setActiveStep('usage')}
-                      className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs font-mono rounded-xl shadow-lg"
+                      disabled={isVerifyingOtt}
+                      onClick={async () => {
+                        setPaymentError(null);
+                        if (selectedGateway === 'ottvoucher') {
+                          const cleanPin = ottPin.replace(/\D/g, '');
+                          if (cleanPin.length !== 16) {
+                            setPaymentError(`OTT Voucher PIN must be exactly 16 numeric digits (${cleanPin.length}/16 digits entered).`);
+                            return;
+                          }
+                          setIsVerifyingOtt(true);
+                          try {
+                            const res = await fetch('/api/gateways/ottvoucher/redeem', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ ottPin: cleanPin, amount: 10, currency })
+                            });
+                            const data = await res.json().catch(() => ({ success: false }));
+                            setIsVerifyingOtt(false);
+                            if (!res.ok || !data.success) {
+                              setPaymentError(data.message || 'Invalid 16-digit OTT Voucher PIN.');
+                              return;
+                            }
+                          } catch {
+                            setIsVerifyingOtt(false);
+                            setPaymentError('Unable to reach OTT Voucher verification server.');
+                            return;
+                          }
+                        }
+                        setActiveStep('usage');
+                      }}
+                      className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-bold text-xs font-mono rounded-xl shadow-lg"
                     >
-                      Authorize &amp; Connect &rarr;
+                      {isVerifyingOtt ? 'Verifying 16-Digit OTT Voucher...' : 'Authorize & Connect →'}
                     </button>
                   </div>
                 )}

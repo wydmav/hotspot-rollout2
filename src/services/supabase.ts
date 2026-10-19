@@ -430,6 +430,11 @@ class SupabaseService {
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+        fetch('/api/gateways/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ supabaseConfig: this.config })
+        }).catch(() => {});
       } catch {}
     }
     this.initClient();

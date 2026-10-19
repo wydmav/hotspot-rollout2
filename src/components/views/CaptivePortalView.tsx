@@ -203,6 +203,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   const [voucherCodeInput, setVoucherCodeInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
 
   // Live countdown timer for "Session Usage" view
   const [remainingSeconds, setRemainingSeconds] = useState(306132); // ~3 days, 13 hours, 2 minutes
@@ -461,20 +462,63 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
     setPreviewStep('payment');
   };
 
-  // Payment Execution Simulation
-  const handleExecutePayment = (e: React.FormEvent) => {
+  // Payment Execution & Strict 16-Digit OTT Voucher Verification
+  const handleExecutePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsProcessing(true);
+    setPaymentError(null);
+    const fullPhone = `${guestCountry.code}${guestPhone.replace(/\s+/g, '')}`;
 
+    if (selectedGateway === 'ottvoucher') {
+      const cleanPin = ottPin.replace(/\D/g, '');
+      if (cleanPin.length !== 16) {
+        setPaymentError(`OTT Voucher PIN must be exactly 16 numeric digits (${cleanPin.length}/16 digits entered).`);
+        return;
+      }
+      setIsProcessing(true);
+      try {
+        const response = await fetch('/api/gateways/ottvoucher/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ottPin: cleanPin,
+            phoneNumber: fullPhone,
+            amount: selectedPlan?.price || 10,
+            planId: selectedPlan?.id || 'hs_1d',
+            planName: selectedPlan?.name || 'Daily Pass',
+            durationSeconds: selectedPlan?.durationSeconds || 86400,
+            currency,
+            guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim(),
+            guestEmail: guestEmail.trim(),
+            mac: '7A:91:02:11:44:99'
+          })
+        });
+        const data = await response.json().catch(() => ({ success: false }));
+        setIsProcessing(false);
+        if (!response.ok || !data.success) {
+          setPaymentError(data.message || 'Invalid 16-digit OTT Voucher PIN. Please check your voucher slip and try again.');
+          return;
+        }
+        setIssuedCode(data.voucherCode || `OTT-${cleanPin.slice(-4)}`);
+        setLastConnectedAuthMode('paid');
+        setPreviewStep('success');
+        const dur = data.durationSeconds || selectedPlan?.durationSeconds || 86400;
+        setRemainingSeconds(dur);
+        setTotalPackageSeconds(dur);
+      } catch {
+        setIsProcessing(false);
+        setPaymentError('Unable to reach OTT Voucher verification backend.');
+      }
+      return;
+    }
+
+    setIsProcessing(true);
     setTimeout(() => {
-      const fullPhone = `${guestCountry.code}${guestPhone.replace(/\s+/g, '')}`;
       const res = onProcessPayment(selectedGateway, selectedPlan.id, fullPhone, ottPin);
       setIssuedCode(res.voucher.code);
       setIsProcessing(false);
       setLastConnectedAuthMode('paid');
       setPreviewStep('success');
 
-      // Set package duration based on chosen plan
       if (selectedPlan.name.toLowerCase().includes('month')) {
         setRemainingSeconds(2592000);
         setTotalPackageSeconds(2592000);
@@ -488,26 +532,39 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
         setRemainingSeconds(7200);
         setTotalPackageSeconds(7200);
       }
-    }, 1200);
+    }, 1000);
   };
 
   // Direct Voucher Code Redemption
-  const handleRedeemDirectCode = (e: React.FormEvent) => {
+  const handleRedeemDirectCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPaymentError(null);
     if (!voucherCodeInput.trim()) return;
 
     setIsProcessing(true);
-    setTimeout(() => {
-      const res = onRedeemVoucher(voucherCodeInput, '7A:91:02:11:44:99', 'Customer-Device');
+    try {
+      const res = await fetch('/api/vouchers/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: voucherCodeInput.trim(),
+          mac: '7A:91:02:11:44:99',
+          guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim()
+        })
+      });
+      const data = await res.json().catch(() => ({ success: false }));
       setIsProcessing(false);
-      if (res.success) {
-        setIssuedCode(voucherCodeInput.toUpperCase());
+      if (res.ok && data.success) {
+        setIssuedCode(voucherCodeInput.trim().toUpperCase());
         setLastConnectedAuthMode('paid');
         setPreviewStep('success');
       } else {
-        alert(res.message);
+        setPaymentError(data.message || 'Invalid or expired voucher code.');
       }
-    }, 800);
+    } catch {
+      setIsProcessing(false);
+      setPaymentError('Failed to verify voucher code.');
+    }
   };
 
   // Strict CNA Lockdown & Instant Captive Portal Redirect Script (RouterOS v7.16.2)
@@ -1522,6 +1579,12 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                           <p className="text-slate-300 text-[10px]">
                             An automated prompt for <strong>{currency}{selectedPlan.price}</strong> will be sent to <strong>{guestCountry.code} {guestPhone}</strong>. Approve on your handset via *199# Push to activate internet.
                           </p>
+                        </div>
+                      )}
+
+                      {paymentError && (
+                        <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[11px] font-mono font-bold text-center">
+                          {paymentError}
                         </div>
                       )}
 

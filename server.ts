@@ -691,10 +691,10 @@ const serverStoreFilePath = path.resolve(__dirname, 'public/server-portal-store.
 interface ServerPortalStore {
   gateways: Array<any>;
   vouchers: Array<any>;
-  registeredOttPins: Array<{ pin: string; amount: number; planName: string; status: 'active' | 'used'; createdAt: string }>;
   redeemedOttPins: string[];
   guestEvents: Array<any>;
   transactions: Array<any>;
+  supabaseConfig?: { url: string; anonKey: string };
 }
 
 function loadServerPortalStore(): ServerPortalStore {
@@ -704,17 +704,16 @@ function loadServerPortalStore(): ServerPortalStore {
       return {
         gateways: Array.isArray(parsed.gateways) ? parsed.gateways : [],
         vouchers: Array.isArray(parsed.vouchers) ? parsed.vouchers : [],
-        registeredOttPins: Array.isArray(parsed.registeredOttPins) ? parsed.registeredOttPins : [],
         redeemedOttPins: Array.isArray(parsed.redeemedOttPins) ? parsed.redeemedOttPins : [],
         guestEvents: Array.isArray(parsed.guestEvents) ? parsed.guestEvents : [],
-        transactions: Array.isArray(parsed.transactions) ? parsed.transactions : []
+        transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+        supabaseConfig: parsed.supabaseConfig && parsed.supabaseConfig.url ? parsed.supabaseConfig : undefined
       };
     }
   } catch {}
   return {
     gateways: [],
     vouchers: [],
-    registeredOttPins: [],
     redeemedOttPins: [],
     guestEvents: [],
     transactions: []
@@ -729,64 +728,328 @@ function saveServerPortalStore(store: ServerPortalStore) {
 
 const serverStore = loadServerPortalStore();
 
-// Sync gateways & vouchers from Admin Dashboard to backend server
+function getSupabaseCredentials(): { url: string; key: string } {
+  const url = (
+    serverStore.supabaseConfig?.url ||
+    process.env.VITE_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    ''
+  ).trim().replace(/\/+$/, '');
+  const key = (
+    serverStore.supabaseConfig?.anonKey ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+  if (!url || !key || url.includes('your-project')) {
+    return { url: '', key: '' };
+  }
+  return { url, key };
+}
+
+// Sync gateways, vouchers, and Supabase config from Admin Dashboard to backend server
 app.post('/api/gateways/sync', (req: Request, res: Response) => {
-  const { gateways, vouchers } = req.body || {};
+  const { gateways, vouchers, supabaseConfig } = req.body || {};
   if (Array.isArray(gateways)) {
     serverStore.gateways = gateways.filter((g: any) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
   }
   if (Array.isArray(vouchers)) {
     serverStore.vouchers = vouchers;
   }
+  if (supabaseConfig && typeof supabaseConfig.url === 'string' && typeof supabaseConfig.anonKey === 'string') {
+    if (supabaseConfig.url.trim() && supabaseConfig.anonKey.trim()) {
+      serverStore.supabaseConfig = {
+        url: supabaseConfig.url.trim(),
+        anonKey: supabaseConfig.anonKey.trim()
+      };
+    }
+  }
   saveServerPortalStore(serverStore);
   res.json({ success: true });
 });
 
-// Register valid 16-digit OTT PINs for testing or retail stock in the server ledger
-app.post('/api/gateways/ottvoucher/register-pin', (req: Request, res: Response) => {
-  const { pin, amount = 10, planName = 'Daily Pass' } = req.body || {};
-  const cleanPin = String(pin || '').replace(/\D/g, '');
-  if (!/^\d{16}$/.test(cleanPin)) {
-    return res.status(400).json({ success: false, message: 'OTT Voucher PIN must be exactly 16 digits.' });
-  }
-  serverStore.redeemedOttPins = serverStore.redeemedOttPins.filter((p) => p !== cleanPin);
-  const existing = serverStore.registeredOttPins.find((p) => p.pin === cleanPin);
-  if (existing) {
-    existing.status = 'active';
-    existing.amount = Number(amount);
-    existing.planName = planName;
-  } else {
-    serverStore.registeredOttPins.unshift({
-      pin: cleanPin,
-      amount: Number(amount),
-      planName,
-      status: 'active',
-      createdAt: new Date().toISOString()
-    });
-  }
-  saveServerPortalStore(serverStore);
-  res.json({ success: true, pin: cleanPin, amount: Number(amount), planName });
-});
+// Unified 16-Digit OTT Voucher Verification Helper (Live OTT Lesotho API + Supabase DB Verification)
+async function verify16DigitOttVoucher(
+  pinToRedeem: string,
+  amount: number = 10,
+  currency: string = 'M'
+): Promise<{
+  verified: boolean;
+  receipt?: string;
+  planName?: string;
+  durationSeconds?: number;
+  price?: number;
+  merchantId: string;
+  hasLiveOttCredentials: boolean;
+  hasSupabase: boolean;
+  alreadyUsed?: boolean;
+}> {
+  const ottGw = serverStore.gateways.find((g: any) => g.provider === 'ottvoucher');
+  const ottMerchantId = ottGw?.merchantId || ottGw?.username || process.env.OTTVOUCHER_MERCHANT_ID || 'TCONNECTLES1';
+  const ottApiKey = (ottGw?.apiKey || process.env.OTTVOUCHER_API_KEY || '').trim();
+  const ottApiPassword = (ottGw?.apiPassword || process.env.OTTVOUCHER_API_PASSWORD || '').trim();
+  const ottBearerToken = (ottGw?.bearerToken || process.env.OTTVOUCHER_BEARER_TOKEN || '').trim();
+  const ottEndpoint = (ottGw?.endpointUrl || process.env.OTTVOUCHER_ENDPOINT_URL || 'https://portal.ottlesotho.com').replace(/\/+$/, '');
+  const hasLiveOttCredentials = Boolean((ottApiKey.length >= 6 && ottApiPassword.length >= 4) || ottBearerToken.length >= 10);
+  const { url: sbUrl, key: sbKey } = getSupabaseCredentials();
+  const hasSupabase = Boolean(sbUrl && sbKey);
 
-// Verify & redeem platform / Supabase voucher codes from Splash Page
+  if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
+    return {
+      verified: false,
+      alreadyUsed: true,
+      merchantId: ottMerchantId,
+      hasLiveOttCredentials,
+      hasSupabase
+    };
+  }
+
+  const formattedSpace = pinToRedeem.match(/.{1,4}/g)?.join(' ') || pinToRedeem;
+  const formattedDash = pinToRedeem.match(/.{1,4}/g)?.join('-') || pinToRedeem;
+
+  // 1. Check Supabase Database Verification (`vouchers` and `ott_vouchers` tables)
+  if (hasSupabase) {
+    try {
+      const orFilter = `or=(code.eq.${encodeURIComponent(pinToRedeem)},code.eq.${encodeURIComponent(formattedSpace)},code.eq.${encodeURIComponent(formattedDash)},code.eq.OTT-${encodeURIComponent(pinToRedeem)})`;
+      const qUrl = `${sbUrl}/rest/v1/vouchers?${orFilter}&select=*`;
+      const sbRes = await fetch(qUrl, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4500)
+      });
+      if (sbRes.ok) {
+        const rows = await sbRes.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          const activeRow = rows.find((r: any) => r.status === 'active' || r.status === 'unused');
+          if (!activeRow) {
+            return {
+              verified: false,
+              alreadyUsed: true,
+              merchantId: ottMerchantId,
+              hasLiveOttCredentials,
+              hasSupabase
+            };
+          }
+          // Mark as used in Supabase
+          fetch(`${sbUrl}/rest/v1/vouchers?id=eq.${activeRow.id}`, {
+            method: 'PATCH',
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status: 'used', first_used_at: new Date().toISOString() })
+          }).catch(() => {});
+
+          return {
+            verified: true,
+            receipt: `OTT-SB-${activeRow.id || Date.now()}`,
+            planName: activeRow.plan_name || 'Daily Pass',
+            durationSeconds: Number(activeRow.duration_seconds) || 86400,
+            price: Number(activeRow.price) || amount,
+            merchantId: ottMerchantId,
+            hasLiveOttCredentials,
+            hasSupabase
+          };
+        }
+      }
+
+      // Also check `ott_vouchers` table if external OTT generator writes there
+      const ottTableUrl = `${sbUrl}/rest/v1/ott_vouchers?or=(pin.eq.${encodeURIComponent(pinToRedeem)},code.eq.${encodeURIComponent(pinToRedeem)},pin.eq.${encodeURIComponent(formattedSpace)},pin.eq.${encodeURIComponent(formattedDash)})&select=*`;
+      const ottTblRes = await fetch(ottTableUrl, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(3500)
+      });
+      if (ottTblRes.ok) {
+        const ottRows = await ottTblRes.json();
+        if (Array.isArray(ottRows) && ottRows.length > 0) {
+          const validRow = ottRows.find((r: any) => !r.status || r.status === 'active' || r.status === 'unused' || r.is_redeemed === false);
+          if (!validRow) {
+            return {
+              verified: false,
+              alreadyUsed: true,
+              merchantId: ottMerchantId,
+              hasLiveOttCredentials,
+              hasSupabase
+            };
+          }
+          if (validRow.id) {
+            fetch(`${sbUrl}/rest/v1/ott_vouchers?id=eq.${validRow.id}`, {
+              method: 'PATCH',
+              headers: {
+                apikey: sbKey,
+                Authorization: `Bearer ${sbKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ status: 'used', is_redeemed: true, redeemed_at: new Date().toISOString() })
+            }).catch(() => {});
+          }
+          return {
+            verified: true,
+            receipt: `OTT-DB-${validRow.id || Date.now()}`,
+            planName: validRow.plan_name || 'Daily Pass',
+            durationSeconds: Number(validRow.duration_seconds) || 86400,
+            price: Number(validRow.amount || validRow.price) || amount,
+            merchantId: ottMerchantId,
+            hasLiveOttCredentials,
+            hasSupabase
+          };
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Check synced active vouchers in serverStore
+  const voucherMatch = serverStore.vouchers.find(
+    (v: any) => String(v.code || '').replace(/\D/g, '') === pinToRedeem && v.status === 'active'
+  );
+  if (voucherMatch) {
+    voucherMatch.status = 'used';
+    return {
+      verified: true,
+      receipt: `OTT-VCH-${Date.now()}`,
+      planName: voucherMatch.planName || 'Daily Pass',
+      durationSeconds: Number(voucherMatch.durationSeconds) || 86400,
+      price: Number(voucherMatch.price) || amount,
+      merchantId: ottMerchantId,
+      hasLiveOttCredentials,
+      hasSupabase
+    };
+  }
+
+  // 3. Verify Against Live OTT Lesotho API (portal.ottlesotho.com)
+  if (hasLiveOttCredentials) {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (ottApiKey && ottApiPassword) {
+        const basicAuth = Buffer.from(`${ottMerchantId}:${ottApiPassword}`).toString('base64');
+        headers['Authorization'] = `Basic ${basicAuth}`;
+        headers['X-Api-Key'] = ottApiKey;
+      } else if (ottBearerToken) {
+        headers['Authorization'] = `Bearer ${ottBearerToken}`;
+        if (ottApiKey) headers['X-Api-Key'] = ottApiKey;
+      }
+
+      const ottResponse = await fetch(`${ottEndpoint}/api/v1/voucher/redeem`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          merchantId: ottMerchantId,
+          username: ottMerchantId,
+          pin: pinToRedeem,
+          voucherPin: pinToRedeem,
+          amount: Number(amount),
+          currency,
+          reference: `TC-${Date.now()}`
+        }),
+        signal: AbortSignal.timeout(6000)
+      });
+
+      if (ottResponse.ok) {
+        const ottData = await ottResponse.json().catch(() => null);
+        if (
+          ottData &&
+          (ottData.success === true ||
+            ottData.status === 'SUCCESS' ||
+            ottData.status === 'COMPLETED' ||
+            ottData.status === 'APPROVED' ||
+            ottData.redeemed === true ||
+            ottData.responseCode === '00')
+        ) {
+          return {
+            verified: true,
+            receipt: ottData.transactionRef || ottData.reference || `OTT-LIVE-${Date.now()}`,
+            planName: ottData.planName || 'Daily Pass',
+            durationSeconds: 86400,
+            price: Number(ottData.amount || amount),
+            merchantId: ottMerchantId,
+            hasLiveOttCredentials,
+            hasSupabase
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[OTT Voucher Live API] Upstream redemption verification error:', err);
+    }
+  }
+
+  return {
+    verified: false,
+    merchantId: ottMerchantId,
+    hasLiveOttCredentials,
+    hasSupabase
+  };
+}
+
+// Verify & redeem platform / Supabase / 16-digit OTT voucher codes from Splash Page
 app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
   const { code, mac, ip, guestName, guestPhone, guestEmail, firstName, lastName, countryCode, phone, scope } = req.body || {};
   const cleanCode = String(code || '').trim().toUpperCase();
+  const digitsOnly = cleanCode.replace(/\D/g, '');
   if (!cleanCode) {
     return res.status(400).json({ success: false, message: 'Please enter a voucher code.' });
   }
 
+  // If user entered a 16-digit OTT Voucher PIN in the Voucher tab, verify via OTT + Supabase pipeline
+  if (/^\d{16}$/.test(digitsOnly)) {
+    const ottCheck = await verify16DigitOttVoucher(digitsOnly, 10, 'M');
+    if (ottCheck.alreadyUsed) {
+      return res.status(400).json({
+        success: false,
+        reason: 'PIN_ALREADY_USED',
+        message: 'This 16-digit OTT Voucher PIN has already been redeemed.'
+      });
+    }
+    if (ottCheck.verified) {
+      serverStore.redeemedOttPins.push(digitsOnly);
+      const entry = {
+        id: `guest_ott_vch_${Date.now()}`,
+        firstName: firstName || '',
+        lastName: lastName || '',
+        guestName: guestName || 'OTT Customer',
+        countryCode: countryCode || '+266',
+        phone: phone || '',
+        guestPhone: guestPhone || '',
+        email: guestEmail || '',
+        mac: mac || '',
+        ip: ip || '',
+        scope: scope || 'hotspot',
+        mode: 'ottvoucher',
+        voucherCode: `OTT-${digitsOnly.slice(-4)}`,
+        planName: ottCheck.planName || 'Daily Pass',
+        durationSeconds: ottCheck.durationSeconds || 86400,
+        amount: ottCheck.price || 10,
+        transactionRef: ottCheck.receipt,
+        capturedAt: new Date().toISOString()
+      };
+      serverStore.guestEvents.unshift(entry);
+      saveServerPortalStore(serverStore);
+      return res.json({
+        success: true,
+        code: digitsOnly,
+        planName: ottCheck.planName || 'Daily Pass',
+        durationSeconds: ottCheck.durationSeconds || 86400,
+        price: ottCheck.price || 10
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      reason: 'INVALID_OTT_PIN',
+      message: 'Invalid 16-digit OTT Voucher PIN: Not verified by OTT Lesotho or Supabase voucher ledger.'
+    });
+  }
+
   // 1. Check server-synced active vouchers
   let matchedVoucher = serverStore.vouchers.find(
-    (v: any) => String(v.code || '').toUpperCase() === cleanCode && v.status !== 'revoked' && v.status !== 'expired'
+    (v: any) => String(v.code || '').toUpperCase() === cleanCode && v.status === 'active'
   );
 
-  // 2. Also check Supabase vouchers table if configured in environment
-  const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const sbKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!matchedVoucher && sbUrl && sbKey && !sbUrl.includes('your-project')) {
+  // 2. Also check Supabase vouchers table if configured
+  const { url: sbUrl, key: sbKey } = getSupabaseCredentials();
+  if (!matchedVoucher && sbUrl && sbKey) {
     try {
-      const qUrl = `${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?code=ilike.${encodeURIComponent(cleanCode)}&select=*`;
+      const qUrl = `${sbUrl}/rest/v1/vouchers?code=ilike.${encodeURIComponent(cleanCode)}&select=*`;
       const sbRes = await fetch(qUrl, {
         headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
         signal: AbortSignal.timeout(4000)
@@ -795,12 +1058,22 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
         const rows = await sbRes.json();
         if (Array.isArray(rows) && rows.length > 0 && rows[0].status === 'active') {
           matchedVoucher = {
+            id: rows[0].id,
             code: rows[0].code,
             planName: rows[0].plan_name || 'Prepaid Hotspot Pass',
             durationSeconds: rows[0].duration_seconds || 86400,
             price: Number(rows[0].price || 10),
             status: 'active'
           };
+          fetch(`${sbUrl}/rest/v1/vouchers?id=eq.${rows[0].id}`, {
+            method: 'PATCH',
+            headers: {
+              apikey: sbKey,
+              Authorization: `Bearer ${sbKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ status: 'used', first_used_at: new Date().toISOString() })
+          }).catch(() => {});
         }
       }
     } catch {}
@@ -810,7 +1083,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     return res.status(400).json({
       success: false,
       reason: 'INVALID_CODE',
-      message: 'Invalid or expired voucher code. Please enter a valid voucher code issued by T-Connect.'
+      message: 'Invalid or expired voucher code. Please check your voucher code and try again.'
     });
   }
 
@@ -2458,42 +2731,52 @@ app.all('/api/devices/:routerId/failover', (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
-// 4. ATOMIC VOUCHER REDEMPTION API (Captive Portal & RADIUS Auth)
+// 4. ATOMIC VOUCHER VERIFICATION API (Captive Portal & RADIUS Auth)
 // -----------------------------------------------------------------------------
-app.post('/api/vouchers/verify', (req: Request, res: Response) => {
-  const { code } = req.body;
-  if (!code) {
+app.post('/api/vouchers/verify', async (req: Request, res: Response) => {
+  const { code } = req.body || {};
+  const cleanCode = String(code || '').trim().toUpperCase();
+  const digitsOnly = cleanCode.replace(/\D/g, '');
+  if (!cleanCode) {
     return res.status(400).json({ valid: false, message: 'Voucher code is required' });
   }
 
-  // Verification response
-  res.json({
-    valid: true,
-    code: code.trim().toUpperCase(),
-    planName: 'Day Pass (Standard)',
-    durationHours: 24,
-    deviceLimit: 2,
-    rateLimitDown: '4M',
-    rateLimitUp: '2M'
-  });
-});
-
-app.post('/api/vouchers/redeem', (req: Request, res: Response) => {
-  const { code, mac, hostname, siteName } = req.body;
-  if (!code || !mac) {
-    return res.status(400).json({ success: false, message: 'Both voucher code and device MAC are required' });
+  if (/^\d{16}$/.test(digitsOnly)) {
+    const ottCheck = await verify16DigitOttVoucher(digitsOnly, 10, 'M');
+    if (!ottCheck.verified) {
+      return res.status(400).json({
+        valid: false,
+        message: ottCheck.alreadyUsed
+          ? 'This 16-digit OTT Voucher PIN has already been redeemed.'
+          : 'Invalid 16-digit OTT Voucher PIN.'
+      });
+    }
+    return res.json({
+      valid: true,
+      code: digitsOnly,
+      planName: ottCheck.planName || 'Daily Pass',
+      durationHours: Math.round((ottCheck.durationSeconds || 86400) / 3600),
+      deviceLimit: 2,
+      rateLimitDown: '25M',
+      rateLimitUp: '10M'
+    });
   }
 
-  console.log(`[Voucher Redemption] Code: ${code} from MAC: ${mac} (${hostname || 'Unknown'})`);
+  const matched = serverStore.vouchers.find(
+    (v: any) => String(v.code || '').toUpperCase() === cleanCode && v.status === 'active'
+  );
+  if (!matched) {
+    return res.status(400).json({ valid: false, message: 'Invalid or expired voucher code.' });
+  }
 
-  // Grant session authorization
   res.json({
-    success: true,
-    message: 'Access entitlement granted. Authorized on MikroTik Hotspot.',
-    sessionToken: `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-    rateLimit: '4096k/2048k',
-    sessionTimeout: 86400,
-    redirectUrl: 'https://google.com'
+    valid: true,
+    code: cleanCode,
+    planName: matched.planName || 'Day Pass (Standard)',
+    durationHours: Math.round((matched.durationSeconds || 86400) / 3600),
+    deviceLimit: 2,
+    rateLimitDown: '25M',
+    rateLimitUp: '10M'
   });
 });
 
@@ -2504,7 +2787,6 @@ app.post('/api/vouchers/redeem', (req: Request, res: Response) => {
 app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => {
   const provider = req.params.provider;
   const { apiKey, apiSecret, apiPassword, username, bearerToken, merchantId, isLive } = req.body;
-  const startTime = Date.now();
 
   console.log(`[Payment Gateway Test] Testing ${provider.toUpperCase()} | Env: ${isLive ? 'LIVE' : 'SANDBOX'}`);
 
@@ -2535,7 +2817,6 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
         upstreamLatencyMs = Date.now() - pingStart;
         upstreamTested = response.ok || response.status < 500;
       } catch (e) {
-        // Fallback gracefully
         upstreamTested = true;
       }
     }
@@ -2548,7 +2829,7 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
       latencyMs: upstreamLatencyMs,
       statusCode: 200,
       upstreamReachable: upstreamTested,
-      message: `Connected successfully to OTT Lesotho (portal.ottlesotho.com) for merchant ${ottUser}. API Key and API Password validated. Ready for voucher redemptions.`,
+      message: `Connected successfully to OTT Lesotho (portal.ottlesotho.com) for merchant ${ottUser}. API Key and API Password validated. Ready for 16-digit voucher redemptions.`,
       testedAt: new Date().toISOString()
     });
   }
@@ -2566,10 +2847,8 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
     });
   }
 
-  // Simulate network roundtrip latency or actual telecom ping
   const latencyMs = Math.floor(Math.random() * 60) + 120;
 
-  // Successful verification
   res.status(200).json({
     success: true,
     provider,
@@ -2581,7 +2860,7 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
   });
 });
 
-// Dedicated OTT Voucher 12-Digit PIN Redemption Endpoint (Strict Live API + Supabase/Platform DB Verification)
+// Dedicated OTT Voucher 16-Digit PIN Redemption Endpoint (Strict Live OTT API + Supabase Database Verification)
 app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) => {
   const {
     ottPin,
@@ -2603,10 +2882,10 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     currency = 'M'
   } = req.body || {};
 
+  // 1. Sanitize & Enforce 16 Numeric Digits
   const pinToRedeem = String(ottPin || voucherPin || '').replace(/\D/g, '');
   console.log(`[OTT Voucher Redeem] Verifying 16-digit PIN: ${pinToRedeem.slice(0, 4)}****${pinToRedeem.slice(-4)} from MAC: ${mac || 'unknown'}`);
 
-  // 1. Strict 16-Digit Numeric Format Enforcement
   if (!/^\d{16}$/.test(pinToRedeem)) {
     return res.status(400).json({
       success: false,
@@ -2615,146 +2894,47 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     });
   }
 
-  // 2. Reject Already-Redeemed PINs
-  if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
+  // 2. Verify Against Live OTT Lesotho API & Supabase Database Verification Check
+  const verification = await verify16DigitOttVoucher(pinToRedeem, Number(amount), currency);
+
+  if (verification.alreadyUsed) {
     return res.status(400).json({
       success: false,
+      provider: 'ottvoucher',
       message: 'This 16-digit OTT Voucher PIN has already been redeemed.',
       diagnostic: 'PIN_ALREADY_USED'
     });
   }
 
-  let isPinVerified = false;
-  let upstreamReceipt = '';
-
-  // 3. Check Registered OTT PINs & Platform Active Vouchers
-  const registeredMatch = serverStore.registeredOttPins.find(
-    (p) => p.pin === pinToRedeem && p.status === 'active'
-  );
-  if (registeredMatch) {
-    registeredMatch.status = 'used';
-    isPinVerified = true;
-    upstreamReceipt = `OTT-REG-${Date.now()}`;
-  }
-
-  if (!isPinVerified) {
-    const voucherMatch = serverStore.vouchers.find(
-      (v: any) => String(v.code || '').replace(/\D/g, '') === pinToRedeem && v.status === 'active'
-    );
-    if (voucherMatch) {
-      voucherMatch.status = 'used';
-      isPinVerified = true;
-      upstreamReceipt = `OTT-VCH-${Date.now()}`;
-    }
-  }
-
-  // 4. Check Supabase `vouchers` Table (if Supabase is connected)
-  const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-  const sbKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!isPinVerified && sbUrl && sbKey && !sbUrl.includes('your-project')) {
-    try {
-      const qUrl = `${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?or=(code.eq.${pinToRedeem},code.eq.OTT-${pinToRedeem})&status=eq.active&select=*`;
-      const sbRes = await fetch(qUrl, {
-        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
-        signal: AbortSignal.timeout(4000)
-      });
-      if (sbRes.ok) {
-        const rows = await sbRes.json();
-        if (Array.isArray(rows) && rows.length > 0) {
-          isPinVerified = true;
-          upstreamReceipt = `OTT-SB-${rows[0].id || Date.now()}`;
-          // Mark as used in Supabase
-          fetch(`${sbUrl.replace(/\/+$/, '')}/rest/v1/vouchers?id=eq.${rows[0].id}`, {
-            method: 'PATCH',
-            headers: {
-              apikey: sbKey,
-              Authorization: `Bearer ${sbKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ status: 'used', first_used_at: new Date().toISOString() })
-          }).catch(() => {});
-        }
-      }
-    } catch {}
-  }
-
-  // 5. Verify Against Live OTT Lesotho API (portal.ottlesotho.com) when Credentials Are Configured
-  const ottGw = serverStore.gateways.find((g: any) => g.provider === 'ottvoucher');
-  const ottMerchantId = ottGw?.merchantId || ottGw?.username || process.env.OTTVOUCHER_MERCHANT_ID || 'TCONNECTLES1';
-  const ottApiKey = (ottGw?.apiKey || process.env.OTTVOUCHER_API_KEY || '').trim();
-  const ottApiPassword = (ottGw?.apiPassword || process.env.OTTVOUCHER_API_PASSWORD || '').trim();
-  const ottEndpoint = (ottGw?.endpointUrl || 'https://portal.ottlesotho.com').replace(/\/+$/, '');
-  const hasLiveOttCredentials = Boolean(ottApiKey.length >= 6 && ottApiPassword.length >= 4);
-
-  if (!isPinVerified && hasLiveOttCredentials) {
-    try {
-      const basicAuth = Buffer.from(`${ottMerchantId}:${ottApiPassword}`).toString('base64');
-      const ottResponse = await fetch(`${ottEndpoint}/api/v1/voucher/redeem`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${basicAuth}`,
-          'X-Api-Key': ottApiKey
-        },
-        body: JSON.stringify({
-          merchantId: ottMerchantId,
-          username: ottMerchantId,
-          pin: pinToRedeem,
-          voucherPin: pinToRedeem,
-          amount: Number(amount),
-          currency,
-          reference: `TC-${Date.now()}`
-        }),
-        signal: AbortSignal.timeout(6000)
-      });
-
-      if (ottResponse.ok) {
-        const ottData = await ottResponse.json().catch(() => null);
-        if (
-          ottData &&
-          (ottData.success === true ||
-            ottData.status === 'SUCCESS' ||
-            ottData.status === 'COMPLETED' ||
-            ottData.redeemed === true ||
-            ottData.responseCode === '00')
-        ) {
-          isPinVerified = true;
-          upstreamReceipt = ottData.transactionRef || ottData.reference || `OTT-LIVE-${Date.now()}`;
-        }
-      }
-    } catch (err) {
-      console.warn('[OTT Voucher Live API] Upstream redemption verification error:', err);
-    }
-  }
-
-  // 6. Strictly Reject Any Unverified / Random 16-Digit PIN!
-  if (!isPinVerified) {
+  if (!verification.verified) {
     return res.status(400).json({
       success: false,
       provider: 'ottvoucher',
-      diagnostic: hasLiveOttCredentials ? 'OTT_PIN_REJECTED' : 'UNVERIFIED_OTT_PIN',
-      message: hasLiveOttCredentials
-        ? 'Invalid OTT Voucher PIN: Rejected by OTT Lesotho (portal.ottlesotho.com). Please check your 16-digit voucher slip and try again.'
-        : 'Invalid OTT Voucher PIN: This 16-digit PIN was not found in active vouchers, and live OTT Lesotho API credentials (API Key & Password for TCONNECTLES1) have not been configured in Payment Gateways yet.'
+      diagnostic: verification.hasLiveOttCredentials ? 'OTT_PIN_REJECTED' : 'UNVERIFIED_OTT_PIN',
+      message: verification.hasLiveOttCredentials
+        ? 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho (portal.ottlesotho.com) and Supabase verification check. Please check your 16-digit voucher slip and try again.'
+        : 'Invalid 16-digit OTT Voucher PIN: Not found in Supabase database verification check, and live OTT Lesotho API credentials (API Key & Password for TCONNECTLES1) have not been configured in Payment Gateways yet.'
     });
   }
 
-  // Mark PIN as redeemed so it cannot be reused
+  // 3. Mark PIN as Redeemed & Record Transaction / Guest Session
   serverStore.redeemedOttPins.push(pinToRedeem);
-  const txRef = upstreamReceipt || `OTT-LES-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+  const finalAmount = verification.price || Number(amount) || 10;
+  const finalPlanName = verification.planName || planName || 'Daily Pass';
+  const finalDuration = verification.durationSeconds || Number(durationSeconds) || 86400;
+  const txRef = verification.receipt || `OTT-LES-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
   const issuedCode = `OTT-${pinToRedeem.slice(-4)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const nowIso = new Date().toISOString();
 
-  // Record completed transaction & guest event for Admin Dashboard
   const txRecord = {
     id: `tx_ott_${Date.now()}`,
     transactionRef: txRef,
     provider: 'ottvoucher',
-    amount: Number(amount),
+    amount: finalAmount,
     currency,
     phoneNumber: phoneNumber || `PIN: ${pinToRedeem.slice(0, 4)}••••`,
     planId: planId || 'hs_1d',
-    planName: planName || 'Daily Pass',
+    planName: finalPlanName,
     vertical: scope || 'hotspot',
     siteName: 'T-Connect Hotspot',
     voucherCodeIssued: issuedCode,
@@ -2763,6 +2943,32 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     completedAt: nowIso.replace('T', ' ').slice(0, 19)
   };
   serverStore.transactions.unshift(txRecord);
+
+  // Sync completed OTT redemption transaction to Supabase if connected
+  const { url: sbUrl, key: sbKey } = getSupabaseCredentials();
+  if (sbUrl && sbKey) {
+    fetch(`${sbUrl}/rest/v1/transactions`, {
+      method: 'POST',
+      headers: {
+        apikey: sbKey,
+        Authorization: `Bearer ${sbKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        transaction_ref: txRef,
+        provider: 'ottvoucher',
+        amount: finalAmount,
+        currency,
+        phone_number: txRecord.phoneNumber,
+        plan_name: finalPlanName,
+        vertical: scope || 'hotspot',
+        site_name: 'T-Connect Hotspot',
+        voucher_code_issued: issuedCode,
+        status: 'completed',
+        completed_at: nowIso
+      })
+    }).catch(() => {});
+  }
 
   const guestEntry = {
     id: `guest_ott_${Date.now()}`,
@@ -2778,9 +2984,9 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     scope: scope || 'hotspot',
     mode: 'ottvoucher',
     voucherCode: issuedCode,
-    planName: planName || 'Daily Pass',
-    durationSeconds: Number(durationSeconds) || 86400,
-    amount: Number(amount),
+    planName: finalPlanName,
+    durationSeconds: finalDuration,
+    amount: finalAmount,
     transactionRef: txRef,
     capturedAt: nowIso
   };
@@ -2790,14 +2996,15 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
   res.status(200).json({
     success: true,
     provider: 'ottvoucher',
-    merchant: ottMerchantId,
+    merchant: verification.merchantId,
     transactionRef: txRef,
     voucherPin: pinToRedeem,
     voucherCode: issuedCode,
-    amount: Number(amount),
+    amount: finalAmount,
     currency,
-    planName: planName || 'Daily Pass',
-    message: `OTT Voucher verified and redeemed! ${currency}${amount} credited.`,
+    planName: finalPlanName,
+    durationSeconds: finalDuration,
+    message: `OTT Voucher verified and redeemed! ${currency}${finalAmount} credited.`,
     redeemedAt: nowIso
   });
 });
