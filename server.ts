@@ -3133,31 +3133,26 @@ async function startServer() {
   const distPath = path.resolve(__dirname, 'dist');
   const hasDist = fs.existsSync(path.resolve(distPath, 'index.html'));
 
-  if (!isProd || !hasDist) {
-    if (isProd && !hasDist) {
-      console.warn(`\n⚠️  [NOTICE] Production mode active, but 'dist/index.html' was not found.`);
-      console.warn(`   Automatically mounting Vite dynamic compiler so the app loads immediately.`);
-      console.warn(`   To generate pre-compiled static assets, run 'npm run build'.\n`);
-    }
-    // Development mode / dynamic fallback: attach Vite middleware for instant JSX compilation
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { 
-        middlewareMode: true,
-        hmr: false,
-        ws: false
-      },
-      appType: 'spa'
-    });
-    app.use(vite.middlewares);
-  } else {
-    // Production mode: serve built static bundle
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
-  }
+  let viteMiddleware: any = null;
+  let resolveViteReady: () => void;
+  const viteReadyPromise = new Promise<void>((resolve) => {
+    resolveViteReady = resolve;
+  });
 
+  // Delegate non-API requests to Vite middleware once ready
+  app.use(async (req, res, next) => {
+    if (!isProd || !hasDist) {
+      if (!viteMiddleware) {
+        await viteReadyPromise;
+      }
+      if (viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+    }
+    next();
+  });
+
+  // Bind port 3000 immediately so container startup probes succeed without waiting for Vite compilation
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`=======================================================`);
     console.log(`  T-CONNECT CONTROL TOWER — ONLINE`);
@@ -3182,6 +3177,33 @@ async function startServer() {
     }
     process.exit(1);
   });
+
+  if (!isProd || !hasDist) {
+    if (isProd && !hasDist) {
+      console.warn(`\n⚠️  [NOTICE] Production mode active, but 'dist/index.html' was not found.`);
+      console.warn(`   Automatically mounting Vite dynamic compiler so the app loads immediately.`);
+      console.warn(`   To generate pre-compiled static assets, run 'npm run build'.\n`);
+    }
+    // Development mode / dynamic fallback: attach Vite middleware for instant JSX compilation
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { 
+        middlewareMode: true,
+        hmr: false,
+        ws: false
+      },
+      appType: 'spa'
+    });
+    viteMiddleware = vite.middlewares;
+    resolveViteReady!();
+  } else {
+    resolveViteReady!();
+    // Production mode: serve built static bundle
+    app.use(express.static(distPath));
+    app.get('*', (req: Request, res: Response) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
 }
 
 startServer().catch(err => {
