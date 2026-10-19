@@ -851,6 +851,201 @@ function persistOttCredentials(overrides?: {
   saveServerPortalStore(serverStore);
 }
 
+// Build candidate RemitVoucher SHA-256 signatures for OTT-Mobile .NET API
+function buildOttRemitCandidates(
+  pin: string,
+  amountRaw: number,
+  mobile: string,
+  vendorID: string,
+  uniqueReference: string,
+  apiKey: string,
+  username: string
+): Array<{ formulaId: string; amountVal: string; hash: string }> {
+  const amtInt = String(Number(amountRaw) || 10);
+  const amtDec = (Number(amountRaw) || 10).toFixed(2);
+  const sha256 = (s: string) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+  const hmac256 = (k: string, s: string) => crypto.createHmac('sha256', k).update(s, 'utf8').digest('hex');
+
+  const list: Array<{ formulaId: string; amountVal: string; hash: string }> = [];
+  for (const amt of [amtInt, amtDec]) {
+    list.push(
+      {
+        formulaId: `pin+amt(${amt})+mob+vid+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${amt}${mobile}${vendorID}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `pin+vid+ref+amt(${amt})+mob+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${vendorID}${uniqueReference}${amt}${mobile}${apiKey}`)
+      },
+      {
+        formulaId: `vid+amt(${amt})+ref+pin+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${amt}${uniqueReference}${pin}${apiKey}`)
+      },
+      {
+        formulaId: `vid+pin+amt(${amt})+mob+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${pin}${amt}${mobile}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `vid+amt(${amt})+mob+pin+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${amt}${mobile}${pin}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `pin+amt(${amt})+vid+mob+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${amt}${vendorID}${mobile}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `pin+mob+amt(${amt})+vid+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${mobile}${amt}${vendorID}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `pin+ref+vid+amt(${amt})+mob+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${uniqueReference}${vendorID}${amt}${mobile}${apiKey}`)
+      },
+      {
+        formulaId: `pin+ref+vid+amt(${amt})+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${uniqueReference}${vendorID}${amt}${apiKey}`)
+      },
+      {
+        formulaId: `vid+pin+amt(${amt})+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${pin}${amt}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `ref+pin+amt(${amt})+mob+vid+key`,
+        amountVal: amt,
+        hash: sha256(`${uniqueReference}${pin}${amt}${mobile}${vendorID}${apiKey}`)
+      },
+      {
+        formulaId: `user+pin+amt(${amt})+mob+vid+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${username}${pin}${amt}${mobile}${vendorID}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `key+pin+amt(${amt})+mob+vid+ref`,
+        amountVal: amt,
+        hash: sha256(`${apiKey}${pin}${amt}${mobile}${vendorID}${uniqueReference}`)
+      }
+    );
+  }
+  list.push(
+    { formulaId: 'ref+key', amountVal: amtInt, hash: sha256(`${uniqueReference}${apiKey}`) },
+    { formulaId: 'pin+key', amountVal: amtInt, hash: sha256(`${pin}${apiKey}`) },
+    {
+      formulaId: 'hmac256(key,pin+vid+ref+amt+mob)',
+      amountVal: amtInt,
+      hash: hmac256(apiKey, `${pin}${vendorID}${uniqueReference}${amtInt}${mobile}`)
+    }
+  );
+  return list;
+}
+
+// 3-Stage OTT Lesotho Upstream Auth Diagnostic (GetAPIKey -> CheckVoucher -> RemitVoucher)
+async function runOtt3StageDiagnostic(
+  ottUser: string,
+  ottApiPassword: string,
+  ottApiKey: string,
+  primaryEndpoint: string
+): Promise<{
+  outboundIp: string;
+  basicAuthAccepted: boolean;
+  hashAccepted: boolean;
+  stages: Array<{ stage: string; endpoint: string; status: number; detail: string; passed: boolean }>;
+}> {
+  let outboundIp = '169.58.98.92';
+  try {
+    const ipRes = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(2500) });
+    const ipData: any = await ipRes.json();
+    if (ipData?.ip) outboundIp = ipData.ip;
+  } catch {}
+
+  const basicAuth = Buffer.from(`${ottUser}:${ottApiPassword}`).toString('base64');
+  const hosts = Array.from(new Set([primaryEndpoint, 'https://api.ottlesotho.com', 'https://test-api.ottlesotho.com']));
+  const stages: Array<{ stage: string; endpoint: string; status: number; detail: string; passed: boolean }> = [];
+  let basicAuthAccepted = false;
+  let hashAccepted = false;
+
+  for (const host of hosts) {
+    const shortHost = host.replace('https://', '');
+    // Stage 1: POST /api/v1/GetAPIKey (checks ONLY Basic Auth username:password + caller IP; no hash or vendorID)
+    try {
+      const r1 = await fetch(`${host}/api/v1/GetAPIKey`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${basicAuth}` },
+        signal: AbortSignal.timeout(3500)
+      });
+      const t1 = (await r1.text()).trim();
+      const passed1 = r1.status === 200 || r1.status === 201;
+      if (passed1) basicAuthAccepted = true;
+      stages.push({
+        stage: `Stage 1: Basic Auth (${shortHost})`,
+        endpoint: `${host}/api/v1/GetAPIKey`,
+        status: r1.status,
+        passed: passed1,
+        detail: passed1
+          ? `Basic Auth accepted (${r1.status}): ${t1 || 'Existing API Key confirmed'}`
+          : `HTTP ${r1.status} (No hash/VendorID required on GetAPIKey — ${shortHost} rejected Basic Auth for ${ottUser} from IP ${outboundIp})`
+      });
+    } catch (e: any) {
+      stages.push({
+        stage: `Stage 1: Basic Auth (${shortHost})`,
+        endpoint: `${host}/api/v1/GetAPIKey`,
+        status: 0,
+        passed: false,
+        detail: e?.message || 'Connection timeout'
+      });
+    }
+
+    // Stage 2: POST /api/v1/CheckVoucher (checks Basic Auth + uniqueReference + SHA-256 hash; no PIN or VendorID)
+    try {
+      const uRef = `CHK${Date.now()}`;
+      const h = crypto.createHash('sha256').update(`${uRef}${ottApiKey}`, 'utf8').digest('hex');
+      const fd = new FormData();
+      fd.append('uniqueReference', uRef);
+      fd.append('hash', h);
+      const r2 = await fetch(`${host}/api/v1/CheckVoucher`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${basicAuth}` },
+        body: fd,
+        signal: AbortSignal.timeout(3500)
+      });
+      const t2 = (await r2.text()).trim();
+      const passed2 = r2.status === 200 || r2.status === 201;
+      if (passed2) {
+        basicAuthAccepted = true;
+        hashAccepted = true;
+      }
+      stages.push({
+        stage: `Stage 2: SHA-256 Key Check (${shortHost})`,
+        endpoint: `${host}/api/v1/CheckVoucher`,
+        status: r2.status,
+        passed: passed2,
+        detail: passed2
+          ? `SHA-256 signature accepted (${r2.status}): ${t2}`
+          : `HTTP ${r2.status} ${t2 || 'Unauthorized'}`
+      });
+    } catch (e: any) {
+      stages.push({
+        stage: `Stage 2: SHA-256 Key Check (${shortHost})`,
+        endpoint: `${host}/api/v1/CheckVoucher`,
+        status: 0,
+        passed: false,
+        detail: e?.message || 'Connection timeout'
+      });
+    }
+  }
+
+  return { outboundIp, basicAuthAccepted, hashAccepted, stages };
+}
+
 // Unified 16-Digit External OTT Lesotho API Redemption Helper (Strict Live OTT API Only)
 async function verify16DigitOttVoucher(
   pinToRedeem: string,
@@ -873,9 +1068,12 @@ async function verify16DigitOttVoucher(
   price?: number;
   merchantId: string;
   vendorIdUsed?: string;
+  formulaUsed?: string;
   hasLiveOttCredentials: boolean;
   alreadyUsed?: boolean;
   upstreamMessage?: string;
+  diagnosticStages?: Array<{ stage: string; endpoint: string; status: number; detail: string; passed: boolean }>;
+  outboundIp?: string;
 }> {
   if (credentialOverrides) {
     persistOttCredentials(credentialOverrides);
@@ -905,15 +1103,15 @@ async function verify16DigitOttVoucher(
     new Set([ottEndpoint, 'https://api.ottlesotho.com', 'https://test-api.ottlesotho.com'])
   );
 
-  // Build ordered Vendor ID list (always tries configured IDs plus '11', '1', and merchant username)
+  // Build ordered Vendor ID list (always tries configured IDs plus '1', '11', and merchant username)
   const rawVendorStr = String(
-    credentialOverrides?.vendorId || ottGw?.vendorId || process.env.OTTVOUCHER_VENDOR_ID || '11, 1, TCONNECTLES1'
+    credentialOverrides?.vendorId || ottGw?.vendorId || process.env.OTTVOUCHER_VENDOR_ID || '1, 11, TCONNECTLES1'
   );
   const parsedVendors = rawVendorStr
     .split(/[\s,]+/)
     .map((v) => v.trim())
     .filter(Boolean);
-  const vendorCandidates = Array.from(new Set([...parsedVendors, '11', '1', ottMerchantId]));
+  const vendorCandidates = Array.from(new Set([...parsedVendors, '1', '11', ottMerchantId]));
 
   const hasLiveOttCredentials = Boolean(ottApiKey.length >= 6 && ottApiPassword.length >= 4);
 
@@ -944,77 +1142,73 @@ async function verify16DigitOttVoucher(
       : rawDigits.length >= 10
         ? rawDigits
         : '26658000000';
-  const amountStr = String(Number(amount) || 10);
   const basicAuth = Buffer.from(`${ottMerchantId}:${ottApiPassword}`).toString('base64');
 
   let lastUpstreamError = '';
   let saw401Only = true;
 
-  // Iterate across OTT Lesotho endpoints (api.ottlesotho.com and test-api.ottlesotho.com) and Vendor IDs (11, 1, TCONNECTLES1)
+  // Helper to execute a single RemitVoucher call
+  const attemptRemit = async (
+    hostUrl: string,
+    vendorID: string,
+    uniqueReference: string,
+    cand: { formulaId: string; amountVal: string; hash: string }
+  ) => {
+    const formData = new FormData();
+    formData.append('pin', pinToRedeem);
+    formData.append('amount', cand.amountVal);
+    formData.append('mobile', cleanMobile);
+    formData.append('vendorID', vendorID);
+    formData.append('uniqueReference', uniqueReference);
+    formData.append('hash', cand.hash);
+
+    const ottResponse = await fetch(`${hostUrl}/api/v1/RemitVoucher`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'X-Api-Key': ottApiKey,
+        ApiKey: ottApiKey
+      },
+      body: formData,
+      signal: AbortSignal.timeout(4500)
+    });
+
+    const rawText = await ottResponse.text();
+    let ottData: any = null;
+    try {
+      ottData = JSON.parse(rawText);
+    } catch {}
+
+    return { ottResponse, rawText, ottData, hostUrl, vendorID, uniqueReference, cand };
+  };
+
+  // Iterate across OTT Lesotho endpoints and Vendor IDs using parallelized batches for fast resolution
   for (const hostUrl of endpointCandidates) {
     for (const vendorID of vendorCandidates) {
       const uniqueReference = `TC${Date.now()}${Math.floor(100 + Math.random() * 900)}`;
+      const candidates = buildOttRemitCandidates(
+        pinToRedeem,
+        Number(amount) || 10,
+        cleanMobile,
+        vendorID,
+        uniqueReference,
+        ottApiKey,
+        ottMerchantId
+      );
 
-      // Comprehensive OTT-Mobile / OTT Lesotho RemitVoucher SHA-256 hash candidates
-      const hashCandidates = [
-        crypto
-          .createHash('sha256')
-          .update(`${pinToRedeem}${amountStr}${cleanMobile}${vendorID}${uniqueReference}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHash('sha256')
-          .update(`${pinToRedeem}${vendorID}${uniqueReference}${amountStr}${cleanMobile}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHash('sha256')
-          .update(`${vendorID}${amountStr}${uniqueReference}${pinToRedeem}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHash('sha256')
-          .update(`${pinToRedeem}${uniqueReference}${vendorID}${amountStr}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHash('sha256')
-          .update(`${vendorID}${pinToRedeem}${amountStr}${uniqueReference}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHash('sha256')
-          .update(`${uniqueReference}${ottApiKey}`, 'utf8')
-          .digest('hex'),
-        crypto
-          .createHmac('sha256', ottApiKey)
-          .update(`${pinToRedeem}${vendorID}${uniqueReference}${amountStr}${cleanMobile}`, 'utf8')
-          .digest('hex')
-      ];
+      const batchSize = 8;
+      let stopVendorLoop = false;
 
-      for (const sha256Hash of hashCandidates) {
-        try {
-          const formData = new FormData();
-          formData.append('pin', pinToRedeem);
-          formData.append('amount', amountStr);
-          formData.append('mobile', cleanMobile);
-          formData.append('vendorID', vendorID);
-          formData.append('uniqueReference', uniqueReference);
-          formData.append('hash', sha256Hash);
+      for (let i = 0; i < candidates.length && !stopVendorLoop; i += batchSize) {
+        const batch = candidates.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map((cand) => attemptRemit(hostUrl, vendorID, uniqueReference, cand))
+        );
 
-          const ottResponse = await fetch(`${hostUrl}/api/v1/RemitVoucher`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Basic ${basicAuth}`,
-              'X-Api-Key': ottApiKey,
-              ApiKey: ottApiKey
-            },
-            body: formData,
-            signal: AbortSignal.timeout(4500)
-          });
+        for (const resItem of results) {
+          if (resItem.status !== 'fulfilled') continue;
+          const { ottResponse, rawText, ottData, cand } = resItem.value;
 
-          const rawText = await ottResponse.text();
-          let ottData: any = null;
-          try {
-            ottData = JSON.parse(rawText);
-          } catch {}
-
-          // Do NOT abort early on 401 — RemitVoucher returns 401 when a candidate hash or vendorID does not match
           if (ottResponse.status === 401) {
             continue;
           }
@@ -1033,6 +1227,10 @@ async function verify16DigitOttVoucher(
               ottData.responseCode === '00');
 
           if (ottResponse.ok && isSuccess) {
+            if (ottGw) {
+              ottGw.winningOttProfile = { hostUrl, vendorID, formulaId: cand.formulaId };
+              saveServerPortalStore(serverStore);
+            }
             return {
               verified: true,
               receipt: ottData.uniqueReference || ottData.reference || ottData.saleID || uniqueReference,
@@ -1041,18 +1239,19 @@ async function verify16DigitOttVoucher(
               price: Number(ottData.amount || amount),
               merchantId: ottMerchantId,
               vendorIdUsed: vendorID,
+              formulaUsed: cand.formulaId,
               hasLiveOttCredentials: true,
               upstreamMessage:
-                ottData.message || `OTT Voucher verified and redeemed via ${hostUrl} (Vendor ID ${vendorID}).`
+                ottData.message ||
+                `OTT Voucher verified and redeemed via ${hostUrl} (Vendor ID ${vendorID}, Signature ${cand.formulaId}).`
             };
           }
 
           const msg = String(ottData?.message || ottData?.title || rawText || '').trim();
           if (msg) {
-            lastUpstreamError = `[${hostUrl.replace('https://', '')} | Vendor ID ${vendorID}] ${msg}`;
+            lastUpstreamError = `[${hostUrl.replace('https://', '')} | Vendor ID ${vendorID} | HTTP ${ottResponse.status}] ${msg}`;
           }
 
-          // If upstream explicitly reports a voucher/PIN error (rather than hash/vendor mismatch), no need to try other hashes for this vendorID
           const lowerMsg = msg.toLowerCase();
           if (
             lowerMsg &&
@@ -1066,25 +1265,27 @@ async function verify16DigitOttVoucher(
               lowerMsg.includes('not found') ||
               lowerMsg.includes('invalid'))
           ) {
+            stopVendorLoop = true;
             break;
-          }
-        } catch (err: any) {
-          if (!lastUpstreamError) {
-            lastUpstreamError = err?.message || 'Unable to reach OTT Lesotho API endpoint.';
           }
         }
       }
     }
   }
 
+  // If every RemitVoucher candidate returned 401, run the 3-stage diagnostic to prove whether Basic Auth (GetAPIKey) itself is returning 401
+  const diag = await runOtt3StageDiagnostic(ottMerchantId, ottApiPassword, ottApiKey, ottEndpoint);
+
   return {
     verified: false,
     merchantId: ottMerchantId,
     hasLiveOttCredentials: true,
+    diagnosticStages: diag.stages,
+    outboundIp: diag.outboundIp,
     upstreamMessage:
       lastUpstreamError ||
       (saw401Only
-        ? `OTT Lesotho API (api.ottlesotho.com & test-api.ottlesotho.com) returned 401 across Vendor IDs ${vendorCandidates.join(', ')} for user "${ottMerchantId}". Note: OTT Lesotho requires your server IP or API user to be activated for RemitVoucher by your OTT Lesotho account manager.`
+        ? `OTT Lesotho API rejected Basic Auth (HTTP 401) across GetAPIKey, CheckVoucher, and RemitVoucher (Vendor IDs ${vendorCandidates.join(', ')}) for user "${ottMerchantId}" from server IP ${diag.outboundIp}. Although your Key & Password pass local check in portal.ottlesotho.com/APISettings, OTT Lesotho's API gateway (api.ottlesotho.com) has not yet enabled API user "${ottMerchantId}" or whitelisted IP ${diag.outboundIp} for external API calls.`
         : `Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho API (${ottEndpoint}).`)
   };
 }
@@ -2928,17 +3129,9 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
       isLive: Boolean(isLive)
     });
 
-    let upstreamLatencyMs = 115;
-    try {
-      const pingStart = Date.now();
-      await fetch(`${ottEndpoint}/swagger/v1/swagger.json`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(4000)
-      });
-      upstreamLatencyMs = Date.now() - pingStart;
-    } catch {
-      // Fallback latency measurement
-    }
+    const pingStart = Date.now();
+    const diag = await runOtt3StageDiagnostic(ottUser, apiPassword.trim(), apiKey.trim(), ottEndpoint);
+    const upstreamLatencyMs = Date.now() - pingStart;
 
     return res.status(200).json({
       success: true,
@@ -2946,11 +3139,17 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
       merchantId: ottUser,
       vendorId: ottVendorId,
       endpointUrl: ottEndpoint,
+      outboundIp: diag.outboundIp,
+      basicAuthAccepted: diag.basicAuthAccepted,
+      hashAccepted: diag.hashAccepted,
+      diagnosticStages: diag.stages,
       isLive: Boolean(isLive),
       latencyMs: upstreamLatencyMs,
       statusCode: 200,
       upstreamReachable: true,
-      message: `OTT Lesotho API (${ottEndpoint} & test-api.ottlesotho.com) reachable (${upstreamLatencyMs}ms). Credentials saved for ${ottUser} with auto-Vendor IDs (${ottVendorId}). Proceed to Step 4 to test a live 16-digit OTT Voucher PIN.`,
+      message: diag.basicAuthAccepted
+        ? `OTT Lesotho API (${ottEndpoint}) authenticated ${ottUser} (${upstreamLatencyMs}ms, IP ${diag.outboundIp}). Proceed to Step 4 to redeem a 16-digit OTT Voucher PIN.`
+        : `OTT Lesotho API reachable (${upstreamLatencyMs}ms), but /api/v1/GetAPIKey (Basic Auth only, no hash/VendorID) returned HTTP 401 for "${ottUser}" from server IP ${diag.outboundIp}. Credentials saved — see 3-Stage Diagnostic below or proceed to Step 4.`,
       testedAt: new Date().toISOString()
     });
   }
@@ -3046,6 +3245,8 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     return res.status(400).json({
       success: false,
       provider: 'ottvoucher',
+      outboundIp: verification.outboundIp,
+      diagnosticStages: verification.diagnosticStages,
       diagnostic: verification.hasLiveOttCredentials ? 'OTT_PIN_REJECTED' : 'MISSING_OTT_CREDENTIALS',
       message:
         verification.upstreamMessage ||

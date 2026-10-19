@@ -11,12 +11,15 @@
       "apiKey": "",
       "apiSecret": "",
       "bearerToken": "",
-      "merchantId": "",
+      "merchantId": "TCONNECTLES1",
       "webhookSecret": "",
       "webhookUrl": "https://app.tconnect.co.ls/api/webhooks/ecocash",
       "successRate24h": 0,
       "avgLatencyMs": 0,
-      "testPassedOnce": false
+      "testPassedOnce": false,
+      "apiPassword": "",
+      "vendorId": "11, 1",
+      "username": "TCONNECTLES1"
     },
     {
       "provider": "ottvoucher",
@@ -30,7 +33,6 @@
       "apiSecret": "",
       "apiPassword": "",
       "username": "TCONNECTLES1",
-      "vendorId": "11, 1",
       "endpointUrl": "https://api.ottlesotho.com",
       "bearerToken": "",
       "merchantId": "TCONNECTLES1",
@@ -38,7 +40,8 @@
       "webhookUrl": "https://app.tconnect.co.ls/api/webhooks/ottvoucher",
       "successRate24h": 0,
       "avgLatencyMs": 0,
-      "testPassedOnce": false
+      "testPassedOnce": false,
+      "vendorId": "11, 1"
     }
   ],
   "vouchers": [

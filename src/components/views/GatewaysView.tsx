@@ -46,7 +46,12 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [selectedGateway, setSelectedGateway] = useState<GatewayConfig | undefined>(gateways[0]);
   const [activeStep, setActiveStep] = useState<number>(1);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    outboundIp?: string;
+    diagnosticStages?: Array<{ stage: string; endpoint: string; status: number; detail: string; passed: boolean }>;
+  } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
@@ -153,7 +158,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       if (response.ok && data.success) {
         setTestResult({
           success: true,
-          message: `${data.message} (${data.latencyMs}ms latency)`
+          message: `${data.message} (${data.latencyMs}ms latency)`,
+          outboundIp: data.outboundIp,
+          diagnosticStages: data.diagnosticStages
         });
         onUpdateCredentials(selectedGateway.provider, {
           status: 'operational',
@@ -167,7 +174,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       } else {
         setTestResult({
           success: false,
-          message: data.message || 'Gateway rejected authentication.'
+          message: data.message || 'Gateway rejected authentication.',
+          outboundIp: data.outboundIp,
+          diagnosticStages: data.diagnosticStages
         });
         onUpdateCredentials(selectedGateway.provider, {
           status: 'degraded',
@@ -796,6 +805,23 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                           <div>Merchant: <strong className="text-cyan-400">{redeemTestResult.merchant}</strong></div>
                         </div>
                       )}
+
+                      {Array.isArray(redeemTestResult.diagnosticStages) && redeemTestResult.diagnosticStages.length > 0 && (
+                        <div className="pt-2 border-t border-white/10 space-y-1.5 text-[11px] font-mono">
+                          <div className="text-slate-300 font-bold flex items-center justify-between">
+                            <span>3-Stage OTT Lesotho Upstream Auth Breakdown</span>
+                            {redeemTestResult.outboundIp && (
+                              <span className="text-cyan-300">Server Outbound IP: {redeemTestResult.outboundIp}</span>
+                            )}
+                          </div>
+                          {redeemTestResult.diagnosticStages.map((st: any, idx: number) => (
+                            <div key={idx} className="p-2 rounded bg-black/40 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                              <span className="text-white font-bold">{st.stage}</span>
+                              <span className={st.passed ? 'text-emerald-400' : 'text-amber-300'}>{st.detail}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -876,8 +902,24 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               ) : (
                 <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               )}
-              <div className="leading-relaxed">
-                {testResult.message}
+              <div className="leading-relaxed flex-1 space-y-2">
+                <div>{testResult.message}</div>
+                {Array.isArray(testResult.diagnosticStages) && testResult.diagnosticStages.length > 0 && (
+                  <div className="pt-2 border-t border-white/10 space-y-1 text-[11px]">
+                    <div className="text-slate-300 font-bold flex items-center justify-between">
+                      <span>OTT Lesotho 3-Stage Upstream Verification</span>
+                      {testResult.outboundIp && (
+                        <span className="text-cyan-300">Server Outbound IP: {testResult.outboundIp}</span>
+                      )}
+                    </div>
+                    {testResult.diagnosticStages.map((st, idx) => (
+                      <div key={idx} className="p-1.5 rounded bg-black/40 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <span className="text-white font-bold">{st.stage}</span>
+                        <span className={st.passed ? 'text-emerald-400' : 'text-amber-300'}>{st.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
