@@ -191,7 +191,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="radio" name="selected_plan" value="${p.id}" ${idx === 0 ? 'checked' : ''} />
         <div>
           <div class="plan-name">${p.name} ${p.isPopular ? '<span class="pop-tag">POPULAR</span>' : ''}</div>
-          <div class="plan-meta">${p.durationLabel || '24 Hours'} · ${p.downloadSpeedMbps || 20} Mbps</div>
+          <div class="plan-meta">${p.durationLabel || '24 Hours'}</div>
         </div>
       </div>
       <div class="plan-price">M${p.price}</div>
@@ -345,6 +345,13 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     font-size: 13px;
     font-weight: 900;
     cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-emerald:disabled {
+    background: #334155;
+    color: #94a3b8;
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .plan-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; max-height: 195px; overflow-y: auto; }
   .plan-item {
@@ -473,7 +480,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           </div>
           <input class="inp" type="text" inputmode="numeric" maxlength="19" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="1234 5678 9012 3456" style="font-family:monospace;letter-spacing:1.5px;" required>
         </div>
-        <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay &amp; Connect Internet &rarr;</button>
+        <button type="submit" id="buySubmitBtn" class="btn-emerald" disabled>Pay &amp; Connect Internet &rarr;</button>
       </form>
     </div>
   </div>
@@ -551,15 +558,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handlePayInputFormat(inp) {
     var raw = inp.value.replace(/\\D/g, '');
+    var btn = document.getElementById('buySubmitBtn');
     if (selectedGw === 'ottvoucher') {
       raw = raw.slice(0, 16);
       var groups = raw.match(/.{1,4}/g);
       inp.value = groups ? groups.join(' ') : '';
       var ctr = document.getElementById('ottDigitCounter');
       if (ctr) ctr.textContent = raw.length + ' / 16 digits';
+      if (btn) btn.disabled = (raw.length !== 16);
     } else {
       raw = raw.slice(0, 12);
       inp.value = raw;
+      if (btn) btn.disabled = (raw.length < 8);
     }
   }
 
@@ -572,7 +582,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     var lbl = document.getElementById('payInputLabel');
     var inp = document.getElementById('payInputVal');
     var ctr = document.getElementById('ottDigitCounter');
+    var btn = document.getElementById('buySubmitBtn');
     inp.value = '';
+    if (btn) btn.disabled = true;
     if (gw === 'ottvoucher') {
       lbl.textContent = '16-Digit OTT Voucher PIN *';
       inp.placeholder = '1234 5678 9012 3456';

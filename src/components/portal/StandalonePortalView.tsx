@@ -831,7 +831,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                             )}
                           </div>
                           <div className="text-[11px] text-slate-400 font-mono tabular-nums">
-                            {plan.durationLabel} · {plan.downloadSpeedMbps} Mbps
+                            {plan.durationLabel}
                           </div>
                         </div>
                       </div>
@@ -964,8 +964,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <button
                 type="submit"
-                disabled={isConnecting || (selectedGateway === 'ottvoucher' && ottPin.length !== 12)}
-                className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                disabled={isConnecting || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>

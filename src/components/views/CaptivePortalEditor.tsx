@@ -866,7 +866,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                     )}
 
                     <button
-                      disabled={isVerifyingOtt}
+                      disabled={isVerifyingOtt || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
                       onClick={async () => {
                         setPaymentError(null);
                         if (selectedGateway === 'ottvoucher') {
@@ -896,9 +896,9 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                         }
                         setActiveStep('usage');
                       }}
-                      className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-bold text-xs font-mono rounded-xl shadow-lg"
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-all cursor-pointer"
                     >
-                      {isVerifyingOtt ? 'Verifying 16-Digit OTT Voucher...' : 'Authorize & Connect →'}
+                      {isVerifyingOtt ? 'Verifying 16-Digit OTT Voucher...' : 'Pay & Connect Internet →'}
                     </button>
                   </div>
                 )}
