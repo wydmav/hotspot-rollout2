@@ -8,10 +8,13 @@ import {
   RefreshCw,
   Globe,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Volume2,
+  VolumeX,
+  ExternalLink
 } from 'lucide-react';
 import { storage } from '../../services/storage';
-import { ScopePortalConfig, VerticalType, GatewayProvider } from '../../types';
+import { ScopePortalConfig, VerticalType, GatewayProvider, SponsorAdConfig, VideoAdItem } from '../../types';
 import { DEFAULT_SCOPE_CONFIGS, SCOPE_LIST } from '../views/ScopeCaptivePortalBuilder';
 import { ProviderLogo } from '../common/BrandLogos';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
@@ -63,6 +66,16 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           }
         })
         .catch(() => {});
+
+      fetch('/api/portal/video-ads')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted) return;
+          if (data?.success && data?.sponsorAd && typeof data.sponsorAd === 'object') {
+            setSponsorAdConfig((prev) => ({ ...prev, ...data.sponsorAd }));
+          }
+        })
+        .catch(() => {});
     };
     fetchConfig();
     const timer = setInterval(fetchConfig, 4000);
@@ -99,16 +112,56 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       if (scopeParam && DEFAULT_SCOPE_CONFIGS[scopeParam]) {
         setActiveScope(scopeParam);
       }
-      if (stepParam === 'plan' || stepParam === 'voucher') {
+      if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'video_ad') {
         setPortalStep(stepParam);
+      }
+      const reasonParam = params.get('reason');
+      if (reasonParam === 'retrigger') {
+        setAdTriggerReason('retrigger');
+        setPortalStep('video_ad');
       }
     }
   }, [routerGatewayIp]);
 
-  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'usage'
-  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'usage'>(
+  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'usage'
+  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'usage'>(
     isFreeAccessAllowed ? 'identification' : 'voucher'
   );
+
+  // Video Ad Interstitial & 3h / 2GB Re-Trigger State
+  const [sponsorAdConfig, setSponsorAdConfig] = useState<SponsorAdConfig>(() => storage.getSponsorAdConfig());
+  const [adTriggerReason, setAdTriggerReason] = useState<'post_auth' | 'retrigger'>('post_auth');
+  const [adElapsedSec, setAdElapsedSec] = useState(0);
+  const [adDurationSec, setAdDurationSec] = useState(15);
+  const [isAdUnlocked, setIsAdUnlocked] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [sessionElapsedSinceAdSec, setSessionElapsedSinceAdSec] = useState(0);
+  const [sessionDataSinceAdMb, setSessionDataSinceAdMb] = useState(0);
+
+  const activeVideoAd: VideoAdItem | null = React.useMemo(() => {
+    if (!sponsorAdConfig.enabled) return null;
+    const lib = sponsorAdConfig.videoLibrary || [];
+    const normScope = activeScope === 'village' ? 'community' : activeScope;
+    return (
+      lib.find((v) => v.enabled && (v.targetScope === normScope || v.targetScope === activeScope)) ||
+      lib.find((v) => v.enabled && v.targetScope === 'all') ||
+      lib.find((v) => v.enabled) ||
+      null
+    );
+  }, [sponsorAdConfig, activeScope]);
+
+  const startOrEnterConnectedSession = (reason: 'post_auth' | 'retrigger' = 'post_auth') => {
+    if (sponsorAdConfig.enabled && activeVideoAd) {
+      setAdTriggerReason(reason);
+      setAdElapsedSec(0);
+      setIsAdUnlocked(false);
+      storage.recordVideoAdImpression(activeVideoAd.id);
+      setPortalStep('video_ad');
+    } else {
+      setPortalStep('usage');
+    }
+  };
 
   // Immediately hide Free Access step if Admin turns off Free Access Mode in real time
   useEffect(() => {
@@ -159,14 +212,59 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const isEmailValid = !currentConfig.collectEmail || emailValidation.isValid;
   const isGuestFormValid = isFirstNameValid && isSurnameValid && isPhoneValid && isEmailValid;
 
-  // Countdown timer when in 'usage' step
+  // Video Ad countdown & unlock timer when in 'video_ad' step
   useEffect(() => {
-    if (portalStep !== 'usage') return;
+    if (portalStep !== 'video_ad' || !activeVideoAd) return;
+    const watchMode = activeVideoAd.watchMode || 'full_video';
+    const skipTarget = Math.max(1, Number(activeVideoAd.skipAfterSec) || 5);
     const timer = setInterval(() => {
-      setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      setAdElapsedSec((prev) => {
+        const next = prev + 1;
+        if (watchMode === 'skip_after_sec' && next >= skipTarget) {
+          setIsAdUnlocked(true);
+        } else if (watchMode === 'full_video' && next >= Math.max(adDurationSec, 15)) {
+          setIsAdUnlocked(true);
+        }
+        return next;
+      });
     }, 1000);
     return () => clearInterval(timer);
-  }, [portalStep]);
+  }, [portalStep, activeVideoAd, adDurationSec]);
+
+  // Countdown timer & 3-Hour / 2 GB Checkpoint Watcher when in 'usage' step
+  useEffect(() => {
+    if (portalStep !== 'usage') return;
+    const retriggerSec = Math.max(1, Number(sponsorAdConfig.retriggerEveryHours) || 3) * 3600;
+    const retriggerMb = Math.max(0.5, Number(sponsorAdConfig.retriggerEveryGb) || 2) * 1024;
+    const timer = setInterval(() => {
+      setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+      setSessionElapsedSinceAdSec((prevSec) => {
+        const nextSec = prevSec + 1;
+        if (sponsorAdConfig.enabled && activeVideoAd && nextSec >= retriggerSec) {
+          setSessionElapsedSinceAdSec(0);
+          setSessionDataSinceAdMb(0);
+          setAdTriggerReason('retrigger');
+          setAdElapsedSec(0);
+          setIsAdUnlocked(false);
+          setPortalStep('video_ad');
+        }
+        return nextSec;
+      });
+      setSessionDataSinceAdMb((prevMb) => {
+        const nextMb = Number((prevMb + 0.35).toFixed(2));
+        if (sponsorAdConfig.enabled && activeVideoAd && nextMb >= retriggerMb) {
+          setSessionElapsedSinceAdSec(0);
+          setSessionDataSinceAdMb(0);
+          setAdTriggerReason('retrigger');
+          setAdElapsedSec(0);
+          setIsAdUnlocked(false);
+          setPortalStep('video_ad');
+        }
+        return nextMb;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [portalStep, sponsorAdConfig, activeVideoAd]);
 
   const formatTimer = (secs: number) => {
     const d = Math.floor(secs / 86400);
@@ -296,7 +394,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setConnectedPlanName('Free Wi-Fi Pass');
       setConnectedDurationLabel('30 Minutes');
       setRemainingSeconds(1800);
-      setPortalStep('usage');
+      setSessionElapsedSinceAdSec(0);
+      setSessionDataSinceAdMb(0);
+      startOrEnterConnectedSession('post_auth');
     }, 700);
   };
 
@@ -366,7 +466,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setConnectedPlanName(planTitle);
       setConnectedDurationLabel(durationSecs >= 604800 ? '7 Days' : durationSecs >= 86400 ? '24 Hours' : `${Math.round(durationSecs / 60)} Mins`);
       setRemainingSeconds(durationSecs);
-      setPortalStep('usage');
+      setSessionElapsedSinceAdSec(0);
+      setSessionDataSinceAdMb(0);
+      startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
       setStatusBanner(null);
@@ -458,7 +560,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setConnectedPlanName(selectedPlan?.name || 'Daily Pass');
       setConnectedDurationLabel(selectedPlan?.durationLabel || '24 Hours');
       setRemainingSeconds(selectedPlan?.durationSeconds || 86400);
-      setPortalStep('usage');
+      setSessionElapsedSinceAdSec(0);
+      setSessionDataSinceAdMb(0);
+      startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
       setStatusBanner(null);
@@ -956,6 +1060,108 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>
               </button>
             </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* STEP 4.5: POST-AUTH & 3-HOUR / 2 GB VIDEO ADVERTISEMENT           */}
+          {/* ================================================================= */}
+          {portalStep === 'video_ad' && activeVideoAd && (
+            <div
+              className="rounded-3xl p-5 border border-amber-500/40 shadow-2xl backdrop-blur-xl space-y-3.5 text-left"
+              style={{
+                backgroundColor: `rgba(10, 14, 24, 0.95)`
+              }}
+            >
+              <div className="flex items-center justify-between text-[11px] font-mono">
+                <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold">
+                  {adTriggerReason === 'retrigger'
+                    ? `${sponsorAdConfig.retriggerEveryHours || 3}h / ${sponsorAdConfig.retriggerEveryGb || 2}GB Checkpoint Ad`
+                    : 'Connected Sponsor Video'}
+                </span>
+                <span className={isAdUnlocked ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
+                  {isAdUnlocked
+                    ? 'Ad Complete ✓'
+                    : activeVideoAd.watchMode === 'skip_after_sec'
+                    ? `Skip in ${Math.max(0, (activeVideoAd.skipAfterSec || 5) - adElapsedSec)}s`
+                    : `${Math.max(0, Math.ceil(adDurationSec - adElapsedSec))}s left`}
+                </span>
+              </div>
+
+              <div className="relative rounded-2xl overflow-hidden bg-black border border-white/15 shadow-inner">
+                <video
+                  ref={videoRef}
+                  src={activeVideoAd.videoUrl}
+                  playsInline
+                  autoPlay
+                  muted={isVideoMuted}
+                  onLoadedMetadata={(e) => {
+                    const dur = e.currentTarget.duration;
+                    if (dur && !isNaN(dur) && isFinite(dur)) {
+                      setAdDurationSec(Math.ceil(dur));
+                    }
+                  }}
+                  onEnded={() => setIsAdUnlocked(true)}
+                  onError={() => setIsAdUnlocked(true)}
+                  className="w-full max-h-[220px] object-cover bg-black"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsVideoMuted((prev) => {
+                      const next = !prev;
+                      if (videoRef.current) videoRef.current.muted = next;
+                      return next;
+                    });
+                  }}
+                  className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-black/75 border border-white/25 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer hover:bg-black/90"
+                >
+                  {isVideoMuted ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+                  <span>{isVideoMuted ? 'Unmute' : 'Sound On'}</span>
+                </button>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-extrabold">
+                  Sponsored by {activeVideoAd.sponsorName}
+                </div>
+                <h3 className="text-base font-black text-white leading-snug mt-0.5">
+                  {activeVideoAd.headline}
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed mt-1">
+                  {activeVideoAd.description}
+                </p>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  disabled={!isAdUnlocked}
+                  onClick={() => setPortalStep('usage')}
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {isAdUnlocked
+                      ? 'Continue to High-Speed Internet \u2192'
+                      : activeVideoAd.watchMode === 'skip_after_sec'
+                      ? `Skip Ad & Continue in ${Math.max(0, (activeVideoAd.skipAfterSec || 5) - adElapsedSec)}s...`
+                      : `Please watch short video (${Math.max(0, Math.ceil(adDurationSec - adElapsedSec))}s)...`}
+                  </span>
+                </button>
+
+                {activeVideoAd.destinationUrl && (
+                  <a
+                    href={activeVideoAd.destinationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 rounded-xl border border-[#f05e17]/50 bg-[#f05e17]/15 hover:bg-[#f05e17]/25 text-orange-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>Visit {activeVideoAd.sponsorName}</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+            </div>
           )}
 
           {/* ================================================================= */}

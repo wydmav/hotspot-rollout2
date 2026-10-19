@@ -705,6 +705,7 @@ interface ScopeCaptivePortalBuilderProps {
   onProcessPayment?: (provider: GatewayProvider, planId: string, phone?: string, ottPin?: string, planOverride?: any) => any;
   onRedeemVoucher?: (code: string, mac: string, hostname?: string) => any;
   currency?: string;
+  onOpenVideoAds?: () => void;
 }
 
 export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps> = ({
@@ -713,6 +714,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   onProcessPayment,
   onRedeemVoucher,
   currency = 'M',
+  onOpenVideoAds,
 }) => {
   // Currently selected scope / builder tab
   const [selectedScope, setSelectedScope] = useState<VerticalType>(initialScope);
@@ -1321,6 +1323,18 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             <Palette className="w-3.5 h-3.5" />
             <span>Wallpapers &amp; Style</span>
           </button>
+
+          {onOpenVideoAds && (
+            <button
+              type="button"
+              onClick={onOpenVideoAds}
+              className="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 cursor-pointer"
+              title="Upload video ads & configure 3-hour / 2 GB re-triggers"
+            >
+              <span>🎬</span>
+              <span>Video Ads (3h / 2GB)</span>
+            </button>
+          )}
 
           <button
             onClick={handleResetScopeDefaults}

@@ -277,16 +277,39 @@ export interface SystemAlert {
 
 export type PlatformRole = 'Super Admin' | 'Collaborator' | 'Management';
 
+export interface VideoAdItem {
+  id: string;
+  title: string;
+  sponsorName: string;
+  headline: string;
+  description: string;
+  videoUrl: string;
+  destinationUrl: string;
+  targetScope: VerticalType | 'all';
+  enabled: boolean;
+  watchMode: 'full_video' | 'skip_after_sec';
+  skipAfterSec: number;
+  durationSec?: number;
+  impressions: number;
+  createdAt: string;
+}
+
 export interface SponsorAdConfig {
   enabled: boolean;
   sponsorName: string;
   headline: string;
   description: string;
   imageUrl: string;
+  videoUrl?: string;
+  mediaType?: 'video' | 'image';
   destinationUrl: string;
   displayTrigger: 'pre_login' | 'post_connect' | 'both';
   countdownDurationSec: number;
   skipAllowed: boolean;
+  watchMode?: 'full_video' | 'skip_after_sec';
+  retriggerEveryHours?: number; // default 3 hours
+  retriggerEveryGb?: number; // default 2 GB
+  videoLibrary?: VideoAdItem[];
 }
 
 export interface TeamMember {

@@ -18,16 +18,22 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// Parse JSON and URL-encoded bodies with 25mb limit for photo uploads
-app.use(express.json({ limit: '25mb' }));
-app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+// Parse JSON and URL-encoded bodies with 60mb limit for photo and short video ad uploads
+app.use(express.json({ limit: '60mb' }));
+app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
-// Static images directory for captive portal splash backgrounds
+// Static images and videos directories for captive portal splash backgrounds & video ads
 const publicImagesDir = path.resolve(__dirname, 'public/images');
 if (!fs.existsSync(publicImagesDir)) {
   fs.mkdirSync(publicImagesDir, { recursive: true });
 }
 app.use('/images', express.static(publicImagesDir));
+
+const publicVideosDir = path.resolve(__dirname, 'public/videos');
+if (!fs.existsSync(publicVideosDir)) {
+  fs.mkdirSync(publicVideosDir, { recursive: true });
+}
+app.use('/videos', express.static(publicVideosDir));
 
 // CORS for captive portals and mobile money webhook gateways
 app.use((req, res, next) => {
@@ -88,6 +94,67 @@ app.post('/api/upload-photo', (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error('Failed to save photo:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Video listing & physical upload endpoints for post-auth & 3h / 2GB recurring video ads
+app.get('/api/videos', (_req: Request, res: Response) => {
+  try {
+    if (!fs.existsSync(publicVideosDir)) {
+      fs.mkdirSync(publicVideosDir, { recursive: true });
+    }
+    const files = fs.readdirSync(publicVideosDir).filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f));
+    res.json({
+      success: true,
+      videos: files.map(f => {
+        const stat = fs.statSync(path.resolve(publicVideosDir, f));
+        return {
+          name: f,
+          url: `/videos/${f}`,
+          path: `public/videos/${f}`,
+          sizeKb: Math.round(stat.size / 1024),
+          uploadedAt: stat.mtime.toISOString()
+        };
+      })
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/upload-video', (req: Request, res: Response) => {
+  try {
+    const { filename, base64Data } = req.body || {};
+    if (!base64Data) {
+      return res.status(400).json({ success: false, error: 'No video file data provided' });
+    }
+    if (!fs.existsSync(publicVideosDir)) {
+      fs.mkdirSync(publicVideosDir, { recursive: true });
+    }
+    const extMatch = filename?.match(/\.(mp4|webm|mov|m4v)$/i);
+    const ext = extMatch ? extMatch[0].toLowerCase() : '.mp4';
+    const cleanBase = filename
+      ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+      : `video_ad_${Date.now()}`;
+    const cleanName = `${cleanBase}${ext}`;
+    const targetPath = path.resolve(publicVideosDir, cleanName);
+
+    const base64Clean = String(base64Data).replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(base64Clean, 'base64');
+    fs.writeFileSync(targetPath, buffer);
+
+    console.log(`[Video Ad Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to public/videos/`);
+
+    res.json({
+      success: true,
+      filename: cleanName,
+      url: `/videos/${cleanName}`,
+      sizeKb: Math.round(buffer.length / 1024),
+      message: 'Video ad uploaded and saved to public/videos/'
+    });
+  } catch (err: any) {
+    console.error('Failed to save video ad:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -184,6 +251,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   const badgeText = [brandTitle.trim(), tagline.trim()].filter(Boolean).join(' · ');
   const defaultTab = allowFreeAccess ? 'free' : 'buy';
+  const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
+  const postAuthDst = videoAdsEnabled
+    ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
+    : 'https://www.google.com';
 
   const plansHtml = plans.map((p: any, idx: number) => `
     <label class="plan-item ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${String(p.name).replace(/'/g, '')}', this)">
@@ -440,7 +511,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
         <input type="hidden" name="username" value="T-TRIAL">
         <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="https://www.google.com">
+        <input type="hidden" name="dst" value="${postAuthDst}">
         ${termsEnabled ? `<div class="terms">${termsText}</div>` : ''}
         <button type="submit" class="btn-primary">Connect Free Wi-Fi &rarr;</button>
       </form>
@@ -452,7 +523,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="https://www.google.com">
+        <input type="hidden" name="dst" value="${postAuthDst}">
         <div class="field">
           <label class="lbl">Voucher Code *</label>
           <input class="inp" type="text" id="voucherInput" value="" placeholder="Enter voucher code (e.g. TC-XXXX)" required style="text-transform:uppercase;letter-spacing:1px;">
@@ -466,7 +537,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="https://www.google.com">
+        <input type="hidden" name="dst" value="${postAuthDst}">
         <div class="plan-list">${plansHtml}</div>
         <div class="lbl">Choose Payment Method</div>
         <div class="gw-grid">
@@ -692,13 +763,183 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
   res.send(html);
 });
 
-app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>You're Connected</h2><p>Your Wi-Fi session is active.</p><a href="https://www.google.com">Continue to Internet &rarr;</a></div></body></html>`;
+function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', reason = 'post_auth'): string {
+  const baseUrl = `${protocol}://${host}`;
+  const sponsorCfg: any = serverStore.sponsorAd || {};
+  const enabled = sponsorCfg.enabled !== false;
+  const retriggerHours = sponsorCfg.retriggerEveryHours || 3;
+  const retriggerGb = sponsorCfg.retriggerEveryGb || 2;
+  const defaultLib = [
+    {
+      id: 'vid_alliance_all',
+      title: 'Alliance Insurance Lesotho — 15s Spot',
+      sponsorName: 'Alliance Insurance Lesotho',
+      headline: 'Protect Your Journey Across Lesotho',
+      description: 'High-speed Starlink Wi-Fi sponsored by Alliance Insurance. Comprehensive motor, life, and asset cover.',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      destinationUrl: 'https://alliance.co.ls',
+      targetScope: 'all',
+      enabled: true,
+      watchMode: 'full_video',
+      skipAfterSec: 5
+    }
+  ];
+  const lib = Array.isArray(sponsorCfg.videoLibrary) && sponsorCfg.videoLibrary.length > 0
+    ? sponsorCfg.videoLibrary
+    : defaultLib;
+  const normScope = scope === 'village' ? 'community' : scope;
+  const chosenAd =
+    lib.find((v: any) => v.enabled && (v.targetScope === normScope || v.targetScope === scope)) ||
+    lib.find((v: any) => v.enabled && v.targetScope === 'all') ||
+    lib.find((v: any) => v.enabled) ||
+    defaultLib[0];
+
+  if (!enabled || !chosenAd) {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>You're Connected</h2><p>Your Wi-Fi session is active.</p><a href="https://www.google.com">Continue to Internet &rarr;</a></div></body></html>`;
+  }
+
+  let videoSrc = String(chosenAd.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+  if (videoSrc.startsWith('/')) {
+    videoSrc = `${baseUrl}${videoSrc}`;
+  }
+  const watchMode = chosenAd.watchMode || 'full_video';
+  const skipSec = Number(chosenAd.skipAfterSec) || 5;
+  const reasonBadge = reason === 'retrigger'
+    ? `${retriggerHours}h / ${retriggerGb}GB Session Checkpoint Ad`
+    : 'Connected Sponsor Video';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>${chosenAd.sponsorName || 'Sponsor'} — T-Connect Wi-Fi</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
+  body{min-height:100vh;background:#05070c;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:16px}
+  .card{width:100%;max-width:420px;background:#0f1422;border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:18px;box-shadow:0 24px 60px rgba(0,0,0,0.75)}
+  .top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;font-family:monospace}
+  .badge{background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.4);padding:3px 8px;border-radius:8px;font-weight:700}
+  .vid-wrap{position:relative;border-radius:16px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.12);margin-bottom:12px}
+  video{width:100%;max-height:240px;display:block;object-fit:cover;background:#000}
+  .mute-btn{position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer}
+  .sponsor-kicker{font-size:10px;font-family:monospace;color:#34d399;text-transform:uppercase;font-weight:800;margin-bottom:4px}
+  h2{font-size:16px;font-weight:900;color:#fff;margin-bottom:4px}
+  p{font-size:12px;color:#cbd5e1;line-height:1.45;margin-bottom:12px}
+  .btn-row{display:flex;flex-direction:column;gap:8px}
+  .btn-continue{width:100%;padding:13px;border-radius:12px;border:none;background:#10b981;color:#052e16;font-weight:900;font-size:13px;cursor:pointer}
+  .btn-continue:disabled{background:#334155;color:#94a3b8;opacity:0.6;cursor:not-allowed}
+  .btn-visit{width:100%;padding:10px;border-radius:12px;border:1px solid rgba(240,94,23,0.45);background:rgba(240,94,23,0.15);color:#fdba74;font-weight:700;font-size:12px;text-align:center;text-decoration:none;display:block}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top-row">
+    <span class="badge">${reasonBadge}</span>
+    <span id="timerStatus" style="color:#94a3b8;">Playing video...</span>
+  </div>
+  <div class="vid-wrap">
+    <video id="adVideo" src="${videoSrc}" playsinline autoplay muted controlsList="nodownload nofullscreen"></video>
+    <button type="button" class="mute-btn" id="muteBtn" onclick="toggleAudio()">Unmute Audio</button>
+  </div>
+  <div class="sponsor-kicker">Sponsored by ${chosenAd.sponsorName}</div>
+  <h2>${chosenAd.headline}</h2>
+  <p>${chosenAd.description}</p>
+  <div class="btn-row">
+    <button type="button" id="continueBtn" class="btn-continue" disabled onclick="releaseToInternet()">
+      ${watchMode === 'full_video' ? 'Please watch short video to continue...' : `Continue to Internet in ${skipSec}s...`}
+    </button>
+    ${chosenAd.destinationUrl ? `<a href="${chosenAd.destinationUrl}" target="_blank" rel="noopener" class="btn-visit">Visit ${chosenAd.sponsorName} &rarr;</a>` : ''}
+  </div>
+</div>
+<script>
+  var vid = document.getElementById('adVideo');
+  var btn = document.getElementById('continueBtn');
+  var statusEl = document.getElementById('timerStatus');
+  var muteBtn = document.getElementById('muteBtn');
+  var watchMode = '${watchMode}';
+  var skipSec = ${skipSec};
+  var elapsed = 0;
+  var unlocked = false;
+
+  function unlockButton() {
+    if (unlocked) return;
+    unlocked = true;
+    btn.disabled = false;
+    btn.textContent = 'Continue to High-Speed Internet \\u2192';
+    statusEl.textContent = 'Ad Complete \\u2713';
+    statusEl.style.color = '#34d399';
+  }
+
+  function toggleAudio() {
+    if (!vid) return;
+    vid.muted = !vid.muted;
+    muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
+  }
+
+  function releaseToInternet() {
+    if (!unlocked) return;
+    window.location.href = 'https://www.google.com';
+  }
+
+  if (vid) {
+    vid.addEventListener('ended', function() {
+      unlockButton();
+    });
+    vid.addEventListener('error', function() {
+      unlockButton();
+    });
+    vid.play().catch(function() {});
+  }
+
+  setInterval(function() {
+    elapsed++;
+    if (watchMode === 'skip_after_sec') {
+      var rem = Math.max(0, skipSec - elapsed);
+      if (rem > 0 && !unlocked) {
+        btn.textContent = 'Skip Ad & Continue in ' + rem + 's...';
+        statusEl.textContent = rem + 's remaining';
+      } else {
+        unlockButton();
+      }
+    } else {
+      if (vid && vid.duration && !isNaN(vid.duration)) {
+        var left = Math.max(0, Math.ceil(vid.duration - vid.currentTime));
+        if (!unlocked) {
+          statusEl.textContent = left + 's left';
+          btn.textContent = 'Unlocking Internet in ' + left + 's...';
+        }
+        if (left <= 0) unlockButton();
+      } else if (elapsed >= 15) {
+        unlockButton();
+      }
+    }
+  }, 1000);
+</script>
+</body>
+</html>`;
+}
+
+app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const scope = (req.query.scope as string) || 'hotspot';
+  const html = compileVideoAdHtml(host, protocol, scope, 'post_auth');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 
-// Persistent Server Store for Gateways, Vouchers, Redeemed OTT PINs, and Guest Events
+app.get('/api/portal/video-ad.html', (req: Request, res: Response) => {
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const scope = (req.query.scope as string) || 'hotspot';
+  const reason = (req.query.reason as string) || 'retrigger';
+  const html = compileVideoAdHtml(host, protocol, scope, reason);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
+});
+
+// Persistent Server Store for Gateways, Vouchers, Redeemed OTT PINs, Guest Events, and Video Ads
 const serverStoreFilePath = path.resolve(__dirname, 'public/server-portal-store.json');
 interface ServerPortalStore {
   gateways: Array<any>;
@@ -707,6 +948,7 @@ interface ServerPortalStore {
   guestEvents: Array<any>;
   transactions: Array<any>;
   supabaseConfig?: { url: string; anonKey: string };
+  sponsorAd?: any;
 }
 
 function loadServerPortalStore(): ServerPortalStore {
@@ -719,7 +961,8 @@ function loadServerPortalStore(): ServerPortalStore {
         redeemedOttPins: Array.isArray(parsed.redeemedOttPins) ? parsed.redeemedOttPins : [],
         guestEvents: Array.isArray(parsed.guestEvents) ? parsed.guestEvents : [],
         transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-        supabaseConfig: parsed.supabaseConfig && parsed.supabaseConfig.url ? parsed.supabaseConfig : undefined
+        supabaseConfig: parsed.supabaseConfig && parsed.supabaseConfig.url ? parsed.supabaseConfig : undefined,
+        sponsorAd: parsed.sponsorAd || undefined
       };
     }
   } catch {}
@@ -739,6 +982,60 @@ function saveServerPortalStore(store: ServerPortalStore) {
 }
 
 const serverStore = loadServerPortalStore();
+
+// Sync & retrieve Post-Auth and 3-Hour / 2GB Recurring Video Ad Configuration
+app.get('/api/portal/video-ads', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    sponsorAd: serverStore.sponsorAd || null
+  });
+});
+
+app.post('/api/portal/video-ads', (req: Request, res: Response) => {
+  try {
+    const { sponsorAd } = req.body || {};
+    if (sponsorAd && typeof sponsorAd === 'object') {
+      serverStore.sponsorAd = sponsorAd;
+      saveServerPortalStore(serverStore);
+
+      const host = req.get('host') || '169.58.98.92:3000';
+      const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+      const portalBaseUrl = `${protocol}://${host}`;
+      const hours = Math.max(1, Number(sponsorAd.retriggerEveryHours) || 3);
+      const gb = Math.max(1, Number(sponsorAd.retriggerEveryGb) || 2);
+      const bytesQuota = gb * 1073741824;
+      const hh = String(hours).padStart(2, '0');
+
+      const adCommands = sponsorAd.enabled
+        ? [
+            `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
+            `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+            `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-alogin.html" dst-path="hotspot/alogin.html" check-certificate=no } on-error={}`,
+            `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-alogin.html" dst-path="flash/hotspot/alogin.html" check-certificate=no } on-error={}`,
+            `:do { /ip hotspot user profile set [find] advertise=yes advertise-url="${portalBaseUrl}/api/portal/video-ad.html?reason=retrigger" advertise-interval=${hh}:00:00 advertise-timeout=00:02:00 } on-error={}`,
+            `:do { /system scheduler remove [find name="tc-video-ad-quota-guard"] } on-error={}`,
+            `:do { /system scheduler add name="tc-video-ad-quota-guard" interval=1m on-event=":foreach i in=[/ip hotspot active find] do={ :local b ([/ip hotspot active get \\$i bytes-in] + [/ip hotspot active get \\$i bytes-out]); :if (\\$b >= ${bytesQuota}) do={ /ip hotspot active remove \\$i } }" comment="T-Connect ${gb}GB Video Ad Checkpoint Re-Trigger" } on-error={}`,
+            `:do { :log info "T-Connect Video Ads enabled: Post-Auth + Every ${hours}h or ${gb}GB (${bytesQuota} bytes)" } on-error={}`
+          ]
+        : [
+            `:do { /ip hotspot user profile set [find] advertise=no } on-error={}`,
+            `:do { /system scheduler remove [find name="tc-video-ad-quota-guard"] } on-error={}`
+          ];
+
+      for (const router of monitoredRouters.values()) {
+        router.pendingCommands = [...(router.pendingCommands || []), ...adCommands];
+        router.policyLastSyncedAt = new Date().toISOString();
+      }
+    }
+    res.json({
+      success: true,
+      sponsorAd: serverStore.sponsorAd,
+      syncedRouters: monitoredRouters.size
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 function getSupabaseCredentials(): { url: string; key: string } {
   const url = (

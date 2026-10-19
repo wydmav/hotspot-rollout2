@@ -16,8 +16,60 @@ import {
   CaptivePortalLead,
   ConnectionAttemptLog,
   SponsorAdConfig,
+  VideoAdItem,
   PlatformRole
 } from '../types';
+
+export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
+  {
+    id: 'vid_alliance_all',
+    title: 'Alliance Insurance Lesotho — 15s Spot',
+    sponsorName: 'Alliance Insurance Lesotho',
+    headline: 'Protect Your Journey Across Lesotho',
+    description: 'High-speed Starlink Wi-Fi sponsored by Alliance Insurance. Comprehensive motor, life, and asset cover.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    destinationUrl: 'https://alliance.co.ls',
+    targetScope: 'all',
+    enabled: true,
+    watchMode: 'full_video',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    createdAt: '2026-10-19'
+  },
+  {
+    id: 'vid_maluti_hotspot',
+    title: 'Maluti Mountain Brewery & Cafes — 15s Spot',
+    sponsorName: 'Maluti Mountain Refreshments',
+    headline: 'Refresh Your Day at Maseru Hotspots',
+    description: 'Stream, work, and connect seamlessly across T-Connect Hotspot cafes and plazas.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    destinationUrl: 'https://tconnect.co.ls',
+    targetScope: 'hotspot',
+    enabled: true,
+    watchMode: 'skip_after_sec',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    createdAt: '2026-10-19'
+  },
+  {
+    id: 'vid_transit_bus',
+    title: 'Lesotho Express Commuter Wi-Fi — 15s Spot',
+    sponsorName: 'Lesotho Express & Econet',
+    headline: 'Fast Onboard Starlink Across Every Route',
+    description: 'Stay connected on the move. Re-plays every 3 hours or 2 GB of data consumed.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    destinationUrl: 'https://tconnect.co.ls',
+    targetScope: 'bus',
+    enabled: true,
+    watchMode: 'full_video',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    createdAt: '2026-10-19'
+  }
+];
 
 // Updated storage key for 100% clean state (zero sample sessions, leads, tenants, or logs)
 const STORAGE_KEY = 'tconnect_controller_clean_state_v5';
@@ -1731,20 +1783,59 @@ class StorageService {
   }
 
   getSponsorAdConfig(): SponsorAdConfig {
-    if ((this.state as any).sponsorAd) {
-      return (this.state as any).sponsorAd;
-    }
-    return {
+    const fallback: SponsorAdConfig = {
       enabled: true,
       sponsorName: 'Alliance Insurance Lesotho',
       headline: 'Travel & Asset Protection Across Lesotho',
-      description: 'Enjoy free high-speed Starlink WiFi courtesy of Alliance Insurance. Connect with local protection plans today.',
+      description: 'Enjoy high-speed Starlink Wi-Fi courtesy of Alliance Insurance. Plays immediately after login and every 3 hours or 2 GB used.',
       imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80',
+      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+      mediaType: 'video',
       destinationUrl: 'https://alliance.co.ls',
       displayTrigger: 'both',
       countdownDurationSec: 5,
-      skipAllowed: true
+      skipAllowed: false,
+      watchMode: 'full_video',
+      retriggerEveryHours: 3,
+      retriggerEveryGb: 2,
+      videoLibrary: STARTER_VIDEO_AD_LIBRARY
     };
+    if ((this.state as any).sponsorAd) {
+      const saved: SponsorAdConfig = (this.state as any).sponsorAd;
+      return {
+        ...fallback,
+        ...saved,
+        retriggerEveryHours: saved.retriggerEveryHours ?? 3,
+        retriggerEveryGb: saved.retriggerEveryGb ?? 2,
+        videoLibrary: Array.isArray(saved.videoLibrary) && saved.videoLibrary.length > 0
+          ? saved.videoLibrary
+          : STARTER_VIDEO_AD_LIBRARY
+      };
+    }
+    return fallback;
+  }
+
+  resolveVideoAdForScope(scope: VerticalType | string = 'hotspot'): VideoAdItem | null {
+    const cfg = this.getSponsorAdConfig();
+    if (!cfg.enabled) return null;
+    const lib = cfg.videoLibrary || STARTER_VIDEO_AD_LIBRARY;
+    const normalizedScope = scope === 'village' ? 'community' : scope;
+    const exactMatch = lib.find(v => v.enabled && (v.targetScope === normalizedScope || v.targetScope === scope));
+    if (exactMatch) return exactMatch;
+    const allMatch = lib.find(v => v.enabled && v.targetScope === 'all');
+    if (allMatch) return allMatch;
+    const anyEnabled = lib.find(v => v.enabled);
+    return anyEnabled || null;
+  }
+
+  recordVideoAdImpression(videoId: string): void {
+    const cfg = this.getSponsorAdConfig();
+    if (!Array.isArray(cfg.videoLibrary)) return;
+    const updatedLib = cfg.videoLibrary.map(v =>
+      v.id === videoId ? { ...v, impressions: (v.impressions || 0) + 1 } : v
+    );
+    (this.state as any).sponsorAd = { ...cfg, videoLibrary: updatedLib };
+    this.saveState();
   }
 
   updateSponsorAdConfig(config: Partial<SponsorAdConfig>): SponsorAdConfig {
@@ -1756,9 +1847,16 @@ class StorageService {
       role: 'Collaborator',
       action: 'portal.sponsor_ad_update',
       target: updated.sponsorName,
-      details: `Updated captive portal in-session sponsor ad banner: '${updated.headline}'.`
+      details: `Updated post-auth & recurring (${updated.retriggerEveryHours || 3}h / ${updated.retriggerEveryGb || 2}GB) video ad campaign (${updated.videoLibrary?.filter(v => v.enabled).length || 0} active videos).`
     });
     this.saveState();
+    if (typeof window !== 'undefined') {
+      fetch('/api/portal/video-ads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sponsorAd: updated })
+      }).catch(() => {});
+    }
     return updated;
   }
 
