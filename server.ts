@@ -403,17 +403,17 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <button type="button" id="tabBtn_buy" class="tab-btn" onclick="switchTab('buy')">Buy Pass</button>
     </div>
 
-    <!-- SHARED GUEST IDENTIFICATION FIELDS -->
-    <div id="guestFieldsWrap">
+    <!-- SHARED GUEST IDENTIFICATION FIELDS (Only shown on Free Wi-Fi tab) -->
+    <div id="guestFieldsWrap" style="${allowFreeAccess ? '' : 'display:none;'}">
       ${collectName ? `
       <div class="grid-2">
         <div class="field">
           <label class="lbl">First Name *</label>
-          <input class="inp" type="text" id="guestFirst" value="" placeholder="First name" required minlength="2">
+          <input class="inp" type="text" id="guestFirst" value="" placeholder="First name">
         </div>
         <div class="field">
           <label class="lbl">Surname *</label>
-          <input class="inp" type="text" id="guestLast" value="" placeholder="Surname" required minlength="2">
+          <input class="inp" type="text" id="guestLast" value="" placeholder="Surname">
         </div>
       </div>` : ''}
       ${collectPhone ? `
@@ -424,13 +424,13 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
             <option value="+266">+266</option>
             <option value="+27">+27</option>
           </select>
-          <input class="inp" type="tel" id="guestPhone" value="" placeholder="5xxxxxxx / 6xxxxxxx" required>
+          <input class="inp" type="tel" id="guestPhone" value="" placeholder="5xxxxxxx / 6xxxxxxx">
         </div>
       </div>` : ''}
       ${collectEmail ? `
       <div class="field">
         <label class="lbl">Email Address *</label>
-        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com" required>
+        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com">
       </div>` : ''}
     </div>
 
@@ -540,6 +540,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function switchTab(tab) {
     showErr('');
+    var gWrap = document.getElementById('guestFieldsWrap');
+    if (gWrap) gWrap.style.display = (tab === 'free') ? 'block' : 'none';
     ['free', 'voucher', 'buy'].forEach(function(t) {
       var btn = document.getElementById('tabBtn_' + t);
       var sec = document.getElementById('sec_' + t);
@@ -612,7 +614,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handleVoucherSubmit(e) {
     e.preventDefault();
-    if (!validateGuestFields()) return false;
     var code = document.getElementById('voucherInput').value.trim().toUpperCase();
     if (!code) { showErr('Please enter your voucher code.'); return false; }
     var btn = document.getElementById('voucherSubmitBtn');
@@ -637,7 +638,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handleBuySubmit(e) {
     e.preventDefault();
-    if (!validateGuestFields()) return false;
     var val = document.getElementById('payInputVal').value.replace(/\\D/g, '');
     if (selectedGw === 'ottvoucher' && val.length !== 16) {
       showErr('OTT Voucher PIN must be exactly 16 digits (' + val.length + '/16 digits entered).');
@@ -869,6 +869,27 @@ function buildOttRemitCandidates(
   const list: Array<{ formulaId: string; amountVal: string; hash: string }> = [];
   for (const amt of [amtInt, amtDec]) {
     list.push(
+      // PIN-only (no SMS / mobile) SHA-256 signatures first
+      {
+        formulaId: `vid+amt(${amt})+ref+pin+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${amt}${uniqueReference}${pin}${apiKey}`)
+      },
+      {
+        formulaId: `pin+ref+vid+amt(${amt})+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${uniqueReference}${vendorID}${amt}${apiKey}`)
+      },
+      {
+        formulaId: `vid+pin+amt(${amt})+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${vendorID}${pin}${amt}${uniqueReference}${apiKey}`)
+      },
+      {
+        formulaId: `pin+amt(${amt})+vid+ref+key`,
+        amountVal: amt,
+        hash: sha256(`${pin}${amt}${vendorID}${uniqueReference}${apiKey}`)
+      },
       {
         formulaId: `pin+amt(${amt})+mob+vid+ref+key`,
         amountVal: amt,
@@ -878,11 +899,6 @@ function buildOttRemitCandidates(
         formulaId: `pin+vid+ref+amt(${amt})+mob+key`,
         amountVal: amt,
         hash: sha256(`${pin}${vendorID}${uniqueReference}${amt}${mobile}${apiKey}`)
-      },
-      {
-        formulaId: `vid+amt(${amt})+ref+pin+key`,
-        amountVal: amt,
-        hash: sha256(`${vendorID}${amt}${uniqueReference}${pin}${apiKey}`)
       },
       {
         formulaId: `vid+pin+amt(${amt})+mob+ref+key`,
@@ -908,16 +924,6 @@ function buildOttRemitCandidates(
         formulaId: `pin+ref+vid+amt(${amt})+mob+key`,
         amountVal: amt,
         hash: sha256(`${pin}${uniqueReference}${vendorID}${amt}${mobile}${apiKey}`)
-      },
-      {
-        formulaId: `pin+ref+vid+amt(${amt})+key`,
-        amountVal: amt,
-        hash: sha256(`${pin}${uniqueReference}${vendorID}${amt}${apiKey}`)
-      },
-      {
-        formulaId: `vid+pin+amt(${amt})+ref+key`,
-        amountVal: amt,
-        hash: sha256(`${vendorID}${pin}${amt}${uniqueReference}${apiKey}`)
       },
       {
         formulaId: `ref+pin+amt(${amt})+mob+vid+key`,

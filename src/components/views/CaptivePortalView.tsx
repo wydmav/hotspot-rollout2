@@ -1591,8 +1591,8 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                       {/* Pay / Redeem Button */}
                       <button
                         onClick={handleExecutePayment}
-                        disabled={isProcessing}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                        disabled={isProcessing || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                       >
                         {isProcessing ? (
                           <>
@@ -1677,10 +1677,10 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                         backgroundColor: `rgba(15, 20, 34, ${glassOpacity / 100})`,
                       }}
                     >
-                      {/* Notice banner from Screenshot 3 */}
-                      <div className="p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-xl text-[10px] font-mono text-blue-300 flex items-center gap-2 text-left">
-                        <Info className="w-4 h-4 text-blue-400 shrink-0" />
-                        <span>The link on this screen will be sent by email / SMS</span>
+                      {/* Active session banner */}
+                      <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[10px] font-mono text-emerald-300 flex items-center gap-2 text-left">
+                        <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Your Wi-Fi session is active on this device</span>
                       </div>
 
                       {/* Brand Icon */}

@@ -913,9 +913,9 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                       borderRadius: `${config.cardRadiusPx}px`,
                     }}
                   >
-                    <div className="p-2 bg-blue-500/10 border border-blue-500/30 rounded-xl text-[10px] font-mono text-blue-300 flex items-center gap-1.5 text-left">
-                      <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      <span>The link on this screen will be sent by email / SMS</span>
+                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 text-left">
+                      <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Your Wi-Fi session is active on this device</span>
                     </div>
 
                     <div className="p-3 bg-black/50 rounded-xl border border-white/10 space-y-1">

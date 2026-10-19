@@ -1113,14 +1113,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ottPin: cleanPin,
-            phoneNumber: fullPhone,
             amount: chosenPlan.price,
             planId: chosenPlan.id,
             planName: chosenPlan.name,
             durationSeconds: chosenPlan.durationSeconds || 86400,
             currency,
-            guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim(),
-            guestEmail: guestEmail.trim(),
             scope: selectedScope,
             mac: '7A:91:02:11:44:99'
           })
@@ -2389,22 +2386,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                         <button
                           type="button"
-                          onClick={() => {
-                            if (isGuestFormValid) setPreviewStep('plan');
-                          }}
-                          disabled={!isGuestFormValid}
-                          className="w-full py-1.5 text-slate-300 hover:text-white disabled:opacity-30 text-[10px] font-mono transition-colors"
+                          onClick={() => setPreviewStep('plan')}
+                          className="w-full py-1.5 text-slate-300 hover:text-white text-[10px] font-mono transition-colors cursor-pointer"
                         >
-                          Or Buy High-Speed Pass &rarr;
+                          Or Buy Pass / Redeem OTT Voucher (No Form Required) &rarr;
                         </button>
                       </div>
                     ) : (
                       <button
-                        type="submit"
-                        disabled={!isGuestFormValid}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+                        type="button"
+                        onClick={() => setPreviewStep('plan')}
+                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
                       >
-                        Continue to Pass &rarr;
+                        Select Package &amp; Redeem OTT Voucher &rarr;
                       </button>
                     )}
                   </form>
@@ -2461,7 +2455,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                   )}
                                 </div>
                                 <div className="text-[10px] text-slate-400">
-                                  {plan.durationLabel} · {plan.downloadSpeedMbps}Mbps
+                                  {plan.durationLabel}
                                 </div>
                               </div>
                             </div>
@@ -2510,7 +2504,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         <div>
                           <div className="text-white font-bold text-xs">{chosenPlan.name}</div>
                           <div className="text-[10px] text-slate-400 font-mono">
-                            {chosenPlan.durationLabel} · {chosenPlan.downloadSpeedMbps}Mbps
+                            {chosenPlan.durationLabel}
                           </div>
                         </div>
                         <div className="text-right">
@@ -2605,12 +2599,12 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <button
                         type="button"
                         onClick={handleSimulatePayment}
-                        disabled={isVerifyingPayment}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-colors"
+                        disabled={isVerifyingPayment || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-colors cursor-pointer"
                       >
                         {isVerifyingPayment
                           ? 'Verifying 16-Digit OTT Voucher...'
-                          : `Authorize & Connect (${currency}${chosenPlan.price}) →`}
+                          : `Pay & Connect Internet (${currency}${chosenPlan.price}) →`}
                       </button>
                     </div>
                   );

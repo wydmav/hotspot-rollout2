@@ -137,35 +137,39 @@ export function updateUserTemporaryPassword(emailOrId: string, tempPassword: str
 export async function forgotPassword(email: string): Promise<ForgotPasswordResponse> {
   const cleanEmail = email.trim().toLowerCase();
   const currentState = storage.getState();
-  let member = currentState.team.find((m: TeamMember) => m.email.toLowerCase() === cleanEmail);
 
-  // If member is not yet in roster, register them as Collaborator so they can authenticate
-  if (!member) {
-    const generatedName = cleanEmail
-      .split('@')[0]
-      .replace(/[._-]/g, ' ')
-      .replace(/\b\w/g, (l) => l.toUpperCase());
-    member = storage.inviteTeamMember(generatedName, cleanEmail, 'Collaborator', []);
+  // Never generate or expose a temporary password for the primary Super Admin account
+  if (cleanEmail === ADMIN_EMAIL.toLowerCase()) {
+    const simulatedEmail = await simulateEmailAlert(cleanEmail, ADMIN_NAME, '[REDACTED]');
+    return {
+      success: true,
+      email: cleanEmail,
+      memberName: ADMIN_NAME,
+      tempPassword: '',
+      adminEmail: ADMIN_EMAIL,
+      emailDispatched: true,
+      simulatedEmail,
+      message: 'If this account is eligible for a password reset, the system administrator has been notified.'
+    };
   }
 
-  // Generate randomized secure temporary password
-  const tempPassword = generateSecureTemporaryPassword();
+  const member = currentState.team.find((m: TeamMember) => m.email.toLowerCase() === cleanEmail);
+  if (member) {
+    const tempPassword = generateSecureTemporaryPassword();
+    storage.setMemberTemporaryPassword(member.id, tempPassword);
+  }
 
-  // Update the user's record in the storage state
-  storage.setMemberTemporaryPassword(member.id, tempPassword);
-
-  // Simulate email alert to rphooko@tconnect.africa
-  const simulatedEmail = await simulateEmailAlert(cleanEmail, member.name, tempPassword);
+  const simulatedEmail = await simulateEmailAlert(cleanEmail, member?.name || cleanEmail, '[REDACTED]');
 
   return {
     success: true,
     email: cleanEmail,
-    memberName: member.name,
-    tempPassword,
+    memberName: member?.name || '',
+    tempPassword: '',
     adminEmail: ADMIN_EMAIL,
     emailDispatched: true,
     simulatedEmail,
-    message: `Password reset request routed to Administrator Raphooko Phooko (${ADMIN_EMAIL}). A temporary password has been issued and linked to your account.`,
+    message: 'Your password reset request has been logged for the system administrator. Once verified, the administrator will provide your temporary login credentials directly.'
   };
 }
 
@@ -182,27 +186,23 @@ export class AuthService {
   handleForgotPasswordSync(email: string): ForgotPasswordResponse {
     const cleanEmail = email.trim().toLowerCase();
     const currentState = storage.getState();
-    let member = currentState.team.find((m: TeamMember) => m.email.toLowerCase() === cleanEmail);
 
-    if (!member) {
-      const generatedName = cleanEmail
-        .split('@')[0]
-        .replace(/[._-]/g, ' ')
-        .replace(/\b\w/g, (l) => l.toUpperCase());
-      member = storage.inviteTeamMember(generatedName, cleanEmail, 'Collaborator', []);
+    if (cleanEmail !== ADMIN_EMAIL.toLowerCase()) {
+      const member = currentState.team.find((m: TeamMember) => m.email.toLowerCase() === cleanEmail);
+      if (member) {
+        const tempPassword = generateSecureTemporaryPassword();
+        storage.setMemberTemporaryPassword(member.id, tempPassword);
+      }
     }
-
-    const tempPassword = generateSecureTemporaryPassword();
-    storage.setMemberTemporaryPassword(member.id, tempPassword);
 
     const timestamp = new Date().toISOString();
     const simulatedEmail: SimulatedEmailDispatch = {
       to: ADMIN_EMAIL,
       from: 'security@tconnect.africa',
       replyTo: cleanEmail,
-      subject: `[T-Connect Security] Password Reset Alert for ${cleanEmail}`,
-      body: `Temporary password ${tempPassword} issued for ${member.name} (${cleanEmail}). Dispatched to ${ADMIN_EMAIL}.`,
-      htmlPreview: `<div>Temporary password issued: <code>${tempPassword}</code></div>`,
+      subject: `[T-Connect Security] Password Reset Request for ${cleanEmail}`,
+      body: `Password reset requested for ${cleanEmail}.`,
+      htmlPreview: `<div>Password reset requested for ${cleanEmail}.</div>`,
       dispatchedAt: timestamp,
       messageId: `msg_${Date.now()}`,
       deliveryStatus: 'delivered',
@@ -211,12 +211,12 @@ export class AuthService {
     return {
       success: true,
       email: cleanEmail,
-      memberName: member.name,
-      tempPassword,
+      memberName: '',
+      tempPassword: '',
       adminEmail: ADMIN_EMAIL,
       emailDispatched: true,
       simulatedEmail,
-      message: `Password reset request routed to Administrator Raphooko Phooko (${ADMIN_EMAIL}). A temporary password has been issued.`,
+      message: 'Your password reset request has been logged for the system administrator. Once verified, the administrator will provide your temporary login credentials directly.',
     };
   }
 }

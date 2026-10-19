@@ -215,8 +215,6 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           amount: 10,
           planName: 'Daily Pass',
           currency: 'M',
-          phoneNumber: testMobile || '26658000000',
-          phone: testMobile || '26658000000',
           mac: 'D4:01:C3:88:99:AA',
           apiKey: apiKey.trim(),
           apiPassword: apiPassword.trim(),
@@ -735,35 +733,21 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div className="sm:col-span-2 relative">
-                        <label className="text-[10px] text-slate-400 block mb-1">16-Digit OTT Voucher PIN</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={19}
-                          value={generatedTestPin}
-                          onChange={(e) => {
-                            const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                            const formatted = digits.match(/.{1,4}/g)?.join(' ') || '';
-                            setGeneratedTestPin(formatted);
-                          }}
-                          placeholder="1234 5678 9012 3456"
-                          className="w-full px-3 py-2 bg-black/60 border border-blue-400/40 rounded-lg text-emerald-400 font-mono text-base tracking-widest font-extrabold text-center sm:text-left tabular-nums"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">Customer Mobile (OTT Vault SMS)</label>
-                        <input
-                          type="tel"
-                          inputMode="numeric"
-                          value={testMobile}
-                          onChange={(e) => setTestMobile(e.target.value.replace(/[^\d+]/g, ''))}
-                          placeholder="26658000000"
-                          className="w-full px-3 py-2.5 bg-black/60 border border-white/20 rounded-lg text-white font-mono text-xs tabular-nums"
-                        />
-                      </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">16-Digit OTT Voucher PIN (No SMS / Mobile Required)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={19}
+                        value={generatedTestPin}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = digits.match(/.{1,4}/g)?.join(' ') || '';
+                          setGeneratedTestPin(formatted);
+                        }}
+                        placeholder="1234 5678 9012 3456"
+                        className="w-full px-3 py-2.5 bg-black/60 border border-blue-400/40 rounded-lg text-emerald-400 font-mono text-base tracking-widest font-extrabold text-center sm:text-left tabular-nums"
+                      />
                     </div>
 
                     <button
@@ -775,14 +759,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       {isRedeemingTest ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Redeeming with OTT Lesotho API (Vendor ID {vendorId || '11, 1'})...</span>
+                          <span>Redeeming with OTT Lesotho API (Vendor ID {vendorId || '11, 1, TCONNECTLES1'})...</span>
                         </>
                       ) : (
                         <span>Verify &amp; Redeem 16-Digit PIN via OTT Lesotho API &rarr;</span>
                       )}
                     </button>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Verifies and redeems directly against <code className="text-cyan-300">{endpointUrl || 'https://api.ottlesotho.com'}/api/v1/RemitVoucher</code> using Basic Auth (<code className="text-emerald-300">{merchantId || 'TCONNECTLES1'}</code>), SHA-256 request signing (<code className="text-emerald-300">API Key</code>), and Vendor ID (<code className="text-emerald-300">{vendorId || '11, 1'}</code>). Any remaining voucher balance is kept in the customer&apos;s OTT Vault via SMS.
+                      Verifies and redeems the 16-digit PIN directly against <code className="text-cyan-300">{endpointUrl || 'https://api.ottlesotho.com'}/api/v1/RemitVoucher</code> using Basic Auth (<code className="text-emerald-300">{merchantId || 'TCONNECTLES1'}</code>), SHA-256 request signing (<code className="text-emerald-300">API Key</code>), and Vendor ID (<code className="text-emerald-300">{vendorId || '11, 1, TCONNECTLES1'}</code>) with no SMS or mobile number required.
                     </p>
                   </div>
 

@@ -300,15 +300,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }, 700);
   };
 
-  // Redeem Voucher Code (Strictly verifies against active platform / Supabase vouchers)
+  // Redeem Voucher Code (Strictly verifies against active platform / OTT Lesotho API)
   const handleRedeemVoucher = async (e: React.FormEvent) => {
     e.preventDefault();
     setVoucherError(null);
-
-    if (!isGuestFormValid) {
-      setVoucherError('Please complete your name and mobile number above before activating your voucher.');
-      return;
-    }
 
     const code = voucherCode.trim().toUpperCase();
     if (!code) {
@@ -379,15 +374,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Complete EcoCash or 16-Digit OTT Voucher Payment (Strict API + Supabase Validation)
+  // Complete EcoCash or 16-Digit OTT Voucher Payment
   const handleCompletePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
-
-    if (!isGuestFormValid) {
-      setPaymentError('Please complete your name and mobile number before proceeding with payment.');
-      return;
-    }
 
     const selectedPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
     const cleanPin = ottPin.replace(/\D/g, '');
@@ -724,8 +714,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 </button>
               </div>
 
-              {renderGuestIdentificationInputs()}
-
               <div>
                 <label className="text-[11px] font-medium text-slate-300 block mb-1.5">
                   Voucher Code <span className="text-red-400">*</span>
@@ -737,7 +725,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     setVoucherCode(e.target.value);
                     setVoucherError(null);
                   }}
-                  placeholder="Enter voucher code (e.g. TC-XXXX)"
+                  placeholder="Enter voucher code (e.g. TC-XXXX or 16-digit OTT PIN)"
                   className="w-full px-3.5 py-2.5 bg-black/50 border border-white/25 focus:border-emerald-400 rounded-xl text-white text-sm font-mono tracking-wider uppercase focus:outline-none"
                 />
                 {voucherError && (
@@ -750,7 +738,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <button
                 type="submit"
-                disabled={isConnecting || !isGuestFormValid}
+                disabled={isConnecting || !voucherCode.trim()}
                 className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
@@ -799,8 +787,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 </button>
               </div>
 
-              {renderGuestIdentificationInputs()}
-
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                 {enabledPlans.map((plan) => {
                   const isSelected = selectedPlanId === plan.id;
@@ -845,12 +831,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <button
                 type="button"
-                disabled={!isGuestFormValid}
                 onClick={() => {
                   setPaymentError(null);
                   setPortalStep('payment');
                 }}
-                className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <span>Continue to Payment</span>
                 <ArrowRight className="w-4 h-4" />
