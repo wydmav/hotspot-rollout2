@@ -68,7 +68,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-  const [vendorId, setVendorId] = useState(selectedGateway?.vendorId || '11, 1');
+  const [vendorId, setVendorId] = useState(selectedGateway?.vendorId || '11, 1, TCONNECTLES1');
   const [endpointUrl, setEndpointUrl] = useState(
     selectedGateway?.endpointUrl && !selectedGateway.endpointUrl.includes('portal.ottlesotho.com')
       ? selectedGateway.endpointUrl
@@ -89,7 +89,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setApiPassword(gw.apiPassword || '');
     setBearerToken(gw.bearerToken || '');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-    setVendorId(gw.vendorId || '11, 1');
+    setVendorId(gw.vendorId || '11, 1, TCONNECTLES1');
     setEndpointUrl(
       gw.endpointUrl && !gw.endpointUrl.includes('portal.ottlesotho.com')
         ? gw.endpointUrl
@@ -115,7 +115,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       apiSecret: apiSecret.trim(),
       apiPassword: apiPassword.trim(),
       username: (merchantId || 'TCONNECTLES1').trim(),
-      vendorId: (vendorId || '11, 1').trim(),
+      vendorId: (vendorId || '11, 1, TCONNECTLES1').trim(),
       endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim(),
       bearerToken: bearerToken.trim(),
       merchantId: (merchantId || 'TCONNECTLES1').trim(),
@@ -141,7 +141,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           apiSecret: apiSecret.trim(),
           apiPassword: apiPassword.trim(),
           username: (merchantId || 'TCONNECTLES1').trim(),
-          vendorId: (vendorId || '11, 1').trim(),
+          vendorId: (vendorId || '11, 1, TCONNECTLES1').trim(),
           endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim(),
           bearerToken: bearerToken.trim(),
           merchantId: (merchantId || 'TCONNECTLES1').trim(),
@@ -212,7 +212,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           apiKey: apiKey.trim(),
           apiPassword: apiPassword.trim(),
           username: (merchantId || 'TCONNECTLES1').trim(),
-          vendorId: (vendorId || '11, 1').trim(),
+          vendorId: (vendorId || '11, 1, TCONNECTLES1').trim(),
           endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim()
         })
       });
@@ -478,13 +478,13 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="text-slate-300 font-bold">3. VENDOR ID</label>
-                        <span className="text-[10px] text-emerald-400">Tries 11 &amp; 1</span>
+                        <span className="text-[10px] text-emerald-400">Auto-tries 11, 1 &amp; TCONNECTLES1</span>
                       </div>
                       <input
                         type="text"
                         value={vendorId}
                         onChange={(e) => setVendorId(e.target.value)}
-                        placeholder="11, 1"
+                        placeholder="11, 1, TCONNECTLES1"
                         className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
