@@ -1130,7 +1130,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
         if (!res.ok || !data.success) {
           setPaymentError(
-            data.message || 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho and Supabase verification check.'
+            data.message || 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho API (api.ottlesotho.com).'
           );
           return;
         }
@@ -2581,7 +2581,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             className="w-full px-2 py-1.5 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
                           />
                           <div className="text-[9px] text-slate-400 font-mono text-center">
-                            Verified against OTT Lesotho API &amp; Supabase DB ({currency}{chosenPlan.price})
+                            Verified against live OTT Lesotho API ({currency}{chosenPlan.price})
                           </div>
                         </div>
                       ) : (

@@ -219,6 +219,7 @@ export interface GatewayConfig {
   apiSecret: string;
   apiPassword?: string;
   username?: string;
+  vendorId?: string;
   endpointUrl?: string;
   bearerToken?: string;
   merchantId: string;

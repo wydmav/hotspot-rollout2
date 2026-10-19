@@ -68,10 +68,17 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
+  const [vendorId, setVendorId] = useState(selectedGateway?.vendorId || '11, 1');
+  const [endpointUrl, setEndpointUrl] = useState(
+    selectedGateway?.endpointUrl && !selectedGateway.endpointUrl.includes('portal.ottlesotho.com')
+      ? selectedGateway.endpointUrl
+      : 'https://api.ottlesotho.com'
+  );
   const [webhookSecret, setWebhookSecret] = useState(selectedGateway?.webhookSecret || '');
 
-  // OTT Voucher Generation & Quick Redemption Tester (16-Digit PINs)
+  // OTT Voucher Quick Redemption Tester (16-Digit PINs + Mobile for OTT Vault SMS)
   const [generatedTestPin, setGeneratedTestPin] = useState('');
+  const [testMobile, setTestMobile] = useState('26658000000');
   const [redeemTestResult, setRedeemTestResult] = useState<any>(null);
   const [isRedeemingTest, setIsRedeemingTest] = useState(false);
 
@@ -82,6 +89,12 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setApiPassword(gw.apiPassword || '');
     setBearerToken(gw.bearerToken || '');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
+    setVendorId(gw.vendorId || '11, 1');
+    setEndpointUrl(
+      gw.endpointUrl && !gw.endpointUrl.includes('portal.ottlesotho.com')
+        ? gw.endpointUrl
+        : 'https://api.ottlesotho.com'
+    );
     setWebhookSecret(gw.webhookSecret || '');
     setTestResult(null);
     setRedeemTestResult(null);
@@ -98,13 +111,15 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const handleSaveCredentials = () => {
     if (!selectedGateway) return;
     onUpdateCredentials(selectedGateway.provider, {
-      apiKey,
-      apiSecret,
-      apiPassword,
-      username: merchantId,
-      bearerToken,
-      merchantId,
-      webhookSecret
+      apiKey: apiKey.trim(),
+      apiSecret: apiSecret.trim(),
+      apiPassword: apiPassword.trim(),
+      username: (merchantId || 'TCONNECTLES1').trim(),
+      vendorId: (vendorId || '11, 1').trim(),
+      endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim(),
+      bearerToken: bearerToken.trim(),
+      merchantId: (merchantId || 'TCONNECTLES1').trim(),
+      webhookSecret: webhookSecret.trim()
     });
     setTestResult({
       success: true,
@@ -122,12 +137,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiKey,
-          apiSecret,
-          apiPassword,
-          username: merchantId,
-          bearerToken,
-          merchantId,
+          apiKey: apiKey.trim(),
+          apiSecret: apiSecret.trim(),
+          apiPassword: apiPassword.trim(),
+          username: (merchantId || 'TCONNECTLES1').trim(),
+          vendorId: (vendorId || '11, 1').trim(),
+          endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim(),
+          bearerToken: bearerToken.trim(),
+          merchantId: (merchantId || 'TCONNECTLES1').trim(),
           isLive: selectedGateway.isLive
         })
       });
@@ -189,7 +206,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           amount: 10,
           planName: 'Daily Pass',
           currency: 'M',
-          mac: 'D4:01:C3:88:99:AA'
+          phoneNumber: testMobile || '26658000000',
+          phone: testMobile || '26658000000',
+          mac: 'D4:01:C3:88:99:AA',
+          apiKey: apiKey.trim(),
+          apiPassword: apiPassword.trim(),
+          username: (merchantId || 'TCONNECTLES1').trim(),
+          vendorId: (vendorId || '11, 1').trim(),
+          endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim()
         })
       });
       const data = await res.json();
@@ -249,7 +273,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
         <div>
           <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (EcoCash &amp; OTT Voucher)</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Strict 16-digit OTT Voucher API + Supabase validation &amp; EcoCash Lesotho USSD Push
+            Direct OTT Lesotho API (api.ottlesotho.com) 16-Digit Redemption &amp; EcoCash Lesotho USSD Push
           </p>
         </div>
 
@@ -380,39 +404,101 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               </p>
 
               {selectedGateway.provider === 'ottvoucher' ? (
-                /* Specialized OTT Voucher Lesotho Credentials Form */
+                /* Specialized 5-Field OTT Voucher Lesotho Credentials Form (api.ottlesotho.com) */
                 <div className="space-y-4 bg-[#121829] p-4 rounded-xl border border-[#1f283d]">
-                  {/* Verified Partner Username Banner */}
+                  {/* Verified Partner Header Banner */}
                   <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span className="text-slate-300 font-bold">API USERNAME:</span>
+                      <span className="text-slate-300 font-bold">OTT LESOTHO API:</span>
                       <code className="bg-black/60 px-2.5 py-0.5 rounded text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
-                        {merchantId || 'TCONNECTLES1'}
+                        {endpointUrl || 'https://api.ottlesotho.com'}
                       </code>
-                      <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">portal.ottlesotho.com</span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Basic Auth + SHA-256 Hash + Vendor ID ({vendorId || '11, 1'})
+                      </span>
                     </div>
 
                     <a
                       href="https://portal.ottlesotho.com/APISettings"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-mono font-bold"
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-mono font-bold shrink-0"
                     >
-                      <span>Open OTT Portal</span>
+                      <span>Open OTT Portal (API Settings)</span>
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
 
-                  {/* API KEY Input Field */}
+                  {/* Row 1: API Base URL, API Username, and Vendor ID */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-slate-300 font-bold">1. API BASE URL</label>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setEndpointUrl('https://api.ottlesotho.com')}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                          >
+                            Prod
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEndpointUrl('https://test-api.ottlesotho.com')}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                          >
+                            Test
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        value={endpointUrl}
+                        onChange={(e) => setEndpointUrl(e.target.value)}
+                        placeholder="https://api.ottlesotho.com"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-slate-300 font-bold">2. API USERNAME</label>
+                        <span className="text-[10px] text-slate-400">Basic Auth User</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={merchantId}
+                        onChange={(e) => setMerchantId(e.target.value)}
+                        placeholder="TCONNECTLES1"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono font-bold text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-slate-300 font-bold">3. VENDOR ID</label>
+                        <span className="text-[10px] text-emerald-400">Tries 11 &amp; 1</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={vendorId}
+                        onChange={(e) => setVendorId(e.target.value)}
+                        placeholder="11, 1"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Field 4: API KEY Input Field */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-slate-300 font-bold flex items-center gap-1.5">
                         <Key className="w-3.5 h-3.5 text-[#f05e17]" />
-                        <span>API KEY</span>
+                        <span>4. API KEY (Request Signing Key)</span>
                       </label>
                       <span className="text-[10px] text-slate-400 font-normal">
-                        Click &quot;Get New Key&quot; in OTT portal &amp; paste here
+                        Click &quot;New APIKey&quot; in OTT API Settings &amp; paste here
                       </span>
                     </div>
                     <div className="flex gap-2">
@@ -438,32 +524,46 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </div>
                   </div>
 
-                  {/* API PASSWORD Input Field with Visibility Toggle */}
+                  {/* Field 5: API PASSWORD Input Field with Visibility Toggle & Paste */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-slate-300 font-bold flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-[#f05e17]" />
-                        <span>API PASSWORD</span>
+                        <span>5. API PASSWORD (Basic Auth Password)</span>
                       </label>
                       <span className="text-[10px] text-slate-400 font-normal">
-                        Click &quot;Get New Password&quot; in OTT portal &amp; paste here
+                        Click &quot;Get a Password&quot; in OTT API Settings &amp; paste here
                       </span>
                     </div>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={apiPassword}
-                        onChange={(e) => setApiPassword(e.target.value)}
-                        placeholder="e.g. G6vLr=0c9="
-                        className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
-                      />
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={apiPassword}
+                          onChange={(e) => setApiPassword(e.target.value)}
+                          placeholder="e.g. G6vLr=0c9- or IjL3w0q7K0"
+                          className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white"
+                          title={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white"
-                        title={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={async () => {
+                          try {
+                            const text = await navigator.clipboard.readText();
+                            if (text) setApiPassword(text.trim());
+                          } catch {}
+                        }}
+                        className="px-3 py-2 bg-[#1b233a] hover:bg-[#25304e] border border-[#232d42] text-slate-300 hover:text-white rounded-lg text-xs"
                       >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        Paste
                       </button>
                     </div>
                   </div>
@@ -472,7 +572,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                   <div className="pt-2">
                     <button
                       onClick={handleSaveCredentials}
-                      className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-2"
+                      className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
                       <span>Save Credentials &amp; Continue to Connection Test &rarr;</span>
@@ -626,8 +726,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <div className="flex-1 relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="sm:col-span-2 relative">
+                        <label className="text-[10px] text-slate-400 block mb-1">16-Digit OTT Voucher PIN</label>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -643,24 +744,36 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         />
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={handleTestRedeemPin}
-                        disabled={isRedeemingTest}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs font-mono rounded-lg shadow-sm flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
-                      >
-                        {isRedeemingTest ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>Verifying 16-Digit PIN...</span>
-                          </>
-                        ) : (
-                          <span>Verify &amp; Redeem 16-Digit PIN &rarr;</span>
-                        )}
-                      </button>
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-1">Customer Mobile (OTT Vault SMS)</label>
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          value={testMobile}
+                          onChange={(e) => setTestMobile(e.target.value.replace(/[^\d+]/g, ''))}
+                          placeholder="26658000000"
+                          className="w-full px-3 py-2.5 bg-black/60 border border-white/20 rounded-lg text-white font-mono text-xs tabular-nums"
+                        />
+                      </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleTestRedeemPin}
+                      disabled={isRedeemingTest || generatedTestPin.replace(/\D/g, '').length !== 16}
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all"
+                    >
+                      {isRedeemingTest ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Redeeming with OTT Lesotho API (Vendor ID {vendorId || '11, 1'})...</span>
+                        </>
+                      ) : (
+                        <span>Verify &amp; Redeem 16-Digit PIN via OTT Lesotho API &rarr;</span>
+                      )}
+                    </button>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Enter any 16-digit PIN to verify. Invalid or random 16-digit numbers are strictly <strong className="text-rose-400">rejected</strong>, while valid 16-digit vouchers from your OTT Voucher platform (<code className="text-cyan-300">portal.ottlesotho.com</code> or Supabase verification check) are authenticated.
+                      Verifies and redeems directly against <code className="text-cyan-300">{endpointUrl || 'https://api.ottlesotho.com'}/api/v1/RemitVoucher</code> using Basic Auth (<code className="text-emerald-300">{merchantId || 'TCONNECTLES1'}</code>), SHA-256 request signing (<code className="text-emerald-300">API Key</code>), and Vendor ID (<code className="text-emerald-300">{vendorId || '11, 1'}</code>). Any remaining voucher balance is kept in the customer&apos;s OTT Vault via SMS.
                     </p>
                   </div>
 

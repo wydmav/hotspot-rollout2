@@ -101,7 +101,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
     provider: 'ottvoucher',
     name: 'OTT Voucher Lesotho',
-    subtitle: '16-Digit PIN & Retail Voucher Redemption (portal.ottlesotho.com)',
+    subtitle: '16-Digit PIN & Retail Voucher Redemption (api.ottlesotho.com)',
     currency: 'M',
     isLive: false,
     isSandbox: true,
@@ -110,7 +110,8 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     apiSecret: '',
     apiPassword: '',
     username: 'TCONNECTLES1',
-    endpointUrl: 'https://portal.ottlesotho.com',
+    vendorId: '11, 1',
+    endpointUrl: 'https://api.ottlesotho.com',
     bearerToken: '',
     merchantId: 'TCONNECTLES1',
     webhookSecret: '',
@@ -179,6 +180,8 @@ export const STARTER_TENANT_GROUPS: TenantGroup[] = [];
 
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers (EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)
+  'api.ottlesotho.com',
+  'test-api.ottlesotho.com',
   'portal.ottlesotho.com',
   'ottlesotho.com',
   'api.ottvoucher.com',
@@ -258,7 +261,20 @@ class StorageService {
           }
 
           if (Array.isArray(parsed.gateways)) {
-            parsed.gateways = parsed.gateways.filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
+            parsed.gateways = parsed.gateways
+              .filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher')
+              .map((g: GatewayConfig) => {
+                if (g.provider === 'ottvoucher') {
+                  if (!g.endpointUrl || g.endpointUrl.includes('portal.ottlesotho.com')) {
+                    g.endpointUrl = 'https://api.ottlesotho.com';
+                  }
+                  if (!g.vendorId) {
+                    g.vendorId = '11, 1';
+                  }
+                  g.subtitle = '16-Digit PIN & Retail Voucher Redemption (api.ottlesotho.com)';
+                }
+                return g;
+              });
             if (parsed.gateways.length === 0) {
               parsed.gateways = UNCONFIGURED_GATEWAYS;
             }
@@ -1340,10 +1356,19 @@ class StorageService {
     const gw = this.state.gateways.find((g) => g.provider === provider);
     if (!gw) return;
 
+    const isCredentialChange =
+      updates.apiKey !== undefined ||
+      updates.apiPassword !== undefined ||
+      updates.vendorId !== undefined ||
+      updates.endpointUrl !== undefined ||
+      updates.merchantId !== undefined;
+
     Object.assign(gw, updates);
-    gw.testPassedOnce = false;
-    if (gw.isLive) gw.isLive = false;
-    gw.status = updates.apiKey ? 'testing' : 'not_configured';
+    if (isCredentialChange && updates.status === undefined) {
+      gw.testPassedOnce = false;
+      if (gw.isLive) gw.isLive = false;
+      gw.status = gw.apiKey ? 'testing' : 'not_configured';
+    }
 
     this.saveState();
   }
