@@ -1,0 +1,95 @@
+================================================================================
+T-CONNECT OTT LESOTHO M10 VOUCHER TEST GUIDE (VERIFIED HASH & ENDPOINT)
+================================================================================
+
+ROOT CAUSE OF YOUR EARLIER HTTP 401:
+1. `/api/v1/CheckVoucher` is the Reseller endpoint. For a Merchant account like
+   `TCONNECTLES1`, the check endpoint is `/api/v1/CheckRemitVoucher` and the
+   redemption endpoint is `/api/v1/RemitVoucher`.
+2. In OTT Lesotho's .NET API, `API_KEY` goes FIRST in the SHA-256 hash, followed
+   by the parameters in alphabetical order:
+   - For CheckRemitVoucher: `SHA256(apiKey + uniqueReference)`
+   - For RemitVoucher:      `SHA256(apiKey + amount + mobile + pin + uniqueReference + vendorID)`
+
+--------------------------------------------------------------------------------
+1. SAFE PRE-CHECK (RETURNS HTTP 201 WITHOUT BURNING YOUR VOUCHER)
+--------------------------------------------------------------------------------
+Copy and paste this on your VPS (`rphooko@vmi3475343:~$`) to verify your
+`TCONNECTLES1` credentials + `API_KEY` immediately:
+
+API_KEY="4323e6fa-09b2-4eaa-9b73-f275dad58787"
+OTT_USER="TCONNECTLES1"
+OTT_PASS='3*68pF&24*'
+REF="CHK$(date +%s)"
+HASH=$(printf "%s%s" "$API_KEY" "$REF" | sha256sum | awk '{print $1}')
+
+curl -i -X POST "https://api.ottlesotho.com/api/v1/CheckRemitVoucher" \
+  -H "Authorization: Basic $(printf '%s:%s' "$OTT_USER" "$OTT_PASS" | base64 -w 0)" \
+  -F "uniqueReference=${REF}" \
+  -F "hash=${HASH}"
+
+--------------------------------------------------------------------------------
+2. REDEEM YOUR 16-DIGIT M10 VOUCHER DIRECTLY (VENDOR ID 1)
+--------------------------------------------------------------------------------
+Replace `<PUT_YOUR_16_DIGIT_M10_VOUCHER_PIN_HERE>` with your 16-digit M10 PIN:
+
+VOUCHER_PIN="<PUT_YOUR_16_DIGIT_M10_VOUCHER_PIN_HERE>"
+API_KEY="4323e6fa-09b2-4eaa-9b73-f275dad58787"
+OTT_USER="TCONNECTLES1"
+OTT_PASS='3*68pF&24*'
+AMOUNT="10"
+MOBILE="26658000000"
+VENDOR_ID="1"
+REF="TCV1$(date +%s)"
+
+# Exact OTT Lesotho SHA-256 Formula: SHA256(apiKey + amount + mobile + pin + uniqueReference + vendorID)
+HASH=$(printf "%s%s%s%s%s%s" "$API_KEY" "$AMOUNT" "$MOBILE" "$VOUCHER_PIN" "$REF" "$VENDOR_ID" | sha256sum | awk '{print $1}')
+
+curl -i -X POST "https://api.ottlesotho.com/api/v1/RemitVoucher" \
+  -H "Authorization: Basic $(printf '%s:%s' "$OTT_USER" "$OTT_PASS" | base64 -w 0)" \
+  -F "pin=${VOUCHER_PIN}" \
+  -F "amount=${AMOUNT}" \
+  -F "mobile=${MOBILE}" \
+  -F "vendorID=${VENDOR_ID}" \
+  -F "uniqueReference=${REF}" \
+  -F "hash=${HASH}"
+
+--------------------------------------------------------------------------------
+3. REDEEM YOUR 16-DIGIT M10 VOUCHER DIRECTLY (VENDOR ID 11)
+--------------------------------------------------------------------------------
+If your voucher was generated under Vendor ID 11, run this:
+
+VOUCHER_PIN="<PUT_YOUR_16_DIGIT_M10_VOUCHER_PIN_HERE>"
+API_KEY="4323e6fa-09b2-4eaa-9b73-f275dad58787"
+OTT_USER="TCONNECTLES1"
+OTT_PASS='3*68pF&24*'
+AMOUNT="10"
+MOBILE="26658000000"
+VENDOR_ID="11"
+REF="TCV11$(date +%s)"
+
+# Exact OTT Lesotho SHA-256 Formula: SHA256(apiKey + amount + mobile + pin + uniqueReference + vendorID)
+HASH=$(printf "%s%s%s%s%s%s" "$API_KEY" "$AMOUNT" "$MOBILE" "$VOUCHER_PIN" "$REF" "$VENDOR_ID" | sha256sum | awk '{print $1}')
+
+curl -i -X POST "https://api.ottlesotho.com/api/v1/RemitVoucher" \
+  -H "Authorization: Basic $(printf '%s:%s' "$OTT_USER" "$OTT_PASS" | base64 -w 0)" \
+  -F "pin=${VOUCHER_PIN}" \
+  -F "amount=${AMOUNT}" \
+  -F "mobile=${MOBILE}" \
+  -F "vendorID=${VENDOR_ID}" \
+  -F "uniqueReference=${REF}" \
+  -F "hash=${HASH}"
+
+--------------------------------------------------------------------------------
+4. TEST VIA YOUR T-CONNECT BACKEND (AUTO-TESTS VENDOR ID 1 AND VENDOR ID 11)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:3000/api/payments/initiate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "ottvoucher",
+    "amount": 10,
+    "voucherPin": "<PUT_YOUR_16_DIGIT_M10_VOUCHER_PIN_HERE>",
+    "planId": "plan_daily_m10",
+    "planName": "Daily Pass",
+    "durationSeconds": 86400
+  }'

@@ -317,47 +317,48 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 16px;
+    padding: 14px 12px;
     width: 100%;
-    max-width: 440px;
+    max-width: 340px;
     margin: 0 auto;
   }
-  .hero { text-align: center; padding: 16px 0 8px; width: 100%; }
+  .hero { text-align: center; padding: 10px 0 6px; width: 100%; }
   .kicker {
-    color: rgba(255,255,255,0.9);
-    font-size: 12px;
-    font-weight: 600;
+    color: rgba(255,255,255,0.92);
+    font-size: 10px;
+    font-weight: 700;
     letter-spacing: 0.4px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
   }
-  .hero h1 { font-size: 24px; font-weight: 900; letter-spacing: -0.5px; color: #fff; text-shadow: 0 4px 16px rgba(0,0,0,0.7); line-height: 1.15; }
+  .hero h1 { font-size: 18px; font-weight: 900; letter-spacing: -0.4px; color: #fff; text-shadow: 0 3px 14px rgba(0,0,0,0.85); line-height: 1.15; }
   .card {
     width: 100%;
     background: rgba(15, 20, 34, ${(glassOpacity / 100).toFixed(2)});
-    backdrop-filter: blur(20px);
+    backdrop-filter: blur(18px);
     border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 24px;
-    padding: 20px;
-    box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+    border-radius: 18px;
+    padding: 14px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.65);
     margin: auto 0;
   }
   .tabs {
     display: grid;
     grid-template-columns: ${allowFreeAccess ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'};
-    gap: 6px;
+    gap: 5px;
     background: rgba(0,0,0,0.45);
-    padding: 4px;
-    border-radius: 14px;
+    padding: 3px;
+    border-radius: 11px;
     border: 1px solid rgba(255,255,255,0.1);
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
   .tab-btn {
-    padding: 9px 6px;
-    border-radius: 10px;
+    padding: 7px 4px;
+    border-radius: 8px;
     border: none;
     background: transparent;
     color: #cbd5e1;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     cursor: pointer;
     transition: all 0.15s;
@@ -365,55 +366,122 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   .tab-btn.active { background: ${accentColor}; color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
   .sec { display: none; }
   .sec.active { display: block; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .field { margin-bottom: 10px; text-align: left; }
-  .lbl { display: block; font-size: 11px; color: #cbd5e1; margin-bottom: 4px; font-weight: 600; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .field { margin-bottom: 8px; text-align: left; }
+  .lbl { display: block; font-size: 10px; color: #cbd5e1; margin-bottom: 3px; font-weight: 600; }
   .inp {
     width: 100%;
-    padding: 11px 12px;
-    border-radius: 12px;
+    padding: 8px 10px;
+    border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.2);
     background: rgba(0,0,0,0.5);
     color: #fff;
-    font-size: 13px;
+    font-size: 11px;
     outline: none;
   }
   .inp:focus { border-color: ${accentColor}; }
-  .phone-row { display: flex; gap: 6px; }
+  .phone-row { display: flex; gap: 5px; }
   .cc-sel {
-    padding: 11px 8px;
-    border-radius: 12px;
+    padding: 8px 6px;
+    border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.2);
     background: rgba(0,0,0,0.6);
     color: #fff;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    width: 86px;
+    width: 74px;
     flex-shrink: 0;
   }
-  .terms { font-size: 10px; color: #94a3b8; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; line-height: 1.4; }
+  .tc-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 9px;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.12);
+    margin: 8px 0 10px;
+    font-size: 10px;
+    color: #e2e8f0;
+    text-align: left;
+  }
+  .tc-row input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: ${accentColor};
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .tc-link {
+    color: #38bdf8;
+    text-decoration: underline;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .tc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.82);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .tc-modal {
+    width: 100%;
+    max-width: 340px;
+    background: #0f1422;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.85);
+    text-align: left;
+  }
+  .tc-modal h3 { font-size: 13px; font-weight: 900; color: #fff; margin-bottom: 8px; }
+  .tc-modal-body {
+    max-height: 210px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: #cbd5e1;
+    line-height: 1.5;
+    background: rgba(0,0,0,0.45);
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+  }
   .btn-primary {
     width: 100%;
-    min-height: 44px;
-    padding: 12px;
-    border-radius: 14px;
+    min-height: 38px;
+    padding: 9px 10px;
+    border-radius: 11px;
     border: none;
     background: ${accentColor};
     color: #fff;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 900;
     cursor: pointer;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+    transition: all 0.2s ease;
+  }
+  .btn-primary:disabled {
+    background: #334155;
+    color: #94a3b8;
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .btn-emerald {
     width: 100%;
-    min-height: 44px;
-    padding: 12px;
-    border-radius: 14px;
+    min-height: 38px;
+    padding: 9px 10px;
+    border-radius: 11px;
     border: none;
     background: #10b981;
     color: #052e16;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 900;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -424,40 +492,52 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     opacity: 0.55;
     cursor: not-allowed;
   }
-  .plan-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; max-height: 195px; overflow-y: auto; }
+  .plan-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; max-height: 155px; overflow-y: auto; }
   .plan-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 12px;
-    border-radius: 12px;
+    padding: 7px 10px;
+    border-radius: 10px;
     border: 1px solid rgba(255,255,255,0.12);
     background: rgba(0,0,0,0.4);
     cursor: pointer;
   }
   .plan-item.selected { border-color: ${accentColor}; background: rgba(240,94,23,0.18); }
-  .plan-left { display: flex; align-items: center; gap: 9px; text-align: left; }
-  .plan-name { font-size: 12px; font-weight: 800; color: #fff; }
-  .plan-meta { font-size: 10px; color: #94a3b8; font-family: monospace; }
-  .plan-price { font-size: 14px; font-weight: 900; color: #fbbf24; font-family: monospace; }
-  .pop-tag { font-size: 10px; color: #fbbf24; margin-left: 4px; }
-  .gw-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
+  .plan-left { display: flex; align-items: center; gap: 7px; text-align: left; }
+  .plan-name { font-size: 11px; font-weight: 800; color: #fff; }
+  .plan-meta { font-size: 9px; color: #94a3b8; font-family: monospace; }
+  .plan-price { font-size: 12px; font-weight: 900; color: #fbbf24; font-family: monospace; }
+  .pop-tag { font-size: 9px; color: #fbbf24; margin-left: 4px; }
+  .gw-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
   .gw-btn {
-    padding: 10px 6px;
-    border-radius: 12px;
+    padding: 7px 5px;
+    border-radius: 9px;
     border: 1px solid rgba(255,255,255,0.14);
     background: rgba(0,0,0,0.4);
     color: #cbd5e1;
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
     cursor: pointer;
   }
   .gw-btn.active { border-color: ${accentColor}; background: rgba(240,94,23,0.22); color: #fff; }
-  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 10px 12px; border-radius: 12px; font-size: 12px; margin-bottom: 12px; display: none; text-align: left; }
+  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 8px 10px; border-radius: 10px; font-size: 10px; margin-bottom: 8px; display: none; text-align: left; }
 </style>
 </head>
 <body>
 <div class="overlay"></div>
+
+<!-- T&Cs Popup Modal -->
+<div id="termsModalBackdrop" class="tc-modal-backdrop" onclick="if(event.target===this)closeTermsModal(false)">
+  <div class="tc-modal">
+    <h3>Terms &amp; Conditions</h3>
+    <div class="tc-modal-body">${termsText}</div>
+    <div style="display:flex;gap:6px;">
+      <button type="button" class="btn-emerald" onclick="closeTermsModal(true)">Agree &amp; Continue</button>
+      <button type="button" style="padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#cbd5e1;font-size:10px;font-weight:700;cursor:pointer;" onclick="closeTermsModal(false)">Close</button>
+    </div>
+  </div>
+</div>
 
 <main class="main-wrap">
   <div class="hero">
@@ -505,6 +585,14 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       </div>` : ''}
     </div>
 
+    <!-- SHARED MANDATORY T&Cs CHECKBOX + HYPERLINK POPUP FOR ALL MODES -->
+    <div class="tc-row">
+      <input type="checkbox" id="tcAcceptedBox" onchange="syncButtonsWithTerms()" />
+      <label for="tcAcceptedBox" style="cursor:pointer;line-height:1.35;">
+        I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span> (T's &amp; C's apply)
+      </label>
+    </div>
+
     ${allowFreeAccess ? `
     <!-- TAB 1: FREE WI-FI -->
     <div id="sec_free" class="sec active">
@@ -512,8 +600,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="hidden" name="username" value="T-TRIAL">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
-        ${termsEnabled ? `<div class="terms">${termsText}</div>` : ''}
-        <button type="submit" class="btn-primary">Connect Free Wi-Fi &rarr;</button>
+        <button type="submit" id="freeSubmitBtn" class="btn-primary" disabled>Connect Free Wi-Fi &rarr;</button>
       </form>
     </div>
     ` : ''}
@@ -528,7 +615,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           <label class="lbl">Voucher Code *</label>
           <input class="inp" type="text" id="voucherInput" value="" placeholder="Enter voucher code (e.g. TC-XXXX)" required style="text-transform:uppercase;letter-spacing:1px;">
         </div>
-        <button type="submit" id="voucherSubmitBtn" class="btn-emerald">Activate Voucher &amp; Connect &rarr;</button>
+        <button type="submit" id="voucherSubmitBtn" class="btn-emerald" disabled>Activate Voucher &amp; Connect &rarr;</button>
       </form>
     </div>
 
@@ -545,18 +632,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
         </div>
         <div class="field" id="payField">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
             <label class="lbl" id="payInputLabel" style="margin-bottom:0;">16-Digit OTT Voucher PIN *</label>
-            <span id="ottDigitCounter" style="font-size:10px;font-family:monospace;color:#34d399;font-weight:700;">0 / 16 digits</span>
+            <span id="ottDigitCounter" style="font-size:9px;font-family:monospace;color:#34d399;font-weight:700;">0 / 16 digits</span>
           </div>
-          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="1234 5678 9012 3456" style="font-family:monospace;letter-spacing:1.5px;" required>
+          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="1234 5678 9012 3456" style="font-family:monospace;letter-spacing:1.2px;" required>
         </div>
         <button type="submit" id="buySubmitBtn" class="btn-emerald" disabled>Pay &amp; Connect Internet &rarr;</button>
       </form>
     </div>
   </div>
 
-  <div style="height:12px"></div>
+  <div style="height:8px"></div>
 </main>
 
 <script>
@@ -576,7 +663,43 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     }
   }
 
+  function isTermsChecked() {
+    var cb = document.getElementById('tcAcceptedBox');
+    return cb ? cb.checked : false;
+  }
+
+  function openTermsModal(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    var m = document.getElementById('termsModalBackdrop');
+    if (m) m.style.display = 'flex';
+  }
+
+  function closeTermsModal(agreeAndCheck) {
+    var m = document.getElementById('termsModalBackdrop');
+    if (m) m.style.display = 'none';
+    if (agreeAndCheck) {
+      var cb = document.getElementById('tcAcceptedBox');
+      if (cb) cb.checked = true;
+      syncButtonsWithTerms();
+    }
+  }
+
+  function syncButtonsWithTerms() {
+    var ok = isTermsChecked();
+    if (ok) showErr('');
+    var fBtn = document.getElementById('freeSubmitBtn');
+    if (fBtn) fBtn.disabled = !ok;
+    var vBtn = document.getElementById('voucherSubmitBtn');
+    if (vBtn) vBtn.disabled = !ok;
+    var inp = document.getElementById('payInputVal');
+    if (inp) handlePayInputFormat(inp);
+  }
+
   function validateGuestFields() {
+    if (!isTermsChecked()) {
+      showErr('Please tick the Terms & Conditions box to proceed.');
+      return false;
+    }
     var fEl = document.getElementById('guestFirst');
     var lEl = document.getElementById('guestLast');
     var pEl = document.getElementById('guestPhone');
@@ -632,17 +755,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   function handlePayInputFormat(inp) {
     var raw = inp.value.replace(/\\D/g, '');
     var btn = document.getElementById('buySubmitBtn');
+    var tcOk = isTermsChecked();
     if (selectedGw === 'ottvoucher') {
       raw = raw.slice(0, 16);
       var groups = raw.match(/.{1,4}/g);
       inp.value = groups ? groups.join(' ') : '';
       var ctr = document.getElementById('ottDigitCounter');
       if (ctr) ctr.textContent = raw.length + ' / 16 digits';
-      if (btn) btn.disabled = (raw.length !== 16);
+      if (btn) btn.disabled = (raw.length !== 16 || !tcOk);
     } else {
       raw = raw.slice(0, 12);
       inp.value = raw;
-      if (btn) btn.disabled = (raw.length < 8);
+      if (btn) btn.disabled = (raw.length < 8 || !tcOk);
     }
   }
 
@@ -685,6 +809,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handleVoucherSubmit(e) {
     e.preventDefault();
+    if (!isTermsChecked()) {
+      showErr('Please tick the Terms & Conditions box to proceed.');
+      return false;
+    }
     var code = document.getElementById('voucherInput').value.trim().toUpperCase();
     if (!code) { showErr('Please enter your voucher code.'); return false; }
     var btn = document.getElementById('voucherSubmitBtn');
@@ -709,6 +837,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handleBuySubmit(e) {
     e.preventDefault();
+    if (!isTermsChecked()) {
+      showErr('Please tick the Terms & Conditions box to proceed.');
+      return false;
+    }
     var val = document.getElementById('payInputVal').value.replace(/\\D/g, '');
     if (selectedGw === 'ottvoucher' && val.length !== 16) {
       showErr('OTT Voucher PIN must be exactly 16 digits (' + val.length + '/16 digits entered).');
@@ -802,113 +934,163 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
   if (videoSrc.startsWith('/')) {
     videoSrc = `${baseUrl}${videoSrc}`;
   }
+  const mediaType = chosenAd.mediaType || (Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0 ? 'image_carousel' : 'video');
+  const rawSlides = Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0
+    ? chosenAd.slides.map((s: any) => ({
+        imageUrl: String(s.imageUrl || '').startsWith('/') ? `${baseUrl}${s.imageUrl}` : String(s.imageUrl || ''),
+        redirectUrl: String(s.redirectUrl || chosenAd.destinationUrl || 'https://www.google.com'),
+        caption: String(s.caption || '')
+      }))
+    : [];
   const watchMode = chosenAd.watchMode || 'full_video';
   const skipSec = Number(chosenAd.skipAfterSec) || 5;
-  const reasonBadge = reason === 'retrigger'
-    ? `${retriggerHours}h / ${retriggerGb}GB Session Checkpoint Ad`
-    : 'Connected Sponsor Video';
+  const defaultDest = String(chosenAd.destinationUrl || 'https://www.google.com');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>${chosenAd.sponsorName || 'Sponsor'} — T-Connect Wi-Fi</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>${chosenAd.sponsorName || 'Sponsor'} — T-Connect Ad</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
-  body{min-height:100vh;background:#05070c;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:16px}
-  .card{width:100%;max-width:420px;background:#0f1422;border:1px solid rgba(255,255,255,0.16);border-radius:24px;padding:18px;box-shadow:0 24px 60px rgba(0,0,0,0.75)}
-  .top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;font-family:monospace}
-  .badge{background:rgba(245,158,11,0.18);color:#fbbf24;border:1px solid rgba(245,158,11,0.4);padding:3px 8px;border-radius:8px;font-weight:700}
-  .vid-wrap{position:relative;border-radius:16px;overflow:hidden;background:#000;border:1px solid rgba(255,255,255,0.12);margin-bottom:12px}
-  video{width:100%;max-height:240px;display:block;object-fit:cover;background:#000}
-  .mute-btn{position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.75);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer}
-  .sponsor-kicker{font-size:10px;font-family:monospace;color:#34d399;text-transform:uppercase;font-weight:800;margin-bottom:4px}
-  h2{font-size:16px;font-weight:900;color:#fff;margin-bottom:4px}
-  p{font-size:12px;color:#cbd5e1;line-height:1.45;margin-bottom:12px}
-  .btn-row{display:flex;flex-direction:column;gap:8px}
-  .btn-continue{width:100%;padding:13px;border-radius:12px;border:none;background:#10b981;color:#052e16;font-weight:900;font-size:13px;cursor:pointer}
-  .btn-continue:disabled{background:#334155;color:#94a3b8;opacity:0.6;cursor:not-allowed}
-  .btn-visit{width:100%;padding:10px;border-radius:12px;border:1px solid rgba(240,94,23,0.45);background:rgba(240,94,23,0.15);color:#fdba74;font-weight:700;font-size:12px;text-align:center;text-decoration:none;display:block}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;user-select:none}
+  html,body{width:100vw;height:100vh;overflow:hidden;background:#000;color:#fff}
+  .ad-stage{position:fixed;inset:0;width:100vw;height:100vh;background:#000;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  video,.slide-img{width:100vw;height:100vh;object-fit:cover;display:block;background:#000}
+  .top-pill{position:fixed;top:14px;right:14px;z-index:50;display:flex;align-items:center;gap:8px}
+  .btn-skip{padding:10px 16px;border-radius:999px;border:1px solid rgba(255,255,255,0.28);background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
+  .btn-skip.unlocked{background:#10b981;color:#052e16;border-color:#34d399}
+  .btn-skip:disabled{opacity:0.85;cursor:not-allowed}
+  .mute-pill{position:fixed;bottom:16px;left:16px;z-index:50;background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:999px;padding:8px 14px;font-size:11px;font-weight:700;cursor:pointer}
+  .carousel-nav{position:fixed;bottom:16px;right:16px;z-index:50;display:flex;align-items:center;gap:8px}
+  .nav-btn{background:rgba(0,0,0,0.78);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer}
+  .slide-counter{background:rgba(0,0,0,0.75);color:#e2e8f0;padding:6px 12px;border-radius:999px;font-size:11px;font-family:monospace;font-weight:700;border:1px solid rgba(255,255,255,0.2)}
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="top-row">
-    <span class="badge">${reasonBadge}</span>
-    <span id="timerStatus" style="color:#94a3b8;">Playing video...</span>
-  </div>
-  <div class="vid-wrap">
-    <video id="adVideo" src="${videoSrc}" playsinline autoplay muted controlsList="nodownload nofullscreen"></video>
-    <button type="button" class="mute-btn" id="muteBtn" onclick="toggleAudio()">Unmute Audio</button>
-  </div>
-  <div class="sponsor-kicker">Sponsored by ${chosenAd.sponsorName}</div>
-  <h2>${chosenAd.headline}</h2>
-  <p>${chosenAd.description}</p>
-  <div class="btn-row">
-    <button type="button" id="continueBtn" class="btn-continue" disabled onclick="releaseToInternet()">
-      ${watchMode === 'full_video' ? 'Please watch short video to continue...' : `Continue to Internet in ${skipSec}s...`}
-    </button>
-    ${chosenAd.destinationUrl ? `<a href="${chosenAd.destinationUrl}" target="_blank" rel="noopener" class="btn-visit">Visit ${chosenAd.sponsorName} &rarr;</a>` : ''}
-  </div>
+<div class="ad-stage" id="adStage" onclick="handleAdClick(event)">
+  ${mediaType === 'image_carousel' && rawSlides.length > 0
+    ? `<img id="carouselImg" class="slide-img" src="${rawSlides[0].imageUrl}" alt="Ad" />`
+    : `<video id="adVideo" src="${videoSrc}" playsinline autoplay muted controlsList="nodownload nofullscreen"></video>`}
 </div>
+
+<div class="top-pill">
+  <button type="button" id="continueBtn" class="btn-skip" disabled onclick="releaseToInternet(event)">
+    ${watchMode === 'full_video' && mediaType === 'video' ? 'Watching Ad...' : `Continue in ${skipSec}s`}
+  </button>
+</div>
+
+${mediaType === 'image_carousel' && rawSlides.length > 0 ? `
+<div class="carousel-nav" onclick="event.stopPropagation()">
+  <button type="button" class="nav-btn" onclick="prevSlide(event)">&larr; Prev</button>
+  <span class="slide-counter" id="slideCounter">1 / ${rawSlides.length}</span>
+  <button type="button" class="nav-btn" onclick="nextSlide(event)">Next &rarr;</button>
+</div>
+` : `
+<button type="button" class="mute-pill" id="muteBtn" onclick="toggleAudio(event)">Unmute Audio</button>
+`}
+
 <script>
   var vid = document.getElementById('adVideo');
   var btn = document.getElementById('continueBtn');
-  var statusEl = document.getElementById('timerStatus');
   var muteBtn = document.getElementById('muteBtn');
+  var mediaType = '${mediaType}';
+  var slides = ${JSON.stringify(rawSlides)};
+  var slideIdx = 0;
+  var defaultDest = '${defaultDest.replace(/'/g, "\\'")}';
   var watchMode = '${watchMode}';
   var skipSec = ${skipSec};
   var elapsed = 0;
   var unlocked = false;
+  var touchStartX = 0;
 
   function unlockButton() {
     if (unlocked) return;
     unlocked = true;
     btn.disabled = false;
-    btn.textContent = 'Continue to High-Speed Internet \\u2192';
-    statusEl.textContent = 'Ad Complete \\u2713';
-    statusEl.style.color = '#34d399';
+    btn.className = 'btn-skip unlocked';
+    btn.textContent = 'Continue to Internet \\u2192';
   }
 
-  function toggleAudio() {
+  function handleAdClick(e) {
+    var targetUrl = defaultDest;
+    if (mediaType === 'image_carousel' && slides.length > 0 && slides[slideIdx] && slides[slideIdx].redirectUrl) {
+      targetUrl = slides[slideIdx].redirectUrl;
+    }
+    if (targetUrl) {
+      window.location.href = targetUrl;
+    }
+  }
+
+  function renderSlide() {
+    if (!slides.length) return;
+    var img = document.getElementById('carouselImg');
+    var ctr = document.getElementById('slideCounter');
+    if (img) img.src = slides[slideIdx].imageUrl;
+    if (ctr) ctr.textContent = (slideIdx + 1) + ' / ' + slides.length;
+  }
+
+  function nextSlide(e) {
+    if (e) e.stopPropagation();
+    if (!slides.length) return;
+    slideIdx = (slideIdx + 1) % slides.length;
+    renderSlide();
+  }
+
+  function prevSlide(e) {
+    if (e) e.stopPropagation();
+    if (!slides.length) return;
+    slideIdx = (slideIdx - 1 + slides.length) % slides.length;
+    renderSlide();
+  }
+
+  var stage = document.getElementById('adStage');
+  if (stage && mediaType === 'image_carousel') {
+    stage.addEventListener('touchstart', function(e) {
+      if (e.touches && e.touches[0]) touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    stage.addEventListener('touchend', function(e) {
+      if (!e.changedTouches || !e.changedTouches[0]) return;
+      var diff = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(diff) > 45) {
+        if (diff < 0) nextSlide();
+        else prevSlide();
+      }
+    }, { passive: true });
+  }
+
+  function toggleAudio(e) {
+    if (e) e.stopPropagation();
     if (!vid) return;
     vid.muted = !vid.muted;
-    muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
+    if (muteBtn) muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
   }
 
-  function releaseToInternet() {
+  function releaseToInternet(e) {
+    if (e) e.stopPropagation();
     if (!unlocked) return;
     window.location.href = 'https://www.google.com';
   }
 
   if (vid) {
-    vid.addEventListener('ended', function() {
-      unlockButton();
-    });
-    vid.addEventListener('error', function() {
-      unlockButton();
-    });
+    vid.addEventListener('ended', function() { unlockButton(); });
+    vid.addEventListener('error', function() { unlockButton(); });
     vid.play().catch(function() {});
   }
 
   setInterval(function() {
     elapsed++;
-    if (watchMode === 'skip_after_sec') {
+    if (watchMode === 'skip_after_sec' || mediaType === 'image_carousel') {
       var rem = Math.max(0, skipSec - elapsed);
       if (rem > 0 && !unlocked) {
-        btn.textContent = 'Skip Ad & Continue in ' + rem + 's...';
-        statusEl.textContent = rem + 's remaining';
+        btn.textContent = 'Continue in ' + rem + 's';
       } else {
         unlockButton();
       }
     } else {
       if (vid && vid.duration && !isNaN(vid.duration)) {
         var left = Math.max(0, Math.ceil(vid.duration - vid.currentTime));
-        if (!unlocked) {
-          statusEl.textContent = left + 's left';
-          btn.textContent = 'Unlocking Internet in ' + left + 's...';
-        }
+        if (!unlocked) btn.textContent = 'Continue in ' + left + 's';
         if (left <= 0) unlockButton();
       } else if (elapsed >= 15) {
         unlockButton();
@@ -1307,14 +1489,14 @@ async function runOtt3StageDiagnostic(
       });
     }
 
-    // Stage 2: POST /api/v1/CheckVoucher (checks Basic Auth + uniqueReference + SHA-256 hash; no PIN or VendorID)
+    // Stage 2: POST /api/v1/CheckRemitVoucher (checks Basic Auth + SHA256(apiKey + uniqueReference); no PIN burned)
     try {
       const uRef = `CHK${Date.now()}`;
-      const h = crypto.createHash('sha256').update(`${uRef}${ottApiKey}`, 'utf8').digest('hex');
+      const h = crypto.createHash('sha256').update(`${ottApiKey}${uRef}`, 'utf8').digest('hex');
       const fd = new FormData();
       fd.append('uniqueReference', uRef);
       fd.append('hash', h);
-      const r2 = await fetch(`${host}/api/v1/CheckVoucher`, {
+      const r2 = await fetch(`${host}/api/v1/CheckRemitVoucher`, {
         method: 'POST',
         headers: { Authorization: `Basic ${basicAuth}` },
         body: fd,
@@ -1328,7 +1510,7 @@ async function runOtt3StageDiagnostic(
       }
       stages.push({
         stage: `Stage 2: SHA-256 Key Check (${shortHost})`,
-        endpoint: `${host}/api/v1/CheckVoucher`,
+        endpoint: `${host}/api/v1/CheckRemitVoucher`,
         status: r2.status,
         passed: passed2,
         detail: passed2
@@ -1338,7 +1520,7 @@ async function runOtt3StageDiagnostic(
     } catch (e: any) {
       stages.push({
         stage: `Stage 2: SHA-256 Key Check (${shortHost})`,
-        endpoint: `${host}/api/v1/CheckVoucher`,
+        endpoint: `${host}/api/v1/CheckRemitVoucher`,
         status: 0,
         passed: false,
         detail: e?.message || 'Connection timeout'
@@ -1391,8 +1573,18 @@ async function verify16DigitOttVoucher(
     process.env.OTTVOUCHER_MERCHANT_ID ||
     'TCONNECTLES1'
   ).trim();
-  const ottApiKey = (credentialOverrides?.apiKey || ottGw?.apiKey || process.env.OTTVOUCHER_API_KEY || '').trim();
-  const ottApiPassword = (credentialOverrides?.apiPassword || ottGw?.apiPassword || process.env.OTTVOUCHER_API_PASSWORD || '').trim();
+  const ottApiKey = (
+    credentialOverrides?.apiKey ||
+    ottGw?.apiKey ||
+    process.env.OTTVOUCHER_API_KEY ||
+    '4323e6fa-09b2-4eaa-9b73-f275dad58787'
+  ).trim();
+  const ottApiPassword = (
+    credentialOverrides?.apiPassword ||
+    ottGw?.apiPassword ||
+    process.env.OTTVOUCHER_API_PASSWORD ||
+    '3*68pF&24*'
+  ).trim();
   const rawEndpoint = (
     credentialOverrides?.endpointUrl ||
     ottGw?.endpointUrl ||
@@ -1401,20 +1593,20 @@ async function verify16DigitOttVoucher(
   ).trim().replace(/\/+$/, '');
   const ottEndpoint = rawEndpoint.includes('portal.ottlesotho.com') ? 'https://api.ottlesotho.com' : rawEndpoint;
 
-  // Build ordered Endpoint list (auto-tries configured endpoint plus both prod & test OTT Lesotho hosts)
+  // Build ordered Endpoint list
   const endpointCandidates = Array.from(
-    new Set([ottEndpoint, 'https://api.ottlesotho.com', 'https://test-api.ottlesotho.com'])
+    new Set([ottEndpoint, 'https://api.ottlesotho.com'])
   );
 
-  // Build ordered Vendor ID list (always tries configured IDs plus '1', '11', and merchant username)
+  // Build ordered Vendor ID list (tests '1' and '11' sequentially)
   const rawVendorStr = String(
-    credentialOverrides?.vendorId || ottGw?.vendorId || process.env.OTTVOUCHER_VENDOR_ID || '1, 11, TCONNECTLES1'
+    credentialOverrides?.vendorId || ottGw?.vendorId || process.env.OTTVOUCHER_VENDOR_ID || '1, 11'
   );
   const parsedVendors = rawVendorStr
     .split(/[\s,]+/)
     .map((v) => v.trim())
     .filter(Boolean);
-  const vendorCandidates = Array.from(new Set([...parsedVendors, '1', '11', ottMerchantId]));
+  const vendorCandidates = Array.from(new Set(['1', '11', ...parsedVendors]));
 
   const hasLiveOttCredentials = Boolean(ottApiKey.length >= 6 && ottApiPassword.length >= 4);
 
@@ -1437,7 +1629,7 @@ async function verify16DigitOttVoucher(
     };
   }
 
-  // Normalize subscriber mobile number for OTT Vault leftover balance SMS
+  // OTT Lesotho /api/v1/RemitVoucher requires 'mobile' in multipart/form-data ([Required]); defaults to 26658000000 when subscriber enters PIN only
   const rawDigits = String(mobileNumber || '').replace(/\D/g, '');
   const cleanMobile =
     rawDigits.length === 8
@@ -1449,130 +1641,86 @@ async function verify16DigitOttVoucher(
 
   let lastUpstreamError = '';
   let saw401Only = true;
+  const amtClean = String(Math.round(Number(amount) || 10));
 
-  // Helper to execute a single RemitVoucher call
-  const attemptRemit = async (
-    hostUrl: string,
-    vendorID: string,
-    uniqueReference: string,
-    cand: { formulaId: string; amountVal: string; hash: string }
-  ) => {
-    const formData = new FormData();
-    formData.append('pin', pinToRedeem);
-    formData.append('amount', cand.amountVal);
-    formData.append('mobile', cleanMobile);
-    formData.append('vendorID', vendorID);
-    formData.append('uniqueReference', uniqueReference);
-    formData.append('hash', cand.hash);
-
-    const ottResponse = await fetch(`${hostUrl}/api/v1/RemitVoucher`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        'X-Api-Key': ottApiKey,
-        ApiKey: ottApiKey
-      },
-      body: formData,
-      signal: AbortSignal.timeout(4500)
-    });
-
-    const rawText = await ottResponse.text();
-    let ottData: any = null;
-    try {
-      ottData = JSON.parse(rawText);
-    } catch {}
-
-    return { ottResponse, rawText, ottData, hostUrl, vendorID, uniqueReference, cand };
-  };
-
-  // Iterate across OTT Lesotho endpoints and Vendor IDs using parallelized batches for fast resolution
   for (const hostUrl of endpointCandidates) {
     for (const vendorID of vendorCandidates) {
       const uniqueReference = `TC${Date.now()}${Math.floor(100 + Math.random() * 900)}`;
-      const candidates = buildOttRemitCandidates(
-        pinToRedeem,
-        Number(amount) || 10,
-        cleanMobile,
-        vendorID,
-        uniqueReference,
-        ottApiKey,
-        ottMerchantId
-      );
+      // Verified OTT Lesotho SHA-256 signature order: SHA256(apiKey + amount + mobile + pin + uniqueReference + vendorID)
+      const rawHashInput = `${ottApiKey}${amtClean}${cleanMobile}${pinToRedeem}${uniqueReference}${vendorID}`;
+      const computedHash = crypto.createHash('sha256').update(rawHashInput, 'utf8').digest('hex');
 
-      const batchSize = 8;
-      let stopVendorLoop = false;
+      try {
+        const formData = new FormData();
+        formData.append('pin', pinToRedeem);
+        formData.append('amount', amtClean);
+        formData.append('mobile', cleanMobile);
+        formData.append('vendorID', vendorID);
+        formData.append('uniqueReference', uniqueReference);
+        formData.append('hash', computedHash);
 
-      for (let i = 0; i < candidates.length && !stopVendorLoop; i += batchSize) {
-        const batch = candidates.slice(i, i + batchSize);
-        const results = await Promise.allSettled(
-          batch.map((cand) => attemptRemit(hostUrl, vendorID, uniqueReference, cand))
-        );
+        const ottResponse = await fetch(`${hostUrl}/api/v1/RemitVoucher`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${basicAuth}`,
+            Accept: 'application/json'
+          },
+          body: formData,
+          signal: AbortSignal.timeout(4500)
+        });
 
-        for (const resItem of results) {
-          if (resItem.status !== 'fulfilled') continue;
-          const { ottResponse, rawText, ottData, cand } = resItem.value;
+        const rawText = await ottResponse.text();
+        let ottData: any = null;
+        try {
+          ottData = JSON.parse(rawText);
+        } catch {}
 
-          if (ottResponse.status === 401) {
-            continue;
-          }
-
-          saw401Only = false;
-
-          const isSuccess =
-            ottData &&
-            (ottData.success === true ||
-              String(ottData.success).toLowerCase() === 'true' ||
-              ottData.status === 'SUCCESS' ||
-              ottData.status === 'COMPLETED' ||
-              ottData.status === 'APPROVED' ||
-              ottData.redeemed === true ||
-              ottData.errorCode === '0' ||
-              ottData.responseCode === '00');
-
-          if (ottResponse.ok && isSuccess) {
-            if (ottGw) {
-              ottGw.winningOttProfile = { hostUrl, vendorID, formulaId: cand.formulaId };
-              saveServerPortalStore(serverStore);
-            }
-            return {
-              verified: true,
-              receipt: ottData.uniqueReference || ottData.reference || ottData.saleID || uniqueReference,
-              planName: ottData.planName || 'Daily Pass',
-              durationSeconds: 86400,
-              price: Number(ottData.amount || amount),
-              merchantId: ottMerchantId,
-              vendorIdUsed: vendorID,
-              formulaUsed: cand.formulaId,
-              hasLiveOttCredentials: true,
-              upstreamMessage:
-                ottData.message ||
-                `OTT Voucher verified and redeemed via ${hostUrl} (Vendor ID ${vendorID}, Signature ${cand.formulaId}).`
-            };
-          }
-
-          const msg = String(ottData?.message || ottData?.title || rawText || '').trim();
-          if (msg) {
-            lastUpstreamError = `[${hostUrl.replace('https://', '')} | Vendor ID ${vendorID} | HTTP ${ottResponse.status}] ${msg}`;
-          }
-
-          const lowerMsg = msg.toLowerCase();
-          if (
-            lowerMsg &&
-            !lowerMsg.includes('hash') &&
-            !lowerMsg.includes('signature') &&
-            !lowerMsg.includes('vendor') &&
-            (lowerMsg.includes('pin') ||
-              lowerMsg.includes('voucher') ||
-              lowerMsg.includes('used') ||
-              lowerMsg.includes('expired') ||
-              lowerMsg.includes('not found') ||
-              lowerMsg.includes('invalid'))
-          ) {
-            stopVendorLoop = true;
-            break;
-          }
+        if (ottResponse.status === 401 || ottResponse.status === 404) {
+          continue;
         }
-      }
+
+        saw401Only = false;
+
+        const isSuccess =
+          ottData &&
+          (ottData.success === true ||
+            String(ottData.success).toLowerCase() === 'true' ||
+            ottData.status === 'SUCCESS' ||
+            ottData.status === 'COMPLETED' ||
+            ottData.status === 'APPROVED' ||
+            ottData.redeemed === true ||
+            (ottData.errorCode === '0' && String(ottData.success).toLowerCase() !== 'false'));
+
+        if (ottResponse.ok && isSuccess) {
+          if (ottGw) {
+            ottGw.winningOttProfile = {
+              hostUrl,
+              vendorID,
+              formulaId: 'SHA256(apiKey+amount+mobile+pin+uniqueReference+vendorID)'
+            };
+            saveServerPortalStore(serverStore);
+          }
+          return {
+            verified: true,
+            receipt: ottData.uniqueReference || ottData.reference || ottData.saleID || uniqueReference,
+            planName: ottData.planName || 'Daily Pass',
+            durationSeconds: 86400,
+            price: Number(ottData.amount || amount),
+            merchantId: ottMerchantId,
+            vendorIdUsed: vendorID,
+            formulaUsed: 'SHA256(apiKey+amount+mobile+pin+uniqueReference+vendorID)',
+            hasLiveOttCredentials: true,
+            upstreamMessage:
+              ottData.message ||
+              `OTT Voucher verified and redeemed via ${hostUrl}/api/v1/RemitVoucher (Vendor ID ${vendorID}).`
+          };
+        }
+
+        const msg = String(ottData?.message || ottData?.title || rawText || '').trim();
+        if (msg) {
+          lastUpstreamError = `[${hostUrl.replace('https://', '')}/api/v1/RemitVoucher | Vendor ID ${vendorID} | HTTP ${ottResponse.status}] ${msg}`;
+        }
+      } catch {}
     }
   }
 

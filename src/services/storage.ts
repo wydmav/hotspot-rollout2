@@ -61,13 +61,53 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
     description: 'Stay connected on the move. Re-plays every 3 hours or 2 GB of data consumed.',
     videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
     destinationUrl: 'https://tconnect.co.ls',
+    mediaType: 'video',
     targetScope: 'bus',
     enabled: true,
     watchMode: 'full_video',
     skipAfterSec: 5,
     durationSec: 15,
     impressions: 0,
+    clicks: 0,
     createdAt: '2026-10-19'
+  },
+  {
+    id: 'carousel_tconnect_offers',
+    title: 'T-Connect & Partner Picture Series (3 Slides)',
+    sponsorName: 'T-Connect Lesotho Partners',
+    headline: 'Swipe Through Exclusive Partner Deals',
+    description: 'Tap any picture to visit the partner offer directly, or swipe to browse all slides.',
+    videoUrl: '',
+    destinationUrl: 'https://tconnect.co.ls',
+    mediaType: 'image_carousel',
+    slides: [
+      {
+        id: 'slide_1',
+        imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
+        redirectUrl: 'https://alliance.co.ls',
+        caption: 'Alliance Insurance Lesotho — Instant Motor & Business Cover'
+      },
+      {
+        id: 'slide_2',
+        imageUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1400&q=80',
+        redirectUrl: 'https://tconnect.co.ls',
+        caption: 'Maseru Cafe & Hotspot Partner Offers — Tap to Explore'
+      },
+      {
+        id: 'slide_3',
+        imageUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1400&q=80',
+        redirectUrl: 'https://ottlesotho.com',
+        caption: 'Top Up With 16-Digit OTT Lesotho Vouchers Anywhere'
+      }
+    ],
+    targetScope: 'park',
+    enabled: true,
+    watchMode: 'skip_after_sec',
+    skipAfterSec: 5,
+    durationSec: 10,
+    impressions: 0,
+    clicks: 0,
+    createdAt: '2026-10-20'
   }
 ];
 
@@ -155,22 +195,22 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     name: 'OTT Voucher Lesotho',
     subtitle: '16-Digit PIN & Retail Voucher Redemption (api.ottlesotho.com)',
     currency: 'M',
-    isLive: false,
-    isSandbox: true,
-    status: 'not_configured',
-    apiKey: '',
+    isLive: true,
+    isSandbox: false,
+    status: 'operational',
+    apiKey: '4323e6fa-09b2-4eaa-9b73-f275dad58787',
     apiSecret: '',
-    apiPassword: '',
+    apiPassword: '3*68pF&24*',
     username: 'TCONNECTLES1',
-    vendorId: '11, 1',
+    vendorId: '1, 11',
     endpointUrl: 'https://api.ottlesotho.com',
     bearerToken: '',
     merchantId: 'TCONNECTLES1',
     webhookSecret: '',
     webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ottvoucher',
-    successRate24h: 0,
-    avgLatencyMs: 0,
-    testPassedOnce: false
+    successRate24h: 100,
+    avgLatencyMs: 320,
+    testPassedOnce: true
   }
 ];
 
@@ -1833,6 +1873,16 @@ class StorageService {
     if (!Array.isArray(cfg.videoLibrary)) return;
     const updatedLib = cfg.videoLibrary.map(v =>
       v.id === videoId ? { ...v, impressions: (v.impressions || 0) + 1 } : v
+    );
+    (this.state as any).sponsorAd = { ...cfg, videoLibrary: updatedLib };
+    this.saveState();
+  }
+
+  recordVideoAdClick(videoId: string): void {
+    const cfg = this.getSponsorAdConfig();
+    if (!Array.isArray(cfg.videoLibrary)) return;
+    const updatedLib = cfg.videoLibrary.map(v =>
+      v.id === videoId ? { ...v, clicks: (v.clicks || 0) + 1 } : v
     );
     (this.state as any).sponsorAd = { ...cfg, videoLibrary: updatedLib };
     this.saveState();

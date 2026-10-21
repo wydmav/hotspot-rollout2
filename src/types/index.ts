@@ -277,13 +277,31 @@ export interface SystemAlert {
 
 export type PlatformRole = 'Super Admin' | 'Collaborator' | 'Management';
 
+export interface AdSlideItem {
+  id: string;
+  imageUrl: string;
+  redirectUrl: string;
+  caption?: string;
+}
+
+export interface WallpaperPresetSlot {
+  id: string;
+  label: string;
+  category: string;
+  url: string;
+  scope?: VerticalType | 'all';
+  isCustom?: boolean;
+}
+
 export interface VideoAdItem {
   id: string;
   title: string;
   sponsorName: string;
   headline: string;
   description: string;
+  mediaType?: 'video' | 'image_carousel';
   videoUrl: string;
+  slides?: AdSlideItem[];
   destinationUrl: string;
   targetScope: VerticalType | 'all';
   enabled: boolean;
@@ -291,6 +309,7 @@ export interface VideoAdItem {
   skipAfterSec: number;
   durationSec?: number;
   impressions: number;
+  clicks?: number;
   createdAt: string;
 }
 
@@ -301,7 +320,7 @@ export interface SponsorAdConfig {
   description: string;
   imageUrl: string;
   videoUrl?: string;
-  mediaType?: 'video' | 'image';
+  mediaType?: 'video' | 'image' | 'image_carousel';
   destinationUrl: string;
   displayTrigger: 'pre_login' | 'post_connect' | 'both';
   countdownDurationSec: number;
@@ -461,4 +480,5 @@ export interface ScopePortalConfig {
   allowOnlinePayment: boolean;
   // Scope-specific plans & pricing
   plans: ScopePlan[];
+  customPresets?: WallpaperPresetSlot[];
 }

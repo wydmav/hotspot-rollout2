@@ -1,0 +1,185 @@
+{
+  "info": {
+    "name": "T-Connect OTT Lesotho M10 Voucher Test Suite (Verified Formula)",
+    "description": "Verified OTT Lesotho /api/v1/CheckRemitVoucher and /api/v1/RemitVoucher collection using SHA256(apiKey + amount + mobile + pin + uniqueReference + vendorID).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "voucher_pin",
+      "value": "PUT_YOUR_16_DIGIT_M10_VOUCHER_PIN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "ott_api_key",
+      "value": "4323e6fa-09b2-4eaa-9b73-f275dad58787",
+      "type": "string"
+    },
+    {
+      "key": "ott_username",
+      "value": "TCONNECTLES1",
+      "type": "string"
+    },
+    {
+      "key": "ott_password",
+      "value": "3*68pF&24*",
+      "type": "string"
+    },
+    {
+      "key": "amount",
+      "value": "10",
+      "type": "string"
+    },
+    {
+      "key": "mobile",
+      "value": "26658000000",
+      "type": "string"
+    },
+    {
+      "key": "local_base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Safe Pre-Check: /api/v1/CheckRemitVoucher (No Voucher Burned)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const apiKey = pm.collectionVariables.get('ott_api_key') || '';",
+              "const ref = 'CHK' + Date.now();",
+              "const hash = CryptoJS.SHA256(apiKey + ref).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('unique_ref', ref);",
+              "pm.variables.set('computed_hash', hash);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{ott_username}}", "type": "string" },
+            { "key": "password", "value": "{{ott_password}}", "type": "string" }
+          ]
+        },
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "uniqueReference", "value": "{{unique_ref}}", "type": "text" },
+            { "key": "hash", "value": "{{computed_hash}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "https://api.ottlesotho.com/api/v1/CheckRemitVoucher",
+          "protocol": "https",
+          "host": ["api", "ottlesotho", "com"],
+          "path": ["api", "v1", "CheckRemitVoucher"]
+        }
+      }
+    },
+    {
+      "name": "2. Direct OTT Lesotho RemitVoucher — Vendor ID 1",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const apiKey = pm.collectionVariables.get('ott_api_key') || '';",
+              "const amt = pm.collectionVariables.get('amount') || '10';",
+              "const mob = pm.collectionVariables.get('mobile') || '26658000000';",
+              "const pin = pm.collectionVariables.get('voucher_pin') || '';",
+              "const ref = 'TCV1' + Date.now();",
+              "const vid = '1';",
+              "const hash = CryptoJS.SHA256(apiKey + amt + mob + pin + ref + vid).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('unique_ref', ref);",
+              "pm.variables.set('computed_hash', hash);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{ott_username}}", "type": "string" },
+            { "key": "password", "value": "{{ott_password}}", "type": "string" }
+          ]
+        },
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "pin", "value": "{{voucher_pin}}", "type": "text" },
+            { "key": "amount", "value": "{{amount}}", "type": "text" },
+            { "key": "mobile", "value": "{{mobile}}", "type": "text" },
+            { "key": "vendorID", "value": "1", "type": "text" },
+            { "key": "uniqueReference", "value": "{{unique_ref}}", "type": "text" },
+            { "key": "hash", "value": "{{computed_hash}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "https://api.ottlesotho.com/api/v1/RemitVoucher",
+          "protocol": "https",
+          "host": ["api", "ottlesotho", "com"],
+          "path": ["api", "v1", "RemitVoucher"]
+        }
+      }
+    },
+    {
+      "name": "3. Direct OTT Lesotho RemitVoucher — Vendor ID 11",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const apiKey = pm.collectionVariables.get('ott_api_key') || '';",
+              "const amt = pm.collectionVariables.get('amount') || '10';",
+              "const mob = pm.collectionVariables.get('mobile') || '26658000000';",
+              "const pin = pm.collectionVariables.get('voucher_pin') || '';",
+              "const ref = 'TCV11' + Date.now();",
+              "const vid = '11';",
+              "const hash = CryptoJS.SHA256(apiKey + amt + mob + pin + ref + vid).toString(CryptoJS.enc.Hex);",
+              "pm.variables.set('unique_ref', ref);",
+              "pm.variables.set('computed_hash', hash);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "{{ott_username}}", "type": "string" },
+            { "key": "password", "value": "{{ott_password}}", "type": "string" }
+          ]
+        },
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "pin", "value": "{{voucher_pin}}", "type": "text" },
+            { "key": "amount", "value": "{{amount}}", "type": "text" },
+            { "key": "mobile", "value": "{{mobile}}", "type": "text" },
+            { "key": "vendorID", "value": "11", "type": "text" },
+            { "key": "uniqueReference", "value": "{{unique_ref}}", "type": "text" },
+            { "key": "hash", "value": "{{computed_hash}}", "type": "text" }
+          ]
+        },
+        "url": {
+          "raw": "https://api.ottlesotho.com/api/v1/RemitVoucher",
+          "protocol": "https",
+          "host": ["api", "ottlesotho", "com"],
+          "path": ["api", "v1", "RemitVoucher"]
+        }
+      }
+    }
+  ]
+}

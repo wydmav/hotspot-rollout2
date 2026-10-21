@@ -116,139 +116,67 @@ export const SCOPE_LIST: ScopeMeta[] = [
   }
 ];
 
-// Curated Wallpaper Presets Per Scope
+// Curated Wallpaper Presets Per Scope (Expanded with 8 presets per scope + customizable empty slots)
 export const SCOPE_WALLPAPERS: Record<VerticalType, Array<{ name: string; url: string; tag: string }>> = {
   hotspot: [
-    {
-      name: 'Artisan Cafe Lounge',
-      url: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Cafe'
-    },
-    {
-      name: 'Cyber Grid Co-Working',
-      url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Office'
-    },
-    {
-      name: 'Urban Retail Galleria',
-      url: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Retail'
-    },
-    {
-      name: 'Starlink Night Orbit',
-      url: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Starlink'
-    }
+    { name: 'Artisan Cafe Lounge', url: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80', tag: 'Cafe' },
+    { name: 'Cyber Grid Co-Working', url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80', tag: 'Office' },
+    { name: 'Urban Retail Galleria', url: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80', tag: 'Retail' },
+    { name: 'Starlink Night Orbit', url: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?auto=format&fit=crop&w=1200&q=80', tag: 'Starlink' },
+    { name: 'Maseru Mall Atrium', url: 'https://images.unsplash.com/photo-1567449303078-57ad995bd17a?auto=format&fit=crop&w=1200&q=80', tag: 'Mall' },
+    { name: 'Executive Airport Lounge', url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1200&q=80', tag: 'VIP' },
+    { name: 'Modern Hotel Lobby', url: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1200&q=80', tag: 'Hotel' },
+    { name: 'Campus Study Hub', url: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1200&q=80', tag: 'Campus' }
   ],
   community: [
-    {
-      name: 'Maloti Mountain Village',
-      url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Highlands'
-    },
-    {
-      name: 'Rural Solar Mesh Sunset',
-      url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Solar'
-    },
-    {
-      name: 'Lesotho Mountain Valley',
-      url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Valley'
-    },
-    {
-      name: 'Sani Pass Rural Highlands',
-      url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Community'
-    }
+    { name: 'Maloti Mountain Village', url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80', tag: 'Highlands' },
+    { name: 'Rural Solar Mesh Sunset', url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1200&q=80', tag: 'Solar' },
+    { name: 'Lesotho Mountain Valley', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80', tag: 'Valley' },
+    { name: 'Sani Pass Rural Highlands', url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80', tag: 'Community' },
+    { name: 'Thaba-Bosiu Heritage Ridge', url: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80', tag: 'Heritage' },
+    { name: 'Katse Dam Panorama', url: 'https://images.unsplash.com/photo-1439066615861-d1af74d74000?auto=format&fit=crop&w=1200&q=80', tag: 'Water' },
+    { name: 'Solar Micro-Grid Station', url: 'https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?auto=format&fit=crop&w=1200&q=80', tag: 'Energy' },
+    { name: 'Highland Homestead Sky', url: 'https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1200&q=80', tag: 'Village' }
   ],
   village: [
-    {
-      name: 'Maloti Mountain Village',
-      url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Highlands'
-    },
-    {
-      name: 'Rural Solar Mesh Sunset',
-      url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Solar'
-    },
-    {
-      name: 'Lesotho Mountain Valley',
-      url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Valley'
-    },
-    {
-      name: 'Sani Pass Rural Highlands',
-      url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Community'
-    }
+    { name: 'Maloti Mountain Village', url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80', tag: 'Highlands' },
+    { name: 'Rural Solar Mesh Sunset', url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1200&q=80', tag: 'Solar' },
+    { name: 'Lesotho Mountain Valley', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80', tag: 'Valley' },
+    { name: 'Sani Pass Rural Highlands', url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80', tag: 'Community' },
+    { name: 'Thaba-Bosiu Heritage Ridge', url: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80', tag: 'Heritage' },
+    { name: 'Katse Dam Panorama', url: 'https://images.unsplash.com/photo-1439066615861-d1af74d74000?auto=format&fit=crop&w=1200&q=80', tag: 'Water' },
+    { name: 'Solar Micro-Grid Station', url: 'https://images.unsplash.com/photo-1508514177221-188b1cf16e9d?auto=format&fit=crop&w=1200&q=80', tag: 'Energy' },
+    { name: 'Highland Homestead Sky', url: 'https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1200&q=80', tag: 'Village' }
   ],
   park: [
-    {
-      name: 'Lush Greenery Canopy',
-      url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Canopy'
-    },
-    {
-      name: 'Sunlit Public Gardens',
-      url: 'https://images.unsplash.com/photo-1519331379826-f10be5486c6f?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Botanical'
-    },
-    {
-      name: 'Maseru Municipal Square',
-      url: 'https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Plaza'
-    },
-    {
-      name: 'Peaceful Forest Meadow',
-      url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Meadow'
-    }
+    { name: 'Lush Greenery Canopy', url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&q=80', tag: 'Canopy' },
+    { name: 'Sunlit Public Gardens', url: 'https://images.unsplash.com/photo-1519331379826-f10be5486c6f?auto=format&fit=crop&w=1200&q=80', tag: 'Botanical' },
+    { name: 'Maseru Municipal Square', url: 'https://images.unsplash.com/photo-1477959858617-67f30bc75b82?auto=format&fit=crop&w=1200&q=80', tag: 'Plaza' },
+    { name: 'Peaceful Forest Meadow', url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&q=80', tag: 'Meadow' },
+    { name: ' Sehlabathebe National Park', url: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1200&q=80', tag: 'Reserve' },
+    { name: 'Smart Civic Walkway', url: 'https://images.unsplash.com/photo-1496568816309-51d7c20e3b21?auto=format&fit=crop&w=1200&q=80', tag: 'Civic' },
+    { name: 'Lakeside Recreation Park', url: 'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1200&q=80', tag: 'Lake' },
+    { name: 'Botanical Sunset Lawn', url: 'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=1200&q=80', tag: 'Sunset' }
   ],
   bus: [
-    {
-      name: 'High-Speed Transit Highway',
-      url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Transit'
-    },
-    {
-      name: 'Scenic Mountain Pass Journey',
-      url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Travel'
-    },
-    {
-      name: 'Night Express Coach Starlink',
-      url: 'https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Night Route'
-    },
-    {
-      name: 'Cross-Border Commuter Coach',
-      url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Express'
-    }
+    { name: 'High-Speed Transit Highway', url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80', tag: 'Transit' },
+    { name: 'Scenic Mountain Pass Journey', url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80', tag: 'Travel' },
+    { name: 'Night Express Coach Starlink', url: 'https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&w=1200&q=80', tag: 'Night Route' },
+    { name: 'Cross-Border Commuter Coach', url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&q=80', tag: 'Express' },
+    { name: 'Maseru Intercity Terminal', url: 'https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&w=1200&q=80', tag: 'Terminal' },
+    { name: 'Luxury Shuttle Cabin', url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80', tag: 'Shuttle' },
+    { name: 'Highland Pass Highway', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80', tag: 'Route' },
+    { name: 'Starlink Roam Fleet', url: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?auto=format&fit=crop&w=1200&q=80', tag: 'Starlink' }
   ],
   stadium: [
-    {
-      name: 'Illuminated Match Night Crowd',
-      url: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Match Day'
-    },
-    {
-      name: 'Packed Arena Bleachers',
-      url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Arena'
-    },
-    {
-      name: 'Festival & Expo Stage',
-      url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Festival'
-    },
-    {
-      name: 'Electric Stadium Floodlights',
-      url: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?auto=format&fit=crop&w=1200&q=80',
-      tag: 'Lights'
-    }
+    { name: 'Illuminated Match Night Crowd', url: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1200&q=80', tag: 'Match Day' },
+    { name: 'Packed Arena Bleachers', url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80', tag: 'Arena' },
+    { name: 'Festival & Expo Stage', url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=1200&q=80', tag: 'Festival' },
+    { name: 'Electric Stadium Floodlights', url: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?auto=format&fit=crop&w=1200&q=80', tag: 'Lights' },
+    { name: 'Setsoto National Stadium', url: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?auto=format&fit=crop&w=1200&q=80', tag: 'National' },
+    { name: 'Live Concert Mainstage', url: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1200&q=80', tag: 'Concert' },
+    { name: 'Championship Pitch View', url: 'https://images.unsplash.com/photo-1489944440615-453fc2b6a9a9?auto=format&fit=crop&w=1200&q=80', tag: 'Pitch' },
+    { name: 'VIP Hospitality Box', url: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&w=1200&q=80', tag: 'VIP' }
   ]
 };
 
@@ -788,6 +716,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [uploadedPhotos, setUploadedPhotos] = useState<Array<{ name: string; url: string }>>([]);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const slotFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Custom / Empty Wallpaper Preset Slot Editor State
+  const [editingSlotIndex, setEditingSlotIndex] = useState<number | null>(null);
+  const [slotNameInput, setSlotNameInput] = useState('');
+  const [slotTagInput, setSlotTagInput] = useState('Custom');
+  const [slotImageInput, setSlotImageInput] = useState('');
+
+  // Mandatory Terms & Conditions Checkbox + Popup Modal State for Emulator
+  const [previewTermsAccepted, setPreviewTermsAccepted] = useState(false);
+  const [isPreviewTermsModalOpen, setIsPreviewTermsModalOpen] = useState(false);
 
   // Live Stopwatch Ticker for Connected Session
   useEffect(() => {
@@ -927,24 +866,115 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }).catch(() => {});
   }, []);
 
-  // Save current scope configuration
-  const saveScopeConfig = (updated: ScopePortalConfig) => {
-    setScopeConfigs((prev) => ({
-      ...prev,
+  // Save current scope configuration and push in real time to VPS & MikroTik Routers
+  const saveScopeConfig = (updated: ScopePortalConfig, customMessage?: string) => {
+    const nextAll = {
+      ...scopeConfigs,
       [updated.scope]: updated,
-    }));
+      ...(updated.scope === 'community' ? { village: updated } : {}),
+      ...(updated.scope === 'village' ? { community: updated } : {})
+    };
+    setScopeConfigs(nextAll);
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         window.localStorage.setItem(`tconnect_portal_scope_${updated.scope}`, JSON.stringify(updated));
+        if (updated.scope === 'community') {
+          window.localStorage.setItem('tconnect_portal_scope_village', JSON.stringify(updated));
+        }
       } catch {}
     }
     fetch('/api/portal/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: updated.scope, config: updated })
+      body: JSON.stringify({ scope: updated.scope, config: updated, configs: nextAll })
     }).catch(() => {});
-    setSavedToast(`Saved ${updated.scopeLabel} portal profile!`);
-    setTimeout(() => setSavedToast(null), 2500);
+    setSavedToast(customMessage || `Saved & pushed ${updated.scopeLabel} policy to routers in real time!`);
+    setTimeout(() => setSavedToast(null), 3000);
+  };
+
+  // Ensure 6 saveable custom preset slots exist per scope (including empty slots ready to fill)
+  const customPresetSlots = React.useMemo(() => {
+    const existing = Array.isArray(currentConfig.customPresets) ? currentConfig.customPresets : [];
+    const padded = [...existing];
+    while (padded.length < 6) {
+      const idx = padded.length + 1;
+      padded.push({
+        id: `slot_${selectedScope}_${idx}`,
+        label: `Empty Slot ${idx}`,
+        category: 'Custom Slot',
+        url: '',
+        scope: selectedScope,
+        isCustom: true
+      });
+    }
+    return padded;
+  }, [currentConfig.customPresets, selectedScope]);
+
+  const handleSaveCustomSlot = (slotIdx: number, name: string, url: string, category = 'Custom') => {
+    const nextSlots = [...customPresetSlots];
+    nextSlots[slotIdx] = {
+      id: nextSlots[slotIdx]?.id || `slot_${selectedScope}_${slotIdx + 1}`,
+      label: name.trim() || `Custom Preset ${slotIdx + 1}`,
+      category: category.trim() || 'Custom',
+      url: url.trim(),
+      scope: selectedScope,
+      isCustom: true
+    };
+    const nextBg = url.trim() ? url.trim() : currentConfig.bgImage;
+    saveScopeConfig(
+      { ...currentConfig, customPresets: nextSlots, bgImage: nextBg },
+      `Saved preset "${name.trim() || `Slot ${slotIdx + 1}`}" & synced to ${activeMeta.label} routers!`
+    );
+    setEditingSlotIndex(null);
+  };
+
+  const handleAddBlankPresetSlot = () => {
+    const nextIdx = customPresetSlots.length + 1;
+    const nextSlots = [
+      ...customPresetSlots,
+      {
+        id: `slot_${selectedScope}_${Date.now()}`,
+        label: `Empty Slot ${nextIdx}`,
+        category: 'Custom Slot',
+        url: '',
+        scope: selectedScope,
+        isCustom: true
+      }
+    ];
+    saveScopeConfig({ ...currentConfig, customPresets: nextSlots }, `Added Empty Slot ${nextIdx} for ${activeMeta.label}`);
+    setEditingSlotIndex(nextSlots.length - 1);
+    setSlotNameInput(`Custom Preset ${nextIdx}`);
+    setSlotTagInput(activeMeta.label);
+    setSlotImageInput('');
+  };
+
+  const handleSlotPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingPhoto(true);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64Data = ev.target?.result as string;
+      try {
+        const res = await fetch('/api/upload-photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, base64Data })
+        });
+        const json = await res.json();
+        if (json.success && json.url) {
+          setSlotImageInput(json.url);
+          setUploadedPhotos((prev) => [{ name: json.filename, url: json.url }, ...prev.filter((p) => p.url !== json.url)]);
+        } else {
+          setSlotImageInput(base64Data);
+        }
+      } catch {
+        setSlotImageInput(base64Data);
+      } finally {
+        setIsUploadingPhoto(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleUpdateCurrent = (updates: Partial<ScopePortalConfig>) => {
@@ -1329,12 +1359,27 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
               type="button"
               onClick={onOpenVideoAds}
               className="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 cursor-pointer"
-              title="Upload video ads & configure 3-hour / 2 GB re-triggers"
+              title="Upload full-screen video & picture ads + configure 3-hour / 2 GB re-triggers"
             >
               <span>🎬</span>
-              <span>Video Ads (3h / 2GB)</span>
+              <span>Full-Screen Ads (3h / 2GB)</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() =>
+              saveScopeConfig(
+                currentConfig,
+                `All ${activeMeta.label} settings, presets & policies saved and pushed to routers in real time!`
+              )
+            }
+            className="px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md cursor-pointer transition-all"
+            title="Save all settings and push policy to routers in this scope immediately"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Save &amp; Push to Routers</span>
+          </button>
 
           <button
             onClick={handleResetScopeDefaults}
@@ -1414,23 +1459,31 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 </div>
               </div>
 
-              {/* Wallpaper Picker Quick Selector for This Scope */}
-              <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
+              {/* Wallpaper Picker Quick Selector + Saveable Custom/Empty Preset Slots */}
+              <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3.5 font-mono text-xs">
                 <div className="flex items-center justify-between border-b border-[#1b233a] pb-2">
                   <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
                     <ImageIcon className="w-4 h-4 text-cyan-400" />
-                    {activeMeta.label} Wallpaper Selection
+                    {activeMeta.label} Wallpaper Presets ({currentWallpapers.length} Built-In + {customPresetSlots.length} Custom Slots)
                   </span>
-                  <span className="text-[10px] text-slate-400">Curated for this scope</span>
+                  <button
+                    type="button"
+                    onClick={handleAddBlankPresetSlot}
+                    className="px-2.5 py-1 rounded-lg bg-[#f05e17]/20 hover:bg-[#f05e17]/30 border border-[#f05e17]/40 text-orange-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Add Empty Preset Slot</span>
+                  </button>
                 </div>
 
+                {/* Built-in 8 Curated Scope Presets */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {currentWallpapers.map((wp, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => handleUpdateCurrent({ bgImage: wp.url })}
-                      className={`group relative h-20 rounded-lg overflow-hidden border text-left transition-all ${
+                      className={`group relative h-20 rounded-lg overflow-hidden border text-left transition-all cursor-pointer ${
                         currentConfig.bgImage === wp.url
                           ? 'border-2 border-[#f05e17] ring-2 ring-[#f05e17]/30'
                           : 'border-[#232d42] hover:border-slate-400'
@@ -1441,7 +1494,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         alt={wp.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent p-1.5 flex flex-col justify-end">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent p-1.5 flex flex-col justify-end">
                         <span className="text-[10px] font-bold text-white truncate leading-tight">
                           {wp.name}
                         </span>
@@ -1449,6 +1502,165 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       </div>
                     </button>
                   ))}
+                </div>
+
+                {/* Custom & Empty Saveable Preset Slots */}
+                <div className="pt-2 border-t border-[#1b233a] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Custom &amp; Empty Saveable Preset Slots (Click any slot to name, add picture &amp; save)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400">Synced per scope</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {customPresetSlots.map((slot, sIdx) => {
+                      const hasImg = Boolean(slot.url && slot.url.trim());
+                      const isActive = hasImg && currentConfig.bgImage === slot.url;
+                      return (
+                        <div
+                          key={slot.id || sIdx}
+                          className={`relative h-22 rounded-lg overflow-hidden border transition-all flex flex-col justify-between ${
+                            isActive
+                              ? 'border-2 border-emerald-400 ring-2 ring-emerald-400/30 bg-[#141d30]'
+                              : hasImg
+                              ? 'border-[#2b3754] bg-[#121829]'
+                              : 'border-dashed border-slate-600 bg-[#0b0f19] hover:border-[#f05e17]'
+                          }`}
+                        >
+                          {hasImg ? (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCurrent({ bgImage: slot.url })}
+                              className="w-full h-full text-left relative group cursor-pointer"
+                            >
+                              <img
+                                src={slot.url}
+                                alt={slot.label}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent p-2 flex flex-col justify-end">
+                                <span className="text-[10px] font-bold text-white truncate">{slot.label}</span>
+                                <span className="text-[9px] text-emerald-400 font-bold">{slot.category || 'Saved Slot'}</span>
+                              </div>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSlotIndex(sIdx);
+                                setSlotNameInput(slot.label.startsWith('Empty Slot') ? '' : slot.label);
+                                setSlotTagInput(slot.category || activeMeta.label);
+                                setSlotImageInput('');
+                              }}
+                              className="w-full h-full p-2 flex flex-col items-center justify-center text-center gap-1 text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              <Plus className="w-4 h-4 text-[#f05e17]" />
+                              <span className="text-[10px] font-bold text-slate-200 truncate max-w-full">{slot.label}</span>
+                              <span className="text-[9px] text-slate-500">Click to name &amp; add photo</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSlotIndex(sIdx);
+                              setSlotNameInput(slot.label.startsWith('Empty Slot') ? '' : slot.label);
+                              setSlotTagInput(slot.category || activeMeta.label);
+                              setSlotImageInput(slot.url || '');
+                            }}
+                            className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 hover:bg-[#f05e17] text-[9px] text-white font-bold border border-white/20 cursor-pointer"
+                          >
+                            {hasImg ? 'Edit' : 'Fill Slot'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Inline Custom Slot Editor Box */}
+                  {editingSlotIndex !== null && (
+                    <div className="p-3 rounded-xl bg-[#131b2e] border border-[#f05e17]/50 space-y-2.5 mt-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-white">
+                          Configure Preset Slot #{editingSlotIndex + 1} ({activeMeta.label})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSlotIndex(null)}
+                          className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          Cancel ✕
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Preset Name *</label>
+                          <input
+                            type="text"
+                            value={slotNameInput}
+                            onChange={(e) => setSlotNameInput(e.target.value)}
+                            placeholder="e.g. Maseru Bus Rank Promo"
+                            className="w-full px-2.5 py-1.5 bg-[#0b0f19] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Category / Location Tag</label>
+                          <input
+                            type="text"
+                            value={slotTagInput}
+                            onChange={(e) => setSlotTagInput(e.target.value)}
+                            placeholder="e.g. Maseru / VIP / Transit"
+                            className="w-full px-2.5 py-1.5 bg-[#0b0f19] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          ref={slotFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleSlotPhotoUpload}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => slotFileInputRef.current?.click()}
+                          disabled={isUploadingPhoto}
+                          className="px-3 py-1.5 bg-[#1b253d] hover:bg-[#253252] border border-cyan-500/40 rounded-lg text-cyan-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{isUploadingPhoto ? 'Uploading...' : 'Upload Picture'}</span>
+                        </button>
+                        <input
+                          type="text"
+                          value={slotImageInput}
+                          onChange={(e) => setSlotImageInput(e.target.value)}
+                          placeholder="Or paste picture URL / select uploaded photo below..."
+                          className="flex-1 min-w-[180px] px-2.5 py-1.5 bg-[#0b0f19] border border-[#232d42] rounded-lg text-slate-200 text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleSaveCustomSlot(
+                              editingSlotIndex,
+                              slotNameInput || `Preset ${editingSlotIndex + 1}`,
+                              slotImageInput,
+                              slotTagInput
+                            )
+                          }
+                          className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Save Preset &amp; Apply</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Custom Image Upload / URL Input */}
