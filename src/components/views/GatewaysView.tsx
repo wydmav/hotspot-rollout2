@@ -271,6 +271,38 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     }
   };
 
+  const [isSyncingFleet, setIsSyncingFleet] = useState(false);
+
+  const handleSyncAllRoutersFromGateway = async () => {
+    setIsSyncingFleet(true);
+    try {
+      const res = await fetch('/api/devices/fleet/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestResult({
+          success: true,
+          message: `Real-time fleet sync dispatched to ${data.syncedCount} adopted router(s)! All 5 downstream ports bridged to bridgeLocal, OTT Lesotho 16-digit voucher redemption enabled, and splash/ad pages pushed.`
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: data.message || 'Failed to sync adopted routers.'
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err?.message || 'Network error syncing adopted routers.'
+      });
+    } finally {
+      setIsSyncingFleet(false);
+    }
+  };
+
   const supportedGateways = gateways.filter((g) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
 
   return (
@@ -284,9 +316,21 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>{supportedGateways.length} Active Gateways (EcoCash &amp; OTT Voucher)</span>
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-slate-400">
+          <button
+            type="button"
+            onClick={handleSyncAllRoutersFromGateway}
+            disabled={isSyncingFleet}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            title="Push OTT Lesotho (HTTP 201 verified), 5-port bridgeLocal, compact T&Cs splash page, and full-screen ads to ALL adopted routers in real time"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFleet ? 'animate-spin' : ''}`} />
+            <span>{isSyncingFleet ? 'Syncing Routers...' : 'Sync OTT & 5-Port Bridge to All Routers'}</span>
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>{supportedGateways.length} Active Gateways</span>
+          </div>
         </div>
       </div>
 

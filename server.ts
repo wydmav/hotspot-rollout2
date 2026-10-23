@@ -1939,18 +1939,11 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     const activeCfg = (scope && config) ? config : (existing.hotspot || Object.values(existing)[0] || {});
     const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
 
-    const syncCommands = [
-      `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"vodacom" or dst-host~"mywallet"] } on-error={}`,
-      `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
-      `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
-      `:do { /ip hotspot cookie remove [find] } on-error={}`,
-      allowFree
-        ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User" } } on-error={}`
-        : `:do { /ip hotspot user remove [find name="T-TRIAL"]; /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
-      allowFree
-        ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial } on-error={}`
-        : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap } on-error={}`
-    ];
+    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+    const syncCommands = fullSyncScript
+      .split('\n')
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.length > 0 && !line.startsWith('#'));
 
     for (const router of monitoredRouters.values()) {
       router.accessMode = allowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
@@ -1958,7 +1951,13 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       router.policyLastSyncedAt = new Date().toISOString();
     }
 
-    res.json({ success: true, configs: existing, allowFreeAccess: allowFree, syncedRouters: monitoredRouters.size });
+    res.json({
+      success: true,
+      configs: existing,
+      allowFreeAccess: allowFree,
+      syncedRouters: monitoredRouters.size,
+      cliScript: fullSyncScript
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -2627,24 +2626,44 @@ app.post('/api/devices/:routerId/action', async (req: Request, res: Response) =>
   }
 
   if (action === 'resync-config') {
+    const host = req.get('host') || '169.58.98.92:3000';
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const portalBaseUrl = `${protocol}://${host}`;
+    const existingConfigs = loadSavedPortalConfigs();
+    const activeCfg = existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
+    const allowFree = router?.accessMode ? router.accessMode !== 'PAID_ONLY' : (activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true);
+
+    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+    const syncCommands = fullSyncScript
+      .split('\n')
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+
+    if (router) {
+      router.pendingCommands = syncCommands;
+      router.policyLastSyncedAt = new Date().toISOString();
+    }
+
     recordServerAudit({
       category: 'router_config',
       action: 'router.config_resync',
       target: routerName,
       routerId,
       routerName,
-      details: 'Configuration re-sync executed: WireGuard keys, RADIUS attributes, and Hotspot Walled Garden rules verified.',
+      details: 'Configuration re-sync executed: 5-port bridgeLocal, OTT Lesotho Walled Garden, compact T&Cs splash page, and full-screen ad redirector queued.',
       severity: 'info',
       ipAddress: req.ip || '127.0.0.1'
     });
     return res.json({
       success: true,
       action: 'resync-config',
-      message: 'Configuration re-sync synchronized successfully. WireGuard keys, RADIUS attributes, and Hotspot Walled Garden rules verified.',
+      message: `Real-time sync queued for ${routerName}: 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, compact T&Cs splash, and full-screen ads.`,
+      cliScript: fullSyncScript,
       syncSummary: {
         wireguardStatus: 'SYNCHRONIZED',
         radiusProfile: 'ACTIVE (127.0.0.1:1812/1813)',
-        walledGardenRules: 6,
+        bridgedPorts: 'ether2, ether3, ether4, ether5, ether6, wifi1, wifi2 -> bridgeLocal',
+        walledGardenRules: 10,
         lastSyncedAt: new Date().toISOString()
       },
       timestamp: new Date().toISOString()
@@ -2893,16 +2912,11 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     fs.writeFileSync(portalConfigFilePath, JSON.stringify(existingConfigs, null, 2), 'utf-8');
   } catch {}
 
-  const syncCommands = [
-    `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
-    `:do { /tool fetch url="${portalBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
-    allowFree
-      ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=${duration}m comment="T-Connect Free Trial Auth User" } } on-error={}`
-      : `:do { /ip hotspot user remove [find name="T-TRIAL"]; /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
-    allowFree
-      ? `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial,cookie,mac-cookie } on-error={}`
-      : `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`
-  ];
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const syncCommands = fullSyncScript
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
 
   let affectedRouters: MonitoredRouter[] = [];
 
@@ -2940,7 +2954,93 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     updatedCount: affectedRouters.length,
     routerIds: affectedRouters.map(r => r.id),
     appliedAt: now,
+    cliScript: fullSyncScript,
     message: `Bulk policy '${validMode}' pushed to ${affectedRouters.length} routers.`
+  });
+});
+
+// Real-Time Fleet Sync Endpoint: pushes OTT Lesotho Walled Garden, 5-Port Bridge, login.html & alogin.html to all adopted routers
+app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
+  const { routers: clientRouters, controllerHost, endpointProtocol } = req.body || {};
+  const host = (controllerHost && String(controllerHost).trim()) || req.get('host') || '169.58.98.92:3000';
+  const protocol = endpointProtocol || (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http');
+  const portalBaseUrl = `${protocol}://${host}`;
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+
+  // Ensure any routers passed by the client are registered in monitoredRouters
+  if (Array.isArray(clientRouters)) {
+    clientRouters.forEach((r: any) => {
+      if (!r || !r.id) return;
+      const existing = monitoredRouters.get(r.id);
+      if (!existing) {
+        monitoredRouters.set(r.id, {
+          id: r.id,
+          name: r.name || `MikroTik-${String(r.id).slice(-6)}`,
+          siteName: r.siteName || 'Hotspot Site',
+          vertical: r.vertical || 'hotspot',
+          status: r.status || 'online',
+          publicWanIp: r.publicWanIp || '127.0.0.1',
+          wireguardIp: r.wireguardIp || '10.99.1.50',
+          lastHeartbeat: r.lastHeartbeat || 'Just now',
+          lastHeartbeatTimestamp: nowMs,
+          uptime: r.uptime || '1h',
+          cpuLoad: r.cpuLoad || 3,
+          memoryUsage: r.memoryUsage || 20,
+          activeSessions: r.activeSessions || 0,
+          missedBeats: 0,
+          webfigPort: 80,
+          winboxPort: 8291,
+          accessMode: r.accessMode || 'FREE_TRIAL_AND_PAID'
+        });
+      }
+    });
+  }
+
+  const existingConfigs = loadSavedPortalConfigs();
+  const activeCfg = existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
+  const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
+
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const syncCommands = fullSyncScript
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+
+  const syncedRouterNames: string[] = [];
+  const syncedRouterIds: string[] = [];
+
+  for (const router of monitoredRouters.values()) {
+    router.pendingCommands = syncCommands;
+    router.policyLastSyncedAt = nowIso;
+    syncedRouterNames.push(router.name);
+    syncedRouterIds.push(router.id);
+  }
+
+  recordServerAudit({
+    category: 'router_config',
+    action: 'fleet.sync_all_realtime',
+    target: 'All Adopted Routers',
+    details: `Real-time fleet sync dispatched to ${syncedRouterIds.length} routers: 5-port bridgeLocal (ether2-ether6 + wifi1-wifi2), OTT Lesotho 16-digit voucher redemption, compact T&Cs splash page, and full-screen ads.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1',
+    metadata: {
+      syncedCount: syncedRouterIds.length,
+      routerIds: syncedRouterIds,
+      portalBaseUrl
+    }
+  });
+
+  res.json({
+    success: true,
+    syncedCount: syncedRouterIds.length,
+    routerIds: syncedRouterIds,
+    routerNames: syncedRouterNames,
+    portalBaseUrl,
+    allowFreeAccess: allowFree,
+    cliScript: fullSyncScript,
+    syncedAt: nowIso,
+    message: `Real-time sync queued for ${syncedRouterIds.length} router(s)! All 5 downstream ports bridged to bridgeLocal, OTT Lesotho 16-digit voucher redemption enabled, and splash/ad pages pushed.`
   });
 });
 

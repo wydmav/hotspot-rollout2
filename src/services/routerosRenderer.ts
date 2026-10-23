@@ -54,21 +54,47 @@ export class RouterOSRenderer {
   }
 
   /**
+   * Builds RouterOS commands to immediately bridge all 5+ downstream LAN/AP ports
+   * (ether2, ether3, ether4, ether5, ether6, sfp1, sfp-sfpplus1 + wifi1, wifi2, wlan1, wlan2)
+   * into bridgeLocal while isolating ether1 as Starlink WAN.
+   */
+  static buildImmediateMultiPortBridgeCommands(bridgeName: string = 'bridgeLocal'): string {
+    return [
+      `# Ensure ${bridgeName} exists & isolate ether1 as Starlink WAN`,
+      `:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={ /interface bridge add name="${bridgeName}" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Local Bridge" } else={ /interface bridge set [find name="${bridgeName}"] arp=enabled protocol-mode=rstp disabled=no }`,
+      `:do { /interface bridge port remove [find interface="ether1"] } on-error={}`,
+      `:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}`,
+      `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}`,
+      `# Immediately bridge all 5+ downstream ports & Wi-Fi radios into ${bridgeName}`,
+      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={ :do { :if ([:len [/interface find name=$p]] > 0) do={ :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no } else={ /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no } } } on-error={} }`,
+      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="MIKROTIK-TC" configuration.mode=ap datapath.bridge="${bridgeName}" disabled=no; :do { /interface wifi unset $w security } on-error={}; :do { /interface wifi unset $w security.passphrase } on-error={} } } on-error={}`
+    ].join('\n');
+  }
+
+  /**
    * Builds RouterOS v7.16.2 compatible commands to deploy the Portal Builder Splash Page
    * directly onto the MikroTik router (hotspot/login.html and flash/hotspot/login.html).
    * Uses /ip hotspot reset-html and /tool fetch from the VPS (never uses invalid /file add).
    */
   static buildSplashPageFileCommands(portalBaseUrl: string, allowFreeAccess: boolean = true): string {
     const cleanBaseUrl = portalBaseUrl.replace(/\/+$/, '');
+    const hostOnly = cleanBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
     const redirectAndFallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>Wi-Fi Login</title><script>window.location.replace(\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\");</script><meta http-equiv=\\"refresh\\" content=\\"0; url=${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\"></head><body style=\\"background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center\\"><div style=\\"background:#0f1422;border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:24px;max-width:360px;width:100%\\"><h2 style=\\"margin:0 0 8px;font-size:18px\\">Opening Wi-Fi Portal...</h2><p style=\\"font-size:12px;color:#94a3b8;margin:0 0 16px\\">Redirecting to the hotspot splash page...</p><a href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)\\" style=\\"display:block;padding:12px;background:#f05e17;color:#fff;text-decoration:none;border-radius:12px;font-weight:800;font-size:13px\\">Tap Here if Not Redirected &rarr;</a></div></body></html>`;
 
     return [
+      RouterOSRenderer.buildImmediateMultiPortBridgeCommands('bridgeLocal'),
+      `# Ensure OTT Lesotho & Controller Walled Garden entries exist`,
+      `:do { /ip hotspot walled-garden ip add dst-address=169.58.98.92 action=accept comment="tc-vps-server-access" } on-error={}`,
+      `:do { /ip hotspot walled-garden add dst-host="*${hostOnly}*" action=allow comment="tc-vps-controller-domain" } on-error={}`,
+      `:do { /ip hotspot walled-garden add dst-host="*ottlesotho.com" action=allow comment="tc-ott-lesotho-api" } on-error={}`,
+      `:do { /ip hotspot walled-garden add dst-host="*ottvoucher.com" action=allow comment="tc-ott-voucher-api" } on-error={}`,
+      `:do { /ip hotspot walled-garden add dst-host="*ecocash.co.ls" action=allow comment="tc-ecocash-api" } on-error={}`,
       `# Ensure default hotspot HTML directory files exist on router storage`,
       `:do { :if ([:len [/file find name~"login.html"]] = 0) do={ /ip hotspot reset-html [find] } } on-error={}`,
       `# Apply immediate redirect/splash HTML to existing login.html files (no /file add used)`,
       `:do { /file set [find name~"hotspot/login.html"] contents="${redirectAndFallbackHtml}" } on-error={}`,
       `:do { /file set [find name~"hotspot/rlogin.html"] contents="${redirectAndFallbackHtml}" } on-error={}`,
-      `# Fetch live Portal Builder Splash Page directly from VPS controller`,
+      `# Fetch live Portal Builder Splash Page & Full-Screen Ad Page directly from VPS controller`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
       `:do { /tool fetch url="${cleanBaseUrl}/api/portal/router-login.html" dst-path="hotspot/rlogin.html" check-certificate=no } on-error={}`,
@@ -137,17 +163,17 @@ export class RouterOSRenderer {
       `:do { /interface list member add list=WAN interface=ether1 comment="T-Connect WAN1: Starlink / ISP" } on-error={}`,
       `:do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface=ether1 disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="Starlink WAN1 DHCP Client" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}`,
       ``,
-      `# 3. Hotspot & AP Bridge Configuration (bridgeLocal & 10.10.0.0/22 across ether2-ether5 + wifi1-wifi2)`,
+      `# 3. Hotspot & AP Bridge Configuration (bridgeLocal & 10.10.0.0/22 across all 5+ LAN/AP ports + Wi-Fi radios)`,
       `:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={ /interface bridge add name="bridgeLocal" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Local Bridge" } else={ /interface bridge set [find name="bridgeLocal"] arp=enabled protocol-mode=rstp disabled=no };`,
       `:do { /interface list member add list=LAN interface=bridgeLocal comment="T-Connect Hotspot LAN Bridge" } on-error={}`,
-      `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}`,
-      `# Reassign ether2..ether5 & wifi1..wifi2 into bridgeLocal with horizon=none (transparent L2 AP bridging)`,
-      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" horizon=none disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p horizon=none disabled=no } } on-error={} };`,
+      `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}`,
+      `# Reassign all 5+ downstream ports (ether2..ether6, sfp1, sfp-sfpplus1) & wifi1..wifi2/wlan1..wlan2 into bridgeLocal with horizon=none`,
+      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={ :do { :if ([:len [/interface find name=$p]] > 0) do={ :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" horizon=none disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p horizon=none disabled=no } } } on-error={} };`,
       `# Remove Conflicting LAN IP / DHCP / Hotspot on Factory Bridges or Direct Ethernet Ports (Preserves ether1 WAN)`,
       `:do { /ip dhcp-server remove [find interface!="bridgeLocal"] } on-error={}`,
       `:do { /ip hotspot remove [find interface!="bridgeLocal"] } on-error={}`,
-      `:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}`,
-      `:do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5"] } on-error={}`,
+      `:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5|ether6|sfp"] } on-error={}`,
+      `:do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5|ether6|sfp"] } on-error={}`,
       `:do { /ip address remove [find interface="bridgeLocal"] } on-error={}`,
       `:do { /ip address remove [find interface="bridge"] } on-error={}`,
       `/ip address add address=10.10.0.1/22 network=10.10.0.0 interface="bridgeLocal" comment="tc-hotspot-lan-gateway"`,
@@ -551,14 +577,16 @@ export class RouterOSRenderer {
 :do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}
 :do { /ip route remove [find gateway~"ether2|ether3|ether4|ether5"] } on-error={}
 
-# 2. Enable & Bind All AP Ethernet Ports (ether2, ether3, ether4, ether5) + WiFi into "${bridge}"
-:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
-:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
+# 2. Enable & Bind All 5+ AP Ethernet Ports (ether2..ether6, sfp) + WiFi into "${bridge}"
+:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}
+:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={
   :do {
-    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
-      /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
-    } else={
-      /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no comment="tc-ap-port-$p"
+    :if ([:len [/interface find name=$p]] > 0) do={
+      :if ([:len [/interface bridge port find interface=$p]] > 0) do={
+        /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
+      } else={
+        /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no comment="tc-ap-port-$p"
+      }
     }
   } on-error={}
 };
@@ -643,14 +671,16 @@ export class RouterOSRenderer {
 :do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}
 :do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface="ether1" disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="T-Connect WAN ether1" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}
 
-# 3. Enable & Move ether2, ether3, ether4, ether5, wifi1, wifi2 into "${bridge}" (Transparent L2 AP Bridge)
-:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
-:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
+# 3. Enable & Move All 5+ Downstream Ports (ether2..ether6, sfp1, sfp-sfpplus1, wifi1..2, wlan1..2) into "${bridge}" (Transparent L2 AP Bridge)
+:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}
+:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={
   :do {
-    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
-      /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
-    } else={
-      /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no
+    :if ([:len [/interface find name=$p]] > 0) do={
+      :if ([:len [/interface bridge port find interface=$p]] > 0) do={
+        /interface bridge port set [find interface=$p] bridge="${bridge}" horizon=none disabled=no
+      } else={
+        /interface bridge port add bridge="${bridge}" interface=$p horizon=none disabled=no
+      }
     }
   } on-error={}
 };

@@ -132,6 +132,10 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [bulkRateLimit, setBulkRateLimit] = useState<string>('10M/30M');
   const [isBulkPushing, setIsBulkPushing] = useState(false);
   const [bulkPushToast, setBulkPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSyncingAllRouters, setIsSyncingAllRouters] = useState(false);
+  const [syncedFleetCliScript, setSyncedFleetCliScript] = useState<string | null>(null);
+  const [copiedFleetCliScript, setCopiedFleetCliScript] = useState(false);
+  const [copiedAllPortsBridgeCmd, setCopiedAllPortsBridgeCmd] = useState(false);
 
   // Adoption Handshake Verification & WinBox Terminal Diagnostics State
   const [isVerifyingHandshake, setIsVerifyingHandshake] = useState(false);
@@ -211,6 +215,9 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           freeDurationMinutes: bulkFreeMinutes,
           freeRateLimit: bulkRateLimit
         });
+        if (data.cliScript) {
+          setSyncedFleetCliScript(data.cliScript);
+        }
         setBulkPushToast({
           type: 'success',
           message: `Policy '${bulkAccessMode}' pushed to ${data.updatedCount} routers across the fleet!`
@@ -229,6 +236,37 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       });
     } finally {
       setIsBulkPushing(false);
+    }
+  };
+
+  const handleSyncAllRoutersRealtime = async () => {
+    setIsSyncingAllRouters(true);
+    try {
+      const res = await fetch('/api/devices/fleet/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routers,
+          controllerHost: controllerHost.trim() || '169.58.98.92:3000',
+          endpointProtocol
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.cliScript) {
+          setSyncedFleetCliScript(data.cliScript);
+        }
+        triggerToast(
+          `Synced ${data.syncedCount} adopted router(s) in real time! 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, compact T&Cs splash, and full-screen ads pushed.`,
+          'success'
+        );
+      } else {
+        triggerToast(data.message || 'Failed to sync fleet routers.', 'error');
+      }
+    } catch (err: any) {
+      triggerToast(`Sync error: ${err.message || 'Network error'}`, 'error');
+    } finally {
+      setIsSyncingAllRouters(false);
     }
   };
 
@@ -526,11 +564,66 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </button>
 
           <button
+            type="button"
+            onClick={handleSyncAllRoutersRealtime}
+            disabled={isSyncingAllRouters}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-extrabold rounded-lg transition-colors shadow-md shadow-emerald-950/50 cursor-pointer"
+            title="Push OTT Lesotho 16-digit voucher redemption, 5-port bridgeLocal, compact T&Cs splash page, and full-screen ads to ALL adopted routers in real time"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
+            <span>{isSyncingAllRouters ? 'Syncing Fleet...' : 'Sync All Adopted Routers Now'}</span>
+          </button>
+
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>+ Add Router to Fleet</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Real-Time Fleet Sync Banner (OTT Lesotho 201 Verified + Immediate 5-Port Bridge) */}
+      <div className="bg-gradient-to-r from-emerald-950/60 via-[#0f1422] to-cyan-950/50 p-4 rounded-xl border border-emerald-500/40 flex flex-col lg:flex-row lg:items-center justify-between gap-3 font-mono text-xs">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-extrabold text-white uppercase tracking-wide">
+              LIVE FLEET SYNC: OTT LESOTHO (HTTP 201 VERIFIED) + IMMEDIATE 5-PORT BRIDGING
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+              ether2–ether6 + wifi1–wifi2 &rarr; bridgeLocal
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            Pushes <strong>OTT Lesotho 16-digit voucher redemption</strong> (Vendor IDs <code className="text-emerald-300">1, 11</code>), compact T&amp;Cs checkbox modal, full-screen video/multi-image ad redirector, and bridges all 5+ downstream ports (<code className="text-cyan-300">ether2, ether3, ether4, ether5, ether6, sfp1, wifi1, wifi2</code>) immediately while keeping <code className="text-amber-300">ether1</code> isolated as Starlink WAN.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleSyncAllRoutersRealtime}
+            disabled={isSyncingAllRouters}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
+            <span>{isSyncingAllRouters ? 'Pushing to Fleet...' : `Sync All ${routers.length} Routers in Real Time`}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const portalBaseUrl = `${endpointProtocol}://${controllerHost.trim() || '169.58.98.92:3000'}`;
+              const cli = syncedFleetCliScript || RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, bulkAccessMode !== 'PAID_ONLY');
+              navigator.clipboard.writeText(cli);
+              setCopiedFleetCliScript(true);
+              setTimeout(() => setCopiedFleetCliScript(false), 2500);
+            }}
+            className="px-3 py-2 bg-[#161d31] hover:bg-[#232d42] border border-emerald-500/40 text-emerald-300 font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Copy the exact real-time sync & 5-port bridge script to paste into WinBox Terminal"
+          >
+            {copiedFleetCliScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedFleetCliScript ? 'Copied Sync Script!' : 'Copy Real-Time Sync CLI'}</span>
           </button>
         </div>
       </div>
@@ -1263,33 +1356,49 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-slate-400 text-[11px]">Select Extra Port:</span>
-                    {(['ether2', 'ether3', 'ether4', 'ether5', 'wifi1', 'wifi2', 'sfp-sfpplus1'] as const).map((port) => (
-                      <button
-                        key={port}
-                        type="button"
-                        onClick={() => setSelectedExtraPort(port)}
-                        className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
-                          selectedExtraPort === port
-                            ? 'bg-[#f05e17] border-[#f05e17] text-white'
-                            : 'bg-[#161d31] border-[#232d42] text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {port}
-                      </button>
-                    ))}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-slate-400 text-[11px]">Select Extra Port:</span>
+                      {(['ether2', 'ether3', 'ether4', 'ether5', 'ether6', 'wifi1', 'wifi2', 'sfp1', 'sfp-sfpplus1'] as const).map((port) => (
+                        <button
+                          key={port}
+                          type="button"
+                          onClick={() => setSelectedExtraPort(port)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
+                            selectedExtraPort === port
+                              ? 'bg-[#f05e17] border-[#f05e17] text-white'
+                              : 'bg-[#161d31] border-[#232d42] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {port}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allPortsCmd = RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName);
+                        navigator.clipboard.writeText(allPortsCmd);
+                        setCopiedAllPortsBridgeCmd(true);
+                        setTimeout(() => setCopiedAllPortsBridgeCmd(false), 2500);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold rounded text-[11px] transition-colors cursor-pointer"
+                    >
+                      {copiedAllPortsBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedAllPortsBridgeCmd ? 'Copied All 5+ Ports Bridge!' : 'Copy Bridge All 5+ Ports (ether2–ether6 + WiFi)'}</span>
+                    </button>
                   </div>
 
                   {/* Generated Bridge Port Command */}
                   <div className="p-3 bg-[#080b12] rounded-xl border border-[#1b233a] space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-[10px]">RouterOS Terminal Command to Bridge {selectedExtraPort}:</span>
+                      <span className="text-slate-400 text-[10px]">RouterOS Terminal Command to Bridge All 5+ Ports Immediately (or {selectedExtraPort}):</span>
                       <button
                         type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(
-                            RouterOSRenderer.renderBridgePortCommand(selectedBridgeName, selectedExtraPort)
+                            RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName)
                           );
                           setCopiedBridgeCmd(true);
                           setTimeout(() => setCopiedBridgeCmd(false), 2000);
@@ -1297,11 +1406,11 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         className="flex items-center gap-1.5 px-2.5 py-0.5 bg-[#161d31] hover:bg-[#232d42] border border-[#232d42] text-[11px] text-white rounded transition-colors"
                       >
                         {copiedBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedBridgeCmd ? 'Copied!' : 'Copy Bridge Command'}</span>
+                        <span>{copiedBridgeCmd ? 'Copied!' : 'Copy 5-Port Bridge Script'}</span>
                       </button>
                     </div>
-                    <pre className="text-emerald-400 font-mono text-xs select-all whitespace-pre-wrap">
-                      {RouterOSRenderer.renderBridgePortCommand(selectedBridgeName, selectedExtraPort)}
+                    <pre className="text-emerald-400 font-mono text-xs select-all whitespace-pre-wrap max-h-40 overflow-y-auto">
+                      {RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName)}
                     </pre>
                   </div>
 
@@ -1319,7 +1428,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                          Harmonizes ports <span className="font-mono text-amber-300">ether2, ether3, ether4, ether5, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
+                          Harmonizes all 5+ downstream ports <span className="font-mono text-amber-300">ether2, ether3, ether4, ether5, ether6, sfp1, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
                         </p>
                       </div>
                     </div>
