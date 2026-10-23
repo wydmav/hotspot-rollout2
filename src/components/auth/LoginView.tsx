@@ -5,7 +5,9 @@ import {
   ArrowRight, 
   KeyRound, 
   CheckCircle2, 
-  AlertCircle
+  AlertCircle,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { storage } from '../../services/storage';
 import { authService, ForgotPasswordResponse } from '../../services/auth';
@@ -14,9 +16,16 @@ import { AuthSession, TeamMember } from '../../types';
 interface LoginViewProps {
   onLoginSuccess: (session: AuthSession) => void;
   teamMembers: TeamMember[];
+  adminTheme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMembers }) => {
+export const LoginView: React.FC<LoginViewProps> = ({
+  onLoginSuccess,
+  teamMembers,
+  adminTheme = 'dark',
+  onToggleTheme
+}) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -112,7 +121,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
   };
 
   return (
-    <div className="min-h-screen bg-[#080b14] text-slate-100 flex flex-col justify-between font-sans selection:bg-[#f05e17] selection:text-white relative overflow-hidden">
+    <div
+      data-admin-theme={adminTheme}
+      className="min-h-screen bg-[#080b14] text-slate-100 flex flex-col justify-between font-sans selection:bg-[#f05e17] selection:text-white relative overflow-hidden"
+    >
       {/* Background Ambience & Grid */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(240,94,23,0.15),rgba(255,255,255,0))] pointer-events-none" />
       <div 
@@ -143,6 +155,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, teamMember
         </div>
 
         <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
+          {onToggleTheme && (
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 hover:text-white text-xs font-mono font-bold transition-colors cursor-pointer"
+              title="Toggle Admin Control Tower Light / Dark Theme"
+            >
+              {adminTheme === 'dark' ? (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Light</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Dark</span>
+                </>
+              )}
+            </button>
+          )}
           <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-full">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>Core WireGuard Online</span>

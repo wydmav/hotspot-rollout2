@@ -16,7 +16,9 @@ import {
   Sparkles,
   PanelLeft,
   PanelLeftClose,
-  Wifi
+  Wifi,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { SystemAlert, PaymentTransaction, TeamMember } from '../../types';
 import { ExportService } from '../../services/exportService';
@@ -53,6 +55,8 @@ interface HeaderProps {
   teamMembersCount?: number;
   pendingResetCount?: number;
   onOpenInviteTeammates?: () => void;
+  adminTheme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -96,6 +100,8 @@ export const Header: React.FC<HeaderProps> = ({
   teamMembersCount = 1,
   pendingResetCount = 0,
   onOpenInviteTeammates,
+  adminTheme = 'dark',
+  onToggleTheme,
 }) => {
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
   const [showVoucherPopover, setShowVoucherPopover] = useState(false);
@@ -194,8 +200,34 @@ export const Header: React.FC<HeaderProps> = ({
         />
       </div>
 
-      {/* Zone 3: Actions (Database, Biometric Security, Low Voucher Alert, Export PDF/CSV, Alerts, User Profile) */}
+      {/* Zone 3: Actions (Theme Toggle, Database, Biometric Security, Low Voucher Alert, Export PDF/CSV, Alerts, User Profile) */}
       <div className="flex items-center gap-2.5">
+        {/* Admin Light / Dark Theme Toggle (Excludes Subscriber Captive Portal) */}
+        {onToggleTheme && (
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 hover:text-white text-xs font-mono font-bold transition-colors cursor-pointer"
+            title={
+              adminTheme === 'dark'
+                ? 'Switch Admin Control Tower to Light Theme (Subscriber Captive Portal stays unchanged)'
+                : 'Switch Admin Control Tower to Dark Theme (Subscriber Captive Portal stays unchanged)'
+            }
+          >
+            {adminTheme === 'dark' ? (
+              <>
+                <Sun className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Light</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-3.5 h-3.5 text-indigo-500" />
+                <span className="hidden sm:inline">Dark</span>
+              </>
+            )}
+          </button>
+        )}
+
         {/* Supabase Connection Status */}
         <button
           onClick={onOpenDatabaseModal}

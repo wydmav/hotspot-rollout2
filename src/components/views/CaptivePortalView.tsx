@@ -1223,7 +1223,7 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
 
             {/* Simulated Device Frame */}
             <div
-              className={`w-full ${
+              className={`portal-isolated-theme w-full ${
                 deviceFrame === 'desktop' ? 'max-w-xl' : 'max-w-[390px]'
               } bg-[#05070c] rounded-[36px] border-8 border-[#1f283d] shadow-2xl overflow-hidden transition-all duration-300 relative`}
             >

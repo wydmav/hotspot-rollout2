@@ -2391,7 +2391,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
           {/* Device Frame */}
           <div
-            className={`w-full ${
+            className={`portal-isolated-theme w-full ${
               deviceFrame === 'desktop' ? 'max-w-md' : 'max-w-[360px]'
             } bg-[#05070c] rounded-[38px] border-8 border-[#1f283d] shadow-2xl overflow-hidden relative transition-all duration-300`}
           >

@@ -56,6 +56,32 @@ export default function App() {
   });
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [voucherThreshold, setVoucherThreshold] = useState<number>(() => storage.getVoucherLowThreshold());
+  const [adminTheme, setAdminTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      const saved = window.localStorage.getItem('tc_admin_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    }
+    return 'dark';
+  });
+
+  const handleToggleTheme = () => {
+    setAdminTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem('tc_admin_theme', next);
+        } catch {}
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      // Never apply admin light theme when rendering the subscriber captive portal
+      document.body.setAttribute('data-admin-theme', isUserTestingPortal ? 'dark' : adminTheme);
+    }
+  }, [adminTheme, isUserTestingPortal]);
 
   // Auto-collapse sidebar on smaller screens
   useEffect(() => {
@@ -719,12 +745,17 @@ export default function App() {
           showToast(`Welcome back, ${session.user.name}! Authenticated as ${session.user.role}.`);
         }}
         teamMembers={state.team}
+        adminTheme={adminTheme}
+        onToggleTheme={handleToggleTheme}
       />
     );
   }
 
   return (
-    <div className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans relative">
+    <div
+      data-admin-theme={adminTheme}
+      className="flex h-screen bg-[#080b14] text-slate-100 overflow-hidden font-sans relative"
+    >
       {/* Streamlined 4-Section Sidebar Navigation */}
       <Sidebar
         currentTab={currentTab}
@@ -797,6 +828,8 @@ export default function App() {
           teamMembersCount={state.team.length}
           pendingResetCount={state.team.filter((m) => m.hasPendingReset).length}
           onOpenInviteTeammates={() => setIsGlobalInviteModalOpen(true)}
+          adminTheme={adminTheme}
+          onToggleTheme={handleToggleTheme}
         />
 
         {/* Role Preview Active Banner */}

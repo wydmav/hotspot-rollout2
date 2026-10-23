@@ -710,7 +710,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#05070c] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden">
+    <div className="portal-isolated-theme min-h-screen bg-[#05070c] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden">
       {/* Hidden iframe & form for real MikroTik Hotspot gateway authentication */}
       <iframe name="mikrotik_auth_iframe" className="hidden" title="MikroTik Auth Frame" />
       <form
