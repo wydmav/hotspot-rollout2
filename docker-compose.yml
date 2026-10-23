@@ -18,6 +18,15 @@ services:
       - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-}
       - RADIUS_SECRET=${RADIUS_SECRET:-radsec_tconnect_lesotho_99120}
       - ROUTER_API_PASSWORD=${ROUTER_API_PASSWORD:-tc_pass_crypto_random_32char}
+      - OTTVOUCHER_MERCHANT_ID=${OTTVOUCHER_MERCHANT_ID:-TCONNECTLES1}
+      - OTTVOUCHER_API_KEY=${OTTVOUCHER_API_KEY:-}
+      - OTTVOUCHER_API_PASSWORD=${OTTVOUCHER_API_PASSWORD:-}
+      - OTTVOUCHER_VENDOR_ID=${OTTVOUCHER_VENDOR_ID:-1, 11}
+      - OTTVOUCHER_ENDPOINT_URL=${OTTVOUCHER_ENDPOINT_URL:-https://api.ottlesotho.com}
+    volumes:
+      - ./data:/app/data
+      - ./public/images:/app/public/images
+      - ./public/videos:/app/public/videos
     networks:
       - tconnect-net
 

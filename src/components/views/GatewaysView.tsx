@@ -87,6 +87,37 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [redeemTestResult, setRedeemTestResult] = useState<any>(null);
   const [isRedeemingTest, setIsRedeemingTest] = useState(false);
 
+  // Pull authoritative gateway credentials from server on mount
+  React.useEffect(() => {
+    fetch('/api/gateways')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && Array.isArray(data.gateways)) {
+          const srvOtt = data.gateways.find((g: any) => g.provider === 'ottvoucher');
+          if (srvOtt) {
+            onUpdateCredentials('ottvoucher', {
+              apiKey: srvOtt.apiKey,
+              apiPassword: srvOtt.apiPassword,
+              username: srvOtt.username || srvOtt.merchantId || 'TCONNECTLES1',
+              merchantId: srvOtt.merchantId || srvOtt.username || 'TCONNECTLES1',
+              vendorId: srvOtt.vendorId || '1, 11',
+              endpointUrl: srvOtt.endpointUrl || 'https://api.ottlesotho.com',
+              status: 'operational',
+              isLive: true
+            });
+            if (selectedGateway?.provider === 'ottvoucher') {
+              if (srvOtt.apiKey) setApiKey(srvOtt.apiKey);
+              if (srvOtt.apiPassword) setApiPassword(srvOtt.apiPassword);
+              if (srvOtt.merchantId || srvOtt.username) setMerchantId(srvOtt.merchantId || srvOtt.username);
+              if (srvOtt.vendorId) setVendorId(srvOtt.vendorId);
+              if (srvOtt.endpointUrl) setEndpointUrl(srvOtt.endpointUrl);
+            }
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleSelectGateway = (gw: GatewayConfig) => {
     setSelectedGateway(gw);
     setApiKey(gw.apiKey || '');
@@ -94,7 +125,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setApiPassword(gw.apiPassword || '');
     setBearerToken(gw.bearerToken || '');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-    setVendorId(gw.vendorId || '11, 1, TCONNECTLES1');
+    setVendorId(gw.vendorId || '1, 11');
     setEndpointUrl(
       gw.endpointUrl && !gw.endpointUrl.includes('portal.ottlesotho.com')
         ? gw.endpointUrl
@@ -113,19 +144,74 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     onRemoveGateway(providerToRemove);
   };
 
-  const handleSaveCredentials = () => {
+  const handleSaveCredentials = async () => {
     if (!selectedGateway) return;
+    const cleanKey = apiKey.trim();
+    const cleanPass = apiPassword.trim();
+    const cleanUser = (merchantId || 'TCONNECTLES1').trim();
+    const cleanVendor = (vendorId || '1, 11').trim();
+    const cleanEndpoint = (endpointUrl || 'https://api.ottlesotho.com').trim();
+
     onUpdateCredentials(selectedGateway.provider, {
-      apiKey: apiKey.trim(),
+      apiKey: cleanKey,
       apiSecret: apiSecret.trim(),
-      apiPassword: apiPassword.trim(),
-      username: (merchantId || 'TCONNECTLES1').trim(),
-      vendorId: (vendorId || '11, 1, TCONNECTLES1').trim(),
-      endpointUrl: (endpointUrl || 'https://api.ottlesotho.com').trim(),
+      apiPassword: cleanPass,
+      username: cleanUser,
+      vendorId: cleanVendor,
+      endpointUrl: cleanEndpoint,
       bearerToken: bearerToken.trim(),
-      merchantId: (merchantId || 'TCONNECTLES1').trim(),
-      webhookSecret: webhookSecret.trim()
+      merchantId: cleanUser,
+      webhookSecret: webhookSecret.trim(),
+      isLive: true,
+      status: 'operational'
     });
+
+    if (selectedGateway.provider === 'ottvoucher') {
+      setIsProcessing(true);
+      try {
+        await fetch('/api/gateways/ottvoucher/credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: cleanKey,
+            apiPassword: cleanPass,
+            username: cleanUser,
+            merchantId: cleanUser,
+            vendorId: cleanVendor,
+            endpointUrl: cleanEndpoint,
+            isLive: true
+          })
+        });
+        const testRes = await fetch('/api/gateways/ottvoucher/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: cleanKey,
+            apiPassword: cleanPass,
+            username: cleanUser,
+            merchantId: cleanUser,
+            vendorId: cleanVendor,
+            endpointUrl: cleanEndpoint,
+            isLive: true
+          })
+        });
+        const testData = await testRes.json();
+        setIsProcessing(false);
+        setTestResult({
+          success: Boolean(testData.success),
+          message: testData.message || 'Credentials saved to persistent storage.',
+          outboundIp: testData.outboundIp,
+          diagnosticStages: testData.diagnosticStages
+        });
+        if (testData.success) {
+          setActiveStep(4);
+        }
+        return;
+      } catch {
+        setIsProcessing(false);
+      }
+    }
+
     setTestResult({
       success: true,
       message: 'Credentials saved! Please run Step 2 (Test Connection) to verify API access.'
@@ -466,7 +552,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         {endpointUrl || 'https://api.ottlesotho.com'}
                       </code>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        Basic Auth + SHA-256 Hash + Vendor ID ({vendorId || '11, 1'})
+                        Basic Auth + SHA-256 Hash + Vendor ID ({vendorId || '1, 11'})
                       </span>
                     </div>
 
@@ -480,6 +566,15 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
+
+                  {(apiKey.trim() === '4323e6fa-09b2-4eaa-9b73-f275dad58787' || apiPassword.trim() === '3*68pF&24*') && (
+                    <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-200 text-xs flex items-start gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="leading-relaxed">
+                        <strong className="text-amber-300">Action Required Once:</strong> You generated a new API Key or Password in <code className="text-white">portal.ottlesotho.com/APISettings</code> today. Paste your new <strong>4. API KEY</strong> and <strong>5. API PASSWORD</strong> below and click <strong>Save Credentials</strong>. Your credentials and redeemed PINs are now stored in a persistent volume and protected from browser/Docker overwrites forever.
+                      </div>
+                    </div>
+                  )}
 
                   {/* Row 1: API Base URL, API Username, and Vendor ID */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

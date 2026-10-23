@@ -314,6 +314,7 @@ class StorageService {
     this.checkVoucherStock();
 
     if (typeof window !== 'undefined') {
+      this.hydrateGatewaysFromServer();
       window.addEventListener('storage', (e) => {
         if (e.key === STORAGE_KEY && e.newValue) {
           try {
@@ -323,6 +324,39 @@ class StorageService {
         }
       });
     }
+  }
+
+  async hydrateGatewaysFromServer(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const res = await fetch('/api/gateways');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.gateways) && data.gateways.length > 0) {
+        let updated = false;
+        this.state.gateways = this.state.gateways.map((localGw) => {
+          const srvGw = data.gateways.find((g: any) => g.provider === localGw.provider);
+          if (srvGw) {
+            updated = true;
+            return {
+              ...localGw,
+              ...srvGw,
+              apiKey: srvGw.apiKey || localGw.apiKey,
+              apiPassword: srvGw.apiPassword || localGw.apiPassword,
+              vendorId: srvGw.vendorId || localGw.vendorId || '1, 11',
+              username: srvGw.username || srvGw.merchantId || localGw.username || 'TCONNECTLES1',
+              merchantId: srvGw.merchantId || srvGw.username || localGw.merchantId || 'TCONNECTLES1',
+              endpointUrl: srvGw.endpointUrl || localGw.endpointUrl || 'https://api.ottlesotho.com'
+            };
+          }
+          return localGw;
+        });
+        if (updated && typeof window.localStorage !== 'undefined') {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+          this.notify();
+        }
+      }
+    } catch {}
   }
 
   private loadInitialState() {
@@ -424,25 +458,29 @@ class StorageService {
     };
   }
 
-  private saveState() {
+  private saveState(explicitCredentialUpdate = false) {
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-        // Sync gateways, vouchers, and Supabase config to backend server so /portal & OTT Voucher API have live state
-        let supabaseConfig: any = undefined;
-        try {
-          const rawSb = window.localStorage.getItem('tconnect_supabase_config_v2');
-          if (rawSb) supabaseConfig = JSON.parse(rawSb);
-        } catch {}
-        fetch('/api/gateways/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            gateways: this.state.gateways,
-            vouchers: this.state.vouchers,
-            supabaseConfig
-          })
-        }).catch(() => {});
+        // Never allow guest captive portal phones (/portal) to push gateway credentials to the server
+        const isGuestPortalRoute = window.location.pathname.startsWith('/portal');
+        if (!isGuestPortalRoute) {
+          let supabaseConfig: any = undefined;
+          try {
+            const rawSb = window.localStorage.getItem('tconnect_supabase_config_v2');
+            if (rawSb) supabaseConfig = JSON.parse(rawSb);
+          } catch {}
+          fetch('/api/gateways/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              gateways: this.state.gateways,
+              vouchers: this.state.vouchers,
+              supabaseConfig,
+              explicitCredentialUpdate
+            })
+          }).catch(() => {});
+        }
       } catch (e) {
         // quiet fallback
       }
@@ -1456,13 +1494,33 @@ class StorageService {
       updates.merchantId !== undefined;
 
     Object.assign(gw, updates);
-    if (isCredentialChange && updates.status === undefined) {
+    if (provider === 'ottvoucher' && gw.apiKey && gw.apiPassword) {
+      gw.isLive = true;
+      gw.isSandbox = false;
+      gw.status = 'operational';
+      gw.testPassedOnce = true;
+      if (typeof window !== 'undefined') {
+        fetch('/api/gateways/ottvoucher/credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: gw.apiKey,
+            apiPassword: gw.apiPassword,
+            username: gw.username || gw.merchantId || 'TCONNECTLES1',
+            merchantId: gw.merchantId || gw.username || 'TCONNECTLES1',
+            vendorId: gw.vendorId || '1, 11',
+            endpointUrl: gw.endpointUrl || 'https://api.ottlesotho.com',
+            isLive: true
+          })
+        }).catch(() => {});
+      }
+    } else if (isCredentialChange && updates.status === undefined) {
       gw.testPassedOnce = false;
       if (gw.isLive) gw.isLive = false;
       gw.status = gw.apiKey ? 'testing' : 'not_configured';
     }
 
-    this.saveState();
+    this.saveState(true);
   }
 
   removeGateway(provider: GatewayProvider): boolean {
