@@ -527,18 +527,21 @@ class StorageService {
           if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
             const leadId = `lead_${ev.id}`;
             if (!this.state.captiveLeads.some((l) => l.id === leadId)) {
-              const parts = newSession.guestName.trim().split(' ');
+              const guestNameStr = newSession.guestName || 'Guest User';
+              const guestPhoneStr = newSession.guestPhone || '';
+              const guestEmailStr = newSession.guestEmail || '';
+              const parts = guestNameStr.trim().split(' ');
               const fName = ev.firstName || parts[0] || 'Guest';
               const lName = ev.lastName || parts.slice(1).join(' ') || '';
               this.state.captiveLeads.unshift({
                 id: leadId,
                 firstName: fName,
                 lastName: lName,
-                fullName: newSession.guestName,
+                fullName: guestNameStr,
                 countryCode: ev.countryCode === '+27' ? '+27' : '+266',
-                phone: ev.phone || newSession.guestPhone,
-                fullPhone: newSession.guestPhone,
-                email: newSession.guestEmail,
+                phone: ev.phone || guestPhoneStr,
+                fullPhone: guestPhoneStr,
+                email: guestEmailStr,
                 capturedAt: newSession.startedAt,
                 routerName: newSession.routerName,
                 siteName: newSession.siteName,

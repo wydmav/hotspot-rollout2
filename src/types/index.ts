@@ -308,9 +308,10 @@ export interface VideoAdItem {
   watchMode: 'full_video' | 'skip_after_sec';
   skipAfterSec: number;
   durationSec?: number;
+  uploadedAt?: string;
   impressions: number;
   clicks?: number;
-  createdAt: string;
+  createdAt?: string;
 }
 
 export interface SponsorAdConfig {
