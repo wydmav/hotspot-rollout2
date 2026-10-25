@@ -246,10 +246,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const accentColor = cfg.accentColor || '#f05e17';
   const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 38;
   const glassOpacity = typeof cfg.glassOpacity === 'number' ? cfg.glassOpacity : 88;
-  const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : true;
+  const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
+  const allowVoucherCode = cfg.allowVoucherCode !== undefined ? Boolean(cfg.allowVoucherCode) : true;
+  const allowOnlinePayment = cfg.allowOnlinePayment !== undefined ? Boolean(cfg.allowOnlinePayment) : true;
   const collectName = cfg.collectName !== undefined ? Boolean(cfg.collectName) : true;
   const collectPhone = cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true;
-  const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : false;
+  const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : true;
   const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
   const termsText = cfg.termsText || 'By connecting, you agree to the T-Connect acceptable use policy.';
 
@@ -268,7 +270,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     : defaultPlans;
 
   const badgeText = [brandTitle.trim(), tagline.trim()].filter(Boolean).join(' · ');
-  const defaultTab = allowFreeAccess ? 'free' : 'buy';
+  const enabledTabsCount = (allowFreeAccess ? 1 : 0) + (allowVoucherCode ? 1 : 0) + (allowOnlinePayment ? 1 : 0);
+  const defaultTab = allowFreeAccess ? 'free' : allowVoucherCode ? 'voucher' : 'buy';
   const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
   const postAuthDst = videoAdsEnabled
     ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
@@ -361,8 +364,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     margin: auto 0;
   }
   .tabs {
-    display: grid;
-    grid-template-columns: ${allowFreeAccess ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'};
+    display: ${enabledTabsCount <= 1 ? 'none' : 'grid'};
+    grid-template-columns: repeat(${Math.max(1, enabledTabsCount)}, 1fr);
     gap: 5px;
     background: rgba(0,0,0,0.45);
     padding: 3px;
@@ -567,13 +570,13 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     <div id="errBox" class="err-box"></div>
 
     <div class="tabs">
-      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn active" onclick="switchTab('free')">Free Wi-Fi</button>` : ''}
-      <button type="button" id="tabBtn_voucher" class="tab-btn ${!allowFreeAccess ? 'active' : ''}" onclick="switchTab('voucher')">Voucher Code</button>
-      <button type="button" id="tabBtn_buy" class="tab-btn" onclick="switchTab('buy')">Buy Pass</button>
+      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn ${defaultTab === 'free' ? 'active' : ''}" onclick="switchTab('free')">Free Wi-Fi</button>` : ''}
+      ${allowVoucherCode ? `<button type="button" id="tabBtn_voucher" class="tab-btn ${defaultTab === 'voucher' ? 'active' : ''}" onclick="switchTab('voucher')">Voucher</button>` : ''}
+      ${allowOnlinePayment ? `<button type="button" id="tabBtn_buy" class="tab-btn ${defaultTab === 'buy' ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>` : ''}
     </div>
 
     <!-- SHARED GUEST IDENTIFICATION FIELDS (Only shown on Free Wi-Fi tab) -->
-    <div id="guestFieldsWrap" style="${allowFreeAccess ? '' : 'display:none;'}">
+    <div id="guestFieldsWrap" style="${defaultTab === 'free' ? '' : 'display:none;'}">
       ${collectName ? `
       <div class="grid-2">
         <div class="field">
@@ -599,7 +602,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       ${collectEmail ? `
       <div class="field">
         <label class="lbl">Email Address *</label>
-        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com">
+        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com" required>
       </div>` : ''}
     </div>
 
@@ -613,7 +616,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
     ${allowFreeAccess ? `
     <!-- TAB 1: FREE WI-FI -->
-    <div id="sec_free" class="sec active">
+    <div id="sec_free" class="sec ${defaultTab === 'free' ? 'active' : ''}">
       <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
         <input type="hidden" name="username" value="T-TRIAL">
         <input type="hidden" name="password" value="123">
@@ -623,8 +626,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </div>
     ` : ''}
 
+    ${allowVoucherCode ? `
     <!-- TAB 2: VOUCHER CODE -->
-    <div id="sec_voucher" class="sec ${!allowFreeAccess ? 'active' : ''}">
+    <div id="sec_voucher" class="sec ${defaultTab === 'voucher' ? 'active' : ''}">
       <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
@@ -636,9 +640,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <button type="submit" id="voucherSubmitBtn" class="btn-emerald" disabled>Activate Voucher &amp; Connect &rarr;</button>
       </form>
     </div>
+    ` : ''}
 
+    ${allowOnlinePayment ? `
     <!-- TAB 3: BUY SPEED PASS (EcoCash & OTT Voucher Only) -->
-    <div id="sec_buy" class="sec">
+    <div id="sec_buy" class="sec ${defaultTab === 'buy' ? 'active' : ''}">
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
@@ -659,6 +665,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <button type="submit" id="buySubmitBtn" class="btn-emerald" disabled>Pay &amp; Connect Internet &rarr;</button>
       </form>
     </div>
+    ` : ''}
   </div>
 
   <div style="height:8px"></div>
@@ -721,9 +728,17 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     var fEl = document.getElementById('guestFirst');
     var lEl = document.getElementById('guestLast');
     var pEl = document.getElementById('guestPhone');
+    var eEl = document.getElementById('guestEmail');
     if (fEl && fEl.value.trim().length < 2) { showErr('Please enter your first name.'); return false; }
     if (lEl && lEl.value.trim().length < 2) { showErr('Please enter your surname.'); return false; }
     if (pEl && pEl.value.replace(/\\D/g, '').length < 8) { showErr('Please enter a valid mobile number.'); return false; }
+    if (eEl) {
+      var emVal = eEl.value.trim();
+      if (!emVal || emVal.indexOf('@') === -1 || emVal.indexOf('.') === -1) {
+        showErr('Please enter a valid email address (e.g. name@example.com).');
+        return false;
+      }
+    }
     showErr('');
     return true;
   }
@@ -819,7 +834,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Pass (30 Mins)', durationSeconds: 1800 }))
+        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi (Unlimited)', durationSeconds: 0 }))
       }).catch(function(){});
     } catch (err) {}
     return true;
@@ -917,21 +932,40 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
   const baseUrl = `${protocol}://${host}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
   const enabled = sponsorCfg.enabled !== false;
-  const retriggerHours = sponsorCfg.retriggerEveryHours || 3;
-  const retriggerGb = sponsorCfg.retriggerEveryGb || 2;
   const defaultLib = [
     {
-      id: 'vid_alliance_all',
-      title: 'Alliance Insurance Lesotho — 15s Spot',
-      sponsorName: 'Alliance Insurance Lesotho',
-      headline: 'Protect Your Journey Across Lesotho',
-      description: 'High-speed Starlink Wi-Fi sponsored by Alliance Insurance. Comprehensive motor, life, and asset cover.',
-      videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      destinationUrl: 'https://alliance.co.ls',
+      id: 'carousel_tconnect_offers',
+      title: 'T-Connect & Partner Picture Series (3 Slides)',
+      sponsorName: 'T-Connect Lesotho Partners',
+      headline: 'Slide Through Exclusive Partner Deals',
+      description: 'Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.',
+      videoUrl: '',
+      destinationUrl: 'https://tconnect.co.ls',
+      mediaType: 'image_carousel',
+      slides: [
+        {
+          id: 'slide_1',
+          imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
+          redirectUrl: 'https://alliance.co.ls',
+          caption: 'Alliance Insurance Lesotho — Instant Motor & Business Cover'
+        },
+        {
+          id: 'slide_2',
+          imageUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1400&q=80',
+          redirectUrl: 'https://tconnect.co.ls',
+          caption: 'Maseru Cafe & Hotspot Partner Offers — Tap to Explore'
+        },
+        {
+          id: 'slide_3',
+          imageUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1400&q=80',
+          redirectUrl: 'https://ottlesotho.com',
+          caption: 'Top Up With 16-Digit OTT Lesotho Vouchers Anywhere'
+        }
+      ],
       targetScope: 'all',
       enabled: true,
-      watchMode: 'full_video',
-      skipAfterSec: 5
+      watchMode: 'skip_after_sec',
+      skipAfterSec: 0
     }
   ];
   const lib = Array.isArray(sponsorCfg.videoLibrary) && sponsorCfg.videoLibrary.length > 0
@@ -939,13 +973,15 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
     : defaultLib;
   const normScope = scope === 'village' ? 'community' : scope;
   const chosenAd =
+    lib.find((v: any) => v.enabled && v.mediaType === 'image_carousel' && (v.targetScope === normScope || v.targetScope === scope)) ||
+    lib.find((v: any) => v.enabled && v.mediaType === 'image_carousel' && v.targetScope === 'all') ||
     lib.find((v: any) => v.enabled && (v.targetScope === normScope || v.targetScope === scope)) ||
     lib.find((v: any) => v.enabled && v.targetScope === 'all') ||
     lib.find((v: any) => v.enabled) ||
     defaultLib[0];
 
   if (!enabled || !chosenAd) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="1; url=https://www.google.com"><title>Connected</title><style>body{min-height:100vh;background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}.box{background:#0f1422;border:1px solid rgba(16,185,129,0.4);padding:28px;border-radius:24px;max-width:360px}h2{color:#34d399;margin-bottom:8px}p{font-size:13px;color:#cbd5e1;margin-bottom:16px}a{display:inline-block;padding:12px 20px;background:#10b981;color:#052e16;font-weight:800;border-radius:12px;text-decoration:none;font-size:13px}</style></head><body><div class="box"><h2>You're Connected</h2><p>Your Wi-Fi session is active.</p><a href="https://www.google.com">Continue to Internet &rarr;</a></div></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title><script>try{window.close();}catch(e){}try{window.open('','_self','');window.close();}catch(e){}window.location.replace('https://www.google.com');</script></head><body style="background:#000"></body></html>`;
   }
 
   let videoSrc = String(chosenAd.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
@@ -960,9 +996,18 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
         caption: String(s.caption || '')
       }))
     : [];
-  const watchMode = chosenAd.watchMode || 'full_video';
-  const skipSec = Number(chosenAd.skipAfterSec) || 5;
   const defaultDest = String(chosenAd.destinationUrl || 'https://www.google.com');
+
+  const slidesTrackHtml = rawSlides.map((s: any, idx: number) => `
+    <div class="slide-frame" data-idx="${idx}">
+      <img class="slide-img" src="${s.imageUrl}" alt="Ad Slide ${idx + 1}" draggable="false" />
+      ${s.caption ? `<div class="slide-caption">${s.caption}</div>` : ''}
+    </div>
+  `).join('');
+
+  const dotsHtml = rawSlides.map((_s: any, idx: number) => `
+    <button type="button" class="dot-btn ${idx === 0 ? 'active' : ''}" id="dot_${idx}" onclick="goToSlide(${idx}, event)"></button>
+  `).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -973,64 +1018,67 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;user-select:none}
   html,body{width:100vw;height:100vh;overflow:hidden;background:#000;color:#fff}
-  .ad-stage{position:fixed;inset:0;width:100vw;height:100vh;background:#000;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .ad-stage{position:fixed;inset:0;width:100vw;height:100vh;background:#000;overflow:hidden;cursor:pointer}
+  .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.32s ease-out}
+  .slide-frame{width:100vw;height:100vh;flex-shrink:0;position:relative;background:#000}
   video,.slide-img{width:100vw;height:100vh;object-fit:cover;display:block;background:#000}
-  .top-pill{position:fixed;top:14px;right:14px;z-index:50;display:flex;align-items:center;gap:8px}
-  .btn-skip{padding:10px 16px;border-radius:999px;border:1px solid rgba(255,255,255,0.28);background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.6)}
-  .btn-skip.unlocked{background:#10b981;color:#052e16;border-color:#34d399}
-  .btn-skip:disabled{opacity:0.85;cursor:not-allowed}
+  .slide-caption{position:absolute;bottom:76px;left:16px;right:16px;margin:0 auto;max-width:420px;background:rgba(0,0,0,0.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.2);padding:10px 16px;border-radius:16px;color:#fff;font-size:13px;font-weight:700;text-align:center}
+  .top-left-pill{position:fixed;top:16px;left:16px;z-index:50;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:rgba(0,0,0,0.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.25);font-size:12px;font-weight:800;color:#fff}
+  .top-right-close{position:fixed;top:16px;right:16px;z-index:60}
+  .btn-close-x{width:44px;height:44px;border-radius:999px;border:2px solid rgba(255,255,255,0.55);background:rgba(0,0,0,0.85);color:#fff;font-size:20px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,0.75);transition:all 0.15s}
+  .btn-close-x:hover,.btn-close-x:active{background:#e11d48;border-color:#fff;transform:scale(0.96)}
+  .arrow-btn{position:fixed;top:50%;transform:translateY(-50%);z-index:50;width:44px;height:44px;border-radius:999px;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.35);color:#fff;font-size:20px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .arrow-left{left:12px}
+  .arrow-right{right:12px}
+  .bottom-dots{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(0,0,0,0.8);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.25)}
+  .dot-btn{height:10px;width:10px;border-radius:999px;border:none;background:rgba(255,255,255,0.45);cursor:pointer;transition:all 0.2s}
+  .dot-btn.active{width:28px;background:#f05e17}
   .mute-pill{position:fixed;bottom:16px;left:16px;z-index:50;background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:999px;padding:8px 14px;font-size:11px;font-weight:700;cursor:pointer}
-  .carousel-nav{position:fixed;bottom:16px;right:16px;z-index:50;display:flex;align-items:center;gap:8px}
-  .nav-btn{background:rgba(0,0,0,0.78);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer}
-  .slide-counter{background:rgba(0,0,0,0.75);color:#e2e8f0;padding:6px 12px;border-radius:999px;font-size:11px;font-family:monospace;font-weight:700;border:1px solid rgba(255,255,255,0.2)}
 </style>
 </head>
 <body>
 <div class="ad-stage" id="adStage" onclick="handleAdClick(event)">
   ${mediaType === 'image_carousel' && rawSlides.length > 0
-    ? `<img id="carouselImg" class="slide-img" src="${rawSlides[0].imageUrl}" alt="Ad" />`
+    ? `<div class="carousel-track" id="carouselTrack">${slidesTrackHtml}</div>`
     : `<video id="adVideo" src="${videoSrc}" playsinline autoplay muted controlsList="nodownload nofullscreen"></video>`}
 </div>
 
-<div class="top-pill">
-  <button type="button" id="continueBtn" class="btn-skip" disabled onclick="releaseToInternet(event)">
-    ${watchMode === 'full_video' && mediaType === 'video' ? 'Watching Ad...' : `Continue in ${skipSec}s`}
-  </button>
+<div class="top-left-pill" onclick="event.stopPropagation()">
+  <span style="width:8px;height:8px;border-radius:999px;background:#34d399;display:inline-block"></span>
+  <span>${chosenAd.sponsorName || 'T-Connect Partner Offer'}</span>
+  ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `<span id="slideCounter" style="color:#fbbf24;font-family:monospace;padding-left:6px;border-left:1px solid rgba(255,255,255,0.25)">1/${rawSlides.length}</span>` : ''}
 </div>
 
-${mediaType === 'image_carousel' && rawSlides.length > 0 ? `
-<div class="carousel-nav" onclick="event.stopPropagation()">
-  <button type="button" class="nav-btn" onclick="prevSlide(event)">&larr; Prev</button>
-  <span class="slide-counter" id="slideCounter">1 / ${rawSlides.length}</span>
-  <button type="button" class="nav-btn" onclick="nextSlide(event)">Next &rarr;</button>
+<div class="top-right-close" onclick="event.stopPropagation()">
+  <button type="button" id="closeAdBtn" class="btn-close-x" title="Close Ad and Enjoy Connectivity" onclick="releaseToInternet(event)">&#10005;</button>
 </div>
-` : `
+
+${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
+<button type="button" class="arrow-btn arrow-left" onclick="prevSlide(event)">&#8249;</button>
+<button type="button" class="arrow-btn arrow-right" onclick="nextSlide(event)">&#8250;</button>
+<div class="bottom-dots" onclick="event.stopPropagation()">
+  ${dotsHtml}
+  <span style="font-size:11px;color:#e2e8f0;font-family:monospace;font-weight:700;margin-left:4px">Slide &rarr;</span>
+</div>
+` : mediaType === 'video' ? `
 <button type="button" class="mute-pill" id="muteBtn" onclick="toggleAudio(event)">Unmute Audio</button>
-`}
+` : ''}
 
 <script>
   var vid = document.getElementById('adVideo');
-  var btn = document.getElementById('continueBtn');
   var muteBtn = document.getElementById('muteBtn');
   var mediaType = '${mediaType}';
   var slides = ${JSON.stringify(rawSlides)};
   var slideIdx = 0;
   var defaultDest = '${defaultDest.replace(/'/g, "\\'")}';
-  var watchMode = '${watchMode}';
-  var skipSec = ${skipSec};
-  var elapsed = 0;
-  var unlocked = false;
   var touchStartX = 0;
-
-  function unlockButton() {
-    if (unlocked) return;
-    unlocked = true;
-    btn.disabled = false;
-    btn.className = 'btn-skip unlocked';
-    btn.textContent = 'Continue to Internet \\u2192';
-  }
+  var touchDragged = false;
 
   function handleAdClick(e) {
+    if (touchDragged) {
+      touchDragged = false;
+      return;
+    }
     var targetUrl = defaultDest;
     if (mediaType === 'image_carousel' && slides.length > 0 && slides[slideIdx] && slides[slideIdx].redirectUrl) {
       targetUrl = slides[slideIdx].redirectUrl;
@@ -1042,10 +1090,20 @@ ${mediaType === 'image_carousel' && rawSlides.length > 0 ? `
 
   function renderSlide() {
     if (!slides.length) return;
-    var img = document.getElementById('carouselImg');
+    var track = document.getElementById('carouselTrack');
     var ctr = document.getElementById('slideCounter');
-    if (img) img.src = slides[slideIdx].imageUrl;
-    if (ctr) ctr.textContent = (slideIdx + 1) + ' / ' + slides.length;
+    if (track) track.style.transform = 'translateX(-' + (slideIdx * 100) + '%)';
+    if (ctr) ctr.textContent = (slideIdx + 1) + '/' + slides.length;
+    for (var i = 0; i < slides.length; i++) {
+      var d = document.getElementById('dot_' + i);
+      if (d) d.className = 'dot-btn' + (i === slideIdx ? ' active' : '');
+    }
+  }
+
+  function goToSlide(idx, e) {
+    if (e) e.stopPropagation();
+    slideIdx = idx;
+    renderSlide();
   }
 
   function nextSlide(e) {
@@ -1065,12 +1123,14 @@ ${mediaType === 'image_carousel' && rawSlides.length > 0 ? `
   var stage = document.getElementById('adStage');
   if (stage && mediaType === 'image_carousel') {
     stage.addEventListener('touchstart', function(e) {
+      touchDragged = false;
       if (e.touches && e.touches[0]) touchStartX = e.touches[0].clientX;
     }, { passive: true });
     stage.addEventListener('touchend', function(e) {
       if (!e.changedTouches || !e.changedTouches[0]) return;
       var diff = e.changedTouches[0].clientX - touchStartX;
-      if (Math.abs(diff) > 45) {
+      if (Math.abs(diff) > 35) {
+        touchDragged = true;
         if (diff < 0) nextSlide();
         else prevSlide();
       }
@@ -1085,36 +1145,27 @@ ${mediaType === 'image_carousel' && rawSlides.length > 0 ? `
   }
 
   function releaseToInternet(e) {
-    if (e) e.stopPropagation();
-    if (!unlocked) return;
-    window.location.href = 'https://www.google.com';
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    try { window.close(); } catch (err) {}
+    try { window.open('', '_self', ''); window.close(); } catch (err) {}
+    var dst = 'https://www.google.com';
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var orig = params.get('user_url') || params.get('link_orig') || params.get('dst');
+      if (orig && orig.indexOf('$(') === -1) dst = orig;
+    } catch (err) {}
+    if (window.top && window.top !== window.self) {
+      try { window.top.location.replace(dst); return; } catch (err) {}
+    }
+    window.location.replace(dst);
   }
 
   if (vid) {
-    vid.addEventListener('ended', function() { unlockButton(); });
-    vid.addEventListener('error', function() { unlockButton(); });
     vid.play().catch(function() {});
   }
-
-  setInterval(function() {
-    elapsed++;
-    if (watchMode === 'skip_after_sec' || mediaType === 'image_carousel') {
-      var rem = Math.max(0, skipSec - elapsed);
-      if (rem > 0 && !unlocked) {
-        btn.textContent = 'Continue in ' + rem + 's';
-      } else {
-        unlockButton();
-      }
-    } else {
-      if (vid && vid.duration && !isNaN(vid.duration)) {
-        var left = Math.max(0, Math.ceil(vid.duration - vid.currentTime));
-        if (!unlocked) btn.textContent = 'Continue in ' + left + 's';
-        if (left <= 0) unlockButton();
-      } else if (elapsed >= 15) {
-        unlockButton();
-      }
-    }
-  }, 1000);
 </script>
 </body>
 </html>`;

@@ -415,15 +415,14 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
     validation.fillSampleData();
   };
 
-  // Free Access Connect Action - Grants Instant Free Session with Live Countdown Timer
+  // Free Access Connect Action - Grants Unlimited Free Wi-Fi Session
   const handleConnectFree = () => {
     if (!isFormValid) {
       validation.markAllTouched();
       return;
     }
-    const durationMins = freeAccessDurationMinutes || 30;
-    setRemainingSeconds(durationMins * 60);
-    setTotalPackageSeconds(durationMins * 60);
+    setRemainingSeconds(0);
+    setTotalPackageSeconds(0);
     setLastConnectedAuthMode('free');
 
     // Save real active session and captive lead in storage
@@ -436,10 +435,10 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
       siteName: 'Hotspot Node (Central)',
       vertical: 'hotspot',
       routerName: 'MikroTik-Node',
-      planName: `Free Access (${durationMins} Mins)`,
+      planName: 'Free Wi-Fi (Unlimited)',
       startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + durationMins * 60 * 1000).toISOString(),
-      remainingSeconds: durationMins * 60,
+      expiresAt: new Date(Date.now() + 3650 * 86400 * 1000).toISOString(),
+      remainingSeconds: 0,
       bytesDown: 14200000,
       bytesUp: 3800000,
       speedLimit: '30M/10M',
@@ -449,7 +448,7 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
       authMode: 'free'
     });
 
-    setPreviewStep('usage');
+    setPreviewStep('success');
   };
 
   // Identification Submit
@@ -852,103 +851,16 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                 </button>
               </div>
 
-              {/* Free Access Duration Controls: 30 Mins to 24 Hours (1 Day) */}
+              {/* Free Access Policy: Unlimited Forever */}
               {authFree && (
-                <div className="pt-3 border-t border-[#1b233a] space-y-2.5 text-xs font-mono">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-white flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Free Session Duration:</span>
-                    </span>
-                    <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 text-[11px]">
-                      {freeAccessDurationMinutes >= 60 
-                        ? `${Math.floor(freeAccessDurationMinutes / 60)}h${freeAccessDurationMinutes % 60 ? ` ${freeAccessDurationMinutes % 60}m` : ''}` 
-                        : `${freeAccessDurationMinutes}m`}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span>30 Mins</span>
-                      <span>12 Hours</span>
-                      <span>24 Hours (1 Day)</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="30"
-                      max="1440"
-                      step="15"
-                      value={freeAccessDurationMinutes}
-                      onChange={(e) => setFreeAccessDurationMinutes(Number(e.target.value))}
-                      className="w-full accent-[#f05e17] cursor-pointer"
-                    />
-                  </div>
-
-                  {/* Preset chips */}
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    {[
-                      { label: '30m', mins: 30 },
-                      { label: '1 Hour', mins: 60 },
-                      { label: '2 Hours', mins: 120 },
-                      { label: '4 Hours', mins: 240 },
-                      { label: '8 Hours', mins: 480 },
-                      { label: '12 Hours', mins: 720 },
-                      { label: '24 Hours (1 Day)', mins: 1440 }
-                    ].map((item) => (
-                      <button
-                        key={item.mins}
-                        type="button"
-                        onClick={() => setFreeAccessDurationMinutes(item.mins)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
-                          freeAccessDurationMinutes === item.mins
-                            ? 'bg-[#f05e17] text-white border-[#f05e17]'
-                            : 'bg-[#161d31] text-slate-300 border-[#232d42] hover:text-white'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Custom hours & minutes inputs */}
-                  <div className="pt-2 border-t border-[#1b233a] flex items-center justify-between gap-2 text-[10px]">
-                    <span className="text-slate-400 font-bold shrink-0">Custom Time Input:</span>
-                    <div className="flex items-center gap-1.5 font-mono">
-                      <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
-                        <input
-                          type="number"
-                          min="0"
-                          max="24"
-                          value={Math.floor(freeAccessDurationMinutes / 60)}
-                          onChange={(e) => {
-                            const h = Math.max(0, Math.min(24, parseInt(e.target.value) || 0));
-                            const currentM = freeAccessDurationMinutes % 60;
-                            const total = Math.max(30, Math.min(1440, h * 60 + currentM));
-                            setFreeAccessDurationMinutes(total);
-                          }}
-                          className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
-                        />
-                        <span className="text-slate-400 text-[10px]">hrs</span>
-                      </div>
-                      <span className="text-slate-500 font-bold">:</span>
-                      <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
-                        <input
-                          type="number"
-                          min="0"
-                          max="59"
-                          value={freeAccessDurationMinutes % 60}
-                          onChange={(e) => {
-                            const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
-                            const currentH = Math.floor(freeAccessDurationMinutes / 60);
-                            const total = Math.max(30, Math.min(1440, currentH * 60 + m));
-                            setFreeAccessDurationMinutes(total);
-                          }}
-                          className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
-                        />
-                        <span className="text-slate-400 text-[10px]">mins</span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="pt-3 border-t border-[#1b233a] flex items-center justify-between text-xs font-mono">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Free Session Duration:</span>
+                  </span>
+                  <span className="text-emerald-300 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/30 text-[11px]">
+                    Unlimited Forever (No Time Limit)
+                  </span>
                 </div>
               )}
             </div>
@@ -1180,7 +1092,7 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
             <div className="w-full flex flex-wrap items-center justify-between gap-3 mb-4 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a]">
               {/* Step Navigation Tabs (Screenshot 1: Identification, Authentication, Payment, Success, Session Usage) */}
               <div className="flex flex-wrap items-center gap-1 text-[11px] font-mono">
-                {(['identification', 'payment', 'success', 'usage'] as const).map((step) => (
+                {(['identification', 'payment', 'success'] as const).map((step) => (
                   <button
                     key={step}
                     onClick={() => setPreviewStep(step)}
@@ -1190,7 +1102,7 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                         : 'text-slate-400 hover:text-white bg-[#121829]'
                     }`}
                   >
-                    {step === 'usage' ? 'Session Usage' : step}
+                    {step}
                   </button>
                 ))}
               </div>
@@ -1663,147 +1575,11 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                       )}
 
                       <button
-                        onClick={() => setPreviewStep('usage')}
+                        onClick={() => setPreviewStep('identification')}
                         className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs font-mono rounded-xl shadow-lg"
                       >
-                        View Session Usage &amp; Time Left &rarr;
+                        Close Splash &amp; Release to Internet &rarr;
                       </button>
-                    </div>
-                  )}
-
-                  {/* STEP 4: SESSION USAGE & TIME REMAINING (MATCHING SCREENSHOT 3) */}
-                  {previewStep === 'usage' && (
-                    <div
-                      className="rounded-2xl p-5 border border-white/20 shadow-2xl backdrop-blur-xl space-y-4 text-center"
-                      style={{
-                        backgroundColor: `rgba(15, 20, 34, ${glassOpacity / 100})`,
-                      }}
-                    >
-                      {/* Active session banner */}
-                      <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[10px] font-mono text-emerald-300 flex items-center gap-2 text-left">
-                        <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Your Wi-Fi session is active on this device</span>
-                      </div>
-
-                      {/* Brand Icon */}
-                      <div className="w-12 h-12 rounded-xl bg-[#0f1422] border border-[#232d42] mx-auto flex items-center justify-center p-2 shadow-inner">
-                        <Wifi className="w-6 h-6 text-[#f05e17]" />
-                      </div>
-
-                      {remainingSeconds > 0 ? (
-                        <>
-                          {/* TIME USAGE METRIC (41.17% Used · Days, Hours, Minutes remaining) */}
-                          <div className="p-3 bg-black/50 rounded-xl border border-white/10 space-y-1">
-                            <div className="text-[11px] font-mono text-slate-400">Time usage</div>
-                            <div className="text-2xl font-black text-white font-mono">
-                              {((1 - remainingSeconds / totalPackageSeconds) * 100).toFixed(2)}% Used
-                            </div>
-
-                            {/* Days, Hours, Minutes, Seconds display */}
-                            <div className="text-xs font-extrabold text-emerald-400 font-mono pt-1">
-                              {formatDetailedTimeRemaining(remainingSeconds)}
-                            </div>
-
-                            {/* Progress Bar */}
-                            <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
-                              <div
-                                className="bg-emerald-500 h-full rounded-full transition-all duration-1000"
-                                style={{
-                                  width: `${Math.max(5, (1 - remainingSeconds / totalPackageSeconds) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* DATA USAGE METRIC */}
-                          <div className="p-3 bg-black/50 rounded-xl border border-white/10 text-left space-y-1 font-mono text-xs">
-                            <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                              <span>Data usage</span>
-                              <span className="text-emerald-400 font-bold">Unlimited data</span>
-                            </div>
-                            <div className="text-slate-200 text-[11px]">17 MB consumed · High-Speed QoS</div>
-                            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-cyan-500 h-full rounded-full w-1/4" />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 pt-1 font-mono">
-                            <button
-                              type="button"
-                              onClick={() => setRemainingSeconds(0)}
-                              className="flex-1 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 rounded-lg text-[10px] transition-colors cursor-pointer"
-                              title="Test session expiry"
-                            >
-                              Simulate Expiry (0s)
-                            </button>
-                            <button
-                              onClick={() => setPreviewStep('payment')}
-                              className="flex-1 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg text-[10px] transition-colors"
-                            >
-                              Extend Pass
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        /* EXPIRED SESSION STATE: ALIGNED FREE RECONNECT & PAID RE-AUTHENTICATION */
-                        <div className="space-y-3 font-mono">
-                          <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30 animate-pulse">
-                            <AlertTriangle className="w-5 h-5" />
-                          </div>
-
-                          <div>
-                            <h4 className="font-extrabold text-white text-sm">Session Expired</h4>
-                            <p className="text-[10px] text-rose-300 mt-0.5">
-                              {lastConnectedAuthMode === 'free'
-                                ? 'Your free access duration has concluded.'
-                                : 'Your paid Wi-Fi pass is exhausted.'}
-                            </p>
-                          </div>
-
-                          <div className="p-3 bg-black/50 rounded-xl border border-rose-500/30 text-[11px] text-slate-300 text-left leading-relaxed">
-                            {lastConnectedAuthMode === 'free' ? (
-                              <span>
-                                Free trial completed. You can <strong>connect again for free</strong> right now, or upgrade to a high-speed paid pass.
-                              </span>
-                            ) : (
-                              <span>
-                                Session finished. Authenticate and pay again via <strong>EcoCash (*199#)</strong> or <strong>OTT Voucher</strong> to restore connection.
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-2 pt-1">
-                            {lastConnectedAuthMode === 'free' ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={handleConnectFree}
-                                  className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                                >
-                                  <Zap className="w-3.5 h-3.5 fill-current" />
-                                  <span>Connect Free Again ({freeAccessDurationMinutes >= 60 ? `${Math.floor(freeAccessDurationMinutes / 60)}h` : `${freeAccessDurationMinutes}m`}) &rarr;</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewStep('payment')}
-                                  className="w-full py-2 bg-white/10 hover:bg-white/20 text-slate-200 text-xs rounded-xl transition-colors cursor-pointer"
-                                >
-                                  Upgrade to High-Speed Pass &rarr;
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewStep('payment')}
-                                className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <DollarSign className="w-3.5 h-3.5" />
-                                <span>Pay Again via Gateway to Reconnect &rarr;</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

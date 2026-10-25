@@ -490,16 +490,31 @@ export const VideoAdManagerPanel: React.FC = () => {
             }
           }}
         >
-          {/* Edge-to-Edge Media (Clicking Redirects User to Target URL) */}
+          {/* Edge-to-Edge Media: Horizontal Sliding Picture Track OR Video */}
           {isPreviewCarousel ? (
-            <img
-              key={currentSlide?.imageUrl}
-              src={currentSlide?.imageUrl}
-              alt={currentSlide?.caption || activePreviewAd.headline}
-              onClick={() => handleAdClickRedirect(activePreviewAd, simSlideIdx)}
-              className="w-screen h-screen object-cover cursor-pointer"
-              title={`Click to open ${currentClickRedirectUrl}`}
-            />
+            <div
+              className="flex w-full h-full transition-transform duration-300 ease-out"
+              style={{ transform: `translateX(-${simSlideIdx * 100}%)` }}
+            >
+              {previewSlides.map((sl, idx) => (
+                <div key={sl.id || idx} className="w-screen h-screen shrink-0 relative bg-black">
+                  <img
+                    src={sl.imageUrl}
+                    alt={sl.caption || activePreviewAd.headline}
+                    onClick={() => handleAdClickRedirect(activePreviewAd, idx)}
+                    className="w-screen h-screen object-cover cursor-pointer"
+                    title={`Click to open ${sl.redirectUrl || currentClickRedirectUrl}`}
+                  />
+                  {sl.caption && (
+                    <div className="absolute bottom-20 inset-x-4 z-20 flex justify-center pointer-events-none">
+                      <div className="px-4 py-2 rounded-2xl bg-black/75 backdrop-blur-md border border-white/20 text-white text-xs font-bold text-center max-w-md">
+                        {sl.caption}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           ) : (
             <video
               key={activePreviewAd.videoUrl}
@@ -527,34 +542,15 @@ export const VideoAdManagerPanel: React.FC = () => {
             </span>
           </div>
 
-          {/* Top-Right Skip / Continue Pill + Close Preview */}
+          {/* Top-Right Immediate X Close Button */}
           <div className="fixed top-4 right-4 z-30 flex items-center gap-2">
             <button
               type="button"
-              disabled={!simUnlocked}
               onClick={() => setIsFullScreenTestOpen(false)}
-              className={`px-4 py-2 rounded-full font-extrabold text-xs transition-all flex items-center gap-1.5 ${
-                simUnlocked
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg cursor-pointer'
-                  : 'bg-black/75 text-white border border-white/25 cursor-not-allowed'
-              }`}
+              className="w-11 h-11 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-2xl flex items-center justify-center cursor-pointer transition-all"
+              title="Close Ad & Enjoy Connectivity"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>
-                {simUnlocked
-                  ? 'Continue to Internet \u2192'
-                  : activePreviewAd.watchMode === 'skip_after_sec'
-                  ? `Skip in ${Math.max(0, (activePreviewAd.skipAfterSec || 5) - simElapsedSec)}s`
-                  : `Ad Playing (${Math.max(0, 15 - simElapsedSec)}s)`}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsFullScreenTestOpen(false)}
-              className="p-2 rounded-full bg-black/75 hover:bg-black text-white border border-white/20 cursor-pointer"
-              title="Exit Full-Screen Preview"
-            >
-              <X className="w-4 h-4" />
+              <X className="w-6 h-6 stroke-[2.5]" />
             </button>
           </div>
 
@@ -1359,14 +1355,22 @@ export const VideoAdManagerPanel: React.FC = () => {
             >
               {/* Full-Screen Media Canvas */}
               {isPreviewCarousel ? (
-                <img
-                  key={currentSlide?.imageUrl}
-                  src={currentSlide?.imageUrl}
-                  alt={currentSlide?.caption || activePreviewAd.headline}
-                  onClick={() => handleAdClickRedirect(activePreviewAd, simSlideIdx)}
-                  className="w-full h-full object-cover cursor-pointer"
-                  title={`Click ad to visit ${currentClickRedirectUrl}`}
-                />
+                <div
+                  className="flex w-full h-full transition-transform duration-300 ease-out"
+                  style={{ transform: `translateX(-${simSlideIdx * 100}%)` }}
+                >
+                  {previewSlides.map((sl, idx) => (
+                    <div key={sl.id || idx} className="w-full h-full shrink-0 relative bg-black">
+                      <img
+                        src={sl.imageUrl}
+                        alt={sl.caption || activePreviewAd.headline}
+                        onClick={() => handleAdClickRedirect(activePreviewAd, idx)}
+                        className="w-full h-full object-cover cursor-pointer"
+                        title={`Click ad to visit ${sl.redirectUrl || currentClickRedirectUrl}`}
+                      />
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <video
                   ref={simVideoRef}
@@ -1389,7 +1393,7 @@ export const VideoAdManagerPanel: React.FC = () => {
                 />
               )}
 
-              {/* Floating Top Bar: Sponsor Redirect Pill + Timer/Continue Pill */}
+              {/* Floating Top Bar: Sponsor Redirect Pill + Immediate X Close Button */}
               <div className="absolute top-3 inset-x-3 z-20 flex items-center justify-between gap-2">
                 <button
                   type="button"
@@ -1404,21 +1408,11 @@ export const VideoAdManagerPanel: React.FC = () => {
 
                 <button
                   type="button"
-                  disabled={!simUnlocked}
-                  className={`px-3 py-1 rounded-full text-[10px] font-extrabold flex items-center gap-1 transition-all shrink-0 ${
-                    simUnlocked
-                      ? 'bg-emerald-500 text-slate-950 shadow-lg cursor-pointer'
-                      : 'bg-black/75 text-white border border-white/20'
-                  }`}
+                  onClick={() => setIsFullScreenTestOpen(true)}
+                  title="Immediate X Close Button (Releases user straight to internet)"
+                  className="w-8 h-8 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-lg flex items-center justify-center cursor-pointer transition-all shrink-0"
                 >
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>
-                    {simUnlocked
-                      ? 'Continue \u2192'
-                      : activePreviewAd.watchMode === 'skip_after_sec'
-                      ? `Skip in ${Math.max(0, (activePreviewAd.skipAfterSec || 5) - simElapsedSec)}s`
-                      : `${Math.max(0, Math.ceil((isPreviewCarousel ? 8 : simVideoDurationSec) - simElapsedSec))}s`}
-                  </span>
+                  <X className="w-4 h-4 stroke-[2.5]" />
                 </button>
               </div>
 

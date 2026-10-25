@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   UserCheck, 
   Search, 
@@ -37,8 +37,72 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const refreshLeads = () => {
-    setLeads(storage.getCaptiveLeads());
+    setLeads([...storage.getCaptiveLeads()]);
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const unsub = storage.subscribe(() => {
+      if (mounted) setLeads([...storage.getCaptiveLeads()]);
+    });
+
+    const pollServerGuestLeads = async () => {
+      try {
+        const res = await fetch('/api/portal/guest-connect');
+        const data = await res.json();
+        if (!mounted || !data?.success || !Array.isArray(data.events)) return;
+        let added = false;
+        const currentLeads = storage.getCaptiveLeads();
+        for (const ev of data.events) {
+          const emailVal = (ev.email || ev.guestEmail || '').trim();
+          const phoneVal = (ev.phone || ev.guestPhone || '').trim();
+          const nameVal = (ev.guestName || `${ev.firstName || ''} ${ev.lastName || ''}`).trim();
+          if (!emailVal && !phoneVal && (!nameVal || nameVal === 'Guest User')) continue;
+          const leadId = `lead_srv_${ev.id}`;
+          const exists = currentLeads.some(
+            (l) =>
+              l.id === leadId ||
+              (emailVal && l.email.toLowerCase() === emailVal.toLowerCase()) ||
+              (phoneVal && l.fullPhone.replace(/\D/g, '') === phoneVal.replace(/\D/g, ''))
+          );
+          if (!exists) {
+            const parts = nameVal.split(' ');
+            storage.addCaptiveLead({
+              id: leadId,
+              firstName: ev.firstName || parts[0] || 'Guest',
+              lastName: ev.lastName || parts.slice(1).join(' ') || 'Subscriber',
+              fullName: nameVal || 'Guest Subscriber',
+              countryCode: ev.countryCode || '+266',
+              phone: phoneVal.replace(/^\+266\s?|\+27\s?/, ''),
+              fullPhone: phoneVal.startsWith('+') ? phoneVal : `${ev.countryCode || '+266'} ${phoneVal}`,
+              email: emailVal || 'not-provided@tconnect.ls',
+              capturedAt: ev.connectedAt || new Date().toISOString(),
+              routerName: ev.routerName || 'MIKROTIK-TC',
+              siteName: ev.siteName || 'T-Connect Hotspot',
+              vertical: (ev.scope as VerticalType) || 'hotspot',
+              clientMac: ev.mac || 'Client-MAC',
+              clientIp: ev.ip || '10.10.0.x',
+              deviceType: 'Wi-Fi Guest',
+              durationMinutes: ev.durationSeconds ? Math.round(ev.durationSeconds / 60) : 0,
+              status: 'active'
+            });
+            added = true;
+          }
+        }
+        if (added && mounted) {
+          setLeads([...storage.getCaptiveLeads()]);
+        }
+      } catch {}
+    };
+
+    pollServerGuestLeads();
+    const timer = setInterval(pollServerGuestLeads, 2500);
+    return () => {
+      mounted = false;
+      unsub();
+      clearInterval(timer);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -52,11 +116,8 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     setTimeout(() => setCopiedText(null), 2000);
   };
 
-  // Re-grant 30-minute free access session for an existing lead
+  // Grant unlimited free access session for an existing lead
   const handleRegrantFreeSession = (lead: CaptivePortalLead) => {
-    const durationMins = 30;
-    const durationSec = durationMins * 60;
-    
     storage.addActiveSession({
       id: `sess_free_${Date.now()}`,
       voucherCode: `FREE-${(lead.phone || '9999').slice(-4)}`,
@@ -66,13 +127,13 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       siteName: lead.siteName || 'Hotspot Node',
       vertical: lead.vertical || 'hotspot',
       routerName: lead.routerName || 'MikroTik Gateway',
-      planName: `Free Access (${durationMins} Mins)`,
+      planName: 'Free Wi-Fi (Unlimited)',
       startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + durationSec * 1000).toISOString(),
-      remainingSeconds: durationSec,
+      expiresAt: new Date(Date.now() + 3650 * 86400 * 1000).toISOString(),
+      remainingSeconds: 0,
       bytesDown: 14200000,
       bytesUp: 3800000,
-      speedLimit: '5M/2.5M',
+      speedLimit: '25M/10M',
       guestName: lead.fullName,
       guestPhone: lead.fullPhone,
       guestEmail: lead.email,
@@ -80,10 +141,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     });
 
     // Update lead status
-    const updatedLead: CaptivePortalLead = { ...lead, status: 'active' };
+    const updatedLead: CaptivePortalLead = { ...lead, durationMinutes: 0, status: 'active' };
     storage.addCaptiveLead(updatedLead);
     refreshLeads();
-    showToast(`Granted 30-minute instant free session to ${lead.fullName}`);
+    showToast(`Granted unlimited free Wi-Fi session to ${lead.fullName}`);
   };
 
   const handleDeleteLead = (id: string, name: string) => {
@@ -120,7 +181,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       clientMac: `40:${Math.floor(10+Math.random()*89)}:76:A2:${Math.floor(10+Math.random()*89)}:${Math.floor(10+Math.random()*89)}`,
       clientIp: `10.89.1.${Math.floor(10 + Math.random() * 80)}`,
       deviceType: Math.random() > 0.5 ? 'Apple iPhone (iOS 17)' : 'Samsung Galaxy A54',
-      durationMinutes: 30,
+      durationMinutes: 0,
       status: 'active'
     };
 
@@ -544,19 +605,17 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
 
                     {/* Session Lease Status */}
                     <td className="py-2.5 px-3">
-                      {isLive ? (
-                        <div className="space-y-0.5">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            <span>Live ({remainingMins}m left)</span>
+                      <div className="space-y-0.5">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                          <span>
+                            {isLive && remainingMins > 0 && activeSession?.authMode !== 'free'
+                              ? `Live (${remainingMins}m left)`
+                              : 'Unlimited (Forever)'}
                           </span>
-                          <div className="text-[9px] text-slate-500">Free Access Lease</div>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800/80 text-slate-400 border border-slate-700">
-                          <span>Expired</span>
                         </span>
-                      )}
+                        <div className="text-[9px] text-slate-500">Free Unlimited Wi-Fi</div>
+                      </div>
                     </td>
 
                     {/* Actions */}
@@ -564,11 +623,11 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => handleRegrantFreeSession(lead)}
-                          className="px-2 py-1 rounded bg-[#f05e17]/20 hover:bg-[#f05e17]/30 text-[#f05e17] border border-[#f05e17]/40 text-[10px] font-bold transition-colors flex items-center gap-1"
-                          title="Grant 30-minute free access session right now"
+                          className="px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold transition-colors flex items-center gap-1"
+                          title="Refresh unlimited free Wi-Fi session"
                         >
                           <Zap className="w-3 h-3 fill-current" />
-                          <span>Re-grant 30m</span>
+                          <span>Unlimited Active</span>
                         </button>
 
                         <button

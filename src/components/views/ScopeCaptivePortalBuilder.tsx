@@ -32,12 +32,17 @@ import {
   Clock,
   Folder,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  UserCheck,
+  ChevronLeft,
+  ChevronRight,
+  X
 } from 'lucide-react';
-import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice } from '../../types';
+import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice, CaptivePortalLead } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage } from '../../services/storage';
 import { TenantGroupsModal } from './TenantGroupsModal';
+import { CaptivePortalLeadsView } from './CaptivePortalLeadsView';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
 
 export const formatDuration = (mins: number) => {
@@ -273,7 +278,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     termsText: 'Amohela Liphelo: Marang-rang a motse a abelanoa ke bohle. Sebelisa marang-rang ka boikarabelo le toka.',
     collectName: true,
     collectPhone: true,
-    collectEmail: false,
+    collectEmail: true,
     collectGender: false,
     collectDob: false,
     defaultCountryCode: '+266',
@@ -345,7 +350,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     termsText: 'Amohela Liphelo: Marang-rang a motse a abelanoa ke bohle. Sebelisa marang-rang ka boikarabelo le toka.',
     collectName: true,
     collectPhone: true,
-    collectEmail: false,
+    collectEmail: true,
     collectGender: false,
     collectDob: false,
     defaultCountryCode: '+266',
@@ -417,7 +422,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     termsText: 'Amohela Liphelo: Rea u amohela serapeng sa sechaba. Boloka tikoloho e hloekile ha u ntse u sebelisa marang-rang.',
     collectName: true,
     collectPhone: true,
-    collectEmail: false,
+    collectEmail: true,
     collectGender: false,
     collectDob: false,
     defaultCountryCode: '+266',
@@ -489,7 +494,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     termsText: 'Amohela Liphelo: Khokelo ena ke ea bapalami bohle ba beseng. Etsa bonnete ba hore u sebelisa li-earphones.',
     collectName: true,
     collectPhone: true,
-    collectEmail: false,
+    collectEmail: true,
     collectGender: false,
     collectDob: false,
     defaultCountryCode: '+266',
@@ -561,7 +566,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     termsText: 'Amohela Liphelo: Rea u amohela lebaleng la lipapali. Khokelo e matlafatsoa ke Starlink bakeng sa sechaba sohle se tlileng papaling.',
     collectName: true,
     collectPhone: true,
-    collectEmail: false,
+    collectEmail: true,
     collectGender: false,
     collectDob: false,
     defaultCountryCode: '+266',
@@ -691,10 +696,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [activeBuilderTab, setActiveBuilderTab] = useState<'builder' | 'pricing' | 'appearance' | 'code'>('builder');
 
   // Preview Simulator State
-  const [previewStep, setPreviewStep] = useState<'identification' | 'plan' | 'payment' | 'usage'>('identification');
+  const [previewStep, setPreviewStep] = useState<'identification' | 'voucher' | 'plan' | 'payment' | 'video_ad' | 'usage'>('identification');
   const [deviceFrame, setDeviceFrame] = useState<'iphone' | 'android' | 'desktop'>('iphone');
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ottvoucher');
+  const [previewVoucherCode, setPreviewVoucherCode] = useState('');
+  const [previewVoucherError, setPreviewVoucherError] = useState<string | null>(null);
+  const [previewAdSlideIdx, setPreviewAdSlideIdx] = useState(0);
+  const previewTouchStartXRef = useRef<number>(0);
+  const [showLeadsModal, setShowLeadsModal] = useState(false);
+  const [capturedLeadsCount, setCapturedLeadsCount] = useState<number>(() => storage.getCaptiveLeads().length);
   
   // Guest Sign-up State (100% empty initial state — zero pre-filled sample data)
   const [guestFirstName, setGuestFirstName] = useState('');
@@ -727,6 +738,64 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   // Mandatory Terms & Conditions Checkbox + Popup Modal State for Emulator
   const [previewTermsAccepted, setPreviewTermsAccepted] = useState(false);
   const [isPreviewTermsModalOpen, setIsPreviewTermsModalOpen] = useState(false);
+
+  // Keep capturedLeadsCount synced in real time with storage and backend guest-connect events
+  useEffect(() => {
+    let mounted = true;
+    const unsub = storage.subscribe(() => {
+      if (mounted) setCapturedLeadsCount(storage.getCaptiveLeads().length);
+    });
+    const timer = setInterval(() => {
+      fetch('/api/portal/guest-connect')
+        .then((r) => r.json())
+        .then((data) => {
+          if (!mounted || !data?.success || !Array.isArray(data.events)) return;
+          const existing = storage.getCaptiveLeads();
+          for (const ev of data.events) {
+            const emailVal = (ev.email || ev.guestEmail || '').trim();
+            const phoneVal = (ev.phone || ev.guestPhone || '').trim();
+            const nameVal = (ev.guestName || `${ev.firstName || ''} ${ev.lastName || ''}`).trim();
+            if (!emailVal && !phoneVal && (!nameVal || nameVal === 'Guest User')) continue;
+            const leadId = `lead_srv_${ev.id}`;
+            const found = existing.some(
+              (l) =>
+                l.id === leadId ||
+                (emailVal && l.email.toLowerCase() === emailVal.toLowerCase()) ||
+                (phoneVal && l.fullPhone.replace(/\D/g, '') === phoneVal.replace(/\D/g, ''))
+            );
+            if (!found) {
+              const parts = nameVal.split(' ');
+              storage.addCaptiveLead({
+                id: leadId,
+                firstName: ev.firstName || parts[0] || 'Guest',
+                lastName: ev.lastName || parts.slice(1).join(' ') || 'Subscriber',
+                fullName: nameVal || 'Guest Subscriber',
+                countryCode: ev.countryCode || '+266',
+                phone: phoneVal.replace(/^\+266\s?|\+27\s?/, ''),
+                fullPhone: phoneVal.startsWith('+') ? phoneVal : `${ev.countryCode || '+266'} ${phoneVal}`,
+                email: emailVal || 'not-provided@tconnect.ls',
+                capturedAt: ev.connectedAt || new Date().toISOString(),
+                routerName: ev.routerName || 'MIKROTIK-TC',
+                siteName: ev.siteName || 'T-Connect Hotspot',
+                vertical: (ev.scope as VerticalType) || 'hotspot',
+                clientMac: ev.mac || 'Client-MAC',
+                clientIp: ev.ip || '10.10.0.x',
+                deviceType: 'Wi-Fi Guest',
+                durationMinutes: Math.round((ev.durationSeconds || 1800) / 60),
+                status: 'active'
+              });
+            }
+          }
+          if (mounted) setCapturedLeadsCount(storage.getCaptiveLeads().length);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => {
+      mounted = false;
+      unsub();
+      clearInterval(timer);
+    };
+  }, []);
 
   // Live Stopwatch Ticker for Connected Session
   useEffect(() => {
@@ -767,15 +836,49 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     return routers.find((r) => r.vertical === selectedScope) || routers[0];
   }, [previewClientGroupId, routers, selectedScope]);
 
-  // Per-hotspot Free Access Mode driven directly by Portal Builder allowFreeAccess toggle
-  const isFreeModeActive = currentConfig.allowFreeAccess !== false;
+  // Real-time Mode Flags driven directly by Portal Builder toggles
+  const isFreeModeActive = Boolean(currentConfig.allowFreeAccess);
+  const isVoucherModeActive = currentConfig.allowVoucherCode !== false;
+  const isBuyPassModeActive = currentConfig.allowOnlinePayment !== false;
+
+  // Auto-switch emulator step in real time when a mode is turned OFF
+  useEffect(() => {
+    if (previewStep === 'identification' && !isFreeModeActive) {
+      if (isVoucherModeActive) setPreviewStep('voucher');
+      else if (isBuyPassModeActive) setPreviewStep('plan');
+    } else if (previewStep === 'voucher' && !isVoucherModeActive) {
+      if (isFreeModeActive) setPreviewStep('identification');
+      else if (isBuyPassModeActive) setPreviewStep('plan');
+    } else if ((previewStep === 'plan' || previewStep === 'payment') && !isBuyPassModeActive) {
+      if (isFreeModeActive) setPreviewStep('identification');
+      else if (isVoucherModeActive) setPreviewStep('voucher');
+    }
+  }, [isFreeModeActive, isVoucherModeActive, isBuyPassModeActive, previewStep]);
+
+  const activePreviewAd = React.useMemo(() => {
+    return storage.resolveVideoAdForScope(selectedScope);
+  }, [selectedScope, previewStep]);
+
+  const enterPostAuthAdOrUsage = () => {
+    const sponsorCfg = storage.getSponsorAdConfig();
+    const ad = storage.resolveVideoAdForScope(selectedScope);
+    if (sponsorCfg.enabled && ad) {
+      setPreviewAdSlideIdx(0);
+      storage.recordVideoAdImpression(ad.id);
+      setPreviewStep('video_ad');
+    } else {
+      setSavedToast('Connected! Splash redirect dismissed & phone released to internet.');
+      setTimeout(() => setSavedToast(null), 3500);
+      setPreviewStep(isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan');
+    }
+  };
 
   // Toggle Free Access Mode across this scope and push to all routers in real time
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
-    handleUpdateCurrent({ allowFreeAccess: enableFree });
+    handleUpdateCurrent({ allowFreeAccess: enableFree, collectEmail: true });
     if (!enableFree && previewStep === 'identification') {
-      setPreviewStep('plan');
-    } else if (enableFree && previewStep === 'plan') {
+      setPreviewStep(isVoucherModeActive ? 'voucher' : 'plan');
+    } else if (enableFree) {
       setPreviewStep('identification');
     }
     try {
@@ -1088,20 +1191,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     handleUpdateCurrent({ plans: filtered });
   };
 
-  // Handle Free Access Connection
+  // Handle Free Access Connection (Unlimited Forever)
   const handleConnectFree = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isGuestFormValid) return;
 
-    const freeMins = activeRouter?.freeDurationMinutes || 30;
-    const durationSec = freeMins * 60;
-    setSessionRemaining(durationSec);
+    setSessionRemaining(0);
     setSessionElapsed(0);
     setSessionAuthMode('free');
 
-    // Persist active session for metrics
+    // Persist active session & guest lead for metrics
+    const sessionId = `sess_free_${Date.now()}`;
     storage.addActiveSession({
-      id: `sess_free_${Date.now()}`,
+      id: sessionId,
       voucherCode: `FREE-${guestPhone.slice(-4)}`,
       clientMac: '7A:91:02:11:44:99',
       clientIp: activeRouter?.wireguardIp || '10.89.1.45',
@@ -1109,10 +1211,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       siteName: activeRouter?.siteName || activeMeta.label,
       vertical: selectedScope,
       routerName: activeRouter?.name || `${activeMeta.label} Hotspot`,
-      planName: `Free Access (${freeMins} Mins)`,
+      planName: 'Free Wi-Fi (Unlimited)',
       startedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + durationSec * 1000).toISOString(),
-      remainingSeconds: durationSec,
+      expiresAt: new Date(Date.now() + 3650 * 86400 * 1000).toISOString(),
+      remainingSeconds: 0,
       bytesDown: 14200000,
       bytesUp: 3800000,
       speedLimit: '30M/10M',
@@ -1122,7 +1224,31 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       authMode: 'free'
     });
 
-    setPreviewStep('usage');
+    fetch('/api/portal/guest-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: sessionId,
+        firstName: guestFirstName.trim(),
+        lastName: guestSurname.trim(),
+        guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim(),
+        countryCode: guestCountryCode,
+        phone: guestPhone.trim(),
+        guestPhone: `${guestCountryCode} ${guestPhone.trim()}`,
+        email: guestEmail.trim(),
+        mac: '7A:91:02:11:44:99',
+        ip: activeRouter?.wireguardIp || '10.89.1.45',
+        scope: selectedScope,
+        siteName: activeRouter?.siteName || activeMeta.label,
+        routerName: activeRouter?.name || `${activeMeta.label} Hotspot`,
+        mode: 'free',
+        planName: 'Free Wi-Fi (Unlimited)',
+        durationSeconds: 0
+      })
+    }).catch(() => {});
+
+    setCapturedLeadsCount(storage.getCaptiveLeads().length);
+    enterPostAuthAdOrUsage();
   };
 
   // Execute & Verify Guest Payment Flow (Strict 16-Digit OTT Voucher Verification)
@@ -1204,10 +1330,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       speedLimit: `${chosenPlan.downloadSpeedMbps}M/${chosenPlan.uploadSpeedMbps}M`,
       guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`,
       guestPhone: fullPhone,
+      guestEmail: guestEmail.trim(),
       authMode: 'gateway'
     });
 
-    setPreviewStep('usage');
+    enterPostAuthAdOrUsage();
   };
 
   // Router count for this scope
@@ -1359,12 +1486,22 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
               type="button"
               onClick={onOpenVideoAds}
               className="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 cursor-pointer"
-              title="Upload full-screen video & picture ads + configure 3-hour / 2 GB re-triggers"
+              title="Upload full-screen sliding picture & video ads + configure 3-hour / 2 GB re-triggers"
             >
               <span>🎬</span>
-              <span>Full-Screen Ads (3h / 2GB)</span>
+              <span>Picture &amp; Video Ads</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowLeadsModal(true)}
+            className="px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 cursor-pointer"
+            title="View & export all Free Wi-Fi connected users and their captured emails"
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>Guest Leads &amp; Emails ({capturedLeadsCount})</span>
+          </button>
 
           <button
             type="button"
@@ -1402,7 +1539,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           {/* TAB: VISUAL BUILDER */}
           {activeBuilderTab === 'builder' && (
             <div className="space-y-4">
-              {/* REAL-TIME PUBLIC LOGIN MODES & FREE ACCESS MASTER SWITCH */}
+              {/* REAL-TIME PUBLIC LOGIN MODES: FREE WI-FI, VOUCHER, AND BUY PASS */}
               <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1b233a] pb-3">
                   <div>
@@ -1411,50 +1548,106 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       Public Splash Login Modes (Real-Time Fleet Control)
                     </span>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Control whether public users see Free Wi-Fi Registration alongside Voucher Code &amp; Buy Pass on the router splash page.
+                      Turn ON or OFF Free Wi-Fi, Voucher, or Buy Pass in real time. All changes sync immediately to live portals &amp; routers.
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleToggleFreeAccessRealtime(!isFreeModeActive)}
-                    className={`px-3.5 py-2 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer shrink-0 border ${
-                      isFreeModeActive
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
-                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300 hover:bg-rose-500/25'
-                    }`}
+                    onClick={() => setShowLeadsModal(true)}
+                    className="px-3 py-1.5 rounded-xl font-extrabold text-[11px] flex items-center gap-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 cursor-pointer shrink-0"
                   >
-                    <span className={`w-2 h-2 rounded-full ${isFreeModeActive ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-                    <span>{isFreeModeActive ? 'Free Access: VISIBLE (ON)' : 'Free Access: HIDDEN (OFF)'}</span>
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>View Connected Leads ({capturedLeadsCount})</span>
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
-                  <div className={`p-2.5 rounded-lg border ${isFreeModeActive ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-500'}`}>
-                    <div className="font-bold flex items-center justify-between">
-                      <span>1. Free Wi-Fi Signup</span>
-                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40">{isFreeModeActive ? 'Shown' : 'Hidden'}</span>
+                  {/* 1. Free Wi-Fi Toggle Card */}
+                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isFreeModeActive ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
+                    <div>
+                      <div className="font-bold flex items-center justify-between">
+                        <span>1. Free Wi-Fi</span>
+                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isFreeModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                          {isFreeModeActive ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">
+                        {isFreeModeActive ? 'Captures Name, Phone & Mandatory Email.' : 'Hidden from splash page.'}
+                      </p>
                     </div>
-                    <p className="text-[10px] opacity-80 mt-1">
-                      {isFreeModeActive ? 'Captures Name + Phone for 30m trial.' : 'Completely hidden from public splash page.'}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleFreeAccessRealtime(!isFreeModeActive)}
+                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
+                        isFreeModeActive
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 hover:bg-emerald-400'
+                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
+                      }`}
+                    >
+                      {isFreeModeActive ? 'Turn OFF Free Wi-Fi' : 'Turn ON Free Wi-Fi'}
+                    </button>
                   </div>
-                  <div className="p-2.5 rounded-lg border bg-amber-950/15 border-amber-500/30 text-amber-200">
-                    <div className="font-bold flex items-center justify-between">
-                      <span>2. Voucher Login</span>
-                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
+
+                  {/* 2. Voucher Code Toggle Card */}
+                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isVoucherModeActive ? 'bg-amber-950/20 border-amber-500/40 text-amber-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
+                    <div>
+                      <div className="font-bold flex items-center justify-between">
+                        <span>2. Voucher</span>
+                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isVoucherModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                          {isVoucherModeActive ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">
+                        {isVoucherModeActive ? 'Allows TC-XXXX & OTT voucher codes.' : 'Voucher tab hidden in real time.'}
+                      </p>
                     </div>
-                    <p className="text-[10px] opacity-80 mt-1">
-                      Authenticates TC-XXXX &amp; MikroTik Hotspot vouchers.
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !isVoucherModeActive;
+                        handleUpdateCurrent({ allowVoucherCode: next });
+                        setSavedToast(next ? 'Voucher Login ENABLED in real time!' : 'Voucher Login TURNED OFF in real time!');
+                        setTimeout(() => setSavedToast(null), 3000);
+                      }}
+                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
+                        isVoucherModeActive
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 hover:bg-amber-400'
+                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
+                      }`}
+                    >
+                      {isVoucherModeActive ? 'Turn OFF Voucher' : 'Turn ON Voucher'}
+                    </button>
                   </div>
-                  <div className="p-2.5 rounded-lg border bg-blue-950/15 border-blue-500/30 text-blue-200">
-                    <div className="font-bold flex items-center justify-between">
-                      <span>3. Buy Speed Pass</span>
-                      <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-black/40 text-emerald-300">Active</span>
+
+                  {/* 3. Buy Pass Toggle Card */}
+                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isBuyPassModeActive ? 'bg-blue-950/20 border-blue-500/40 text-blue-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
+                    <div>
+                      <div className="font-bold flex items-center justify-between">
+                        <span>3. Buy Pass</span>
+                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isBuyPassModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
+                          {isBuyPassModeActive ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] opacity-80 mt-1">
+                        {isBuyPassModeActive ? 'EcoCash & 16-Digit OTT self-service plans.' : 'Buy Pass tab hidden in real time.'}
+                      </p>
                     </div>
-                    <p className="text-[10px] opacity-80 mt-1">
-                      EcoCash and 16-Digit OTT Voucher self-service plans.
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !isBuyPassModeActive;
+                        handleUpdateCurrent({ allowOnlinePayment: next });
+                        setSavedToast(next ? 'Buy Pass ENABLED in real time!' : 'Buy Pass TURNED OFF in real time!');
+                        setTimeout(() => setSavedToast(null), 3000);
+                      }}
+                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
+                        isBuyPassModeActive
+                          ? 'bg-blue-500 text-white border-blue-400 hover:bg-blue-400'
+                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
+                      }`}
+                    >
+                      {isBuyPassModeActive ? 'Turn OFF Buy Pass' : 'Turn ON Buy Pass'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1834,111 +2027,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </div>
 
                   {isFreeModeActive && (
-                    <div className="pt-2 border-t border-[#1b233a] space-y-2 text-[11px] font-mono text-slate-300">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Free Session Duration:</span>
-                        </span>
-                        <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                          {formatDuration(activeRouter?.freeDurationMinutes || 30)}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] text-slate-400">
-                          <span>30 Mins</span>
-                          <span>12 Hours</span>
-                          <span>24 Hours (1 Day)</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="30"
-                          max="1440"
-                          step="15"
-                          value={activeRouter?.freeDurationMinutes || 30}
-                          onChange={(e) => {
-                            const mins = Number(e.target.value);
-                            if (activeRouter) {
-                              storage.toggleRouterFreeMode(activeRouter.id, true, mins);
-                            }
-                          }}
-                          className="w-full accent-[#f05e17] cursor-pointer"
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                        {[
-                          { label: '30m', mins: 30 },
-                          { label: '1 Hour', mins: 60 },
-                          { label: '2 Hours', mins: 120 },
-                          { label: '4 Hours', mins: 240 },
-                          { label: '8 Hours', mins: 480 },
-                          { label: '12 Hours', mins: 720 },
-                          { label: '24 Hours (1 Day)', mins: 1440 }
-                        ].map((item) => (
-                          <button
-                            key={item.mins}
-                            type="button"
-                            onClick={() => {
-                              if (activeRouter) {
-                                storage.toggleRouterFreeMode(activeRouter.id, true, item.mins);
-                              }
-                            }}
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
-                              (activeRouter?.freeDurationMinutes || 30) === item.mins
-                                ? 'bg-[#f05e17] text-white border-[#f05e17]'
-                                : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
-                            }`}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      {/* Custom Numeric Hour & Minute Inputs up to 24 Hours */}
-                      <div className="pt-2 border-t border-[#1b233a] flex items-center justify-between gap-2 text-[10px]">
-                        <span className="text-slate-400 font-bold shrink-0">Custom Time Input:</span>
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
-                            <input
-                              type="number"
-                              min="0"
-                              max="24"
-                              value={Math.floor((activeRouter?.freeDurationMinutes || 30) / 60)}
-                              onChange={(e) => {
-                                const h = Math.max(0, Math.min(24, parseInt(e.target.value) || 0));
-                                const currentM = (activeRouter?.freeDurationMinutes || 30) % 60;
-                                const total = Math.max(30, Math.min(1440, h * 60 + currentM));
-                                if (activeRouter) {
-                                  storage.toggleRouterFreeMode(activeRouter.id, true, total);
-                                }
-                              }}
-                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
-                            />
-                            <span className="text-slate-400 text-[10px]">hrs</span>
-                          </div>
-                          <span className="text-slate-500 font-bold">:</span>
-                          <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-1 rounded border border-[#232d42]">
-                            <input
-                              type="number"
-                              min="0"
-                              max="59"
-                              value={(activeRouter?.freeDurationMinutes || 30) % 60}
-                              onChange={(e) => {
-                                const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
-                                const currentH = Math.floor((activeRouter?.freeDurationMinutes || 30) / 60);
-                                const total = Math.max(30, Math.min(1440, currentH * 60 + m));
-                                if (activeRouter) {
-                                  storage.toggleRouterFreeMode(activeRouter.id, true, total);
-                                }
-                              }}
-                              className="w-8 bg-transparent text-white font-bold text-center focus:outline-none"
-                            />
-                            <span className="text-slate-400 text-[10px]">mins</span>
-                          </div>
-                        </div>
-                      </div>
+                    <div className="pt-2 border-t border-[#1b233a] flex items-center justify-between text-[11px] font-mono text-slate-300">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Free Wi-Fi Session Policy:</span>
+                      </span>
+                      <span className="text-emerald-300 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/30">
+                        Unlimited Forever (No Time Limit)
+                      </span>
                     </div>
                   )}
                 </div>
@@ -2308,18 +2404,31 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           {/* Emulator Top Controls */}
           <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a] font-mono text-xs">
             {/* Step Selector */}
-            <div className="flex items-center gap-1">
-              {(['identification', 'plan', 'payment', 'usage'] as const).map((step) => (
+            <div className="flex flex-wrap items-center gap-1">
+              {([
+                ...(isFreeModeActive ? (['identification'] as const) : []),
+                ...(isVoucherModeActive ? (['voucher'] as const) : []),
+                ...(isBuyPassModeActive ? (['plan', 'payment'] as const) : []),
+                'video_ad'
+              ] as const).map((step) => (
                 <button
                   key={step}
                   onClick={() => setPreviewStep(step)}
-                  className={`px-2.5 py-1 rounded capitalize text-[11px] font-bold transition-colors ${
+                  className={`px-2 py-1 rounded text-[10px] font-bold transition-colors cursor-pointer ${
                     previewStep === step
                       ? 'bg-[#f05e17] text-white'
                       : 'text-slate-400 hover:text-white bg-[#121829]'
                   }`}
                 >
-                  {step === 'identification' ? '1. Sign-Up' : step === 'plan' ? '2. Plans' : step === 'payment' ? '3. Pay' : '4. Usage'}
+                  {step === 'identification'
+                    ? 'Free Wi-Fi'
+                    : step === 'voucher'
+                    ? 'Voucher'
+                    : step === 'plan'
+                    ? 'Buy Pass'
+                    : step === 'payment'
+                    ? 'Pay'
+                    : '🎬 Ad Slide'}
                 </button>
               ))}
             </div>
@@ -2438,6 +2547,124 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 </div>
               ) : null}
 
+              {/* FULL-SCREEN POST-CONNECT SLIDING PICTURE AD OVERLAY IN EMULATOR */}
+              {previewStep === 'video_ad' && activePreviewAd && (() => {
+                const isCarousel =
+                  activePreviewAd.mediaType === 'image_carousel' &&
+                  Array.isArray(activePreviewAd.slides) &&
+                  activePreviewAd.slides.length > 0;
+                const slides = activePreviewAd.slides || [];
+                return (
+                  <div
+                    className="absolute inset-0 z-30 bg-black overflow-hidden select-none flex flex-col justify-between"
+                    onTouchStart={(e) => {
+                      previewTouchStartXRef.current = e.touches[0]?.clientX || 0;
+                    }}
+                    onTouchEnd={(e) => {
+                      if (!isCarousel || slides.length <= 1) return;
+                      const diff = (e.changedTouches[0]?.clientX || 0) - previewTouchStartXRef.current;
+                      if (Math.abs(diff) > 30) {
+                        if (diff < 0) setPreviewAdSlideIdx((prev) => (prev + 1) % slides.length);
+                        else setPreviewAdSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
+                      }
+                    }}
+                  >
+                    {isCarousel ? (
+                      <div
+                        className="flex w-full h-full transition-transform duration-300 ease-out"
+                        style={{ transform: `translateX(-${previewAdSlideIdx * 100}%)` }}
+                      >
+                        {slides.map((sl, idx) => (
+                          <div key={sl.id || idx} className="w-full h-full shrink-0 relative bg-black">
+                            <img
+                              src={sl.imageUrl}
+                              alt={sl.caption || activePreviewAd.title}
+                              className="w-full h-full object-cover"
+                            />
+                            {sl.caption && (
+                              <div className="absolute bottom-14 inset-x-3 z-20 flex justify-center">
+                                <div className="px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/20 text-white text-[10px] font-bold text-center">
+                                  {sl.caption}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <video
+                        src={activePreviewAd.videoUrl}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+
+                    {/* Top Bar: Sponsor + Immediate X Close Button */}
+                    <div className="absolute top-3 inset-x-3 z-30 flex items-center justify-between gap-2">
+                      <div className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md border border-white/25 text-white text-[10px] font-bold flex items-center gap-1.5 truncate">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                        <span className="truncate">{activePreviewAd.sponsorName}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSavedToast('Ad closed — splash popup auto-closed & phone released straight to internet!');
+                          setTimeout(() => setSavedToast(null), 3500);
+                          setPreviewStep(isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan');
+                        }}
+                        title="Close ad immediately and enjoy connectivity"
+                        className="w-9 h-9 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-xl flex items-center justify-center cursor-pointer transition-all"
+                      >
+                        <X className="w-4 h-4 stroke-[2.5]" />
+                      </button>
+                    </div>
+
+                    {/* Left & Right Arrows for Sliding Pictures */}
+                    {isCarousel && slides.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAdSlideIdx((prev) => (prev - 1 + slides.length) % slides.length)}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-black/75 hover:bg-black border border-white/30 text-white flex items-center justify-center cursor-pointer"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAdSlideIdx((prev) => (prev + 1) % slides.length)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-black/75 hover:bg-black border border-white/30 text-white flex items-center justify-center cursor-pointer"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+
+                    {/* Bottom Slide Dots */}
+                    {isCarousel && slides.length > 1 && (
+                      <div className="absolute bottom-3 inset-x-3 z-30 flex justify-center">
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/80 border border-white/20">
+                          {slides.map((sl, idx) => (
+                            <button
+                              key={sl.id || idx}
+                              type="button"
+                              onClick={() => setPreviewAdSlideIdx(idx)}
+                              className={`h-2 rounded-full transition-all cursor-pointer ${
+                                idx === previewAdSlideIdx ? 'w-5 bg-[#f05e17]' : 'w-2 bg-white/45'
+                              }`}
+                            />
+                          ))}
+                          <span className="text-[9px] text-slate-300 font-mono ml-1">
+                            {previewAdSlideIdx + 1}/{slides.length}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Dynamic Glassmorphism Card */}
               <div
                 className={`relative z-10 w-full ${
@@ -2448,17 +2675,109 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     : 'my-auto'
                 }`}
               >
+                {/* Mode Tabs Bar inside Phone Emulator */}
+                {(previewStep === 'identification' || previewStep === 'voucher' || previewStep === 'plan') && (() => {
+                  const enabledCount =
+                    (isFreeModeActive ? 1 : 0) +
+                    (isVoucherModeActive ? 1 : 0) +
+                    (isBuyPassModeActive ? 1 : 0);
+                  if (enabledCount <= 1) return null;
+                  const cols = enabledCount === 3 ? 'grid-cols-3' : 'grid-cols-2';
+                  return (
+                    <div className={`grid ${cols} gap-1 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/15 text-[10px] font-mono mb-2`}>
+                      {isFreeModeActive && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewStep('identification')}
+                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                            previewStep === 'identification' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <Zap className="w-3 h-3" />
+                          <span>Free Wi-Fi</span>
+                        </button>
+                      )}
+                      {isVoucherModeActive && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewStep('voucher')}
+                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                            previewStep === 'voucher' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <Ticket className="w-3 h-3" />
+                          <span>Voucher</span>
+                        </button>
+                      )}
+                      {isBuyPassModeActive && (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewStep('plan')}
+                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                            previewStep === 'plan' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          <span>Buy Pass</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* STEP 1B: VOUCHER LOGIN IN EMULATOR */}
+                {previewStep === 'voucher' && isVoucherModeActive && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!previewVoucherCode.trim()) {
+                        setPreviewVoucherError('Please enter a voucher code.');
+                        return;
+                      }
+                      setPreviewVoucherError(null);
+                      setSessionAuthMode('paid');
+                      setSessionRemaining(86400);
+                      enterPostAuthAdOrUsage();
+                    }}
+                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
+                    style={{
+                      backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
+                    }}
+                  >
+                    <div>
+                      <label className="text-[10px] font-mono text-slate-300 block mb-1">
+                        Voucher Code <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={previewVoucherCode}
+                        onChange={(e) => {
+                          setPreviewVoucherCode(e.target.value);
+                          setPreviewVoucherError(null);
+                        }}
+                        placeholder="Enter voucher code (e.g. TC-XXXX)"
+                        className="w-full px-3 py-2 bg-black/50 border border-white/25 rounded-xl text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-emerald-400"
+                      />
+                      {previewVoucherError && (
+                        <span className="text-[9px] text-rose-300 font-mono block mt-1">{previewVoucherError}</span>
+                      )}
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-xl shadow-lg cursor-pointer"
+                    >
+                      Activate Voucher &amp; Connect &rarr;
+                    </button>
+                  </form>
+                )}
+
                 {/* STEP 1: GUEST SIGN-UP */}
-                {previewStep === 'identification' && (
+                {previewStep === 'identification' && isFreeModeActive && (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (!isGuestFormValid) return;
-                      if (isFreeModeActive) {
-                        handleConnectFree();
-                      } else {
-                        setPreviewStep('plan');
-                      }
+                      handleConnectFree();
                     }}
                     className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
                     style={{
@@ -2472,8 +2791,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           <Zap className="w-3.5 h-3.5 text-amber-300" />
                           <span>Free Hotspot Access Enabled</span>
                         </span>
-                        <span className="bg-amber-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[9px]">
-                          {activeRouter?.freeDurationMinutes || 30} MINS
+                        <span className="bg-emerald-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[9px]">
+                          UNLIMITED
                         </span>
                       </div>
                     )}
@@ -2607,7 +2926,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-xl shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
                         >
                           <Zap className="w-4 h-4 fill-current text-white" />
-                          <span>Connect Free ({activeRouter?.freeDurationMinutes || 30} Mins) &rarr;</span>
+                          <span>Connect Free Wi-Fi &rarr;</span>
                         </button>
 
                         <button
@@ -2835,131 +3154,6 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     </div>
                   );
                 })()}
-
-                {/* STEP 4: SESSION USAGE & SUCCESS */}
-                {previewStep === 'usage' && (
-                  <div
-                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-3 text-center"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
-                    }}
-                  >
-                    {sessionRemaining > 0 ? (
-                      <>
-                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
-                          <CheckCircle2 className="w-6 h-6" />
-                        </div>
-
-                        <div>
-                          <h4 className="font-extrabold text-white text-sm">Online &amp; Connected!</h4>
-                          <p className="text-[10px] text-slate-400 font-mono">
-                            Active on {currentConfig.brandTitle}
-                          </p>
-                        </div>
-
-                        <div className="bg-black/40 p-2.5 rounded-xl border border-white/10 space-y-1 text-xs font-mono">
-                          <div className="flex justify-between text-slate-400 text-[11px]">
-                            <span>Remaining Time:</span>
-                            <span className="text-emerald-400 font-bold">
-                              {Math.floor(sessionRemaining / 3600)}h {Math.floor((sessionRemaining % 3600) / 60)}m {sessionRemaining % 60}s
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-slate-400 text-[11px]">
-                            <span>Access Mode:</span>
-                            <span className="text-amber-300 font-bold uppercase">
-                              {sessionAuthMode === 'free' ? '⚡ Free Access' : '💳 Paid Pass'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-slate-400 text-[11px]">
-                            <span>Guest Subscriber:</span>
-                            <span className="text-white font-bold">{guestFirstName} {guestSurname}</span>
-                          </div>
-                          <div className="flex justify-between text-slate-400 text-[11px]">
-                            <span>Contact &amp; Email:</span>
-                            <span className="text-cyan-300 font-mono truncate max-w-[170px]">{guestEmail || `${guestCountryCode} ${guestPhone}`}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 pt-1 font-mono">
-                          <button
-                            type="button"
-                            onClick={() => setSessionRemaining(0)}
-                            className="flex-1 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 text-rose-300 text-[10px] rounded-lg transition-colors cursor-pointer"
-                            title="Test session expiry"
-                          >
-                            Simulate Expiry (0s)
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewStep('identification')}
-                            className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 text-[10px] rounded-lg transition-colors"
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      /* EXPIRED SESSION STATE: ALIGNED FREE RECONNECT & PAID RE-AUTHENTICATION */
-                      <div className="space-y-3">
-                        <div className="w-10 h-10 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30 animate-pulse">
-                          <AlertTriangle className="w-5 h-5" />
-                        </div>
-
-                        <div>
-                          <h4 className="font-extrabold text-white text-sm">Session Expired</h4>
-                          <p className="text-[10px] text-rose-300 font-mono mt-0.5">
-                            {sessionAuthMode === 'free'
-                              ? 'Your free access duration has ended.'
-                              : 'Your paid pass duration has concluded.'}
-                          </p>
-                        </div>
-
-                        <div className="p-2.5 bg-black/50 rounded-xl border border-rose-500/30 text-[11px] font-mono text-slate-300 text-left leading-relaxed">
-                          {sessionAuthMode === 'free' ? (
-                            <span>
-                              Free trial finished. You can <strong>reconnect again for free</strong>, or upgrade to an unlimited high-speed paid pass.
-                            </span>
-                          ) : (
-                            <span>
-                              Your paid pass is exhausted. Authenticate via <strong>EcoCash (*199#)</strong> or <strong>OTT Voucher</strong> to restore connection.
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="space-y-1.5 pt-1 font-mono">
-                          {sessionAuthMode === 'free' ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleConnectFree()}
-                                className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                              >
-                                <Zap className="w-3.5 h-3.5 fill-current" />
-                                <span>Connect Free Again &rarr;</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPreviewStep('plan')}
-                                className="w-full py-2 bg-white/10 hover:bg-white/20 text-slate-200 text-xs rounded-xl transition-colors cursor-pointer"
-                              >
-                                Upgrade to Paid Pass &rarr;
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewStep('plan')}
-                              className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                            >
-                              <DollarSign className="w-3.5 h-3.5" />
-                              <span>Pay Again via Gateway to Reconnect &rarr;</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* Footer Powered By Lockup */}
@@ -2980,6 +3174,41 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           setTimeout(() => setSavedToast(null), 2500);
         }}
       />
+
+      {/* Captured Guest Leads & Emails Real-Time Modal Drawer */}
+      {showLeadsModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setShowLeadsModal(false)}
+        >
+          <div
+            className="w-full max-w-6xl max-h-[90vh] overflow-y-auto bg-[#0a0e17] border border-[#232d42] rounded-2xl shadow-2xl p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#1b233a] pb-3">
+              <div className="flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <h3 className="text-sm font-extrabold text-white font-mono uppercase">
+                    Connected Free Wi-Fi Guest Leads &amp; Captured Emails
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Real-time directory of all users who entered their Name, Phone &amp; Email on the Captive Portal (Also accessible via Network &amp; Security &rarr; Guest Leads)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLeadsModal(false)}
+                className="p-2 rounded-xl bg-[#161d31] hover:bg-rose-600 text-slate-300 hover:text-white border border-[#232d42] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <CaptivePortalLeadsView selectedVertical="all" currency={currency} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

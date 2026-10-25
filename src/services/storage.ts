@@ -22,61 +22,11 @@ import {
 
 export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   {
-    id: 'vid_alliance_all',
-    title: 'Alliance Insurance Lesotho — 15s Spot',
-    sponsorName: 'Alliance Insurance Lesotho',
-    headline: 'Protect Your Journey Across Lesotho',
-    description: 'High-speed Starlink Wi-Fi sponsored by Alliance Insurance. Comprehensive motor, life, and asset cover.',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    destinationUrl: 'https://alliance.co.ls',
-    targetScope: 'all',
-    enabled: true,
-    watchMode: 'full_video',
-    skipAfterSec: 5,
-    durationSec: 15,
-    impressions: 0,
-    createdAt: '2026-10-19'
-  },
-  {
-    id: 'vid_maluti_hotspot',
-    title: 'Maluti Mountain Brewery & Cafes — 15s Spot',
-    sponsorName: 'Maluti Mountain Refreshments',
-    headline: 'Refresh Your Day at Maseru Hotspots',
-    description: 'Stream, work, and connect seamlessly across T-Connect Hotspot cafes and plazas.',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    destinationUrl: 'https://tconnect.co.ls',
-    targetScope: 'hotspot',
-    enabled: true,
-    watchMode: 'skip_after_sec',
-    skipAfterSec: 5,
-    durationSec: 15,
-    impressions: 0,
-    createdAt: '2026-10-19'
-  },
-  {
-    id: 'vid_transit_bus',
-    title: 'Lesotho Express Commuter Wi-Fi — 15s Spot',
-    sponsorName: 'Lesotho Express & Econet',
-    headline: 'Fast Onboard Starlink Across Every Route',
-    description: 'Stay connected on the move. Re-plays every 3 hours or 2 GB of data consumed.',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-    destinationUrl: 'https://tconnect.co.ls',
-    mediaType: 'video',
-    targetScope: 'bus',
-    enabled: true,
-    watchMode: 'full_video',
-    skipAfterSec: 5,
-    durationSec: 15,
-    impressions: 0,
-    clicks: 0,
-    createdAt: '2026-10-19'
-  },
-  {
     id: 'carousel_tconnect_offers',
     title: 'T-Connect & Partner Picture Series (3 Slides)',
     sponsorName: 'T-Connect Lesotho Partners',
-    headline: 'Swipe Through Exclusive Partner Deals',
-    description: 'Tap any picture to visit the partner offer directly, or swipe to browse all slides.',
+    headline: 'Slide Through Exclusive Partner Deals',
+    description: 'Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.',
     videoUrl: '',
     destinationUrl: 'https://tconnect.co.ls',
     mediaType: 'image_carousel',
@@ -100,14 +50,66 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
         caption: 'Top Up With 16-Digit OTT Lesotho Vouchers Anywhere'
       }
     ],
-    targetScope: 'park',
+    targetScope: 'all',
     enabled: true,
     watchMode: 'skip_after_sec',
-    skipAfterSec: 5,
+    skipAfterSec: 0,
     durationSec: 10,
     impressions: 0,
     clicks: 0,
     createdAt: '2026-10-20'
+  },
+  {
+    id: 'vid_alliance_all',
+    title: 'Alliance Insurance Lesotho — 15s Spot',
+    sponsorName: 'Alliance Insurance Lesotho',
+    headline: 'Protect Your Journey Across Lesotho',
+    description: 'High-speed Starlink Wi-Fi sponsored by Alliance Insurance. Comprehensive motor, life, and asset cover.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    destinationUrl: 'https://alliance.co.ls',
+    mediaType: 'video',
+    targetScope: 'all',
+    enabled: true,
+    watchMode: 'full_video',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    createdAt: '2026-10-19'
+  },
+  {
+    id: 'vid_maluti_hotspot',
+    title: 'Maluti Mountain Brewery & Cafes — 15s Spot',
+    sponsorName: 'Maluti Mountain Refreshments',
+    headline: 'Refresh Your Day at Maseru Hotspots',
+    description: 'Stream, work, and connect seamlessly across T-Connect Hotspot cafes and plazas.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    destinationUrl: 'https://tconnect.co.ls',
+    mediaType: 'video',
+    targetScope: 'hotspot',
+    enabled: false,
+    watchMode: 'skip_after_sec',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    createdAt: '2026-10-19'
+  },
+  {
+    id: 'vid_transit_bus',
+    title: 'Lesotho Express Commuter Wi-Fi — 15s Spot',
+    sponsorName: 'Lesotho Express & Econet',
+    headline: 'Fast Onboard Starlink Across Every Route',
+    description: 'Stay connected on the move. Re-plays every 3 hours or 2 GB of data consumed.',
+    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    destinationUrl: 'https://tconnect.co.ls',
+    mediaType: 'video',
+    targetScope: 'bus',
+    enabled: false,
+    watchMode: 'full_video',
+    skipAfterSec: 5,
+    durationSec: 15,
+    impressions: 0,
+    clicks: 0,
+    createdAt: '2026-10-19'
   }
 ];
 
@@ -886,7 +888,7 @@ class StorageService {
         clientMac: session.clientMac,
         clientIp: session.clientIp,
         deviceType: session.deviceType,
-        durationMinutes: Math.round(session.remainingSeconds / 60) || 30,
+        durationMinutes: session.remainingSeconds > 0 ? Math.round(session.remainingSeconds / 60) : 0,
         status: 'active'
       };
 
@@ -1886,31 +1888,42 @@ class StorageService {
   getSponsorAdConfig(): SponsorAdConfig {
     const fallback: SponsorAdConfig = {
       enabled: true,
-      sponsorName: 'Alliance Insurance Lesotho',
-      headline: 'Travel & Asset Protection Across Lesotho',
-      description: 'Enjoy high-speed Starlink Wi-Fi courtesy of Alliance Insurance. Plays immediately after login and every 3 hours or 2 GB used.',
-      imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80',
+      sponsorName: 'T-Connect Lesotho Partners',
+      headline: 'Slide Through Exclusive Partner Deals',
+      description: 'Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.',
+      imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
       videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      mediaType: 'video',
-      destinationUrl: 'https://alliance.co.ls',
+      mediaType: 'image_carousel',
+      destinationUrl: 'https://tconnect.co.ls',
       displayTrigger: 'both',
-      countdownDurationSec: 5,
-      skipAllowed: false,
-      watchMode: 'full_video',
+      countdownDurationSec: 0,
+      skipAllowed: true,
+      watchMode: 'skip_after_sec',
       retriggerEveryHours: 3,
       retriggerEveryGb: 2,
       videoLibrary: STARTER_VIDEO_AD_LIBRARY
     };
     if ((this.state as any).sponsorAd) {
       const saved: SponsorAdConfig = (this.state as any).sponsorAd;
+      let resolvedLibrary = Array.isArray(saved.videoLibrary) && saved.videoLibrary.length > 0
+        ? saved.videoLibrary.map((item) =>
+            item.id === 'carousel_tconnect_offers' && item.targetScope === 'park'
+              ? { ...item, targetScope: 'all' as const }
+              : item
+          )
+        : STARTER_VIDEO_AD_LIBRARY;
+      // Put image_carousel items first if carousel_tconnect_offers is in the library so picture sliding ads show first
+      const carouselIdx = resolvedLibrary.findIndex((i) => i.mediaType === 'image_carousel' && i.enabled);
+      if (carouselIdx > 0 && resolvedLibrary[0]?.id === 'vid_alliance_all') {
+        const [carouselItem] = resolvedLibrary.splice(carouselIdx, 1);
+        resolvedLibrary = [carouselItem, ...resolvedLibrary];
+      }
       return {
         ...fallback,
         ...saved,
         retriggerEveryHours: saved.retriggerEveryHours ?? 3,
         retriggerEveryGb: saved.retriggerEveryGb ?? 2,
-        videoLibrary: Array.isArray(saved.videoLibrary) && saved.videoLibrary.length > 0
-          ? saved.videoLibrary
-          : STARTER_VIDEO_AD_LIBRARY
+        videoLibrary: resolvedLibrary
       };
     }
     return fallback;
@@ -1921,6 +1934,13 @@ class StorageService {
     if (!cfg.enabled) return null;
     const lib = cfg.videoLibrary || STARTER_VIDEO_AD_LIBRARY;
     const normalizedScope = scope === 'village' ? 'community' : scope;
+    // Prefer enabled image_carousel for this scope or 'all' first
+    const exactCarousel = lib.find(
+      v => v.enabled && v.mediaType === 'image_carousel' && (v.targetScope === normalizedScope || v.targetScope === scope)
+    );
+    if (exactCarousel) return exactCarousel;
+    const allCarousel = lib.find(v => v.enabled && v.mediaType === 'image_carousel' && v.targetScope === 'all');
+    if (allCarousel) return allCarousel;
     const exactMatch = lib.find(v => v.enabled && (v.targetScope === normalizedScope || v.targetScope === scope));
     if (exactMatch) return exactMatch;
     const allMatch = lib.find(v => v.enabled && v.targetScope === 'all');

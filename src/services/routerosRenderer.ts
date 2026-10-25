@@ -194,8 +194,8 @@ export class RouterOSRenderer {
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
       `# Hotspot Server Profile & Server on bridgeLocal (Cookies & MAC-Cookies disabled; addresses-per-mac=unlimited for APs)`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no`,
-      `:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none use-radius=no } on-error={}`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=0s trial-uptime-reset=0s rate-limit="" use-radius=no`,
+      `:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
       `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=5m keepalive-timeout=2m disabled=no`,
       `# Pre-Provisioned Hotspot Auth Users`,
@@ -203,7 +203,7 @@ export class RouterOSRenderer {
       `/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"`,
       `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
       allowFree
-        ? `/ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User"`
+        ? `/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited Auth User"`
         : `# Free Trial Disabled by Admin Policy (T-TRIAL user omitted)`,
       `# Static Management Bypasses Strictly for AP Hardware IPs (No PC bypass so test PC sees Splash Page)`,
       `:do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}`,
@@ -359,14 +359,14 @@ export class RouterOSRenderer {
       );
     } else if (accessMode === 'FREE_TRIAL_AND_PAID') {
       lines.push(
-        `# Policy: Hybrid Access (Free Trial + Paid Vouchers + EcoCash/OTT, Cookies Disabled)`,
+        `# Policy: Hybrid Access (Unlimited Free Wi-Fi + Paid Vouchers + EcoCash/OTT, Cookies Disabled)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
-        `:do { /ip hotspot user add name="T-TRIAL" password="123" limit-uptime=${duration}m comment="T-Connect Free Trial (${duration}m)" } on-error={}`,
+        `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited User" } on-error={}`,
         `:do { /ip hotspot cookie remove [find] } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
-        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial trial-uptime-limit=${duration}m trial-uptime-reset=1d use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,trial trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
         RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true),
-        `:log info "[T-Connect Policy] Hybrid mode active: ${duration}m free trial enabled on Splash Page.";`
+        `:log info "[T-Connect Policy] Hybrid mode active: Unlimited free Wi-Fi enabled on Splash Page.";`
       );
     } else if (accessMode === 'COMPLETELY_FREE') {
       lines.push(
@@ -716,8 +716,8 @@ export class RouterOSRenderer {
 
 # 8. Configure Hotspot Profile & Server on "${bridge}" (Cookies Disabled; addresses-per-mac=unlimited for APs on ether2-ether5)
 :do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}
-/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no
-:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=30m trial-uptime-reset=1d rate-limit="" use-radius=no } on-error={}
+/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=${gateway} dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=0s trial-uptime-reset=0s rate-limit="" use-radius=no
+:do { /ip hotspot profile set [find default=yes] login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=0s trial-uptime-reset=0s rate-limit="" use-radius=no } on-error={}
 :do { /ip hotspot remove [find interface="${bridge}"] } on-error={}
 /ip hotspot add name="tc-hotspot" interface="${bridge}" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=5m keepalive-timeout=2m disabled=no
 
@@ -735,11 +735,11 @@ export class RouterOSRenderer {
 # 10. Deploy Portal Builder On-Router Splash Page (hotspot/login.html & flash/hotspot/login.html)
 ${RouterOSRenderer.buildSplashPageFileCommands(`http://${vpsCleanHost}`, allowFree)}
 
-# 11. Hotspot Users (Voucher/Test User & Conditional Free Trial User)
+# 11. Hotspot Users (Voucher/Test User & Conditional Free Unlimited User)
 :do { /ip hotspot user remove [find name="test"] } on-error={}
 /ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"
 :do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}
-${allowFree ? `/ip hotspot user add name="T-TRIAL" password="123" limit-uptime=30m comment="T-Connect Free Trial Auth User"` : `# Free Trial Disabled by Admin Policy`}
+${allowFree ? `/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited Auth User"` : `# Free Trial Disabled by Admin Policy`}
 
 # 12. Bypass Only AP Hardware Management IPs (Removed 10.10.0.254 PC bypass so test PC sees Splash Page)
 :do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}

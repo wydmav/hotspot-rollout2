@@ -568,7 +568,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
           <div className="w-full flex items-center justify-between gap-3 mb-4 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a]">
             {/* Step Selector */}
             <div className="flex items-center gap-1 text-[11px] font-mono">
-              {(['identification', 'payment', 'usage'] as const).map((step) => (
+              {(['identification', 'payment'] as const).map((step) => (
                 <button
                   key={step}
                   onClick={() => setActiveStep(step)}
@@ -578,7 +578,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                       : 'text-slate-400 hover:text-white bg-[#121829]'
                   }`}
                 >
-                  {step === 'usage' ? 'Session Usage' : step}
+                  {step}
                 </button>
               ))}
             </div>
@@ -894,46 +894,11 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
                             return;
                           }
                         }
-                        setActiveStep('usage');
+                        setActiveStep('identification');
                       }}
                       className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-all cursor-pointer"
                     >
                       {isVerifyingOtt ? 'Verifying 16-Digit OTT Voucher...' : 'Pay & Connect Internet →'}
-                    </button>
-                  </div>
-                )}
-
-                {/* STEP 3: SESSION USAGE (SCREENSHOT 3) */}
-                {activeStep === 'usage' && (
-                  <div
-                    className="border border-white/20 shadow-2xl backdrop-blur-xl space-y-3 text-center"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${config.glassOpacity / 100})`,
-                      padding: `${config.cardPaddingPx}px`,
-                      borderRadius: `${config.cardRadiusPx}px`,
-                    }}
-                  >
-                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 text-left">
-                      <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Your Wi-Fi session is active on this device</span>
-                    </div>
-
-                    <div className="p-3 bg-black/50 rounded-xl border border-white/10 space-y-1">
-                      <div className="text-[10px] font-mono text-slate-400">Time usage</div>
-                      <div className="text-xl font-black text-white font-mono">41.17% Used</div>
-                      <div className="text-xs font-bold text-emerald-400 font-mono">
-                        3 Days, 14 Hours, 22 Minutes remaining
-                      </div>
-                      <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2">
-                        <div className="bg-emerald-500 h-full rounded-full w-2/5" />
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setActiveStep('identification')}
-                      className="w-full py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-mono"
-                    >
-                      Back to Start
                     </button>
                   </div>
                 )}

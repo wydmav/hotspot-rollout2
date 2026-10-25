@@ -11,7 +11,10 @@ import {
   AlertCircle,
   Volume2,
   VolumeX,
-  ExternalLink
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  X
 } from 'lucide-react';
 import { storage } from '../../services/storage';
 import { ScopePortalConfig, VerticalType, GatewayProvider, SponsorAdConfig, VideoAdItem } from '../../types';
@@ -50,9 +53,23 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     stadium: loadLocalScopeConfig('stadium')
   }));
 
-  // Poll live splash configuration saved on the VPS server so guest phones see admin customization & Free Access toggle in real time
+  // Poll live splash configuration saved on the VPS server + localStorage events so guest phones see admin customization & mode toggles in real time
   useEffect(() => {
     let mounted = true;
+    const syncLocal = () => {
+      if (!mounted) return;
+      setScopeConfigs((prev) => ({
+        ...prev,
+        hotspot: loadLocalScopeConfig('hotspot'),
+        village: loadLocalScopeConfig('community'),
+        community: loadLocalScopeConfig('community'),
+        park: loadLocalScopeConfig('park'),
+        bus: loadLocalScopeConfig('bus'),
+        stadium: loadLocalScopeConfig('stadium')
+      }));
+      setSponsorAdConfig(storage.getSponsorAdConfig());
+    };
+
     const fetchConfig = () => {
       fetch('/api/portal/config')
         .then((res) => res.json())
@@ -77,17 +94,29 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         })
         .catch(() => {});
     };
+
     fetchConfig();
-    const timer = setInterval(fetchConfig, 4000);
+    const timer = setInterval(fetchConfig, 1500);
+    const unsubStorage = storage.subscribe(syncLocal);
+    const handleStorageEvent = () => syncLocal();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageEvent);
+    }
     return () => {
       mounted = false;
       clearInterval(timer);
+      unsubStorage();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', handleStorageEvent);
+      }
     };
   }, []);
 
   const currentConfig = scopeConfigs[activeScope] || DEFAULT_SCOPE_CONFIGS.hotspot;
   const activeMeta = SCOPE_LIST.find((s) => s.id === activeScope) || SCOPE_LIST[0];
-  const isFreeAccessAllowed = currentConfig.allowFreeAccess !== false;
+  const isFreeAccessAllowed = Boolean(currentConfig.allowFreeAccess);
+  const isVoucherAllowed = currentConfig.allowVoucherCode !== false;
+  const isBuyPassAllowed = currentConfig.allowOnlinePayment !== false;
 
   // MikroTik Hotspot URL Parameters passed from hotspot/login.html redirect
   const [clientMac, setClientMac] = useState('');
@@ -123,9 +152,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   }, [routerGatewayIp]);
 
-  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'usage'
-  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'usage'>(
-    isFreeAccessAllowed ? 'identification' : 'voucher'
+  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'
+  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'>(
+    isFreeAccessAllowed ? 'identification' : isVoucherAllowed ? 'voucher' : 'plan'
   );
 
   // Video Ad Interstitial & 3h / 2GB Re-Trigger State
@@ -133,13 +162,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [adTriggerReason, setAdTriggerReason] = useState<'post_auth' | 'retrigger'>('post_auth');
   const [adElapsedSec, setAdElapsedSec] = useState(0);
   const [adDurationSec, setAdDurationSec] = useState(15);
-  const [isAdUnlocked, setIsAdUnlocked] = useState(false);
+  const [isAdUnlocked, setIsAdUnlocked] = useState(true);
   const [isVideoMuted, setIsVideoMuted] = useState(true);
   const [carouselSlideIdx, setCarouselSlideIdx] = useState(0);
   const touchStartXRef = useRef<number>(0);
+  const touchDraggedRef = useRef<boolean>(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [sessionElapsedSinceAdSec, setSessionElapsedSinceAdSec] = useState(0);
-  const [sessionDataSinceAdMb, setSessionDataSinceAdMb] = useState(0);
 
   // Mandatory Terms & Conditions Checkbox + Popup Modal State (Applies to all modes)
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -150,6 +178,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const lib = sponsorAdConfig.videoLibrary || [];
     const normScope = activeScope === 'village' ? 'community' : activeScope;
     return (
+      lib.find((v) => v.enabled && v.mediaType === 'image_carousel' && (v.targetScope === normScope || v.targetScope === activeScope)) ||
+      lib.find((v) => v.enabled && v.mediaType === 'image_carousel' && v.targetScope === 'all') ||
       lib.find((v) => v.enabled && (v.targetScope === normScope || v.targetScope === activeScope)) ||
       lib.find((v) => v.enabled && v.targetScope === 'all') ||
       lib.find((v) => v.enabled) ||
@@ -157,25 +187,65 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     );
   }, [sponsorAdConfig, activeScope]);
 
+  const releaseAndCloseSplash = () => {
+    const dstUrl = userOrigUrl && !userOrigUrl.includes('$(') ? userOrigUrl : 'https://www.google.com';
+    try {
+      if (hiddenFormRef.current && clientMac) {
+        hiddenFormRef.current.submit();
+      }
+    } catch {}
+    try {
+      window.close();
+    } catch {}
+    try {
+      window.open('', '_self', '');
+      window.close();
+    } catch {}
+    if (typeof window !== 'undefined') {
+      if (window.top && window.top !== window.self) {
+        try {
+          window.top.location.replace(dstUrl);
+          return;
+        } catch {}
+      }
+      window.location.replace(dstUrl);
+    }
+  };
+
   const startOrEnterConnectedSession = (reason: 'post_auth' | 'retrigger' = 'post_auth') => {
     if (sponsorAdConfig.enabled && activeVideoAd) {
       setAdTriggerReason(reason);
       setAdElapsedSec(0);
       setCarouselSlideIdx(0);
-      setIsAdUnlocked(false);
+      setIsAdUnlocked(true);
       storage.recordVideoAdImpression(activeVideoAd.id);
       setPortalStep('video_ad');
     } else {
-      setPortalStep('usage');
+      releaseAndCloseSplash();
     }
   };
 
-  // Immediately hide Free Access step if Admin turns off Free Access Mode in real time
-  useEffect(() => {
-    if (!isFreeAccessAllowed && portalStep === 'identification') {
-      setPortalStep('voucher');
+  const handleCloseAdAndEnjoyInternet = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-  }, [isFreeAccessAllowed, portalStep]);
+    releaseAndCloseSplash();
+  };
+
+  // Immediately switch active login mode if Admin turns off Free Wi-Fi, Voucher, or Buy Pass in real time
+  useEffect(() => {
+    if (portalStep === 'identification' && !isFreeAccessAllowed) {
+      if (isVoucherAllowed) setPortalStep('voucher');
+      else if (isBuyPassAllowed) setPortalStep('plan');
+    } else if (portalStep === 'voucher' && !isVoucherAllowed) {
+      if (isFreeAccessAllowed) setPortalStep('identification');
+      else if (isBuyPassAllowed) setPortalStep('plan');
+    } else if ((portalStep === 'plan' || portalStep === 'payment') && !isBuyPassAllowed) {
+      if (isFreeAccessAllowed) setPortalStep('identification');
+      else if (isVoucherAllowed) setPortalStep('voucher');
+    }
+  }, [isFreeAccessAllowed, isVoucherAllowed, isBuyPassAllowed, portalStep]);
 
   // Guest Registration Fields (100% empty initial state — collected across all modes and synced to Admin)
   const [guestFirstName, setGuestFirstName] = useState('');
@@ -196,11 +266,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
-
-  // Connected Session State (Consumer-facing only)
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(1800);
-  const [connectedPlanName, setConnectedPlanName] = useState<string>('Wi-Fi Access Pass');
-  const [connectedDurationLabel, setConnectedDurationLabel] = useState<string>('30 Minutes');
 
   const hiddenFormRef = useRef<HTMLFormElement | null>(null);
   const [routerUsername, setRouterUsername] = useState('test');
@@ -238,51 +303,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }, 1000);
     return () => clearInterval(timer);
   }, [portalStep, activeVideoAd, adDurationSec]);
-
-  // Countdown timer & 3-Hour / 2 GB Checkpoint Watcher when in 'usage' step
-  useEffect(() => {
-    if (portalStep !== 'usage') return;
-    const retriggerSec = Math.max(1, Number(sponsorAdConfig.retriggerEveryHours) || 3) * 3600;
-    const retriggerMb = Math.max(0.5, Number(sponsorAdConfig.retriggerEveryGb) || 2) * 1024;
-    const timer = setInterval(() => {
-      setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
-      setSessionElapsedSinceAdSec((prevSec) => {
-        const nextSec = prevSec + 1;
-        if (sponsorAdConfig.enabled && activeVideoAd && nextSec >= retriggerSec) {
-          setSessionElapsedSinceAdSec(0);
-          setSessionDataSinceAdMb(0);
-          setAdTriggerReason('retrigger');
-          setAdElapsedSec(0);
-          setIsAdUnlocked(false);
-          setPortalStep('video_ad');
-        }
-        return nextSec;
-      });
-      setSessionDataSinceAdMb((prevMb) => {
-        const nextMb = Number((prevMb + 0.35).toFixed(2));
-        if (sponsorAdConfig.enabled && activeVideoAd && nextMb >= retriggerMb) {
-          setSessionElapsedSinceAdSec(0);
-          setSessionDataSinceAdMb(0);
-          setAdTriggerReason('retrigger');
-          setAdElapsedSec(0);
-          setIsAdUnlocked(false);
-          setPortalStep('video_ad');
-        }
-        return nextMb;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [portalStep, sponsorAdConfig, activeVideoAd]);
-
-  const formatTimer = (secs: number) => {
-    const d = Math.floor(secs / 86400);
-    const h = Math.floor((secs % 86400) / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    if (d > 0) return `${d}d ${h}h ${m}m`;
-    if (h > 0) return `${h}h ${m}m ${s}s`;
-    return `${m}m ${s < 10 ? '0' : ''}${s}s`;
-  };
 
   /**
    * Sends captured guest details, session, and payment telemetry to the Admin Controller & Supabase
@@ -378,17 +398,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }, 100);
   };
 
-  // Connect Free Trial (Only when Free Access is enabled by Admin)
+  // Connect Free Wi-Fi (Unlimited Forever — Only when Free Access is enabled by Admin)
   const handleConnectFree = async () => {
     if (!termsAccepted || !isGuestFormValid) return;
     setIsConnecting(true);
-    setStatusBanner('Activating your free Wi-Fi session...');
+    setStatusBanner('Activating your unlimited free Wi-Fi...');
 
     const vCode = `FREE-${cleanPhoneDigits.slice(-4) || Math.floor(1000 + Math.random() * 9000)}`;
     await syncGuestSessionToAdmin({
       mode: 'free',
-      planName: 'Free Wi-Fi Trial (30 Mins)',
-      durationSeconds: 1800,
+      planName: 'Free Wi-Fi (Unlimited)',
+      durationSeconds: 0,
       voucherCode: vCode,
       amount: 0,
       speedLimit: '25M/10M'
@@ -399,11 +419,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     setTimeout(() => {
       setIsConnecting(false);
       setStatusBanner(null);
-      setConnectedPlanName('Free Wi-Fi Pass');
-      setConnectedDurationLabel('30 Minutes');
-      setRemainingSeconds(1800);
-      setSessionElapsedSinceAdSec(0);
-      setSessionDataSinceAdMb(0);
       startOrEnterConnectedSession('post_auth');
     }, 700);
   };
@@ -476,11 +491,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       setIsConnecting(false);
       setStatusBanner(null);
-      setConnectedPlanName(planTitle);
-      setConnectedDurationLabel(durationSecs >= 604800 ? '7 Days' : durationSecs >= 86400 ? '24 Hours' : `${Math.round(durationSecs / 60)} Mins`);
-      setRemainingSeconds(durationSecs);
-      setSessionElapsedSinceAdSec(0);
-      setSessionDataSinceAdMb(0);
       startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
@@ -575,11 +585,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       setIsConnecting(false);
       setStatusBanner(null);
-      setConnectedPlanName(selectedPlan?.name || 'Daily Pass');
-      setConnectedDurationLabel(selectedPlan?.durationLabel || '24 Hours');
-      setRemainingSeconds(selectedPlan?.durationSeconds || 86400);
-      setSessionElapsedSinceAdSec(0);
-      setSessionDataSinceAdMb(0);
       startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
@@ -776,143 +781,200 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* FULL-SCREEN EDGE-TO-EDGE AD (100vw x 100vh) — Video or Pictures   */}
+      {/* FULL-SCREEN EDGE-TO-EDGE AD (100vw x 100vh) — Sliding Pictures/Video */}
       {/* ================================================================= */}
-      {portalStep === 'video_ad' && activeVideoAd && (
-        <div
-          className="fixed inset-0 z-50 w-screen h-screen bg-black overflow-hidden select-none cursor-pointer"
-          onClick={() => {
-            const isCarousel =
-              activeVideoAd.mediaType === 'image_carousel' &&
-              Array.isArray(activeVideoAd.slides) &&
-              activeVideoAd.slides.length > 0;
-            const targetUrl = isCarousel
-              ? activeVideoAd.slides?.[carouselSlideIdx]?.redirectUrl || activeVideoAd.destinationUrl
-              : activeVideoAd.destinationUrl;
-            if (targetUrl) {
-              window.open(targetUrl, '_blank', 'noopener,noreferrer');
-            }
-          }}
-          onTouchStart={(e) => {
-            if (e.touches && e.touches[0]) {
-              touchStartXRef.current = e.touches[0].clientX;
-            }
-          }}
-          onTouchEnd={(e) => {
-            const slides = activeVideoAd.slides || [];
-            if (activeVideoAd.mediaType !== 'image_carousel' || slides.length <= 1) return;
-            if (!e.changedTouches || !e.changedTouches[0]) return;
-            const diff = e.changedTouches[0].clientX - touchStartXRef.current;
-            if (Math.abs(diff) > 45) {
-              if (diff < 0) {
-                setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
-              } else {
-                setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
-              }
-            }
-          }}
-        >
-          {activeVideoAd.mediaType === 'image_carousel' &&
+      {portalStep === 'video_ad' && activeVideoAd && (() => {
+        const isCarousel =
+          activeVideoAd.mediaType === 'image_carousel' &&
           Array.isArray(activeVideoAd.slides) &&
-          activeVideoAd.slides.length > 0 ? (
-            <img
-              src={activeVideoAd.slides[carouselSlideIdx]?.imageUrl || activeVideoAd.videoUrl}
-              alt={activeVideoAd.title}
-              className="w-screen h-screen object-cover block bg-black"
-            />
-          ) : (
-            <video
-              ref={videoRef}
-              src={activeVideoAd.videoUrl}
-              playsInline
-              autoPlay
-              muted={isVideoMuted}
-              onLoadedMetadata={(e) => {
-                const dur = e.currentTarget.duration;
-                if (dur && !isNaN(dur) && isFinite(dur)) {
-                  setAdDurationSec(Math.ceil(dur));
-                }
-              }}
-              onEnded={() => setIsAdUnlocked(true)}
-              onError={() => setIsAdUnlocked(true)}
-              className="w-screen h-screen object-cover block bg-black"
-            />
-          )}
+          activeVideoAd.slides.length > 0;
+        const slides = activeVideoAd.slides || [];
+        const currentSlide = slides[carouselSlideIdx] || slides[0];
 
-          {/* Top-Right Floating Skip / Continue Control */}
+        return (
           <div
-            className="fixed top-4 right-4 z-50 flex items-center gap-2"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 w-screen h-screen bg-black overflow-hidden select-none cursor-pointer"
+            onClick={() => {
+              if (touchDraggedRef.current) {
+                touchDraggedRef.current = false;
+                return;
+              }
+              const targetUrl = isCarousel
+                ? currentSlide?.redirectUrl || activeVideoAd.destinationUrl
+                : activeVideoAd.destinationUrl;
+              if (targetUrl) {
+                storage.recordVideoAdClick(activeVideoAd.id);
+                window.open(targetUrl, '_blank', 'noopener,noreferrer');
+              }
+            }}
+            onTouchStart={(e) => {
+              touchDraggedRef.current = false;
+              if (e.touches && e.touches[0]) {
+                touchStartXRef.current = e.touches[0].clientX;
+              }
+            }}
+            onTouchEnd={(e) => {
+              if (!isCarousel || slides.length <= 1) return;
+              if (!e.changedTouches || !e.changedTouches[0]) return;
+              const diff = e.changedTouches[0].clientX - touchStartXRef.current;
+              if (Math.abs(diff) > 35) {
+                touchDraggedRef.current = true;
+                if (diff < 0) {
+                  setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
+                } else {
+                  setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
+                }
+              }
+            }}
           >
-            <button
-              type="button"
-              disabled={!isAdUnlocked}
-              onClick={() => setPortalStep('usage')}
-              className={`px-4 py-2 rounded-full text-xs font-black shadow-2xl border backdrop-blur-md transition-all cursor-pointer ${
-                isAdUnlocked
-                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-emerald-300'
-                  : 'bg-black/75 text-white border-white/30 opacity-90 cursor-not-allowed'
-              }`}
-            >
-              {isAdUnlocked
-                ? 'Continue to Internet \u2192'
-                : activeVideoAd.watchMode === 'skip_after_sec' || activeVideoAd.mediaType === 'image_carousel'
-                ? `Continue in ${Math.max(0, (activeVideoAd.skipAfterSec || 5) - adElapsedSec)}s`
-                : `Continue in ${Math.max(0, Math.ceil(adDurationSec - adElapsedSec))}s`}
-            </button>
-          </div>
+            {/* Horizontal Sliding Picture Track OR Full-Screen Video */}
+            {isCarousel ? (
+              <div
+                className="flex w-full h-full transition-transform duration-300 ease-out"
+                style={{
+                  transform: `translateX(-${carouselSlideIdx * 100}%)`
+                }}
+              >
+                {slides.map((sl, idx) => (
+                  <div key={sl.id || idx} className="w-screen h-screen shrink-0 relative bg-black">
+                    <img
+                      src={sl.imageUrl || activeVideoAd.videoUrl}
+                      alt={sl.caption || activeVideoAd.title}
+                      className="w-screen h-screen object-cover block bg-black"
+                      draggable={false}
+                    />
+                    {sl.caption && (
+                      <div className="absolute bottom-20 inset-x-4 z-30 flex justify-center pointer-events-none">
+                        <div className="px-4 py-2 rounded-2xl bg-black/75 backdrop-blur-md border border-white/20 text-white text-xs sm:text-sm font-bold text-center max-w-md shadow-2xl">
+                          {sl.caption}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                src={activeVideoAd.videoUrl}
+                playsInline
+                autoPlay
+                muted={isVideoMuted}
+                onLoadedMetadata={(e) => {
+                  const dur = e.currentTarget.duration;
+                  if (dur && !isNaN(dur) && isFinite(dur)) {
+                    setAdDurationSec(Math.ceil(dur));
+                  }
+                }}
+                onEnded={() => setIsAdUnlocked(true)}
+                onError={() => setIsAdUnlocked(true)}
+                className="w-screen h-screen object-cover block bg-black"
+              />
+            )}
 
-          {/* Bottom Floating Controls: Audio Mute for Video OR Manual Swipe/Next Controls for Multi-Image Series */}
-          {activeVideoAd.mediaType === 'image_carousel' &&
-          Array.isArray(activeVideoAd.slides) &&
-          activeVideoAd.slides.length > 0 ? (
+            {/* Top-Left Sponsor Info & Slide Hint */}
             <div
-              className="fixed bottom-4 right-4 z-50 flex items-center gap-2"
+              className="fixed top-4 left-4 z-50 flex items-center gap-2 px-3.5 py-2 rounded-full bg-black/75 backdrop-blur-md border border-white/25 text-white text-xs font-bold shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="truncate max-w-[180px] sm:max-w-xs">
+                {activeVideoAd.sponsorName || 'T-Connect Partner Offer'}
+              </span>
+              {isCarousel && slides.length > 1 && (
+                <span className="text-[10px] text-amber-300 font-mono pl-1 border-l border-white/20">
+                  Slide {carouselSlideIdx + 1}/{slides.length}
+                </span>
+              )}
+            </div>
+
+            {/* Top-Right Immediate X Close Button (Releases straight to connectivity) */}
+            <div
+              className="fixed top-4 right-4 z-50 flex items-center gap-2"
               onClick={(e) => e.stopPropagation()}
             >
               <button
                 type="button"
-                onClick={() => {
-                  const total = activeVideoAd.slides?.length || 1;
-                  setCarouselSlideIdx((prev) => (prev - 1 + total) % total);
-                }}
-                className="px-3.5 py-2 rounded-full bg-black/75 hover:bg-black/90 border border-white/30 text-white text-xs font-bold cursor-pointer"
+                onClick={handleCloseAdAndEnjoyInternet}
+                aria-label="Close ad and enjoy connectivity"
+                title="Close ad and use internet"
+                className="w-11 h-11 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95"
               >
-                &larr; Prev
-              </button>
-              <span className="px-3 py-1.5 rounded-full bg-black/75 border border-white/20 text-white text-xs font-mono font-bold">
-                {carouselSlideIdx + 1} / {activeVideoAd.slides.length}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  const total = activeVideoAd.slides?.length || 1;
-                  setCarouselSlideIdx((prev) => (prev + 1) % total);
-                }}
-                className="px-3.5 py-2 rounded-full bg-black/75 hover:bg-black/90 border border-white/30 text-white text-xs font-bold cursor-pointer"
-              >
-                Next &rarr;
+                <X className="w-6 h-6 stroke-[2.5]" />
               </button>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsVideoMuted((prev) => {
-                  const next = !prev;
-                  if (videoRef.current) videoRef.current.muted = next;
-                  return next;
-                });
-              }}
-              className="fixed bottom-4 left-4 z-50 px-3.5 py-2 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              {isVideoMuted ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
-              <span>{isVideoMuted ? 'Unmute' : 'Sound On'}</span>
-            </button>
-          )}
-        </div>
-      )}
+
+            {/* Left & Right Slide Arrows for Multi-Picture Series */}
+            {isCarousel && slides.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
+                  }}
+                  aria-label="Previous picture"
+                  className="fixed left-3 top-1/2 -translate-y-1/2 z-50 w-11 h-11 rounded-full bg-black/75 hover:bg-black/90 border border-white/35 text-white flex items-center justify-center shadow-2xl cursor-pointer active:scale-95"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
+                  }}
+                  aria-label="Next picture"
+                  className="fixed right-3 top-1/2 -translate-y-1/2 z-50 w-11 h-11 rounded-full bg-black/75 hover:bg-black/90 border border-white/35 text-white flex items-center justify-center shadow-2xl cursor-pointer active:scale-95"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </>
+            )}
+
+            {/* Bottom Controls: Pagination Dots + Slide Hint for Pictures OR Audio Mute for Video */}
+            {isCarousel && slides.length > 0 ? (
+              <div
+                className="fixed bottom-5 inset-x-4 z-50 flex flex-col items-center gap-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/25 shadow-2xl">
+                  {slides.map((sl, idx) => (
+                    <button
+                      key={sl.id || idx}
+                      type="button"
+                      onClick={() => setCarouselSlideIdx(idx)}
+                      className={`h-2.5 rounded-full transition-all cursor-pointer ${
+                        idx === carouselSlideIdx ? 'w-7 bg-[#f05e17]' : 'w-2.5 bg-white/45 hover:bg-white/80'
+                      }`}
+                      aria-label={`View picture ${idx + 1}`}
+                    />
+                  ))}
+                  <span className="text-[11px] text-slate-200 font-mono font-bold ml-1.5">
+                    Swipe or tap arrows &rarr;
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsVideoMuted((prev) => {
+                    const next = !prev;
+                    if (videoRef.current) videoRef.current.muted = next;
+                    return next;
+                  });
+                }}
+                className="fixed bottom-4 left-4 z-50 px-3.5 py-2 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                {isVideoMuted ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+                <span>{isVideoMuted ? 'Unmute' : 'Sound On'}</span>
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Pure Full-Viewport Splash Page Container */}
       <main
@@ -959,176 +1021,159 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* STEP 1: FREE WI-FI SIGN-UP (Only when Free Access Mode is ON)     */}
+          {/* DYNAMIC MODE QUICK TABS HELPER                                    */}
           {/* ================================================================= */}
-          {portalStep === 'identification' && isFreeAccessAllowed && (
-            <div
-              className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-              style={{
-                backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-              }}
-            >
-              {/* Mode Quick Tabs: Free / Voucher / Buy Pass */}
-              <div className="grid grid-cols-3 gap-1 bg-black/45 p-1 rounded-xl border border-white/10 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('identification')}
-                  className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Zap className="w-3 h-3" />
-                  <span>Free Wi-Fi</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('voucher')}
-                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Ticket className="w-3 h-3 text-emerald-400" />
-                  <span>Voucher</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('plan')}
-                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>Buy Pass</span>
-                </button>
-              </div>
+          {(() => {
+            const enabledModesCount =
+              (isFreeAccessAllowed ? 1 : 0) +
+              (isVoucherAllowed ? 1 : 0) +
+              (isBuyPassAllowed ? 1 : 0);
 
-              {renderGuestIdentificationInputs()}
+            const renderModeQuickTabs = (activeTab: 'identification' | 'voucher' | 'plan') => {
+              if (enabledModesCount <= 1) return null;
+              const gridCols =
+                enabledModesCount === 3
+                  ? 'grid-cols-3'
+                  : 'grid-cols-2';
+              return (
+                <div className={`grid ${gridCols} gap-1 bg-black/45 p-1 rounded-xl border border-white/10 text-[11px]`}>
+                  {isFreeAccessAllowed && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalStep('identification')}
+                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                        activeTab === 'identification'
+                          ? 'bg-[#f05e17] text-white shadow'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <Zap className="w-3 h-3" />
+                      <span>Free Wi-Fi</span>
+                    </button>
+                  )}
+                  {isVoucherAllowed && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalStep('voucher')}
+                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                        activeTab === 'voucher'
+                          ? 'bg-[#f05e17] text-white shadow'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <Ticket className={`w-3 h-3 ${activeTab === 'voucher' ? 'text-white' : 'text-emerald-400'}`} />
+                      <span>Voucher</span>
+                    </button>
+                  )}
+                  {isBuyPassAllowed && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalStep('plan')}
+                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                        activeTab === 'plan'
+                          ? 'bg-[#f05e17] text-white shadow'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <Sparkles className={`w-3 h-3 ${activeTab === 'plan' ? 'text-white' : 'text-amber-400'}`} />
+                      <span>Buy Pass</span>
+                    </button>
+                  )}
+                </div>
+              );
+            };
 
-              {renderTermsAndConditionsRow()}
-
-              <div className="pt-0.5">
-                <button
-                  type="button"
-                  onClick={handleConnectFree}
-                  disabled={!termsAccepted || !isGuestFormValid || isConnecting}
-                  className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Zap className="w-3.5 h-3.5" />
-                  <span>{isConnecting ? 'Connecting...' : 'Connect Free Wi-Fi \u2192'}</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ================================================================= */}
-          {/* STEP 2: VOUCHER CODE LOGIN                                        */}
-          {/* ================================================================= */}
-          {portalStep === 'voucher' && (
-            <form
-              onSubmit={handleRedeemVoucher}
-              className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-              style={{
-                backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-              }}
-            >
-              {/* Mode Quick Tabs */}
-              <div className={`grid ${isFreeAccessAllowed ? 'grid-cols-3' : 'grid-cols-2'} gap-1 bg-black/45 p-1 rounded-xl border border-white/10 text-[11px]`}>
-                {isFreeAccessAllowed && (
-                  <button
-                    type="button"
-                    onClick={() => setPortalStep('identification')}
-                    className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+            return (
+              <>
+                {/* ================================================================= */}
+                {/* STEP 1: FREE WI-FI SIGN-UP (Only when Free Access Mode is ON)     */}
+                {/* ================================================================= */}
+                {portalStep === 'identification' && isFreeAccessAllowed && (
+                  <div
+                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
+                    style={{
+                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
+                    }}
                   >
-                    <Zap className="w-3 h-3" />
-                    <span>Free Wi-Fi</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('voucher')}
-                  className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Ticket className="w-3 h-3" />
-                  <span>Voucher Code</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('plan')}
-                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>Buy Pass</span>
-                </button>
-              </div>
+                    {renderModeQuickTabs('identification')}
 
-              <div>
-                <label className="text-[10px] font-medium text-slate-300 block mb-1">
-                  Voucher Code <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={voucherCode}
-                  onChange={(e) => {
-                    setVoucherCode(e.target.value);
-                    setVoucherError(null);
-                  }}
-                  placeholder="Enter voucher code (e.g. TC-XXXX or 16-digit OTT PIN)"
-                  className="w-full px-3 py-2 bg-black/50 border border-white/25 focus:border-emerald-400 rounded-xl text-white text-xs font-mono tracking-wider uppercase focus:outline-none"
-                />
-                {voucherError && (
-                  <div className="mt-1.5 p-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-[11px] flex items-start gap-1.5">
-                    <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                    <span>{voucherError}</span>
+                    {renderGuestIdentificationInputs()}
+
+                    {renderTermsAndConditionsRow()}
+
+                    <div className="pt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleConnectFree}
+                        disabled={!termsAccepted || !isGuestFormValid || isConnecting}
+                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>{isConnecting ? 'Connecting...' : 'Connect Free Wi-Fi \u2192'}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
-              </div>
 
-              {renderTermsAndConditionsRow()}
-
-              <button
-                type="submit"
-                disabled={!termsAccepted || isConnecting || !voucherCode.trim()}
-                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{isConnecting ? 'Verifying Voucher...' : 'Activate Voucher & Connect \u2192'}</span>
-              </button>
-            </form>
-          )}
-
-          {/* ================================================================= */}
-          {/* STEP 3: PLAN SELECTION                                            */}
-          {/* ================================================================= */}
-          {portalStep === 'plan' && (
-            <div
-              className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-              style={{
-                backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-              }}
-            >
-              {/* Mode Quick Tabs */}
-              <div className={`grid ${isFreeAccessAllowed ? 'grid-cols-3' : 'grid-cols-2'} gap-1 bg-black/45 p-1 rounded-xl border border-white/10 text-[11px]`}>
-                {isFreeAccessAllowed && (
-                  <button
-                    type="button"
-                    onClick={() => setPortalStep('identification')}
-                    className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                {/* ================================================================= */}
+                {/* STEP 2: VOUCHER CODE LOGIN (Only when Voucher Mode is ON)         */}
+                {/* ================================================================= */}
+                {portalStep === 'voucher' && isVoucherAllowed && (
+                  <form
+                    onSubmit={handleRedeemVoucher}
+                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
+                    style={{
+                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
+                    }}
                   >
-                    <Zap className="w-3 h-3" />
-                    <span>Free Wi-Fi</span>
-                  </button>
+                    {renderModeQuickTabs('voucher')}
+
+                    <div>
+                      <label className="text-[10px] font-medium text-slate-300 block mb-1">
+                        Voucher Code <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={voucherCode}
+                        onChange={(e) => {
+                          setVoucherCode(e.target.value);
+                          setVoucherError(null);
+                        }}
+                        placeholder="Enter voucher code (e.g. TC-XXXX or 16-digit OTT PIN)"
+                        className="w-full px-3 py-2 bg-black/50 border border-white/25 focus:border-emerald-400 rounded-xl text-white text-xs font-mono tracking-wider uppercase focus:outline-none"
+                      />
+                      {voucherError && (
+                        <div className="mt-1.5 p-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-[11px] flex items-start gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                          <span>{voucherError}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {renderTermsAndConditionsRow()}
+
+                    <button
+                      type="submit"
+                      disabled={!termsAccepted || isConnecting || !voucherCode.trim()}
+                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>{isConnecting ? 'Verifying Voucher...' : 'Activate Voucher & Connect \u2192'}</span>
+                    </button>
+                  </form>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('voucher')}
-                  className="py-1.5 rounded-lg font-bold text-slate-300 hover:text-white flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Ticket className="w-3 h-3 text-emerald-400" />
-                  <span>Voucher Code</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPortalStep('plan')}
-                  className="py-1.5 rounded-lg font-bold bg-[#f05e17] text-white shadow flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>Buy Pass</span>
-                </button>
-              </div>
+
+                {/* ================================================================= */}
+                {/* STEP 3: PLAN SELECTION (Only when Buy Pass Mode is ON)            */}
+                {/* ================================================================= */}
+                {portalStep === 'plan' && isBuyPassAllowed && (
+                  <div
+                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
+                    style={{
+                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
+                    }}
+                  >
+                    {renderModeQuickTabs('plan')}
 
               <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
                 {enabledPlans.map((plan) => {
@@ -1174,20 +1219,23 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               {renderTermsAndConditionsRow()}
 
-              <button
-                type="button"
-                disabled={!termsAccepted}
-                onClick={() => {
-                  setPaymentError(null);
-                  setPortalStep('payment');
-                }}
-                className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <span>Continue to Payment</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  disabled={!termsAccepted}
+                  onClick={() => {
+                    setPaymentError(null);
+                    setPortalStep('payment');
+                  }}
+                  className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>Continue to Payment</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* ================================================================= */}
           {/* STEP 4: ECOCASH & 16-DIGIT OTT VOUCHER PAYMENT                    */}
@@ -1304,56 +1352,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>
               </button>
             </form>
-          )}
-
-          {/* ================================================================= */}
-          {/* STEP 5: CONSUMER-FACING CONNECTED CONFIRMATION                    */}
-          {/* ================================================================= */}
-          {portalStep === 'usage' && (
-            <div
-              className="rounded-3xl p-6 border border-emerald-500/40 shadow-2xl backdrop-blur-xl space-y-4 text-center"
-              style={{
-                backgroundColor: `rgba(10, 18, 30, 0.92)`
-              }}
-            >
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto text-emerald-400">
-                <CheckCircle2 className="w-7 h-7" />
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold text-emerald-400 mb-1">
-                  You're Connected
-                </div>
-                <h2 className="text-xl font-black text-white">{connectedPlanName}</h2>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Active Package · {connectedDurationLabel}
-                </p>
-              </div>
-
-              <div className="bg-black/40 p-3.5 rounded-2xl border border-white/10 text-center">
-                <span className="text-[11px] text-slate-400 block mb-0.5">Session Time Remaining</span>
-                <span className="text-emerald-400 font-bold text-base font-mono tabular-nums">
-                  {formatTimer(remainingSeconds)}
-                </span>
-              </div>
-
-              <form
-                method="POST"
-                action={linkLoginOnly || `http://${routerGatewayIp}/login`}
-                className="space-y-2"
-              >
-                <input type="hidden" name="username" value={routerUsername} />
-                <input type="hidden" name="password" value={routerPassword} />
-                <input type="hidden" name="dst" value={userOrigUrl} />
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Globe className="w-4 h-4" />
-                  <span>Continue to Internet &rarr;</span>
-                </button>
-              </form>
-            </div>
           )}
         </div>
 
