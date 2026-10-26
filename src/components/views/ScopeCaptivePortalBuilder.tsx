@@ -2517,7 +2517,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
             {/* Background Image Container */}
             <div
-              className="relative min-h-[560px] p-4 flex flex-col justify-between bg-cover bg-center transition-all duration-300"
+              className="relative min-h-[560px] pt-3 px-3 pb-0 flex flex-col justify-between bg-cover bg-center transition-all duration-300"
               style={{
                 backgroundImage: `url(${effectivePreviewBg})`,
               }}
@@ -2665,16 +2665,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 );
               })()}
 
-              {/* Dynamic Glassmorphism Card */}
-              <div
-                className={`relative z-10 w-full ${
-                  currentConfig.cardPlacement === 'top'
-                    ? 'mt-3'
-                    : currentConfig.cardPlacement === 'bottom'
-                    ? 'mt-auto'
-                    : 'my-auto'
-                }`}
-              >
+              {/* Slim Docked Bottom Sheet Captive Portal Box */}
+              <div className="relative z-10 w-full mt-auto mb-0">
                 {/* Mode Tabs Bar inside Phone Emulator */}
                 {(previewStep === 'identification' || previewStep === 'voucher' || previewStep === 'plan') && (() => {
                   const enabledCount =
@@ -2684,16 +2676,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   if (enabledCount <= 1) return null;
                   const cols = enabledCount === 3 ? 'grid-cols-3' : 'grid-cols-2';
                   return (
-                    <div className={`grid ${cols} gap-1 bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/15 text-[10px] font-mono mb-2`}>
+                    <div className={`grid ${cols} gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[9px] font-mono mb-1.5`}>
                       {isFreeModeActive && (
                         <button
                           type="button"
                           onClick={() => setPreviewStep('identification')}
-                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
-                            previewStep === 'identification' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                            previewStep === 'identification' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
                           }`}
                         >
-                          <Zap className="w-3 h-3" />
+                          <Zap className="w-2.5 h-2.5" />
                           <span>Free Wi-Fi</span>
                         </button>
                       )}
@@ -2701,11 +2693,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         <button
                           type="button"
                           onClick={() => setPreviewStep('voucher')}
-                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
-                            previewStep === 'voucher' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                            previewStep === 'voucher' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
                           }`}
                         >
-                          <Ticket className="w-3 h-3" />
+                          <Ticket className="w-2.5 h-2.5" />
                           <span>Voucher</span>
                         </button>
                       )}
@@ -2713,11 +2705,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         <button
                           type="button"
                           onClick={() => setPreviewStep('plan')}
-                          className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer ${
-                            previewStep === 'plan' ? 'bg-[#f05e17] text-white' : 'text-slate-300 hover:text-white'
+                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
+                            previewStep === 'plan' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
                           }`}
                         >
-                          <Sparkles className="w-3 h-3" />
+                          <Sparkles className="w-2.5 h-2.5" />
                           <span>Buy Pass</span>
                         </button>
                       )}
@@ -2739,11 +2731,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       setSessionRemaining(86400);
                       enterPostAuthAdOrUsage();
                     }}
-                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
-                    }}
+                    className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
                   >
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
                     <div>
                       <label className="text-[10px] font-mono text-slate-300 block mb-1">
                         Voucher Code <span className="text-red-400">*</span>
@@ -2756,7 +2746,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           setPreviewVoucherError(null);
                         }}
                         placeholder="Enter voucher code (e.g. TC-XXXX)"
-                        className="w-full px-3 py-2 bg-black/50 border border-white/25 rounded-xl text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-emerald-400"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-emerald-400"
                       />
                       {previewVoucherError && (
                         <span className="text-[9px] text-rose-300 font-mono block mt-1">{previewVoucherError}</span>
@@ -2764,7 +2754,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     </div>
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-xl shadow-lg cursor-pointer"
+                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-lg cursor-pointer"
                     >
                       Activate Voucher &amp; Connect &rarr;
                     </button>
@@ -2779,28 +2769,26 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       if (!isGuestFormValid) return;
                       handleConnectFree();
                     }}
-                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
-                    }}
+                    className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left"
                   >
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
                     {/* Hotspot Free Mode Badge Notice */}
                     {isFreeModeActive && (
-                      <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono text-amber-200 flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 font-bold">
-                          <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      <div className="p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[9px] font-mono text-amber-200 flex items-center justify-between">
+                        <span className="flex items-center gap-1 font-bold">
+                          <Zap className="w-3 h-3 text-amber-300" />
                           <span>Free Hotspot Access Enabled</span>
                         </span>
-                        <span className="bg-emerald-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[9px]">
+                        <span className="bg-emerald-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[8px]">
                           UNLIMITED
                         </span>
                       </div>
                     )}
 
                     {currentConfig.collectName && (
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                          <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
                             First Name <span className="text-red-400">*</span>
                           </label>
                           <input
@@ -2809,19 +2797,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             value={guestFirstName}
                             onChange={(e) => setGuestFirstName(e.target.value)}
                             placeholder="First name"
-                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
-                              guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
+                              guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
                             }`}
                           />
                           {guestFirstName && !isFirstNameValid && (
-                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                            <span className="text-[8px] text-red-300 font-mono block mt-0.5">
                               Min 2 characters
                             </span>
                           )}
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                          <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
                             Surname <span className="text-red-400">*</span>
                           </label>
                           <input
@@ -2830,12 +2818,12 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             value={guestSurname}
                             onChange={(e) => setGuestSurname(e.target.value)}
                             placeholder="Surname"
-                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
-                              guestSurname && !isSurnameValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
+                              guestSurname && !isSurnameValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
                             }`}
                           />
                           {guestSurname && !isSurnameValid && (
-                            <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                            <span className="text-[8px] text-red-300 font-mono block mt-0.5">
                               Min 2 characters
                             </span>
                           )}
@@ -2845,17 +2833,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                     {currentConfig.collectPhone && (
                       <div>
-                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                        <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
                           Mobile Number <span className="text-red-400">*</span>
                         </label>
                         <div className="flex items-center gap-1.5">
                           <select
                             value={guestCountryCode}
                             onChange={(e) => setGuestCountryCode(e.target.value as '+266' | '+27')}
-                            className="px-2 py-1.5 bg-black/50 border border-white/20 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer shrink-0"
+                            className="px-1.5 py-1 bg-[#121829] border border-[#232d42] rounded-lg text-white text-[11px] font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer shrink-0"
                           >
-                            <option value="+266" className="bg-[#0f1422] text-white">🇱🇸 +266</option>
-                            <option value="+27" className="bg-[#0f1422] text-white">🇿🇦 +27</option>
+                            <option value="+266" className="bg-[#0b0f19] text-white">🇱🇸 +266</option>
+                            <option value="+27" className="bg-[#0b0f19] text-white">🇿🇦 +27</option>
                           </select>
                           <input
                             type="tel"
@@ -2863,19 +2851,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             value={guestPhone}
                             onChange={(e) => setGuestPhone(e.target.value)}
                             placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
-                            className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
-                              guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
+                              guestPhone && !isPhoneValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
                             }`}
                           />
                         </div>
                         {guestPhone && !isPhoneValid && (
-                          <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                          <span className="text-[8px] text-red-300 font-mono block mt-0.5">
                             {phoneErrorMsg}
                           </span>
                         )}
                         {guestPhone && isPhoneValid && (
-                          <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                            <Check className="w-3 h-3" />
+                          <span className="text-[8px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                            <Check className="w-2.5 h-2.5" />
                             <span>Valid {guestCountryCode === '+266' ? 'Lesotho' : 'South African'} number</span>
                           </span>
                         )}
@@ -2884,7 +2872,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                     {currentConfig.collectEmail && (
                       <div>
-                        <label className="text-[10px] font-mono text-slate-300 block mb-0.5">
+                        <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
                           Email address <span className="text-red-400">*</span>
                         </label>
                         <input
@@ -2892,18 +2880,18 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           value={guestEmail}
                           onChange={(e) => setGuestEmail(e.target.value)}
                           placeholder="name@example.com"
-                          className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
-                            guestEmail && !isEmailValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
+                          className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
+                            guestEmail && !isEmailValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
                           }`}
                         />
                         {guestEmail && !isEmailValid && (
-                          <span className="text-[9px] text-red-300 font-mono block mt-0.5">
+                          <span className="text-[8px] text-red-300 font-mono block mt-0.5">
                             {emailErrorMsg || 'Enter valid email with @ and . (e.g. name@domain.com)'}
                           </span>
                         )}
                         {guestEmail && isEmailValid && (
-                          <span className="text-[9px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                            <Check className="w-3 h-3" />
+                          <span className="text-[8px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                            <Check className="w-2.5 h-2.5" />
                             <span>Valid email format</span>
                           </span>
                         )}
@@ -2911,37 +2899,37 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     )}
 
                     {currentConfig.termsEnabled && (
-                      <div className="text-[9px] text-slate-300 leading-tight bg-black/30 p-2 rounded-lg border border-white/10">
+                      <div className="text-[9px] text-slate-300 leading-tight bg-[#121829] p-1.5 rounded-lg border border-[#232d42]">
                         {currentConfig.termsText}
                       </div>
                     )}
 
                     {/* FREE ACCESS MODE BUTTON IN TANGERINE */}
                     {isFreeModeActive ? (
-                      <div className="space-y-1.5 pt-1">
+                      <div className="space-y-1 pt-0.5">
                         <button
                           type="button"
                           onClick={() => handleConnectFree()}
                           disabled={!isGuestFormValid}
-                          className="w-full py-3 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-xl shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+                          className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-lg shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
                         >
-                          <Zap className="w-4 h-4 fill-current text-white" />
+                          <Zap className="w-3.5 h-3.5 fill-current text-white" />
                           <span>Connect Free Wi-Fi &rarr;</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setPreviewStep('plan')}
-                          className="w-full py-1.5 text-slate-300 hover:text-white text-[10px] font-mono transition-colors cursor-pointer"
+                          className="w-full py-1 text-slate-300 hover:text-white text-[9px] font-mono transition-colors cursor-pointer"
                         >
-                          Or Buy Pass / Redeem OTT Voucher (No Form Required) &rarr;
+                          Or Buy Pass / Redeem OTT Voucher &rarr;
                         </button>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={() => setPreviewStep('plan')}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+                        className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-lg shadow-lg transition-transform active:scale-95 cursor-pointer"
                       >
                         Select Package &amp; Redeem OTT Voucher &rarr;
                       </button>
@@ -2951,60 +2939,56 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                 {/* STEP 2: SCOPE-SPECIFIC PLAN & PRICE SELECTION */}
                 {previewStep === 'plan' && (
-                  <div
-                    className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
-                    }}
-                  >
-                    <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                      <span className="text-xs font-bold text-white font-mono uppercase">
+                  <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left">
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+                    <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
+                      <span className="text-[11px] font-bold text-white font-mono uppercase">
                         Select {activeMeta.label} Pass
                       </span>
                       <button
                         onClick={() => setPreviewStep('identification')}
-                        className="text-[10px] text-slate-400 hover:text-white font-mono"
+                        className="text-[9px] text-slate-400 hover:text-white font-mono"
                       >
                         &larr; Back
                       </button>
                     </div>
 
-                    <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
                       {currentConfig.plans.filter((p) => p.enabled).map((plan) => {
                         const isSelected = selectedPlanId === plan.id;
                         return (
                           <label
                             key={plan.id}
                             onClick={() => setSelectedPlanId(plan.id)}
-                            className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer transition-all ${
+                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border cursor-pointer transition-all ${
                               isSelected
                                 ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                                : 'bg-black/40 border-white/10 text-slate-300 hover:border-white/30'
+                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-slate-500'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5">
                               <input
                                 type="radio"
                                 name="selected_plan"
                                 checked={isSelected}
                                 onChange={() => setSelectedPlanId(plan.id)}
-                                className="accent-[#f05e17]"
+                                className="accent-[#f05e17] w-3 h-3"
                               />
                               <div>
-                                <div className="font-bold text-xs flex items-center gap-1.5">
+                                <div className="font-bold text-[11px] flex items-center gap-1">
                                   <span>{plan.name}</span>
                                   {plan.isPopular && (
-                                    <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
+                                    <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
                                       POPULAR
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[10px] text-slate-400">
+                                <div className="text-[9px] text-slate-400">
                                   {plan.durationLabel}
                                 </div>
                               </div>
                             </div>
-                            <span className="text-sm font-extrabold text-emerald-400 font-mono">
+                            <span className="text-xs font-extrabold text-emerald-400 font-mono">
                               {currency}{plan.price}
                             </span>
                           </label>
@@ -3015,7 +2999,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     <button
                       type="button"
                       onClick={() => setPreviewStep('payment')}
-                      className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs font-mono rounded-xl shadow-lg"
+                      className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs font-mono rounded-lg shadow-lg"
                     >
                       Proceed to Payment &rarr;
                     </button>
@@ -3026,83 +3010,79 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 {previewStep === 'payment' && (() => {
                   const chosenPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
                   return (
-                    <div
-                      className="rounded-2xl p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5"
-                      style={{
-                        backgroundColor: `rgba(15, 20, 34, ${currentConfig.glassOpacity / 100})`,
-                      }}
-                    >
-                      <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                        <span className="text-xs font-bold text-white font-mono uppercase">
+                    <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left">
+                      <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+                      <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
+                        <span className="text-[11px] font-bold text-white font-mono uppercase">
                           Payment &amp; Voucher PIN
                         </span>
                         <button
                           onClick={() => setPreviewStep('plan')}
-                          className="text-[10px] text-slate-400 hover:text-white font-mono"
+                          className="text-[9px] text-slate-400 hover:text-white font-mono"
                         >
                           &larr; Back
                         </button>
                       </div>
 
                       {/* Selected Plan & Amount Summary */}
-                      <div className="bg-black/50 p-2.5 rounded-xl border border-white/10 flex items-center justify-between">
+                      <div className="bg-[#121829] p-2 rounded-lg border border-[#232d42] flex items-center justify-between">
                         <div>
-                          <div className="text-white font-bold text-xs">{chosenPlan.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">
+                          <div className="text-white font-bold text-[11px]">{chosenPlan.name}</div>
+                          <div className="text-[9px] text-slate-400 font-mono">
                             {chosenPlan.durationLabel}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[9px] text-slate-400 uppercase font-mono">Amount Due</div>
-                          <div className="text-sm font-extrabold text-emerald-400 font-mono">
+                          <div className="text-[8px] text-slate-400 uppercase font-mono">Amount Due</div>
+                          <div className="text-xs font-extrabold text-emerald-400 font-mono">
                             {currency}{chosenPlan.price}
                           </div>
                         </div>
                       </div>
 
                       {/* Payment Method Selector */}
-                      <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
                         <label
-                          className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer ${
-                            selectedGateway === 'ottvoucher' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-black/40 border-white/10'
+                          className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer ${
+                            selectedGateway === 'ottvoucher' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-[#121829] border-[#232d42]'
                           }`}
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <input
                               type="radio"
                               name="gw"
                               checked={selectedGateway === 'ottvoucher'}
                               onChange={() => setSelectedGateway('ottvoucher')}
-                              className="accent-emerald-500"
+                              className="accent-emerald-500 w-3 h-3"
                             />
-                            <ProviderLogo provider="ottvoucher" className="w-20 h-5" />
+                            <ProviderLogo provider="ottvoucher" className="w-14 h-4" />
                           </div>
-                          <span className="text-[10px] font-mono text-emerald-300">Digital PIN</span>
+                          <span className="text-[9px] font-mono text-emerald-300">PIN</span>
                         </label>
 
                         <label
-                          className={`flex items-center justify-between p-2 rounded-xl border cursor-pointer ${
-                            selectedGateway === 'ecocash' ? 'bg-red-600/20 border-red-500' : 'bg-black/40 border-white/10'
+                          className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer ${
+                            selectedGateway === 'ecocash' ? 'bg-red-600/20 border-red-500' : 'bg-[#121829] border-[#232d42]'
                           }`}
                         >
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <input
                               type="radio"
                               name="gw"
                               checked={selectedGateway === 'ecocash'}
                               onChange={() => setSelectedGateway('ecocash')}
-                              className="accent-red-500"
+                              className="accent-red-500 w-3 h-3"
                             />
-                            <ProviderLogo provider="ecocash" className="w-20 h-5" />
+                            <ProviderLogo provider="ecocash" className="w-14 h-4" />
                           </div>
-                          <span className="text-[10px] font-mono text-red-300">Spache-Fono</span>
+                          <span className="text-[9px] font-mono text-red-300">EcoCash</span>
                         </label>
                       </div>
 
                       {/* Denomination Alignment Notes & PIN Input */}
                       {selectedGateway === 'ottvoucher' ? (
-                        <div className="space-y-1.5 bg-blue-950/30 p-2.5 rounded-xl border border-blue-500/30">
-                          <div className="flex justify-between items-center text-[10px] font-mono text-slate-300">
+                        <div className="space-y-1 bg-[#121829] p-2 rounded-lg border border-[#232d42]">
+                          <div className="flex justify-between items-center text-[9px] font-mono text-slate-300">
                             <span>16-Digit OTT Voucher PIN</span>
                             <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/16 digits</span>
                           </div>
@@ -3117,26 +3097,26 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setOttPin(formatted);
                             }}
                             placeholder="1234 5678 9012 3456"
-                            className="w-full px-2 py-1.5 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
+                            className="w-full px-2 py-1 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
                           />
-                          <div className="text-[9px] text-slate-400 font-mono text-center">
+                          <div className="text-[8px] text-slate-400 font-mono text-center">
                             Verified against live OTT Lesotho API ({currency}{chosenPlan.price})
                           </div>
                         </div>
                       ) : (
-                        <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-[10px] font-mono text-amber-200 space-y-1">
+                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[9px] font-mono text-amber-200 space-y-1">
                           <div className="flex justify-between font-bold">
                             <span>EcoCash Lesotho STK Push</span>
                             <span className="text-emerald-400">{currency}{chosenPlan.price}</span>
                           </div>
-                          <p className="text-slate-300 text-[10px]">
-                            An automated prompt for <strong>{currency}{chosenPlan.price}</strong> will be sent to <strong>{guestCountryCode} {guestPhone}</strong>. Approve on your handset via *199# Push to activate internet.
+                          <p className="text-slate-300 text-[8px] leading-tight">
+                            Prompt for <strong>{currency}{chosenPlan.price}</strong> sent to <strong>{guestCountryCode} {guestPhone}</strong>. Approve on handset to activate.
                           </p>
                         </div>
                       )}
 
                       {paymentError && (
-                        <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[10px] font-mono font-bold text-center">
+                        <div className="p-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[9px] font-mono font-bold text-center">
                           {paymentError}
                         </div>
                       )}
@@ -3145,7 +3125,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         type="button"
                         onClick={handleSimulatePayment}
                         disabled={isVerifyingPayment || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
-                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-colors cursor-pointer"
+                        className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-lg shadow-lg transition-colors cursor-pointer"
                       >
                         {isVerifyingPayment
                           ? 'Verifying 16-Digit OTT Voucher...'
@@ -3157,7 +3137,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
               </div>
 
               {/* Footer Powered By Lockup */}
-              <div className="relative z-10 text-center text-[10px] font-mono text-slate-400 pb-1">
+              <div className="relative z-10 text-center text-[9px] font-mono text-slate-400 py-1 bg-[#0b0f19] border-t border-[#232d42]">
                 T-Connect - Starlink Powered Solutions
               </div>
             </div>

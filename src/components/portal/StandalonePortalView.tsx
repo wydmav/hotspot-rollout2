@@ -597,7 +597,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
   // Reusable Mandatory Terms & Conditions Checkbox + Hyperlink Row (Shown on ALL modes)
   const renderTermsAndConditionsRow = () => (
-    <div className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-black/45 border border-white/15 text-[11px] text-slate-200">
+    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-200">
       <input
         type="checkbox"
         id="portal_tc_checkbox"
@@ -624,7 +624,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         >
           Terms &amp; Conditions
         </button>{' '}
-        <span className="text-[10px] text-slate-400">(T&apos;s and C&apos;s apply)</span>
+        <span className="text-[9px] text-slate-400">(T&apos;s and C&apos;s apply)</span>
       </label>
     </div>
   );
@@ -636,9 +636,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
 
     return (
-      <div className="space-y-2 pb-1.5 border-b border-white/10">
+      <div className="space-y-1.5 pb-1 border-b border-[#232d42]">
         {currentConfig.collectName && (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-1.5">
             <div>
               <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
                 First Name <span className="text-red-400">*</span>
@@ -649,7 +649,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 value={guestFirstName}
                 onChange={(e) => setGuestFirstName(e.target.value)}
                 placeholder="First name"
-                className="w-full px-2.5 py-1.5 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
+                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
               />
             </div>
             <div>
@@ -662,7 +662,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 value={guestSurname}
                 onChange={(e) => setGuestSurname(e.target.value)}
                 placeholder="Surname"
-                className="w-full px-2.5 py-1.5 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
+                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
               />
             </div>
           </div>
@@ -677,10 +677,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               <select
                 value={guestCountryCode}
                 onChange={(e) => setGuestCountryCode(e.target.value as '+266' | '+27')}
-                className="px-2 py-1.5 bg-black/50 border border-white/20 rounded-lg text-white text-[11px] font-mono focus:outline-none cursor-pointer shrink-0"
+                className="px-2 py-1 bg-[#121829] border border-[#232d42] rounded-lg text-white text-[11px] font-mono focus:outline-none cursor-pointer shrink-0"
               >
-                <option value="+266" className="bg-[#0f1422] text-white">+266 (LS)</option>
-                <option value="+27" className="bg-[#0f1422] text-white">+27 (ZA)</option>
+                <option value="+266" className="bg-[#0b0f19] text-white">+266 (LS)</option>
+                <option value="+27" className="bg-[#0b0f19] text-white">+27 (ZA)</option>
               </select>
               <input
                 type="tel"
@@ -689,7 +689,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 value={guestPhone}
                 onChange={(e) => setGuestPhone(e.target.value.replace(/[^\d\s-]/g, ''))}
                 placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
-                className="w-full px-2.5 py-1.5 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-lg text-white text-[11px] font-mono focus:outline-none"
+                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] font-mono focus:outline-none"
               />
             </div>
           </div>
@@ -706,7 +706,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               value={guestEmail}
               onChange={(e) => setGuestEmail(e.target.value)}
               placeholder="name@example.com"
-              className="w-full px-2.5 py-1.5 bg-black/45 border border-white/20 focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
+              className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
             />
           </div>
         )}
@@ -978,7 +978,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       {/* Pure Full-Viewport Splash Page Container */}
       <main
-        className="flex-1 min-h-screen relative flex flex-col justify-between items-center p-3 sm:p-5 bg-cover bg-center transition-all duration-500"
+        className="flex-1 min-h-screen relative flex flex-col justify-between items-center bg-cover bg-center transition-all duration-500 overflow-hidden"
         style={{
           backgroundImage: `url(${currentConfig.bgImage})`
         }}
@@ -990,31 +990,23 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         />
 
         {/* Top Brand & Welcome Headline (Compact so background wallpaper stays clear) */}
-        <div className="relative z-10 text-center max-w-xs w-full pt-3 pb-1">
+        <div className="relative z-10 text-center max-w-sm w-full pt-4 pb-2 px-4">
           {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
-            <div className="text-[11px] font-semibold text-white/95 tracking-wide mb-1 drop-shadow">
+            <div className="text-[11px] font-semibold text-white/95 tracking-wide mb-0.5 drop-shadow">
               {[currentConfig.brandTitle?.trim(), currentConfig.tagline?.trim()].filter(Boolean).join(' · ')}
             </div>
           )}
           {currentConfig.welcomeHeadline?.trim() && (
-            <h1 className="text-lg sm:text-xl font-black text-white tracking-tight drop-shadow-lg leading-tight">
+            <h1 className="text-base sm:text-lg font-black text-white tracking-tight drop-shadow-lg leading-tight">
               {currentConfig.welcomeHeadline}
             </h1>
           )}
         </div>
 
-        {/* Compact Glassmorphism Captive Portal Card (Smaller footprint so wallpaper shines through) */}
-        <div
-          className={`relative z-10 w-full max-w-[330px] sm:max-w-[345px] ${
-            currentConfig.cardPlacement === 'top'
-              ? 'mb-auto mt-1'
-              : currentConfig.cardPlacement === 'bottom'
-              ? 'mt-auto mb-2'
-              : 'my-auto'
-          }`}
-        >
+        {/* Slim Docked Bottom Sheet Captive Portal Box (Docked at base with crisp border & solid dark background) */}
+        <div className="relative z-10 w-full max-w-sm sm:max-w-md mt-auto mb-0 px-2 sm:px-3">
           {statusBanner && (
-            <div className="mb-2.5 p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 backdrop-blur-md text-[11px] text-amber-200 flex items-center gap-2 shadow-lg">
+            <div className="mb-2 p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-200 flex items-center gap-2 shadow-lg">
               <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
               <span>{statusBanner}</span>
             </div>
@@ -1036,12 +1028,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   ? 'grid-cols-3'
                   : 'grid-cols-2';
               return (
-                <div className={`grid ${gridCols} gap-1 bg-black/45 p-1 rounded-xl border border-white/10 text-[11px]`}>
+                <div className={`grid ${gridCols} gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[10px]`}>
                   {isFreeAccessAllowed && (
                     <button
                       type="button"
                       onClick={() => setPortalStep('identification')}
-                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                         activeTab === 'identification'
                           ? 'bg-[#f05e17] text-white shadow'
                           : 'text-slate-300 hover:text-white'
@@ -1055,7 +1047,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setPortalStep('voucher')}
-                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                         activeTab === 'voucher'
                           ? 'bg-[#f05e17] text-white shadow'
                           : 'text-slate-300 hover:text-white'
@@ -1069,7 +1061,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setPortalStep('plan')}
-                      className={`py-1.5 rounded-lg font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                         activeTab === 'plan'
                           ? 'bg-[#f05e17] text-white shadow'
                           : 'text-slate-300 hover:text-white'
@@ -1089,12 +1081,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 {/* STEP 1: FREE WI-FI SIGN-UP (Only when Free Access Mode is ON)     */}
                 {/* ================================================================= */}
                 {portalStep === 'identification' && isFreeAccessAllowed && (
-                  <div
-                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-                    }}
-                  >
+                  <div className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left">
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+
                     {renderModeQuickTabs('identification')}
 
                     {renderGuestIdentificationInputs()}
@@ -1106,7 +1095,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                         type="button"
                         onClick={handleConnectFree}
                         disabled={!termsAccepted || !isGuestFormValid || isConnecting}
-                        className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <Zap className="w-3.5 h-3.5" />
                         <span>{isConnecting ? 'Connecting...' : 'Connect Free Wi-Fi \u2192'}</span>
@@ -1121,15 +1110,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 {portalStep === 'voucher' && isVoucherAllowed && (
                   <form
                     onSubmit={handleRedeemVoucher}
-                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-                    }}
+                    className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
                   >
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+
                     {renderModeQuickTabs('voucher')}
 
                     <div>
-                      <label className="text-[10px] font-medium text-slate-300 block mb-1">
+                      <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
                         Voucher Code <span className="text-red-400">*</span>
                       </label>
                       <input
@@ -1140,10 +1128,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                           setVoucherError(null);
                         }}
                         placeholder="Enter voucher code (e.g. TC-XXXX or 16-digit OTT PIN)"
-                        className="w-full px-3 py-2 bg-black/50 border border-white/25 focus:border-emerald-400 rounded-xl text-white text-xs font-mono tracking-wider uppercase focus:outline-none"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tracking-wider uppercase focus:outline-none"
                       />
                       {voucherError && (
-                        <div className="mt-1.5 p-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-[11px] flex items-start gap-1.5">
+                        <div className="mt-1 p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
                           <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
                           <span>{voucherError}</span>
                         </div>
@@ -1155,7 +1143,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     <button
                       type="submit"
                       disabled={!termsAccepted || isConnecting || !voucherCode.trim()}
-                      className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
                       <span>{isConnecting ? 'Verifying Voucher...' : 'Activate Voucher & Connect \u2192'}</span>
@@ -1167,71 +1155,68 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 {/* STEP 3: PLAN SELECTION (Only when Buy Pass Mode is ON)            */}
                 {/* ================================================================= */}
                 {portalStep === 'plan' && isBuyPassAllowed && (
-                  <div
-                    className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-                    style={{
-                      backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-                    }}
-                  >
+                  <div className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left">
+                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+
                     {renderModeQuickTabs('plan')}
 
-              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
-                {enabledPlans.map((plan) => {
-                  const isSelected = selectedPlanId === plan.id;
-                  return (
-                    <label
-                      key={plan.id}
-                      onClick={() => setSelectedPlanId(plan.id)}
-                      className={`flex items-center justify-between px-2.5 py-2 rounded-xl border cursor-pointer transition-all ${
-                        isSelected
-                          ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                          : 'bg-black/40 border-white/10 text-slate-300 hover:border-white/30'
-                      }`}
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+                      {enabledPlans.map((plan) => {
+                        const isSelected = selectedPlanId === plan.id;
+                        return (
+                          <label
+                            key={plan.id}
+                            onClick={() => setSelectedPlanId(plan.id)}
+                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
+                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                checked={isSelected}
+                                onChange={() => setSelectedPlanId(plan.id)}
+                                className="accent-[#f05e17]"
+                              />
+                              <div>
+                                <div className="text-[11px] font-bold flex items-center gap-1">
+                                  <span>{plan.name}</span>
+                                  {plan.isPopular && (
+                                    <span className="text-[9px] text-amber-400 font-medium">
+                                      · Popular
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono tabular-nums">
+                                  {plan.durationLabel}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-xs font-black font-mono tabular-nums text-amber-400">
+                              {currencySymbol}{plan.price}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {renderTermsAndConditionsRow()}
+
+                    <button
+                      type="button"
+                      disabled={!termsAccepted}
+                      onClick={() => {
+                        setPaymentError(null);
+                        setPortalStep('payment');
+                      }}
+                      className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          checked={isSelected}
-                          onChange={() => setSelectedPlanId(plan.id)}
-                          className="accent-[#f05e17]"
-                        />
-                        <div>
-                          <div className="text-[11px] font-bold flex items-center gap-1">
-                            <span>{plan.name}</span>
-                            {plan.isPopular && (
-                              <span className="text-[9px] text-amber-400 font-medium">
-                                · Popular
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                            {plan.durationLabel}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs font-black font-mono tabular-nums text-amber-400">
-                        {currencySymbol}{plan.price}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-
-              {renderTermsAndConditionsRow()}
-
-                <button
-                  type="button"
-                  disabled={!termsAccepted}
-                  onClick={() => {
-                    setPaymentError(null);
-                    setPortalStep('payment');
-                  }}
-                  className="w-full py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <span>Continue to Payment</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                      <span>Continue to Payment</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </>
             );
@@ -1243,14 +1228,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           {portalStep === 'payment' && (
             <form
               onSubmit={handleCompletePayment}
-              className="rounded-2xl p-3.5 sm:p-4 border border-white/20 shadow-2xl backdrop-blur-xl space-y-2.5 text-left"
-              style={{
-                backgroundColor: `rgba(15, 20, 34, ${(currentConfig.glassOpacity ?? 84) / 100})`
-              }}
+              className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
             >
-              <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                <span className="text-[11px] font-bold text-white">
-                  Choose Payment Method
+              <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
+
+              <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
+                <span className="text-[11px] font-bold text-white font-mono uppercase">
+                  Payment &amp; Voucher PIN
                 </span>
                 <button
                   type="button"
@@ -1258,14 +1242,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     setPaymentError(null);
                     setPortalStep('plan');
                   }}
-                  className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                  className="text-[10px] text-slate-400 hover:text-white cursor-pointer font-mono"
                 >
                   &larr; Plans
                 </button>
               </div>
 
               {/* 2-Column Payment Selector: EcoCash & OTT Voucher Only */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-1.5">
                 {(['ecocash', 'ottvoucher'] as const).map((gw) => (
                   <button
                     key={gw}
@@ -1274,14 +1258,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       setSelectedGateway(gw);
                       setPaymentError(null);
                     }}
-                    className={`p-2 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                    className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-2 transition-all cursor-pointer ${
                       selectedGateway === gw
                         ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                        : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                        : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
                     }`}
                   >
-                    <ProviderLogo provider={gw as GatewayProvider} className="w-6 h-6" />
-                    <span className="text-[11px] font-bold">
+                    <ProviderLogo provider={gw as GatewayProvider} className="w-5 h-5 shrink-0" />
+                    <span className="text-[10px] font-bold truncate">
                       {gw === 'ecocash' ? 'EcoCash' : 'OTT Voucher'}
                     </span>
                   </button>
@@ -1290,7 +1274,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               {selectedGateway === 'ottvoucher' ? (
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-0.5">
                     <label className="text-[10px] font-medium text-slate-300">
                       16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
                     </label>
@@ -1311,12 +1295,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       setPaymentError(null);
                     }}
                     placeholder="1234 5678 9012 3456"
-                    className="w-full px-3 py-2 bg-black/50 border border-white/25 focus:border-[#f05e17] rounded-xl text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
                   />
                 </div>
               ) : (
                 <div>
-                  <label className="text-[10px] font-medium text-slate-300 block mb-1">
+                  <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
                     EcoCash Mobile Number ({guestCountryCode}) <span className="text-red-400">*</span>
                   </label>
                   <input
@@ -1329,7 +1313,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       setPaymentError(null);
                     }}
                     placeholder="5xxxxxxx / 6xxxxxxx"
-                    className="w-full px-3 py-2 bg-black/50 border border-white/25 focus:border-[#f05e17] rounded-xl text-white text-xs font-mono tabular-nums focus:outline-none"
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
                   />
                 </div>
               )}
@@ -1337,7 +1321,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               {renderTermsAndConditionsRow()}
 
               {paymentError && (
-                <div className="p-2 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-[11px] flex items-start gap-1.5">
+                <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
                   <span>{paymentError}</span>
                 </div>
@@ -1346,7 +1330,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               <button
                 type="submit"
                 disabled={!termsAccepted || isConnecting || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
-                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-[11px] rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>
@@ -1354,8 +1338,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             </form>
           )}
         </div>
-
-        <div className="h-4" />
       </main>
     </div>
   );
