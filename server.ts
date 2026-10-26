@@ -2015,17 +2015,101 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
   });
 });
 
-// Guest session / lead capture endpoint from Splash Page
+// Cross-Hotspot Session Roaming & Recognition API
+app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
+  const queryMac = String(req.query.mac || '').trim().toLowerCase();
+  const queryPhone = String(req.query.phone || '').replace(/\D/g, '');
+
+  if (!queryMac && queryPhone.length < 8) {
+    return res.json({ roamed: false, active: false });
+  }
+
+  const now = Date.now();
+  const existing = serverStore.guestEvents.find((ev: any) => {
+    const evMac = String(ev.mac || '').trim().toLowerCase();
+    const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
+    const macMatch = queryMac && queryMac !== 'unknown-mac' && queryMac !== 'auto' && evMac === queryMac;
+    const phoneMatch = queryPhone.length >= 8 && evPhone.length >= 8 && (evPhone.includes(queryPhone) || queryPhone.includes(evPhone));
+    return macMatch || phoneMatch;
+  });
+
+  if (!existing) {
+    return res.json({ roamed: false, active: false });
+  }
+
+  const isFree = existing.mode === 'free' || existing.voucherCode === 'FREE-PASS';
+  const startMs = existing.capturedAt ? new Date(existing.capturedAt).getTime() : now;
+  const durationSec = Number(existing.durationSeconds) || 86400;
+  const elapsedSec = Math.floor((now - startMs) / 1000);
+  const remainingSec = isFree ? 0 : Math.max(0, durationSec - elapsedSec);
+  const isActive = isFree || remainingSec > 0;
+
+  if (!isActive) {
+    return res.json({ roamed: false, active: false, expired: true });
+  }
+
+  return res.json({
+    roamed: true,
+    active: true,
+    isUnlimited: isFree,
+    remainingSeconds: remainingSec,
+    elapsedSeconds: elapsedSec,
+    session: existing,
+    message: `Active session recognized! Roaming seamlessly from ${existing.siteName || 'previous hotspot'}.`
+  });
+});
+
+// Guest session / lead capture endpoint from Splash Page (with cross-hotspot handover support)
 app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
+  const body = req.body || {};
+  const inMac = String(body.mac || '').trim().toLowerCase();
+  const inPhone = String(body.phone || body.guestPhone || '').replace(/\D/g, '');
+  const nowIso = new Date().toISOString();
+
+  // Check for existing active session on another hotspot
+  const existingIdx = serverStore.guestEvents.findIndex((ev: any) => {
+    const evMac = String(ev.mac || '').trim().toLowerCase();
+    const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
+    const macMatch = inMac && inMac !== 'unknown-mac' && inMac !== 'auto' && evMac === inMac;
+    const phoneMatch = inPhone.length >= 8 && evPhone.length >= 8 && (evPhone.includes(inPhone) || inPhone.includes(evPhone));
+    return macMatch || phoneMatch;
+  });
+
+  if (existingIdx >= 0) {
+    const existing = serverStore.guestEvents[existingIdx];
+    const isFree = existing.mode === 'free' || existing.voucherCode === 'FREE-PASS';
+    const startMs = new Date(existing.capturedAt).getTime();
+    const durSec = Number(existing.durationSeconds) || 86400;
+    const isUnexpired = isFree || (Date.now() - startMs < durSec * 1000);
+
+    if (isUnexpired) {
+      // Roaming Handover: update site name & lastSeen while preserving session tenure
+      const prevSite = existing.siteName;
+      existing.siteName = body.siteName || existing.siteName;
+      existing.routerName = body.routerName || existing.routerName;
+      existing.roamedSites = Array.from(new Set([...(existing.roamedSites || [prevSite]), body.siteName].filter(Boolean)));
+      existing.lastSeenAt = nowIso;
+      saveServerPortalStore(serverStore);
+      return res.json({
+        success: true,
+        isRoaming: true,
+        entry: existing,
+        message: `Handover complete: Roaming session aligned to ${existing.siteName}.`
+      });
+    }
+  }
+
   const entry = {
-    id: req.body?.id || `guest_${Date.now()}`,
-    ...req.body,
-    capturedAt: new Date().toISOString()
+    id: body.id || `guest_${Date.now()}`,
+    ...body,
+    roamedSites: [body.siteName || 'T-Connect Hotspot'],
+    capturedAt: nowIso,
+    lastSeenAt: nowIso
   };
   serverStore.guestEvents.unshift(entry);
-  if (serverStore.guestEvents.length > 200) serverStore.guestEvents.pop();
+  if (serverStore.guestEvents.length > 250) serverStore.guestEvents.pop();
   saveServerPortalStore(serverStore);
-  res.json({ success: true, entry });
+  res.json({ success: true, isRoaming: false, entry });
 });
 
 app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
@@ -3416,7 +3500,7 @@ interface ServerTeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'Owner' | 'Admin' | 'Technical' | 'Collaborator' | 'Viewer' | 'Super Admin';
+  role: 'Owner' | 'Super Admin' | 'Collaborator' | 'Finance' | 'Tech' | 'Management' | 'Admin' | 'Technical' | 'Viewer';
   scopedSites: string[];
   mfaEnabled: boolean;
   status: 'active' | 'invited' | 'expired';
@@ -3432,11 +3516,23 @@ interface ServerTeamMember {
 
 const serverTeamStore = new Map<string, ServerTeamMember>();
 
-// Seed default Super Admin
+// Seed Designated 5 Roles and Accounts
 serverTeamStore.set('rphooko@tconnect.africa', {
   id: 'tm_owner',
   name: 'Raphooko Phooko',
   email: 'rphooko@tconnect.africa',
+  role: 'Owner',
+  scopedSites: [],
+  mfaEnabled: true,
+  status: 'active',
+  invitedAt: '2026-10-02',
+  lastLoginAt: 'Just now'
+});
+
+serverTeamStore.set('admin@tconnect.africa', {
+  id: 'tm_super_admin',
+  name: 'Super Administrator',
+  email: 'admin@tconnect.africa',
   role: 'Super Admin',
   scopedSites: [],
   mfaEnabled: true,
@@ -3445,18 +3541,40 @@ serverTeamStore.set('rphooko@tconnect.africa', {
   lastLoginAt: 'Just now'
 });
 
-// Seed backup account from user's roster so it's instantly accessible everywhere
-serverTeamStore.set('bernphooko@proton.me', {
-  id: 'tm_backup_bern',
-  name: 'Raphooko Backup',
-  email: 'bernphooko@proton.me',
-  role: 'Viewer',
-  scopedSites: ['Maseru Golf Course'],
+serverTeamStore.set('collab@tconnect.africa', {
+  id: 'tm_collab',
+  name: 'Portal Collaborator',
+  email: 'collab@tconnect.africa',
+  role: 'Collaborator',
+  scopedSites: [],
   mfaEnabled: false,
-  status: 'invited',
-  invitedAt: '2026-10-17',
-  inviteToken: 'inv_backup_bernphooko',
-  tempPassword: 'TC-2849-BKUP!'
+  status: 'active',
+  invitedAt: '2026-10-05',
+  lastLoginAt: 'Just now'
+});
+
+serverTeamStore.set('operations@tconnect.africa', {
+  id: 'tm_finance',
+  name: 'Finance Operations',
+  email: 'operations@tconnect.africa',
+  role: 'Finance',
+  scopedSites: [],
+  mfaEnabled: false,
+  status: 'active',
+  invitedAt: '2026-10-10',
+  lastLoginAt: 'Just now'
+});
+
+serverTeamStore.set('technical@tconnect.africa', {
+  id: 'tm_tech',
+  name: 'Technical Engineer',
+  email: 'technical@tconnect.africa',
+  role: 'Tech',
+  scopedSites: [],
+  mfaEnabled: true,
+  status: 'active',
+  invitedAt: '2026-10-12',
+  lastLoginAt: 'Just now'
 });
 
 app.get('/api/team', (_req: Request, res: Response) => {

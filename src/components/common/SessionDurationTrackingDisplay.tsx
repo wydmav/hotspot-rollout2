@@ -33,6 +33,9 @@ export interface CalculatedSessionLog {
   guestName?: string;
   guestPhone?: string;
   guestEmail?: string;
+  expiresAt?: string;
+  isUnlimitedForever?: boolean;
+  roamedSites?: string[];
 }
 
 export interface SessionDurationStats {
@@ -102,6 +105,9 @@ export function extractSessionLogsFromData(
       authMode: s.authMode || 'free',
       startedAt: s.startedAt || new Date(startMs).toISOString(),
       lastSeenAt: new Date(now).toISOString(),
+      expiresAt: s.expiresAt,
+      isUnlimitedForever: s.isUnlimitedForever,
+      roamedSites: s.roamedSites,
       durationSeconds: s.connectedDurationSeconds || elapsedSec,
       grantedDurationSeconds: grantedSec,
       bytesDown: s.bytesDown || 14200000,
@@ -150,6 +156,7 @@ export function extractSessionLogsFromData(
           authMode: 'voucher',
           startedAt: new Date(devFirstMs).toISOString(),
           lastSeenAt: new Date(devLastMs).toISOString(),
+          expiresAt: v.expiresAt,
           durationSeconds: Math.min(connectionSec, voucherDuration),
           grantedDurationSeconds: voucherDuration,
           bytesDown: device.bytesIn || 24000000,
@@ -178,6 +185,7 @@ export function extractSessionLogsFromData(
         authMode: 'voucher',
         startedAt: v.firstUsedAt,
         lastSeenAt: v.expiresAt || new Date(now).toISOString(),
+        expiresAt: v.expiresAt,
         durationSeconds: connectionSec,
         grantedDurationSeconds: voucherDuration,
         bytesDown: 18000000,
@@ -571,9 +579,9 @@ export const SessionDurationTrackingDisplay: React.FC<SessionDurationTrackingDis
               <thead>
                 <tr className="bg-[#0a0e17] text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#1b233a]">
                   <th className="py-2.5 px-3">USER / SUBSCRIBER</th>
-                  <th className="py-2.5 px-3">HOTSPOT NODE</th>
+                  <th className="py-2.5 px-3">HOTSPOT NODE / ROAMING</th>
                   <th className="py-2.5 px-3">ACCESS TIER</th>
-                  <th className="py-2.5 px-3">SESSION DURATION (ACTUAL)</th>
+                  <th className="py-2.5 px-3">PACKAGE TIME REMAINING / ELAPSED</th>
                   <th className="py-2.5 px-3">STARTED</th>
                   <th className="py-2.5 px-3 text-right">STATUS</th>
                 </tr>
@@ -581,15 +589,19 @@ export const SessionDurationTrackingDisplay: React.FC<SessionDurationTrackingDis
               <tbody className="divide-y divide-[#1b233a] text-slate-300">
                 {filteredSessions.length > 0 ? (
                   filteredSessions.map((session) => {
-                    const durationPercent = maximumDurationSeconds > 0 
-                      ? Math.min(100, Math.round((session.durationSeconds / maximumDurationSeconds) * 100))
-                      : 0;
+                    const isFree = session.authMode === 'free' || session.isUnlimitedForever;
+                    const nowMs = Date.now();
+                    const expMs = session.expiresAt
+                      ? new Date(session.expiresAt).getTime()
+                      : new Date(session.startedAt).getTime() + (session.grantedDurationSeconds * 1000);
+                    const secLeft = Math.max(0, Math.floor((expMs - nowMs) / 1000));
+                    const isExpired = !isFree && secLeft <= 0;
 
                     return (
                       <tr key={session.id} className="hover:bg-[#121829]/60 transition-colors">
                         <td className="py-2.5 px-3">
                           <div className="text-white font-bold flex items-center gap-1.5">
-                            {session.authMode === 'free' ? (
+                            {isFree ? (
                               <Zap className="w-3 h-3 text-[#f05e17]" />
                             ) : (
                               <Ticket className="w-3 h-3 text-emerald-400" />
@@ -604,15 +616,21 @@ export const SessionDurationTrackingDisplay: React.FC<SessionDurationTrackingDis
                         </td>
 
                         <td className="py-2.5 px-3 text-slate-300">
-                          <div>{session.siteName}</div>
-                          <div className="text-[10px] text-slate-500 capitalize">{session.vertical} node</div>
+                          <div className="font-medium text-white">{session.siteName}</div>
+                          {session.roamedSites && session.roamedSites.length > 0 ? (
+                            <div className="text-[10px] text-emerald-400 flex items-center gap-1 font-bold mt-0.5">
+                              <span>🔄 Roamed: {session.roamedSites[0]} → {session.siteName}</span>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-500 capitalize">{session.vertical} node</div>
+                          )}
                         </td>
 
                         <td className="py-2.5 px-3">
                           <div className="text-white font-medium">{session.planName}</div>
                           <div className="text-[10px]">
-                            {session.authMode === 'free' ? (
-                              <span className="text-[#f05e17] font-bold">Free Access Mode</span>
+                            {isFree ? (
+                              <span className="text-[#f05e17] font-bold">Free Access Tier</span>
                             ) : (
                               <span className="text-emerald-400 font-bold">{currency}{session.price} Paid</span>
                             )}
@@ -620,20 +638,38 @@ export const SessionDurationTrackingDisplay: React.FC<SessionDurationTrackingDis
                         </td>
 
                         <td className="py-2.5 px-3">
-                          <div className="flex items-center justify-between text-xs font-bold text-cyan-300 mb-1">
-                            <span>{formatDuration(session.durationSeconds)}</span>
-                            <span className="text-[10px] text-slate-500 font-normal">
-                              max {formatShortDuration(session.grantedDurationSeconds)}
-                            </span>
-                          </div>
-                          <div className="w-full bg-[#1b233a] rounded-full h-1.5 overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full ${
-                                session.authMode === 'free' ? 'bg-[#f05e17]' : 'bg-cyan-400'
-                              }`}
-                              style={{ width: `${Math.max(8, durationPercent)}%` }}
-                            />
-                          </div>
+                          {isFree ? (
+                            <div>
+                              <div className="flex items-center justify-between text-xs font-bold text-[#f05e17] mb-1">
+                                <span>Elapsed: {formatDuration(session.durationSeconds)}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/30">
+                                  Unlimited Forever
+                                </span>
+                              </div>
+                              <div className="w-full bg-[#1b233a] rounded-full h-1.5 overflow-hidden">
+                                <div className="h-full rounded-full bg-[#f05e17] w-full" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="flex items-center justify-between text-xs font-bold mb-1">
+                                <span className={isExpired ? 'text-rose-400 font-extrabold' : 'text-cyan-300'}>
+                                  {isExpired ? 'Package Expired' : `${formatDuration(secLeft)} left`}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-normal">
+                                  of {formatShortDuration(session.grantedDurationSeconds)} pkg
+                                </span>
+                              </div>
+                              <div className="w-full bg-[#1b233a] rounded-full h-1.5 overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full ${isExpired ? 'bg-rose-500' : 'bg-cyan-400'}`}
+                                  style={{ 
+                                    width: `${Math.min(100, Math.max(6, Math.round((secLeft / Math.max(1, session.grantedDurationSeconds)) * 100)))}%` 
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         <td className="py-2.5 px-3 text-slate-400 text-[11px]">

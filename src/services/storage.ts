@@ -216,17 +216,99 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   }
 ];
 
+export const DESIGNATED_ROLE_CREDENTIALS: Record<string, { role: TeamMember['role']; password: string; name: string; description: string }> = {
+  'rphooko@tconnect.africa': {
+    role: 'Owner',
+    password: 'TConnected#4321',
+    name: 'Raphooko Phooko',
+    description: 'Owner (Master Access & Switchboard)'
+  },
+  'admin@tconnect.africa': {
+    role: 'Super Admin',
+    password: 'TConnected%4321',
+    name: 'Super Administrator',
+    description: 'Super Admin (All Tabs & Infrastructure)'
+  },
+  'collab@tconnect.africa': {
+    role: 'Collaborator',
+    password: 'TConnected*4321',
+    name: 'Portal Collaborator',
+    description: 'Collaborator (Captive Portal & Ads Only)'
+  },
+  'operations@tconnect.africa': {
+    role: 'Finance',
+    password: 'TConnected@4321',
+    name: 'Finance Operations',
+    description: 'Finance (Billing & Vouchers Only)'
+  },
+  'technical@tconnect.africa': {
+    role: 'Tech',
+    password: 'TConnected!4321',
+    name: 'Technical Engineer',
+    description: 'Tech (Routers & Adoption Only)'
+  }
+};
+
 export const INITIAL_TEAM: TeamMember[] = [
   {
     id: 'tm_owner',
     name: 'Raphooko Phooko',
     email: 'rphooko@tconnect.africa',
+    role: 'Owner',
+    scopedSites: [],
+    mfaEnabled: true,
+    status: 'active',
+    invitedAt: '2026-10-02',
+    lastLoginAt: 'Just now',
+    password: 'TConnected#4321'
+  },
+  {
+    id: 'tm_super_admin',
+    name: 'Super Administrator',
+    email: 'admin@tconnect.africa',
     role: 'Super Admin',
     scopedSites: [],
     mfaEnabled: true,
     status: 'active',
     invitedAt: '2026-10-02',
-    lastLoginAt: 'Just now'
+    lastLoginAt: 'Just now',
+    password: 'TConnected%4321'
+  },
+  {
+    id: 'tm_collab',
+    name: 'Portal Collaborator',
+    email: 'collab@tconnect.africa',
+    role: 'Collaborator',
+    scopedSites: [],
+    mfaEnabled: false,
+    status: 'active',
+    invitedAt: '2026-10-05',
+    lastLoginAt: 'Just now',
+    password: 'TConnected*4321'
+  },
+  {
+    id: 'tm_finance',
+    name: 'Finance Operations',
+    email: 'operations@tconnect.africa',
+    role: 'Finance',
+    scopedSites: [],
+    mfaEnabled: false,
+    status: 'active',
+    invitedAt: '2026-10-10',
+    lastLoginAt: 'Just now',
+    password: 'TConnected@4321'
+  },
+  {
+    id: 'tm_tech',
+    name: 'Technical Engineer',
+    email: 'technical@tconnect.africa',
+    role: 'Tech',
+    scopedSites: [],
+    mfaEnabled: true,
+    status: 'active',
+    invitedAt: '2026-10-12',
+    lastLoginAt: 'Just now',
+    password: 'TConnected!4321'
   }
 ];
 
@@ -376,14 +458,22 @@ class StorageService {
             }
           }
           if (parsed.team && Array.isArray(parsed.team)) {
-            const owner = parsed.team.find((m: any) => m.role === 'Super Admin' || m.role === 'Owner' || m.id === 'tm_owner');
-            if (owner) {
-              owner.name = 'Raphooko Phooko';
-              owner.email = 'rphooko@tconnect.africa';
-              owner.role = 'Super Admin';
-            } else {
-              parsed.team.unshift(INITIAL_TEAM[0]);
-            }
+            // Ensure all 5 designated accounts exist with their designated roles and passwords
+            INITIAL_TEAM.forEach((defaultMember) => {
+              const existingIndex = parsed.team.findIndex((m: any) => m.email?.toLowerCase() === defaultMember.email.toLowerCase());
+              if (existingIndex >= 0) {
+                parsed.team[existingIndex] = {
+                  ...defaultMember,
+                  ...parsed.team[existingIndex],
+                  role: defaultMember.role,
+                  name: defaultMember.name,
+                  password: defaultMember.password,
+                  status: 'active'
+                };
+              } else {
+                parsed.team.push(defaultMember);
+              }
+            });
           } else {
             parsed.team = INITIAL_TEAM;
           }
@@ -500,61 +590,111 @@ class StorageService {
     if (Array.isArray(events)) {
       for (const ev of events) {
         if (!ev || !ev.id) continue;
-        const sessionExists = this.state.activeSessions.some((s) => s.id === ev.id);
-        if (!sessionExists) {
-          const newSession: ActiveSession = {
-            id: ev.id,
-            voucherCode: ev.voucherCode || (ev.mode === 'free' ? 'FREE-PASS' : 'PAID-PASS'),
-            clientMac: ev.mac || ev.clientMac || 'Unknown-MAC',
-            clientIp: ev.ip || ev.clientIp || '10.10.0.x',
-            deviceType: ev.deviceType || 'Guest Device',
-            siteName: ev.siteName || 'T-Connect Hotspot',
-            vertical: ev.scope || ev.vertical || 'hotspot',
-            routerName: ev.routerName || 'MIKROTIK-TC',
-            planName: ev.planName || 'Hotspot Pass',
-            startedAt: ev.capturedAt || new Date().toISOString(),
-            expiresAt: new Date(Date.now() + (ev.durationSeconds || 1800) * 1000).toISOString(),
-            remainingSeconds: ev.durationSeconds || 1800,
-            bytesDown: 0,
-            bytesUp: 0,
-            speedLimit: ev.speedLimit || '25M/10M',
-            guestName: ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User',
-            guestPhone: ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '',
-            guestEmail: ev.email || ev.guestEmail || ''
-          };
-          this.state.activeSessions.unshift(newSession);
-          mutated = true;
+        const evMac = String(ev.mac || ev.clientMac || '').trim().toLowerCase();
+        const evPhoneDigits = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
+        const evSite = ev.siteName || 'T-Connect Hotspot';
+        const evRouter = ev.routerName || 'MIKROTIK-TC';
 
-          // Also record in captiveLeads if guest contact info was provided
-          if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
-            const leadId = `lead_${ev.id}`;
-            if (!this.state.captiveLeads.some((l) => l.id === leadId)) {
-              const guestNameStr = newSession.guestName || 'Guest User';
-              const guestPhoneStr = newSession.guestPhone || '';
-              const guestEmailStr = newSession.guestEmail || '';
-              const parts = guestNameStr.trim().split(' ');
-              const fName = ev.firstName || parts[0] || 'Guest';
-              const lName = ev.lastName || parts.slice(1).join(' ') || '';
-              this.state.captiveLeads.unshift({
-                id: leadId,
-                firstName: fName,
-                lastName: lName,
-                fullName: guestNameStr,
-                countryCode: ev.countryCode === '+27' ? '+27' : '+266',
-                phone: ev.phone || guestPhoneStr,
-                fullPhone: guestPhoneStr,
-                email: guestEmailStr,
-                capturedAt: newSession.startedAt,
-                routerName: newSession.routerName,
-                siteName: newSession.siteName,
-                vertical: newSession.vertical,
-                clientMac: newSession.clientMac,
-                clientIp: newSession.clientIp,
-                deviceType: newSession.deviceType,
-                durationMinutes: Math.round((newSession.remainingSeconds || 1800) / 60),
-                status: 'active'
+        // Check for existing active session by ID, MAC, or Phone (Cross-Hotspot Roaming)
+        const existingSession = this.state.activeSessions.find((s) => {
+          if (s.id === ev.id) return true;
+          const sMac = String(s.clientMac || '').trim().toLowerCase();
+          const sPhone = String(s.guestPhone || '').replace(/\D/g, '');
+          const macMatch = evMac && evMac !== 'unknown-mac' && evMac !== 'auto' && sMac === evMac;
+          const phoneMatch = evPhoneDigits.length >= 8 && sPhone.length >= 8 && (sPhone.includes(evPhoneDigits) || evPhoneDigits.includes(sPhone));
+          return macMatch || phoneMatch;
+        });
+
+        if (existingSession) {
+          const isFree = existingSession.authMode === 'free' || existingSession.voucherCode === 'FREE-PASS';
+          const expTime = new Date(existingSession.expiresAt).getTime();
+          const notExpired = isFree || isNaN(expTime) || expTime > Date.now();
+
+          if (notExpired) {
+            // Handover / Roaming: update current site & router, preserve remaining package duration
+            if (existingSession.siteName !== evSite) {
+              const previous = existingSession.roamedSites || [existingSession.siteName];
+              if (!previous.includes(evSite)) {
+                existingSession.roamedSites = [...previous, evSite];
+              }
+              existingSession.siteName = evSite;
+              existingSession.routerName = evRouter;
+              existingSession.lastSeenAt = new Date().toISOString();
+              mutated = true;
+
+              this.logAudit({
+                actor: existingSession.guestName || evMac,
+                role: 'Subscriber',
+                action: 'roaming.handover',
+                target: evSite,
+                details: `Device ${evMac} roamed from ${previous[previous.length - 1]} to ${evSite}. Session continued seamlessly.`
               });
             }
+            continue;
+          }
+        }
+
+        const isFreeMode = ev.mode === 'free' || ev.voucherCode === 'FREE-PASS';
+        const sessionDurationSec = isFreeMode ? 0 : (ev.durationSeconds || 86400);
+
+        const newSession: ActiveSession = {
+          id: ev.id,
+          voucherCode: ev.voucherCode || (isFreeMode ? 'FREE-PASS' : 'PAID-PASS'),
+          clientMac: ev.mac || ev.clientMac || 'Unknown-MAC',
+          clientIp: ev.ip || ev.clientIp || '10.10.0.x',
+          deviceType: ev.deviceType || 'Guest Device',
+          siteName: evSite,
+          vertical: ev.scope || ev.vertical || 'hotspot',
+          routerName: evRouter,
+          planName: ev.planName || (isFreeMode ? 'Free Wi-Fi (Unlimited)' : 'Hotspot Pass'),
+          startedAt: ev.capturedAt || new Date().toISOString(),
+          expiresAt: isFreeMode
+            ? new Date(Date.now() + 3650 * 86400 * 1000).toISOString()
+            : new Date(Date.now() + sessionDurationSec * 1000).toISOString(),
+          remainingSeconds: sessionDurationSec,
+          bytesDown: 0,
+          bytesUp: 0,
+          speedLimit: ev.speedLimit || '25M/10M',
+          guestName: ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User',
+          guestPhone: ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '',
+          guestEmail: ev.email || ev.guestEmail || '',
+          authMode: isFreeMode ? 'free' : (ev.mode || 'voucher'),
+          isUnlimitedForever: isFreeMode,
+          roamedSites: [evSite],
+          lastSeenAt: new Date().toISOString()
+        };
+        this.state.activeSessions.unshift(newSession);
+        mutated = true;
+
+        // Also record in captiveLeads if guest contact info was provided
+        if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
+          const leadId = `lead_${ev.id}`;
+          if (!this.state.captiveLeads.some((l) => l.id === leadId)) {
+            const guestNameStr = newSession.guestName || 'Guest User';
+            const guestPhoneStr = newSession.guestPhone || '';
+            const guestEmailStr = newSession.guestEmail || '';
+            const parts = guestNameStr.trim().split(' ');
+            const fName = ev.firstName || parts[0] || 'Guest';
+            const lName = ev.lastName || parts.slice(1).join(' ') || '';
+            this.state.captiveLeads.unshift({
+              id: leadId,
+              firstName: fName,
+              lastName: lName,
+              fullName: guestNameStr,
+              countryCode: ev.countryCode === '+27' ? '+27' : '+266',
+              phone: ev.phone || guestPhoneStr,
+              fullPhone: guestPhoneStr,
+              email: guestEmailStr,
+              capturedAt: newSession.startedAt,
+              routerName: newSession.routerName,
+              siteName: newSession.siteName,
+              vertical: newSession.vertical,
+              clientMac: newSession.clientMac,
+              clientIp: newSession.clientIp,
+              deviceType: newSession.deviceType,
+              durationMinutes: isFreeMode ? 0 : Math.round(sessionDurationSec / 60),
+              status: 'active'
+            });
           }
         }
       }
@@ -854,12 +994,79 @@ class StorageService {
     this.saveState();
   }
 
+  lookupRoamingSession(mac: string, phone?: string): ActiveSession | null {
+    const cleanMac = String(mac || '').trim().toLowerCase();
+    const cleanPhoneDigits = String(phone || '').replace(/\D/g, '');
+
+    const sessions = this.state.activeSessions || [];
+    for (const sess of sessions) {
+      const sessMac = String(sess.clientMac || '').trim().toLowerCase();
+      const sessPhoneDigits = String(sess.guestPhone || '').replace(/\D/g, '');
+
+      const macMatches = cleanMac && cleanMac !== 'unknown-mac' && cleanMac !== 'auto' && sessMac === cleanMac;
+      const phoneMatches = cleanPhoneDigits.length >= 8 && sessPhoneDigits.length >= 8 && (sessPhoneDigits.includes(cleanPhoneDigits) || cleanPhoneDigits.includes(sessPhoneDigits));
+
+      if (macMatches || phoneMatches) {
+        if (sess.authMode === 'free' || sess.isUnlimitedForever || sess.voucherCode === 'FREE-PASS') {
+          return sess;
+        }
+        const expTime = new Date(sess.expiresAt).getTime();
+        if (isNaN(expTime) || expTime > Date.now()) {
+          return sess;
+        }
+      }
+    }
+    return null;
+  }
+
   addActiveSession(session: ActiveSession): void {
     if (!this.state.activeSessions) {
       this.state.activeSessions = [...INITIAL_ACTIVE_SESSIONS];
     }
+
+    const sessMac = String(session.clientMac || '').trim().toLowerCase();
+    const sessPhone = String(session.guestPhone || '').replace(/\D/g, '');
+
+    // Check for existing active roaming session by MAC or Phone
+    const existingIndex = this.state.activeSessions.findIndex((s) => {
+      if (s.id === session.id) return true;
+      const sMac = String(s.clientMac || '').trim().toLowerCase();
+      const sPhone = String(s.guestPhone || '').replace(/\D/g, '');
+      const macMatch = sessMac && sessMac !== 'unknown-mac' && sessMac !== 'auto' && sMac === sessMac;
+      const phoneMatch = sessPhone.length >= 8 && sPhone.length >= 8 && (sPhone.includes(sessPhone) || sessPhone.includes(sPhone));
+      return macMatch || phoneMatch;
+    });
+
+    if (existingIndex >= 0) {
+      const existing = this.state.activeSessions[existingIndex];
+      const isFree = existing.authMode === 'free' || existing.voucherCode === 'FREE-PASS' || existing.isUnlimitedForever;
+      const expTime = new Date(existing.expiresAt).getTime();
+      const notExpired = isFree || isNaN(expTime) || expTime > Date.now();
+
+      if (notExpired) {
+        const prevSites = existing.roamedSites || [existing.siteName];
+        if (!prevSites.includes(session.siteName)) {
+          existing.roamedSites = [...prevSites, session.siteName];
+        }
+        existing.siteName = session.siteName;
+        existing.routerName = session.routerName;
+        existing.lastSeenAt = new Date().toISOString();
+        if (session.clientIp) existing.clientIp = session.clientIp;
+        this.saveState();
+        return;
+      }
+    }
+
+    const isFree = session.authMode === 'free' || session.voucherCode === 'FREE-PASS';
+    const finalSession: ActiveSession = {
+      ...session,
+      isUnlimitedForever: isFree,
+      roamedSites: session.roamedSites || [session.siteName],
+      lastSeenAt: new Date().toISOString()
+    };
+
     this.state.activeSessions = [
-      session,
+      finalSession,
       ...this.state.activeSessions.filter(s => s.clientMac !== session.clientMac && s.id !== session.id)
     ];
 
@@ -2174,30 +2381,40 @@ class StorageService {
       };
     }
     
-    // Look up team member by email
-    let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
-
-    // Default permanent master password strictly reserved for rphooko@tconnect.africa
-    const OWNER_PASSWORD = 'TConnected#4321';
-    const PRIMARY_ADMIN_EMAIL = 'rphooko@tconnect.africa';
-
-    // Strict rule: rphooko@tconnect.africa can ONLY authenticate using the Master Password
-    if (cleanEmail === PRIMARY_ADMIN_EMAIL) {
-      if (inputPass !== OWNER_PASSWORD) {
+    // Check if email matches one of the 5 designated role accounts
+    const designated = DESIGNATED_ROLE_CREDENTIALS[cleanEmail];
+    if (designated) {
+      if (inputPass !== designated.password) {
         return {
           success: false,
           message: 'Invalid email or password.'
         };
       }
+
+      let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
       if (!member) {
-        member = this.state.team.find((m) => m.role === 'Super Admin' || m.role === 'Owner') || INITIAL_TEAM[0];
+        member = {
+          id: `tm_${designated.role.toLowerCase().replace(/\s+/g, '_')}`,
+          name: designated.name,
+          email: cleanEmail,
+          role: designated.role,
+          scopedSites: [],
+          mfaEnabled: designated.role === 'Owner' || designated.role === 'Super Admin' || designated.role === 'Tech',
+          status: 'active',
+          invitedAt: '2026-10-02',
+          lastLoginAt: 'Just now',
+          password: designated.password
+        };
+        this.state.team.push(member);
+      } else {
+        member.role = designated.role;
+        member.name = designated.name;
+        member.password = designated.password;
+        member.status = 'active';
+        member.lastLoginAt = 'Just now';
+        delete member.tempPassword;
+        member.hasPendingReset = false;
       }
-      // Ensure no temporary password ever overrides the master password on rphooko@tconnect.africa
-      delete member.tempPassword;
-      delete member.password;
-      member.hasPendingReset = false;
-      member.lastLoginAt = 'Just now';
-      member.status = 'active';
       this.saveState();
 
       const session: AuthSession = {
@@ -2212,7 +2429,7 @@ class StorageService {
         role: member.role,
         action: 'auth.login_success',
         target: member.email,
-        details: `Signed in as ${member.role} to T-Connect controller.`
+        details: `Signed in as designated ${member.role} to T-Connect controller.`
       });
       return {
         success: true,
@@ -2221,6 +2438,8 @@ class StorageService {
       };
     }
 
+    // Look up non-designated team member by email
+    const member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
     if (!member) {
       return {
         success: false,
@@ -2231,7 +2450,7 @@ class StorageService {
     let isAuthenticated = false;
     let loggedInViaTemp = false;
 
-    // Non-owner team members authenticate strictly via their assigned password or admin-issued temp password
+    // Non-designated team members authenticate strictly via their assigned password or admin-issued temp password
     if (member.password && inputPass === member.password.trim()) {
       isAuthenticated = true;
     } else if (member.tempPassword && inputPass === member.tempPassword.trim()) {
@@ -2291,6 +2510,41 @@ class StorageService {
       success: true,
       session,
       message: `Welcome, ${member.name} (${member.role}).`
+    };
+  }
+
+  /**
+   * Allows the Owner (master account) to switch into any role at will
+   * (Super Admin, Collaborator, Finance, Tech, Management) to test permissions in real-time.
+   */
+  switchRole(targetRole: TeamMember['role']): { success: boolean; session?: AuthSession; message: string } {
+    const currentSession = this.getAuthSession();
+    if (!currentSession) {
+      return { success: false, message: 'No active session' };
+    }
+
+    const isOwnerOrMaster = 
+      currentSession.user.role === 'Owner' || 
+      currentSession.user.email.toLowerCase() === 'rphooko@tconnect.africa';
+
+    if (!isOwnerOrMaster) {
+      return { success: false, message: 'Only the Owner can switch active roles at will.' };
+    }
+
+    currentSession.effectiveRole = targetRole;
+    this.setAuthSession(currentSession);
+    this.logAudit({
+      actor: currentSession.user.name,
+      role: targetRole,
+      action: 'auth.role_switch',
+      target: currentSession.user.email,
+      details: `Owner switched effective role to '${targetRole}'. Navigation and permissions updated in real time.`
+    });
+    this.notify();
+    return {
+      success: true,
+      session: currentSession,
+      message: `Active role switched to ${targetRole}.`
     };
   }
 

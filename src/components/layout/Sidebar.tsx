@@ -71,15 +71,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isSuperAdmin = !effectiveRole || effectiveRole === 'Super Admin' || effectiveRole === 'Owner' || effectiveRole === 'Admin';
   const isCollaborator = effectiveRole === 'Collaborator';
+  const isFinance = effectiveRole === 'Finance';
+  const isTech = effectiveRole === 'Tech';
   const isManagement = effectiveRole === 'Management' || effectiveRole === 'Viewer';
 
   // Strict role-based navigation filtering:
-  // - Super Admins: all 4 items
+  // - Super Admins & Owner: all 4 items
   // - Collaborators: just captive portal (network tab)
+  // - Finance: just billing & vouchers (billing tab)
+  // - Tech: just routers & adoption (fleet tab)
   // - Management: just fleet overview (dashboard tab)
   const navItems = allNavItems.filter((item) => {
     if (isSuperAdmin) return true;
     if (isCollaborator) return item.id === 'network';
+    if (isFinance) return item.id === 'billing';
+    if (isTech) return item.id === 'fleet';
     if (isManagement) return item.id === 'dashboard';
     return item.id === 'dashboard';
   }).map((item) => {
@@ -88,6 +94,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ...item,
         label: 'Captive Portal & Ads',
         description: 'Design, Uploads & Ads'
+      };
+    }
+    if (isFinance && item.id === 'billing') {
+      return {
+        ...item,
+        label: 'Financial & Billing',
+        description: 'Vouchers, Gateways & Revenue'
+      };
+    }
+    if (isTech && item.id === 'fleet') {
+      return {
+        ...item,
+        label: 'Routers & Topology',
+        description: 'MikroTik Fleets & Provisioning'
       };
     }
     return item;

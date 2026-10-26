@@ -527,6 +527,17 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                     <td className="py-3">
                       <div>{voucher.planName}</div>
                       <div className="text-[10px] text-slate-500">{voucher.durationSeconds / 3600} Hours Validity</div>
+                      {voucher.status === 'used' && voucher.expiresAt && (
+                        <div className="text-[10px] text-cyan-400 font-bold mt-0.5">
+                          {(() => {
+                            const sec = Math.max(0, Math.floor((new Date(voucher.expiresAt).getTime() - Date.now()) / 1000));
+                            if (sec <= 0) return <span className="text-rose-400 font-bold">Package Expired</span>;
+                            const h = Math.floor(sec / 3600);
+                            const m = Math.floor((sec % 3600) / 60);
+                            return `${h}h ${m}m left on package`;
+                          })()}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 text-emerald-400 font-bold">
                       {currency}{voucher.price.toFixed(2)}

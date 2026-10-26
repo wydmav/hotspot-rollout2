@@ -20,6 +20,14 @@ interface LoginViewProps {
   onToggleTheme?: () => void;
 }
 
+const DESIGNATED_ROLES = [
+  { role: 'Owner', email: 'rphooko@tconnect.africa', pass: 'TConnected#4321', icon: '👑', desc: 'Full master access' },
+  { role: 'Super Admin', email: 'admin@tconnect.africa', pass: 'TConnected%4321', icon: '🛡️', desc: 'All 4 tabs' },
+  { role: 'Collaborator', email: 'collab@tconnect.africa', pass: 'TConnected*4321', icon: '🎨', desc: 'Portal & Ads' },
+  { role: 'Finance', email: 'operations@tconnect.africa', pass: 'TConnected@4321', icon: '💳', desc: 'Billing only' },
+  { role: 'Tech', email: 'technical@tconnect.africa', pass: 'TConnected!4321', icon: '⚙️', desc: 'Routers only' },
+];
+
 export const LoginView: React.FC<LoginViewProps> = ({
   onLoginSuccess,
   teamMembers,
@@ -272,6 +280,41 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 )}
               </button>
             </form>
+
+            {/* Quick Role Sign-in Selector */}
+            <div className="pt-3 border-t border-[#1b233a] space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                <span className="font-bold text-slate-300">Quick Role Testing:</span>
+                <span>Click to auto-fill</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 font-mono text-[11px]">
+                {DESIGNATED_ROLES.map((dr) => (
+                  <button
+                    key={dr.role}
+                    type="button"
+                    onClick={() => {
+                      setEmail(dr.email);
+                      setPassword(dr.pass);
+                      setErrorMsg(null);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg border text-left transition-colors flex items-center justify-between gap-1.5 cursor-pointer ${
+                      email === dr.email
+                        ? 'bg-[#f05e17]/25 border-[#f05e17] text-white font-bold'
+                        : 'bg-[#161d31] hover:bg-[#1f283d] border-[#232d42] text-slate-300'
+                    }`}
+                  >
+                    <div className="min-w-0 truncate">
+                      <span className="mr-1">{dr.icon}</span>
+                      <span className="font-bold">{dr.role}</span>
+                      <div className="text-[9px] text-slate-400 truncate">{dr.desc}</div>
+                    </div>
+                    <span className="text-[9px] text-[#f05e17] shrink-0 font-bold px-1.5 py-0.5 rounded bg-[#f05e17]/10 border border-[#f05e17]/30">
+                      Use
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Footer Meta */}
             <div className="pt-2 text-[11px] font-mono text-slate-500 border-t border-[#1b233a] flex items-center justify-between">

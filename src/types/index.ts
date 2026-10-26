@@ -182,6 +182,9 @@ export interface ActiveSession {
   guestEmail?: string;
   authMode?: 'free' | 'voucher' | 'gateway';
   connectedDurationSeconds?: number;
+  isUnlimitedForever?: boolean;
+  roamedSites?: string[];
+  lastSeenAt?: string;
 }
 
 export interface CaptivePortalLead {
@@ -275,7 +278,7 @@ export interface SystemAlert {
   };
 }
 
-export type PlatformRole = 'Super Admin' | 'Collaborator' | 'Management';
+export type PlatformRole = 'Owner' | 'Super Admin' | 'Collaborator' | 'Finance' | 'Tech' | 'Management';
 
 export interface AdSlideItem {
   id: string;
@@ -336,7 +339,7 @@ export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'Super Admin' | 'Collaborator' | 'Management' | 'Owner' | 'Admin' | 'Technical' | 'Viewer' | 'Custom';
+  role: 'Owner' | 'Super Admin' | 'Collaborator' | 'Finance' | 'Tech' | 'Management' | 'Admin' | 'Technical' | 'Viewer' | 'Custom';
   customPermissions?: string[];
   scopedSites: string[]; // empty for all sites
   mfaEnabled: boolean;

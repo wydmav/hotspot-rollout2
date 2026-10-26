@@ -125,19 +125,29 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
     description: string;
   }> = [
     {
+      role: 'Owner',
+      label: '👑 Owner (Master)',
+      description: 'Master access & cross-role impersonation'
+    },
+    {
       role: 'Super Admin',
-      label: 'Super Admin',
+      label: '🛡️ Super Admin',
       description: 'Full code, adoption, billing & gateways'
     },
     {
       role: 'Collaborator',
-      label: 'Collaborator',
+      label: '🎨 Collaborator',
       description: 'Captive portal, image upload & ads only'
     },
     {
-      role: 'Management',
-      label: 'Management',
-      description: 'Fleet overview dashboard only'
+      role: 'Finance',
+      label: '💳 Finance',
+      description: 'Billing, vouchers & payment gateways only'
+    },
+    {
+      role: 'Tech',
+      label: '⚙️ Tech',
+      description: 'Routers, MikroTik topology & adoption only'
     }
   ];
 
@@ -334,6 +344,60 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
               </button>
             )}
           </div>
+
+          {/* Owner Role Impersonator / Active Role Switcher */}
+          {currentUser.role === 'Owner' && (
+            <div className="pt-2 border-t border-[#1f283d] space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-300 font-bold px-1">
+                <span className="flex items-center gap-1.5 text-[#f05e17]">
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Switch Role (Owner Master)</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">Active: {effectiveRole}</span>
+              </div>
+              <div className="space-y-1">
+                {rolesList.map((r) => {
+                  const isSelected = effectiveRole === r.role;
+                  return (
+                    <button
+                      key={r.role}
+                      type="button"
+                      onClick={() => {
+                        onRolePreviewChange(r.role);
+                        setIsOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between text-xs transition-colors cursor-pointer border ${
+                        isSelected
+                          ? 'bg-[#f05e17]/20 border-[#f05e17]/50 text-white font-bold'
+                          : 'bg-[#121829] hover:bg-[#182035] border-[#1f283d] text-slate-300'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <span>{r.label}</span>
+                          {isSelected && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#f05e17] text-white font-bold">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate font-normal">
+                          {r.description}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        {isSelected ? (
+                          <Check className="w-3.5 h-3.5 text-[#f05e17]" />
+                        ) : (
+                          <div className="w-3 h-3 rounded-full border border-slate-600" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* 4. Sign Out Button */}
           <div className="pt-2 border-t border-[#1f283d]">

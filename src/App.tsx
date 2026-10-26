@@ -34,10 +34,9 @@ export default function App() {
   });
   const [effectiveRole, setEffectiveRole] = useState<TeamMember['role']>(() => {
     const s = storage.getAuthSession();
-    if (!s) return 'Super Admin';
-    if (s.effectiveRole === 'Owner' || s.effectiveRole === 'Admin') return 'Super Admin';
+    if (!s) return 'Owner';
     if (s.effectiveRole === 'Viewer') return 'Management';
-    return s.effectiveRole;
+    return s.effectiveRole || s.user?.role || 'Owner';
   });
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedVertical, setSelectedVertical] = useState<VerticalType | 'all'>('all');
@@ -221,16 +220,24 @@ export default function App() {
   }, []);
 
   // Role-Based Navigation Safety:
-  // - Super Admin: full access to all 4 tabs
+  // - Super Admin & Owner: full access to all 4 tabs
   // - Collaborator: only captive portal & ads ('network' tab)
+  // - Finance: only billing, vouchers & gateways ('billing' tab)
+  // - Tech: only routers & adoption ('fleet' tab)
   // - Management: only fleet overview ('dashboard' tab)
   useEffect(() => {
     const isSuperAdmin = !effectiveRole || effectiveRole === 'Super Admin' || effectiveRole === 'Owner' || effectiveRole === 'Admin';
     const isCollaborator = effectiveRole === 'Collaborator';
+    const isFinance = effectiveRole === 'Finance';
+    const isTech = effectiveRole === 'Tech';
     const isManagement = effectiveRole === 'Management' || effectiveRole === 'Viewer';
 
     if (isCollaborator && currentTab !== 'network') {
       setCurrentTab('network');
+    } else if (isFinance && currentTab !== 'billing') {
+      setCurrentTab('billing');
+    } else if (isTech && currentTab !== 'fleet') {
+      setCurrentTab('fleet');
     } else if (isManagement && currentTab !== 'dashboard') {
       setCurrentTab('dashboard');
     }
@@ -812,13 +819,18 @@ export default function App() {
           onQuickRestock={handleQuickRestock}
           currentUser={authSession.user}
           onRolePreviewChange={(role) => {
+            storage.switchRole(role);
             setEffectiveRole(role);
             if (role === 'Collaborator') {
               setCurrentTab('network');
+            } else if (role === 'Finance') {
+              setCurrentTab('billing');
+            } else if (role === 'Tech') {
+              setCurrentTab('fleet');
             } else if (role === 'Management') {
               setCurrentTab('dashboard');
             }
-            showToast(`Switched active preview role to: ${role}`);
+            showToast(`Switched active view role to: ${role}`);
           }}
           onSignOut={() => {
             storage.setAuthSession(null);
@@ -832,24 +844,36 @@ export default function App() {
           onToggleTheme={handleToggleTheme}
         />
 
-        {/* Role Preview Active Banner */}
+        {/* Role Preview Active Banner / Owner Impersonator */}
         {effectiveRole !== authSession.user.role && (
-          <div className="bg-[#f05e17]/10 border-b border-[#f05e17]/30 px-5 py-2 flex items-center justify-between font-mono text-xs text-white">
-            <div className="flex items-center gap-2">
+          <div className="bg-[#f05e17]/15 border-b border-[#f05e17]/40 px-5 py-2.5 flex flex-wrap items-center justify-between gap-3 font-mono text-xs text-white shadow-md">
+            <div className="flex items-center gap-2.5">
               <Eye className="w-4 h-4 text-[#f05e17] shrink-0" />
               <span>
-                <strong>Role Preview Active:</strong> Inspecting interface as <strong className="text-[#f05e17]">{effectiveRole}</strong>.
+                <strong>Owner Role Impersonator:</strong> Viewing interface as{' '}
+                <strong className="text-[#f05e17] px-1.5 py-0.5 rounded bg-[#f05e17]/20 border border-[#f05e17]/30">
+                  {effectiveRole}
+                </strong>
+                {authSession.user.role === 'Owner' && (
+                  <span className="text-slate-400 ml-2 hidden sm:inline">
+                    (Owner can switch into any role at will)
+                  </span>
+                )}
               </span>
             </div>
-            <button
-              onClick={() => {
-                setEffectiveRole(authSession.user.role);
-                showToast(`Restored role to ${authSession.user.role}.`);
-              }}
-              className="text-[11px] underline text-[#f05e17] hover:text-white"
-            >
-              Revert to {authSession.user.role}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  storage.switchRole(authSession.user.role);
+                  setEffectiveRole(authSession.user.role);
+                  showToast(`Restored role to ${authSession.user.role}.`);
+                }}
+                className="text-xs px-2.5 py-1 rounded-md bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold transition-colors cursor-pointer"
+              >
+                Revert to {authSession.user.role}
+              </button>
+            </div>
           </div>
         )}
 
