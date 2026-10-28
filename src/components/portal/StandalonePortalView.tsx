@@ -43,7 +43,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     return DEFAULT_SCOPE_CONFIGS[scope] || DEFAULT_SCOPE_CONFIGS.hotspot;
   };
 
-  const [activeScope, setActiveScope] = useState<VerticalType>('hotspot');
+  const [activeScope, setActiveScope] = useState<VerticalType>(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search).get('scope') as VerticalType | null;
+      if (sp && DEFAULT_SCOPE_CONFIGS[sp]) return sp;
+    }
+    return 'hotspot';
+  });
   const [scopeConfigs, setScopeConfigs] = useState<Record<VerticalType, ScopePortalConfig>>(() => ({
     hotspot: loadLocalScopeConfig('hotspot'),
     village: loadLocalScopeConfig('community'),
@@ -53,104 +59,20 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     stadium: loadLocalScopeConfig('stadium')
   }));
 
-  // Poll live splash configuration saved on the VPS server + localStorage events so guest phones see admin customization & mode toggles in real time
-  useEffect(() => {
-    let mounted = true;
-    const syncLocal = () => {
-      if (!mounted) return;
-      setScopeConfigs((prev) => ({
-        ...prev,
-        hotspot: loadLocalScopeConfig('hotspot'),
-        village: loadLocalScopeConfig('community'),
-        community: loadLocalScopeConfig('community'),
-        park: loadLocalScopeConfig('park'),
-        bus: loadLocalScopeConfig('bus'),
-        stadium: loadLocalScopeConfig('stadium')
-      }));
-      setSponsorAdConfig(storage.getSponsorAdConfig());
-    };
-
-    const fetchConfig = () => {
-      fetch('/api/portal/config')
-        .then((res) => res.json())
-        .then((data) => {
-          if (!mounted) return;
-          if (data?.success && data?.configs && typeof data.configs === 'object') {
-            setScopeConfigs((prev) => ({
-              ...prev,
-              ...data.configs
-            }));
-          }
-        })
-        .catch(() => {});
-
-      fetch('/api/portal/video-ads')
-        .then((res) => res.json())
-        .then((data) => {
-          if (!mounted) return;
-          if (data?.success && data?.sponsorAd && typeof data.sponsorAd === 'object') {
-            setSponsorAdConfig((prev) => ({ ...prev, ...data.sponsorAd }));
-          }
-        })
-        .catch(() => {});
-    };
-
-    fetchConfig();
-    const timer = setInterval(fetchConfig, 1500);
-    const unsubStorage = storage.subscribe(syncLocal);
-    const handleStorageEvent = () => syncLocal();
-    if (typeof window !== 'undefined') {
-      window.addEventListener('storage', handleStorageEvent);
-    }
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-      unsubStorage();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('storage', handleStorageEvent);
-      }
-    };
-  }, []);
-
   const currentConfig = scopeConfigs[activeScope] || DEFAULT_SCOPE_CONFIGS.hotspot;
   const activeMeta = SCOPE_LIST.find((s) => s.id === activeScope) || SCOPE_LIST[0];
   const isFreeAccessAllowed = Boolean(currentConfig.allowFreeAccess);
   const isVoucherAllowed = currentConfig.allowVoucherCode !== false;
   const isBuyPassAllowed = currentConfig.allowOnlinePayment !== false;
+  const isTermsRequired = currentConfig.termsEnabled !== false;
+  const accentColor = currentConfig.accentColor || '#f05e17';
 
   // MikroTik Hotspot URL Parameters passed from hotspot/login.html redirect
   const [clientMac, setClientMac] = useState('');
   const [clientIp, setClientIp] = useState('');
   const [linkLoginOnly, setLinkLoginOnly] = useState(`http://${routerGatewayIp}/login`);
+  const [hasExplicitRouterLogin, setHasExplicitRouterLogin] = useState(false);
   const [userOrigUrl, setUserOrigUrl] = useState('https://www.google.com');
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const mac = params.get('mac');
-      const ip = params.get('ip');
-      const loginUrl = params.get('link_login_only');
-      const origUrl = params.get('user_url') || params.get('link_orig');
-      const scopeParam = params.get('scope') as VerticalType | null;
-      const stepParam = params.get('step');
-
-      if (mac && !mac.includes('$(')) setClientMac(mac);
-      if (ip && !ip.includes('$(')) setClientIp(ip);
-      if (loginUrl && !loginUrl.includes('$(')) setLinkLoginOnly(loginUrl);
-      if (origUrl && !origUrl.includes('$(')) setUserOrigUrl(origUrl);
-      if (scopeParam && DEFAULT_SCOPE_CONFIGS[scopeParam]) {
-        setActiveScope(scopeParam);
-      }
-      if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'video_ad') {
-        setPortalStep(stepParam);
-      }
-      const reasonParam = params.get('reason');
-      if (reasonParam === 'retrigger') {
-        setAdTriggerReason('retrigger');
-        setPortalStep('video_ad');
-      }
-    }
-  }, [routerGatewayIp]);
 
   // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'
   const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'>(
@@ -169,9 +91,196 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const touchDraggedRef = useRef<boolean>(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Mandatory Terms & Conditions Checkbox + Popup Modal State (Applies to all modes)
+  // Mandatory Terms & Conditions Checkbox + Popup Modal State (Enforced when termsEnabled is on)
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
+  const isTermsSatisfied = !isTermsRequired || termsAccepted;
+
+  // Guest Registration Fields (100% empty initial state — collected across all modes and synced to Admin)
+  const [guestFirstName, setGuestFirstName] = useState('');
+  const [guestSurname, setGuestSurname] = useState('');
+  const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+
+  // Plan & Payment State (Strictly EcoCash and OTT Voucher only)
+  const enabledPlans = currentConfig.plans.filter((p) => p.enabled !== false);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>(
+    () => enabledPlans[0]?.id || currentConfig.plans[0]?.id || 'hs_1d'
+  );
+  const [selectedGateway, setSelectedGateway] = useState<'ecocash' | 'ottvoucher'>('ottvoucher');
+  const [ottPin, setOttPin] = useState('');
+  const [voucherCode, setVoucherCode] = useState('');
+  const [voucherError, setVoucherError] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [statusBanner, setStatusBanner] = useState<string | null>(null);
+
+  const hiddenFormRef = useRef<HTMLFormElement | null>(null);
+  const [routerUsername, setRouterUsername] = useState('test');
+  const [routerPassword, setRouterPassword] = useState('123');
+  const routerAuthSentRef = useRef<boolean>(false);
+
+  // Refs for glitch-free digest-based background polling
+  const lastConfigDigestRef = useRef<string>('');
+  const lastAdDigestRef = useRef<string>('');
+  const hasHydratedServerConfigRef = useRef<boolean>(false);
+  const hasExplicitStepParamRef = useRef<boolean>(false);
+  const isConnectingRef = useRef<boolean>(false);
+  const portalStepRef = useRef(portalStep);
+  const activeScopeRef = useRef(activeScope);
+
+  useEffect(() => {
+    isConnectingRef.current = isConnecting;
+  }, [isConnecting]);
+
+  useEffect(() => {
+    portalStepRef.current = portalStep;
+  }, [portalStep]);
+
+  useEffect(() => {
+    activeScopeRef.current = activeScope;
+  }, [activeScope]);
+
+  // Ensure selectedPlanId is always valid if Admin toggles plans on the dashboard
+  useEffect(() => {
+    if (enabledPlans.length > 0 && !enabledPlans.some((p) => p.id === selectedPlanId)) {
+      setSelectedPlanId(enabledPlans[0].id);
+    }
+  }, [enabledPlans, selectedPlanId]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const mac = params.get('mac');
+      const ip = params.get('ip');
+      const loginUrl = params.get('link_login_only');
+      const origUrl = params.get('user_url') || params.get('link_orig');
+      const scopeParam = params.get('scope') as VerticalType | null;
+      const stepParam = params.get('step');
+
+      if (mac && !mac.includes('$(')) setClientMac(mac);
+      if (ip && !ip.includes('$(')) setClientIp(ip);
+      if (loginUrl && !loginUrl.includes('$(')) {
+        setLinkLoginOnly(loginUrl);
+        setHasExplicitRouterLogin(true);
+      }
+      if (origUrl && !origUrl.includes('$(')) setUserOrigUrl(origUrl);
+      if (scopeParam && DEFAULT_SCOPE_CONFIGS[scopeParam]) {
+        setActiveScope(scopeParam);
+      }
+      if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'video_ad' || stepParam === 'identification') {
+        hasExplicitStepParamRef.current = true;
+        setPortalStep(stepParam);
+      }
+      const reasonParam = params.get('reason');
+      if (reasonParam === 'retrigger') {
+        hasExplicitStepParamRef.current = true;
+        setAdTriggerReason('retrigger');
+        setPortalStep('video_ad');
+      }
+    }
+  }, [routerGatewayIp]);
+
+  // Poll live splash configuration saved on the VPS server + localStorage events using digest comparison
+  // so guest phones receive admin updates in real time WITHOUT layout flashes or state resets during typing/connection
+  useEffect(() => {
+    let mounted = true;
+    const syncLocal = () => {
+      if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+      const nextConfigs: Record<VerticalType, ScopePortalConfig> = {
+        hotspot: loadLocalScopeConfig('hotspot'),
+        village: loadLocalScopeConfig('community'),
+        community: loadLocalScopeConfig('community'),
+        park: loadLocalScopeConfig('park'),
+        bus: loadLocalScopeConfig('bus'),
+        stadium: loadLocalScopeConfig('stadium')
+      };
+      const digest = JSON.stringify(nextConfigs);
+      if (digest !== lastConfigDigestRef.current) {
+        lastConfigDigestRef.current = digest;
+        setScopeConfigs(nextConfigs);
+      }
+      const localAd = storage.getSponsorAdConfig();
+      const adDigest = JSON.stringify(localAd);
+      if (adDigest !== lastAdDigestRef.current) {
+        lastAdDigestRef.current = adDigest;
+        setSponsorAdConfig(localAd);
+      }
+    };
+
+    const fetchConfig = () => {
+      // Never interrupt an active connection handshake or post-auth video ad with background config polls
+      if (isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+
+      fetch('/api/portal/config')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+          if (data?.success && data?.configs && typeof data.configs === 'object') {
+            const incomingDigest = JSON.stringify(data.configs);
+            if (incomingDigest !== lastConfigDigestRef.current) {
+              lastConfigDigestRef.current = incomingDigest;
+              // Cache server configs to localStorage so subsequent opens have 0ms hydration
+              if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+                Object.entries(data.configs).forEach(([k, v]) => {
+                  try {
+                    window.localStorage.setItem(`tconnect_portal_scope_${k}`, JSON.stringify(v));
+                  } catch {}
+                });
+              }
+              setScopeConfigs((prev) => {
+                const merged = { ...prev, ...data.configs };
+                if (!hasHydratedServerConfigRef.current) {
+                  hasHydratedServerConfigRef.current = true;
+                  const targetCfg = merged[activeScopeRef.current] || merged.hotspot || DEFAULT_SCOPE_CONFIGS.hotspot;
+                  if (!hasExplicitStepParamRef.current) {
+                    const preferredStep = targetCfg.allowFreeAccess
+                      ? 'identification'
+                      : targetCfg.allowVoucherCode !== false
+                      ? 'voucher'
+                      : 'plan';
+                    setPortalStep(preferredStep);
+                  }
+                }
+                return merged;
+              });
+            }
+          }
+        })
+        .catch(() => {});
+
+      fetch('/api/portal/video-ads')
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+          if (data?.success && data?.sponsorAd && typeof data.sponsorAd === 'object') {
+            const adDigest = JSON.stringify(data.sponsorAd);
+            if (adDigest !== lastAdDigestRef.current) {
+              lastAdDigestRef.current = adDigest;
+              setSponsorAdConfig((prev) => ({ ...prev, ...data.sponsorAd }));
+            }
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchConfig();
+    const timer = setInterval(fetchConfig, 3000);
+    const unsubStorage = storage.subscribe(syncLocal);
+    const handleStorageEvent = () => syncLocal();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorageEvent);
+    }
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+      unsubStorage();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', handleStorageEvent);
+      }
+    };
+  }, []);
 
   const activeVideoAd: VideoAdItem | null = React.useMemo(() => {
     if (!sponsorAdConfig.enabled) return null;
@@ -187,13 +296,34 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     );
   }, [sponsorAdConfig, activeScope]);
 
+  // Preload active background wallpaper and sponsor ad slides so transitions have zero flicker
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (currentConfig.bgImage) {
+      const bgImg = new Image();
+      bgImg.src = currentConfig.bgImage;
+    }
+    if (activeVideoAd?.slides && Array.isArray(activeVideoAd.slides)) {
+      activeVideoAd.slides.forEach((sl) => {
+        if (sl?.imageUrl) {
+          const adImg = new Image();
+          adImg.src = sl.imageUrl;
+        }
+      });
+    }
+  }, [currentConfig.bgImage, activeVideoAd]);
+
   const releaseAndCloseSplash = () => {
     const dstUrl = userOrigUrl && !userOrigUrl.includes('$(') ? userOrigUrl : 'https://www.google.com';
-    try {
-      if (hiddenFormRef.current && clientMac) {
-        hiddenFormRef.current.submit();
-      }
-    } catch {}
+    // Only submit hidden form if connected through a physical MikroTik router and not yet submitted
+    if ((clientMac || hasExplicitRouterLogin) && !routerAuthSentRef.current) {
+      routerAuthSentRef.current = true;
+      try {
+        if (hiddenFormRef.current) {
+          hiddenFormRef.current.submit();
+        }
+      } catch {}
+    }
     try {
       window.close();
     } catch {}
@@ -247,31 +377,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   }, [isFreeAccessAllowed, isVoucherAllowed, isBuyPassAllowed, portalStep]);
 
-  // Guest Registration Fields (100% empty initial state — collected across all modes and synced to Admin)
-  const [guestFirstName, setGuestFirstName] = useState('');
-  const [guestSurname, setGuestSurname] = useState('');
-  const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
-  const [guestPhone, setGuestPhone] = useState('');
-  const [guestEmail, setGuestEmail] = useState('');
-
-  // Plan & Payment State (Strictly EcoCash and OTT Voucher only — M-Pesa removed)
-  const enabledPlans = currentConfig.plans.filter((p) => p.enabled);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>(
-    () => enabledPlans[0]?.id || currentConfig.plans[0]?.id || 'hs_1d'
-  );
-  const [selectedGateway, setSelectedGateway] = useState<'ecocash' | 'ottvoucher'>('ottvoucher');
-  const [ottPin, setOttPin] = useState('');
-  const [voucherCode, setVoucherCode] = useState('');
-  const [voucherError, setVoucherError] = useState<string | null>(null);
-  const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [statusBanner, setStatusBanner] = useState<string | null>(null);
-
-  const hiddenFormRef = useRef<HTMLFormElement | null>(null);
-  const [routerUsername, setRouterUsername] = useState('test');
-  const [routerPassword, setRouterPassword] = useState('123');
-
-  // Guest Input Validation
+  // Guest Input Validation (Strictly enforces currentConfig.collectName, collectPhone, collectEmail)
   const isFirstNameValid = !currentConfig.collectName || guestFirstName.trim().length >= 2;
   const isSurnameValid = !currentConfig.collectName || guestSurname.trim().length >= 2;
   const cleanPhoneDigits = guestPhone.replace(/\D/g, '');
@@ -333,7 +439,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         routerName: 'MIKROTIK-TC',
         planName: payload.planName,
         startedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + payload.durationSeconds * 1000).toISOString(),
+        expiresAt: new Date(Date.now() + (payload.durationSeconds || 86400) * 1000).toISOString(),
         remainingSeconds: payload.durationSeconds,
         bytesDown: 0,
         bytesUp: 0,
@@ -344,7 +450,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       });
     } catch {}
 
-    // 2. Post to VPS backend so Admin Dashboard across any device receives the lead, session & transaction
+    // 2. Post to VPS backend so Admin Dashboard & Scoped Partner Webhooks receive the lead immediately
     try {
       await fetch('/api/portal/guest-connect', {
         method: 'POST',
@@ -369,7 +475,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           voucherCode: payload.voucherCode,
           amount: payload.amount || 0,
           transactionRef: payload.transactionRef,
-          speedLimit: payload.speedLimit || '25M/10M'
+          speedLimit: payload.speedLimit || '25M/10M',
+          termsAccepted: isTermsSatisfied,
+          sponsorCampaign: activeVideoAd?.sponsorName || currentConfig.brandTitle || 'T-Connect Hotspot'
         })
       });
     } catch {}
@@ -377,30 +485,26 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
   /**
    * Authenticates the client device with the MikroTik Hotspot gateway (10.10.0.1/login)
-   * ONLY called after strict backend verification succeeds.
+   * Uses a single non-blocking background request when on a physical router to prevent double-submit page glitches.
    */
   const authorizeOnMikroTikRouter = (username = 'test', password = '123') => {
     setRouterUsername(username);
     setRouterPassword(password);
+    if (!clientMac && !hasExplicitRouterLogin) {
+      return;
+    }
     const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
-
+    routerAuthSentRef.current = true;
     try {
       const authUrl = `${targetLoginUrl}?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&dst=${encodeURIComponent(userOrigUrl)}`;
-      fetch(authUrl, { mode: 'no-cors' }).catch(() => {});
+      fetch(authUrl, { mode: 'no-cors', credentials: 'include' }).catch(() => {});
     } catch {}
-
-    setTimeout(() => {
-      try {
-        if (hiddenFormRef.current) {
-          hiddenFormRef.current.submit();
-        }
-      } catch {}
-    }, 100);
   };
 
-  // Connect Free Wi-Fi (Unlimited Forever — Only when Free Access is enabled by Admin)
+  // Connect Free Wi-Fi (Unlimited — Only when Free Access is enabled by Admin)
   const handleConnectFree = async () => {
-    if (!termsAccepted || !isGuestFormValid) return;
+    if (!isTermsSatisfied || !isGuestFormValid || isConnecting) return;
+    isConnectingRef.current = true;
     setIsConnecting(true);
     setStatusBanner('Activating your unlimited free Wi-Fi...');
 
@@ -415,12 +519,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     });
 
     authorizeOnMikroTikRouter('T-TRIAL', '123');
-
-    setTimeout(() => {
-      setIsConnecting(false);
-      setStatusBanner(null);
-      startOrEnterConnectedSession('post_auth');
-    }, 700);
+    setIsConnecting(false);
+    isConnectingRef.current = false;
+    setStatusBanner(null);
+    startOrEnterConnectedSession('post_auth');
   };
 
   // Redeem Voucher Code (Strictly verifies against active platform / OTT Lesotho API)
@@ -428,7 +530,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     e.preventDefault();
     setVoucherError(null);
 
-    if (!termsAccepted) {
+    if (!isTermsSatisfied) {
       setVoucherError('Please tick the Terms & Conditions box to proceed.');
       return;
     }
@@ -439,6 +541,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       return;
     }
 
+    isConnectingRef.current = true;
     setIsConnecting(true);
     setStatusBanner('Verifying voucher code...');
 
@@ -458,8 +561,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           code,
           mac: clientMac,
           ip: clientIp,
+          scope: activeScope,
+          firstName: guestFirstName.trim(),
+          lastName: guestSurname.trim(),
           guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' '),
-          guestPhone: `${guestCountryCode} ${guestPhone.trim()}`,
+          countryCode: guestCountryCode,
+          phone: guestPhone.trim(),
+          guestPhone: guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '',
           guestEmail: guestEmail.trim()
         })
       });
@@ -469,6 +577,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       if (!isVerified) {
         setIsConnecting(false);
+        isConnectingRef.current = false;
         setStatusBanner(null);
         setVoucherError(
           apiData.message || localRes.message || 'Invalid or expired voucher code. Please check your code and try again.'
@@ -490,10 +599,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       authorizeOnMikroTikRouter('test', '123');
 
       setIsConnecting(false);
+      isConnectingRef.current = false;
       setStatusBanner(null);
       startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
+      isConnectingRef.current = false;
       setStatusBanner(null);
       setVoucherError('Could not verify voucher at this time. Please try again.');
     }
@@ -504,12 +615,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     e.preventDefault();
     setPaymentError(null);
 
-    if (!termsAccepted) {
+    if (!isTermsSatisfied) {
       setPaymentError('Please tick the Terms & Conditions box to proceed.');
       return;
     }
 
-    const selectedPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+    const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
     const cleanPin = ottPin.replace(/\D/g, '');
 
     if (selectedGateway === 'ottvoucher') {
@@ -525,6 +636,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       }
     }
 
+    isConnectingRef.current = true;
     setIsConnecting(true);
     setStatusBanner(
       selectedGateway === 'ottvoucher'
@@ -551,6 +663,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           currency: currencySymbol,
           mac: clientMac,
           ip: clientIp,
+          scope: activeScope,
+          firstName: guestFirstName.trim(),
+          lastName: guestSurname.trim(),
           guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' '),
           guestEmail: guestEmail.trim()
         })
@@ -560,6 +675,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       if (!response.ok || !data.success) {
         setIsConnecting(false);
+        isConnectingRef.current = false;
         setStatusBanner(null);
         setPaymentError(
           data.message ||
@@ -584,10 +700,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       authorizeOnMikroTikRouter('test', '123');
 
       setIsConnecting(false);
+      isConnectingRef.current = false;
       setStatusBanner(null);
       startOrEnterConnectedSession('post_auth');
     } catch {
       setIsConnecting(false);
+      isConnectingRef.current = false;
       setStatusBanner(null);
       setPaymentError('Network error communicating with payment gateway. Please try again.');
     }
@@ -595,39 +713,43 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
   const currencySymbol = 'M';
 
-  // Reusable Mandatory Terms & Conditions Checkbox + Hyperlink Row (Shown on ALL modes)
-  const renderTermsAndConditionsRow = () => (
-    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-200">
-      <input
-        type="checkbox"
-        id="portal_tc_checkbox"
-        checked={termsAccepted}
-        onChange={(e) => {
-          setTermsAccepted(e.target.checked);
-          if (e.target.checked) {
-            setVoucherError(null);
-            setPaymentError(null);
-          }
-        }}
-        className="w-3.5 h-3.5 rounded accent-[#f05e17] cursor-pointer shrink-0"
-      />
-      <label htmlFor="portal_tc_checkbox" className="cursor-pointer leading-tight select-none">
-        I agree to the{' '}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setIsTermsModalOpen(true);
+  // Reusable Mandatory Terms & Conditions Checkbox + Hyperlink Row (Enforced when termsEnabled is ON in Dashboard)
+  const renderTermsAndConditionsRow = () => {
+    if (!isTermsRequired) return null;
+    return (
+      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-200">
+        <input
+          type="checkbox"
+          id="portal_tc_checkbox"
+          checked={termsAccepted}
+          onChange={(e) => {
+            setTermsAccepted(e.target.checked);
+            if (e.target.checked) {
+              setVoucherError(null);
+              setPaymentError(null);
+            }
           }}
-          className="text-sky-400 hover:text-sky-300 underline font-bold cursor-pointer"
-        >
-          Terms &amp; Conditions
-        </button>{' '}
-        <span className="text-[9px] text-slate-400">(T&apos;s and C&apos;s apply)</span>
-      </label>
-    </div>
-  );
+          style={{ accentColor }}
+          className="w-3.5 h-3.5 rounded cursor-pointer shrink-0"
+        />
+        <label htmlFor="portal_tc_checkbox" className="cursor-pointer leading-tight select-none">
+          I agree to the{' '}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsTermsModalOpen(true);
+            }}
+            className="text-sky-400 hover:text-sky-300 underline font-bold cursor-pointer"
+          >
+            Terms &amp; Conditions
+          </button>{' '}
+          <span className="text-[9px] text-slate-400">(T&apos;s and C&apos;s apply)</span>
+        </label>
+      </div>
+    );
+  };
 
   // Reusable Guest Identification Fields Component (Compact for clear background visibility)
   const renderGuestIdentificationInputs = () => {
@@ -1094,7 +1216,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       <button
                         type="button"
                         onClick={handleConnectFree}
-                        disabled={!termsAccepted || !isGuestFormValid || isConnecting}
+                        disabled={!isTermsSatisfied || !isGuestFormValid || isConnecting}
                         className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <Zap className="w-3.5 h-3.5" />
@@ -1142,7 +1264,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     <button
                       type="submit"
-                      disabled={!termsAccepted || isConnecting || !voucherCode.trim()}
+                      disabled={!isTermsSatisfied || isConnecting || !voucherCode.trim()}
                       className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
@@ -1206,7 +1328,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     <button
                       type="button"
-                      disabled={!termsAccepted}
+                      disabled={!isTermsSatisfied}
                       onClick={() => {
                         setPaymentError(null);
                         setPortalStep('payment');
@@ -1329,7 +1451,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <button
                 type="submit"
-                disabled={!termsAccepted || isConnecting || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                disabled={!isTermsSatisfied || isConnecting || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
                 className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />

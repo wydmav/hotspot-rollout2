@@ -15,10 +15,44 @@ import {
   ExternalLink,
   Plus,
   Sparkles,
-  Smartphone
+  Smartphone,
+  Key,
+  FileText,
+  Copy,
+  Send,
+  Lock,
+  Globe
 } from 'lucide-react';
 import { CaptivePortalLead, VerticalType } from '../../types';
 import { storage } from '../../services/storage';
+
+interface PartnerApiKeyItem {
+  id: string;
+  companyName: string;
+  campaignName: string;
+  apiKey: string;
+  allowedScopes: string[];
+  allowedSites: string[];
+  webhookUrl: string;
+  webhookSecret: string;
+  status: 'active' | 'revoked';
+  createdAt: string;
+  lastUsedAt?: string;
+  totalRequests?: number;
+}
+
+interface PartnerWebhookLogItem {
+  id: string;
+  partnerId: string;
+  companyName: string;
+  leadId: string;
+  scope: string;
+  webhookUrl: string;
+  status: number;
+  success: boolean;
+  deliveredAt: string;
+  detail: string;
+}
 
 interface CaptivePortalLeadsViewProps {
   selectedVertical?: VerticalType | 'all';
@@ -36,8 +70,32 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Partner REST API & Scoped Keys State
+  const [showPartnerApiPanel, setShowPartnerApiPanel] = useState<boolean>(true);
+  const [partnerKeys, setPartnerKeys] = useState<PartnerApiKeyItem[]>([]);
+  const [webhookLogs, setWebhookLogs] = useState<PartnerWebhookLogItem[]>([]);
+  const [newCompanyName, setNewCompanyName] = useState('');
+  const [newCampaignName, setNewCampaignName] = useState('');
+  const [newScopes, setNewScopes] = useState<string[]>(['hotspot', 'stadium']);
+  const [newSitesInput, setNewSitesInput] = useState('*');
+  const [newWebhookUrl, setNewWebhookUrl] = useState('');
+  const [isCreatingKey, setIsCreatingKey] = useState(false);
+  const [testingWebhookId, setTestingWebhookId] = useState<string | null>(null);
+
+  const fetchPartnerKeys = async () => {
+    try {
+      const res = await fetch('/api/admin/partner-keys');
+      const data = await res.json();
+      if (data?.success) {
+        if (Array.isArray(data.keys)) setPartnerKeys(data.keys);
+        if (Array.isArray(data.webhookLogs)) setWebhookLogs(data.webhookLogs);
+      }
+    } catch {}
+  };
+
   const refreshLeads = () => {
     setLeads([...storage.getCaptiveLeads()]);
+    fetchPartnerKeys();
   };
 
   useEffect(() => {
@@ -96,6 +154,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     };
 
     pollServerGuestLeads();
+    fetchPartnerKeys();
     const timer = setInterval(pollServerGuestLeads, 2500);
     return () => {
       mounted = false;
@@ -103,6 +162,131 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       clearInterval(timer);
     };
   }, []);
+
+  const handleToggleScopeChoice = (scopeKey: string) => {
+    setNewScopes((prev) =>
+      prev.includes(scopeKey)
+        ? prev.length > 1
+          ? prev.filter((s) => s !== scopeKey)
+          : prev
+        : [...prev, scopeKey]
+    );
+  };
+
+  const handleCreatePartnerKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompanyName.trim()) {
+      showToast('Please enter the partner company name');
+      return;
+    }
+    setIsCreatingKey(true);
+    try {
+      const allowedSites = newSitesInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const res = await fetch('/api/admin/partner-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: newCompanyName.trim(),
+          campaignName: newCampaignName.trim() || `${newCompanyName.trim()} Sponsored Wi-Fi`,
+          allowedScopes: newScopes,
+          allowedSites: allowedSites.length > 0 ? allowedSites : ['*'],
+          webhookUrl: newWebhookUrl.trim()
+        })
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setPartnerKeys(data.keys || []);
+        setNewCompanyName('');
+        setNewCampaignName('');
+        setNewWebhookUrl('');
+        showToast(`Issued Lead-Only REST API Key for ${data.key?.companyName}`);
+      } else {
+        showToast(data?.message || 'Failed to issue Partner API key');
+      }
+    } catch {
+      showToast('Network error while issuing Partner API key');
+    } finally {
+      setIsCreatingKey(false);
+    }
+  };
+
+  const handleToggleKeyStatus = async (keyItem: PartnerApiKeyItem) => {
+    const nextStatus = keyItem.status === 'active' ? 'revoked' : 'active';
+    try {
+      const res = await fetch(`/api/admin/partner-keys/${keyItem.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.keys)) {
+        setPartnerKeys(data.keys);
+        showToast(`${keyItem.companyName} API key ${nextStatus === 'active' ? 're-activated' : 'revoked'}`);
+      }
+    } catch {}
+  };
+
+  const handleDeletePartnerKey = async (keyItem: PartnerApiKeyItem) => {
+    try {
+      const res = await fetch(`/api/admin/partner-keys/${keyItem.id}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.keys)) {
+        setPartnerKeys(data.keys);
+        showToast(`Deleted API key for ${keyItem.companyName}`);
+      }
+    } catch {}
+  };
+
+  const handleTestWebhook = async (keyItem: PartnerApiKeyItem) => {
+    if (!keyItem.webhookUrl) {
+      showToast('No Webhook URL configured on this key');
+      return;
+    }
+    setTestingWebhookId(keyItem.id);
+    try {
+      const res = await fetch(`/api/admin/partner-keys/${keyItem.id}/test-webhook`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data?.success) {
+        if (Array.isArray(data.webhookLogs)) setWebhookLogs(data.webhookLogs);
+        showToast(
+          data.result?.success
+            ? `Webhook delivered to ${keyItem.companyName} (${data.result.detail})`
+            : `Webhook dispatch logged: ${data.result?.detail || 'Check endpoint'}`
+        );
+      } else {
+        showToast(data?.message || 'Webhook test failed');
+      }
+    } catch {
+      showToast('Failed to trigger test webhook');
+    } finally {
+      setTestingWebhookId(null);
+    }
+  };
+
+  const handleDownloadApiDocs = async () => {
+    try {
+      const res = await fetch('/api/v1/partner/docs.md');
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/markdown;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'T-Connect Control Tower - REST API Documentation.md');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Downloaded T-Connect Control Tower - REST API Documentation.md');
+    } catch {
+      showToast('Could not download API documentation');
+    }
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -333,7 +517,29 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         </div>
 
         {/* Global Actions */}
-        <div className="flex items-center gap-2 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          <button
+            onClick={() => setShowPartnerApiPanel((p) => !p)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors font-bold ${
+              showPartnerApiPanel
+                ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                : 'bg-[#121829] hover:bg-[#1a233b] text-slate-200 border-[#232d42]'
+            }`}
+            title="Manage External Partner Lead REST API Keys & Webhooks"
+          >
+            <Key className="w-3.5 h-3.5" />
+            <span>Partner REST API ({partnerKeys.length})</span>
+          </button>
+
+          <button
+            onClick={handleDownloadApiDocs}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-emerald-300 border border-emerald-500/30 transition-colors font-bold"
+            title="Download T-Connect Control Tower - REST API Documentation.md"
+          >
+            <FileText className="w-3.5 h-3.5 text-emerald-400" />
+            <span>REST API Docs (.md)</span>
+          </button>
+
           <button
             onClick={handleSeedSampleLead}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-300 border border-white/10 transition-colors font-bold"
@@ -362,6 +568,282 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Partner REST API & Scoped Keys Management Panel */}
+      {showPartnerApiPanel && (
+        <div className="bg-[#0b0f19] border border-[#232d42] rounded-xl p-4 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-[#1b233a] pb-3">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Lock className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-extrabold text-white">
+                  T-Connect Control Tower — External Partner Lead REST API (v1)
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  REST / JSON + CSV + HMAC-SHA256 WEBHOOKS
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                  STRICT LEAD-ONLY ISOLATION
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 font-mono mt-1">
+                Scoped Partner API keys (<code className="text-amber-300">tc_live_...</code>) expose <strong>ONLY</strong> verified guest leads for the partner&apos;s authorized hotspot policies. Hardware routers, payment gateways, vouchers, and internal settings are strictly blocked with HTTP 403.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleDownloadApiDocs}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Download &ldquo;T-Connect Control Tower - REST API Documentation.md&rdquo;</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* Issue New Scoped Partner API Key Form */}
+            <form
+              onSubmit={handleCreatePartnerKey}
+              className="lg:col-span-5 bg-[#121829] border border-[#1f283d] rounded-xl p-3.5 space-y-3"
+            >
+              <div className="text-xs font-extrabold text-white uppercase tracking-wider font-mono flex items-center justify-between">
+                <span>Issue Scoped Partner API Key</span>
+                <span className="text-[10px] text-slate-400 font-normal">Lead-Only Access</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                    Partner Company Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newCompanyName}
+                    onChange={(e) => setNewCompanyName(e.target.value)}
+                    placeholder="e.g. Econet / Vodacom / Standard Bank"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0e17] border border-[#232d42] text-xs text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                    Ad / Sponsor Campaign Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newCampaignName}
+                    onChange={(e) => setNewCampaignName(e.target.value)}
+                    placeholder="e.g. Summer Stadium Promo"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0e17] border border-[#232d42] text-xs text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                  Authorized Hotspot Policy Scopes *
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(['hotspot', 'community', 'park', 'bus', 'stadium'] as const).map((scopeKey) => {
+                    const active = newScopes.includes(scopeKey);
+                    return (
+                      <button
+                        type="button"
+                        key={scopeKey}
+                        onClick={() => handleToggleScopeChoice(scopeKey)}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-bold uppercase border transition-colors ${
+                          active
+                            ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                            : 'bg-[#0a0e17] text-slate-400 border-[#232d42] hover:text-white'
+                        }`}
+                      >
+                        {scopeKey}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                    Site Filter (* for all sites in scope)
+                  </label>
+                  <input
+                    type="text"
+                    value={newSitesInput}
+                    onChange={(e) => setNewSitesInput(e.target.value)}
+                    placeholder="* or Maseru Mall, Setsoto"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0e17] border border-[#232d42] text-xs text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                    Real-Time Webhook URL (Optional)
+                  </label>
+                  <input
+                    type="url"
+                    value={newWebhookUrl}
+                    onChange={(e) => setNewWebhookUrl(e.target.value)}
+                    placeholder="https://crm.partner.co.ls/webhooks/leads"
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0e17] border border-[#232d42] text-xs text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isCreatingKey}
+                className="w-full py-2 rounded-lg bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>{isCreatingKey ? 'Issuing Scoped Key...' : 'Generate Partner Lead API Key'}</span>
+              </button>
+            </form>
+
+            {/* Active Partner API Keys & Endpoints Reference */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-white uppercase tracking-wider font-mono">
+                    Issued Partner API Keys ({partnerKeys.length})
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Header: <code className="text-cyan-300">X-API-Key: tc_live_...</code>
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {partnerKeys.map((pk) => {
+                    const sampleCurl = `curl -s -H "X-API-Key: ${pk.apiKey}" "${window.location.origin}/api/v1/partner/leads?scope=${pk.allowedScopes[0] || 'hotspot'}&limit=25"`;
+                    return (
+                      <div
+                        key={pk.id}
+                        className="p-2.5 rounded-lg bg-[#0a0e17] border border-[#232d42] flex flex-col gap-2"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                pk.status === 'active' ? 'bg-emerald-400' : 'bg-red-400'
+                              }`}
+                            />
+                            <span className="text-xs font-bold text-white">{pk.companyName}</span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              ({pk.campaignName})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {pk.allowedScopes.map((sc) => (
+                              <span
+                                key={sc}
+                                className="px-1.5 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30 text-[9px] font-mono font-bold uppercase"
+                              >
+                                {sc}
+                              </span>
+                            ))}
+                            <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[9px] font-mono">
+                              {pk.totalRequests || 0} calls
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 bg-[#121829] px-2.5 py-1.5 rounded border border-[#1b233a] font-mono text-[11px]">
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="text-amber-300 select-all">{pk.apiKey}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(pk.apiKey, `${pk.companyName} API Key`)}
+                              className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white text-[10px] flex items-center gap-1"
+                            >
+                              <Copy className="w-2.5 h-2.5" />
+                              <span>Copy Key</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(sampleCurl, 'cURL command')}
+                              className="px-2 py-0.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-[10px] flex items-center gap-1"
+                            >
+                              <Globe className="w-2.5 h-2.5" />
+                              <span>Copy cURL</span>
+                            </button>
+                            {pk.webhookUrl && (
+                              <button
+                                type="button"
+                                disabled={testingWebhookId === pk.id}
+                                onClick={() => handleTestWebhook(pk)}
+                                className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] flex items-center gap-1"
+                              >
+                                <Send className="w-2.5 h-2.5" />
+                                <span>{testingWebhookId === pk.id ? 'Sending...' : 'Test Webhook'}</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleKeyStatus(pk)}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]"
+                            >
+                              {pk.status === 'active' ? 'Revoke' : 'Activate'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePartnerKey(pk)}
+                              className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400"
+                              title="Delete key"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between text-[10px] font-mono text-slate-500">
+                          <span>
+                            Webhook Secret:{' '}
+                            <code
+                              onClick={() => handleCopy(pk.webhookSecret, 'Webhook Secret')}
+                              className="text-slate-300 cursor-pointer hover:text-white"
+                            >
+                              {pk.webhookSecret}
+                            </code>
+                          </span>
+                          <span>
+                            GET <code className="text-slate-300">/api/v1/partner/leads</code> · POST{' '}
+                            <code className="text-slate-300">/api/v1/partner/leads</code> · CSV{' '}
+                            <code className="text-slate-300">/api/v1/partner/leads/export.csv</code>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {webhookLogs.length > 0 && (
+                <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-3 space-y-1.5">
+                  <div className="text-[10px] font-mono font-bold uppercase text-slate-400">
+                    Recent Real-Time Webhook Deliveries
+                  </div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto font-mono text-[10px]">
+                    {webhookLogs.slice(0, 5).map((log) => (
+                      <div key={log.id} className="flex items-center justify-between text-slate-300">
+                        <span>
+                          <strong className="text-white">{log.companyName}</strong> ({log.scope}) &rarr;{' '}
+                          <span className="text-slate-400">{log.webhookUrl}</span>
+                        </span>
+                        <span className={log.success ? 'text-emerald-400' : 'text-amber-400'}>
+                          {log.detail}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

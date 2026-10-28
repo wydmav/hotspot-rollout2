@@ -178,6 +178,27 @@ app.get('/api/download/bundle.tar.gz', (req: Request, res: Response) => {
   res.download(archivePath, 'tconnect-production-vps.tar.gz');
 });
 
+// Global Partner Key Isolation Guard: Reject any Partner API Key (`X-API-Key` or `Bearer tc_live_...`)
+// attempting to access non-partner endpoints (`/api/gateways`, `/api/routers`, `/api/vouchers`, etc.)
+app.use('/api', (req: Request, res: Response, next) => {
+  const headerKey = String(req.headers['x-api-key'] || '').trim();
+  const authHeader = String(req.headers.authorization || '').trim();
+  const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+  const queryKey = String(req.query.api_key || '').trim();
+  const token = headerKey || bearerToken || queryKey;
+  if ((token.startsWith('tc_live_') || Boolean(headerKey)) && !req.path.startsWith('/v1/partner')) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN_PARTNER_KEY_SCOPE',
+        message:
+          'Partner API keys are strictly isolated to /api/v1/partner/* lead endpoints and cannot access routers, payment gateways, vouchers, or internal telemetry.'
+      }
+    });
+  }
+  next();
+});
+
 // -----------------------------------------------------------------------------
 // RFC 8910 / RFC 8908 CAPTIVE PORTAL API ENDPOINT
 // Queried automatically by modern iOS 14+, Android 11+, and Windows 11 clients
@@ -297,15 +318,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>${brandTitle || 'T-Connect'} Wi-Fi Portal</title>
 <script>
-  // Immediately redirect captive portal popup to live Portal Builder Splash View with client MAC/IP
+  // Immediately redirect captive portal popup to live Portal Builder Splash View with client MAC/IP (zero delay)
   (function() {
     var target = "${baseUrl}/portal?mac=$(mac)&ip=$(ip)&link_login_only=$(link-login-only)&user_url=$(link-orig-esc)&scope=${scope}";
     if (window.location.hostname !== "${host.split(':')[0]}") {
-      var img = new Image();
-      img.onload = function() { window.location.replace(target); };
-      img.onerror = function() { window.location.replace(target); };
-      img.src = "${baseUrl}/api/portal/config?t=" + Date.now();
-      setTimeout(function() { window.location.replace(target); }, 350);
+      window.location.replace(target);
     }
   })();
 </script>
@@ -338,12 +355,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 12px;
+    padding: 12px 0 0;
     width: 100%;
-    max-width: 340px;
+    max-width: 420px;
     margin: 0 auto;
   }
-  .hero { text-align: center; padding: 10px 0 6px; width: 100%; }
+  .hero { text-align: center; padding: 8px 12px 4px; width: 100%; }
   .kicker {
     color: rgba(255,255,255,0.92);
     font-size: 10px;
@@ -352,16 +369,16 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     margin-bottom: 4px;
     text-shadow: 0 2px 8px rgba(0,0,0,0.8);
   }
-  .hero h1 { font-size: 18px; font-weight: 900; letter-spacing: -0.4px; color: #fff; text-shadow: 0 3px 14px rgba(0,0,0,0.85); line-height: 1.15; }
+  .hero h1 { font-size: 17px; font-weight: 900; letter-spacing: -0.4px; color: #fff; text-shadow: 0 3px 14px rgba(0,0,0,0.85); line-height: 1.15; }
   .card {
     width: 100%;
-    background: rgba(15, 20, 34, ${(glassOpacity / 100).toFixed(2)});
-    backdrop-filter: blur(18px);
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 18px;
-    padding: 14px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.65);
-    margin: auto 0;
+    background: #0b0f19;
+    border: 1px solid #232d42;
+    border-bottom: none;
+    border-radius: 16px 16px 0 0;
+    padding: 10px 14px 14px;
+    box-shadow: 0 -10px 40px rgba(0,0,0,0.85);
+    margin-top: auto;
   }
   .tabs {
     display: ${enabledTabsCount <= 1 ? 'none' : 'grid'};
@@ -607,12 +624,14 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </div>
 
     <!-- SHARED MANDATORY T&Cs CHECKBOX + HYPERLINK POPUP FOR ALL MODES -->
+    ${termsEnabled ? `
     <div class="tc-row">
       <input type="checkbox" id="tcAcceptedBox" onchange="syncButtonsWithTerms()" />
       <label for="tcAcceptedBox" style="cursor:pointer;line-height:1.35;">
         I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span> (T's &amp; C's apply)
       </label>
     </div>
+    ` : ''}
 
     ${allowFreeAccess ? `
     <!-- TAB 1: FREE WI-FI -->
@@ -621,7 +640,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="hidden" name="username" value="T-TRIAL">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
-        <button type="submit" id="freeSubmitBtn" class="btn-primary" disabled>Connect Free Wi-Fi &rarr;</button>
+        <button type="submit" id="freeSubmitBtn" class="btn-primary" ${termsEnabled ? 'disabled' : ''}>Connect Free Wi-Fi &rarr;</button>
       </form>
     </div>
     ` : ''}
@@ -690,7 +709,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function isTermsChecked() {
     var cb = document.getElementById('tcAcceptedBox');
-    return cb ? cb.checked : false;
+    return cb ? cb.checked : true;
   }
 
   function openTermsModal(e) {
@@ -1198,6 +1217,34 @@ const legacyServerStoreFilePath = path.resolve(__dirname, 'public/server-portal-
 const LEGACY_REVOKED_OTT_KEYS = new Set(['4323e6fa-09b2-4eaa-9b73-f275dad58787']);
 const LEGACY_REVOKED_OTT_PASSWORDS = new Set(['3*68pF&24*']);
 
+interface PartnerApiKeyRecord {
+  id: string;
+  companyName: string;
+  campaignName: string;
+  apiKey: string;
+  allowedScopes: string[];
+  allowedSites: string[];
+  webhookUrl: string;
+  webhookSecret: string;
+  status: 'active' | 'revoked';
+  createdAt: string;
+  lastUsedAt?: string;
+  totalRequests?: number;
+}
+
+interface PartnerWebhookLogRecord {
+  id: string;
+  partnerId: string;
+  companyName: string;
+  leadId: string;
+  scope: string;
+  webhookUrl: string;
+  status: number;
+  success: boolean;
+  deliveredAt: string;
+  detail: string;
+}
+
 interface ServerPortalStore {
   gateways: Array<any>;
   vouchers: Array<any>;
@@ -1206,6 +1253,8 @@ interface ServerPortalStore {
   transactions: Array<any>;
   supabaseConfig?: { url: string; anonKey: string };
   sponsorAd?: any;
+  partnerApiKeys: PartnerApiKeyRecord[];
+  partnerWebhookLogs: PartnerWebhookLogRecord[];
 }
 
 function loadServerPortalStore(): ServerPortalStore {
@@ -1218,6 +1267,22 @@ function loadServerPortalStore(): ServerPortalStore {
     }
   } catch {}
 
+  const defaultPartnerKeys: PartnerApiKeyRecord[] = [
+    {
+      id: 'pk_alliance_ls',
+      companyName: 'Alliance Insurance Lesotho',
+      campaignName: 'Hotspot & Stadium Sponsor Campaign',
+      apiKey: 'tc_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
+      allowedScopes: ['hotspot', 'stadium'],
+      allowedSites: ['*'],
+      webhookUrl: '',
+      webhookSecret: 'whsec_tconnect_alliance_2026',
+      status: 'active',
+      createdAt: '2026-10-01T08:00:00.000Z',
+      totalRequests: 0
+    }
+  ];
+
   const store: ServerPortalStore = {
     gateways: Array.isArray(rawStore?.gateways) ? rawStore.gateways : [],
     vouchers: Array.isArray(rawStore?.vouchers) ? rawStore.vouchers : [],
@@ -1225,7 +1290,12 @@ function loadServerPortalStore(): ServerPortalStore {
     guestEvents: Array.isArray(rawStore?.guestEvents) ? rawStore.guestEvents : [],
     transactions: Array.isArray(rawStore?.transactions) ? rawStore.transactions : [],
     supabaseConfig: rawStore?.supabaseConfig && rawStore.supabaseConfig.url ? rawStore.supabaseConfig : undefined,
-    sponsorAd: rawStore?.sponsorAd || undefined
+    sponsorAd: rawStore?.sponsorAd || undefined,
+    partnerApiKeys:
+      Array.isArray(rawStore?.partnerApiKeys) && rawStore.partnerApiKeys.length > 0
+        ? rawStore.partnerApiKeys
+        : defaultPartnerKeys,
+    partnerWebhookLogs: Array.isArray(rawStore?.partnerWebhookLogs) ? rawStore.partnerWebhookLogs : []
   };
 
   // Apply environment variable overrides if provided in .env / docker-compose.yml
@@ -1921,6 +1991,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       };
       serverStore.guestEvents.unshift(entry);
       saveServerPortalStore(serverStore);
+      dispatchPartnerWebhooksForLead(entry).catch(() => {});
       return res.json({
         success: true,
         code: digitsOnly,
@@ -2005,6 +2076,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
   serverStore.guestEvents.unshift(entry);
   if (serverStore.guestEvents.length > 200) serverStore.guestEvents.pop();
   saveServerPortalStore(serverStore);
+  dispatchPartnerWebhooksForLead(entry).catch(() => {});
 
   return res.json({
     success: true,
@@ -2109,6 +2181,7 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   serverStore.guestEvents.unshift(entry);
   if (serverStore.guestEvents.length > 250) serverStore.guestEvents.pop();
   saveServerPortalStore(serverStore);
+  dispatchPartnerWebhooksForLead(entry).catch(() => {});
   res.json({ success: true, isRoaming: false, entry });
 });
 
@@ -2181,6 +2254,612 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// -----------------------------------------------------------------------------
+// T-CONNECT CONTROL TOWER — EXTERNAL PARTNER LEAD REST API (v1)
+// Strict Lead-Only Isolation: Partner API keys (tc_live_...) can ONLY access
+// /api/v1/partner/* endpoints and sanitized lead records for their scoped policies.
+// -----------------------------------------------------------------------------
+
+function extractPartnerApiKeyFromRequest(req: Request): string {
+  const headerKey = String(req.headers['x-api-key'] || '').trim();
+  if (headerKey) return headerKey;
+  const authHeader = String(req.headers.authorization || '').trim();
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  const queryKey = String(req.query.api_key || '').trim();
+  if (queryKey.startsWith('tc_live_')) return queryKey;
+  return '';
+}
+
+// Global Isolation Guard: Any request bearing a Partner API Key (`X-API-Key` or `Bearer tc_live_...`)
+// attempting to access non-partner endpoints (`/api/gateways`, `/api/routers`, `/api/vouchers`, etc.) is rejected.
+app.use('/api', (req: Request, res: Response, next) => {
+  const token = extractPartnerApiKeyFromRequest(req);
+  const hasExplicitApiKeyHeader = Boolean(req.headers['x-api-key']);
+  const isPartnerToken = token.startsWith('tc_live_') || hasExplicitApiKeyHeader;
+  if (isPartnerToken && !req.path.startsWith('/v1/partner')) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN_PARTNER_KEY_SCOPE',
+        message:
+          'Partner API keys are strictly isolated to /api/v1/partner/* lead endpoints and cannot access routers, payment gateways, vouchers, or internal telemetry.'
+      }
+    });
+  }
+  next();
+});
+
+function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
+  const firstName = String(ev.firstName || '').trim() || String(ev.guestName || 'Guest').split(' ')[0] || 'Guest';
+  const lastName =
+    String(ev.lastName || '').trim() ||
+    String(ev.guestName || '')
+      .split(' ')
+      .slice(1)
+      .join(' ')
+      .trim();
+  const fullName = String(ev.guestName || `${firstName} ${lastName}`.trim() || 'Guest User');
+  const countryCode = String(ev.countryCode || '+266').trim();
+  const rawPhone = String(ev.phone || '').trim();
+  const fullPhone = String(ev.guestPhone || (rawPhone ? `${countryCode} ${rawPhone}` : '')).trim();
+  const email = String(ev.email || ev.guestEmail || '').trim();
+  const hotspotPolicyScope = String(ev.scope || 'hotspot').toLowerCase();
+  const siteName = String(ev.siteName || 'T-Connect Hotspot');
+  const rawMode = String(ev.mode || 'free').toLowerCase();
+  const connectionMode = rawMode === 'free' ? 'free' : rawMode === 'voucher' ? 'voucher' : 'paid';
+  const sponsorCampaign = String(
+    ev.sponsorCampaign || serverStore.sponsorAd?.sponsorName || defaultCampaign
+  );
+  const roamedSites = Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites : [siteName];
+
+  // Strictly return ONLY sanitized lead & policy fields (no MAC, IP, router IDs, voucher PINs, or gateway refs)
+  return {
+    leadId: String(ev.id || `lead_${Date.now()}`),
+    firstName,
+    lastName,
+    fullName,
+    countryCode,
+    phone: rawPhone,
+    fullPhone,
+    email,
+    hotspotPolicyScope,
+    siteName,
+    connectionMode,
+    sponsorCampaign,
+    termsAccepted: true,
+    roamedSites,
+    capturedAt: String(ev.capturedAt || new Date().toISOString())
+  };
+}
+
+function isLeadAllowedForPartner(ev: any, partner: PartnerApiKeyRecord): boolean {
+  const leadScope = String(ev.scope || 'hotspot').toLowerCase();
+  const scopes = (partner.allowedScopes || []).map((s) => s.toLowerCase());
+  const scopeAllowed = scopes.includes('*') || scopes.includes(leadScope);
+  if (!scopeAllowed) return false;
+
+  const sites = (partner.allowedSites || ['*']).map((s) => s.toLowerCase().trim()).filter(Boolean);
+  if (sites.length > 0 && !sites.includes('*')) {
+    const leadSite = String(ev.siteName || 'T-Connect Hotspot').toLowerCase();
+    const siteMatch = sites.some((s) => leadSite.includes(s));
+    if (!siteMatch) return false;
+  }
+  return true;
+}
+
+async function dispatchPartnerWebhooksForLead(ev: any, targetPartnerId?: string) {
+  const activePartners = (serverStore.partnerApiKeys || []).filter((pk) => {
+    if (pk.status !== 'active' || !pk.webhookUrl || !pk.webhookUrl.trim()) return false;
+    if (targetPartnerId && pk.id !== targetPartnerId) return false;
+    return targetPartnerId ? true : isLeadAllowedForPartner(ev, pk);
+  });
+
+  if (activePartners.length === 0) return [];
+
+  const results: PartnerWebhookLogRecord[] = [];
+
+  for (const partner of activePartners) {
+    const leadPayload = sanitizeLeadForPartner(ev, partner.campaignName);
+    const bodyObj = {
+      event: 'lead.captured',
+      webhookId: `evt_${Date.now()}_${Math.floor(100 + Math.random() * 899)}`,
+      dispatchedAt: new Date().toISOString(),
+      partner: {
+        companyName: partner.companyName,
+        campaignName: partner.campaignName
+      },
+      data: leadPayload
+    };
+    const rawBody = JSON.stringify(bodyObj);
+    const signature = crypto
+      .createHmac('sha256', partner.webhookSecret || 'whsec_tconnect_default')
+      .update(rawBody, 'utf8')
+      .digest('hex');
+
+    let status = 0;
+    let success = false;
+    let detail = '';
+
+    try {
+      const resp = await fetch(partner.webhookUrl.trim(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-TConnect-Event': 'lead.captured',
+          'X-TConnect-Signature': `sha256=${signature}`,
+          'User-Agent': 'T-Connect-Control-Tower-Webhook/1.0'
+        },
+        body: rawBody,
+        signal: AbortSignal.timeout(4500)
+      });
+      status = resp.status;
+      success = resp.ok;
+      detail = `HTTP ${resp.status} (${resp.statusText || 'OK'})`;
+    } catch (err: any) {
+      status = 0;
+      success = false;
+      detail = err?.message || 'Webhook endpoint unreachable';
+    }
+
+    const logItem: PartnerWebhookLogRecord = {
+      id: `whlog_${Date.now()}_${Math.floor(100 + Math.random() * 899)}`,
+      partnerId: partner.id,
+      companyName: partner.companyName,
+      leadId: leadPayload.leadId,
+      scope: leadPayload.hotspotPolicyScope,
+      webhookUrl: partner.webhookUrl.trim(),
+      status,
+      success,
+      deliveredAt: new Date().toISOString(),
+      detail
+    };
+    results.push(logItem);
+    serverStore.partnerWebhookLogs.unshift(logItem);
+    if (serverStore.partnerWebhookLogs.length > 100) {
+      serverStore.partnerWebhookLogs.pop();
+    }
+  }
+
+  saveServerPortalStore(serverStore);
+  return results;
+}
+
+function authenticatePartnerRequest(req: Request, res: Response): PartnerApiKeyRecord | null {
+  const token = extractPartnerApiKeyFromRequest(req);
+  if (!token) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: 'UNAUTHORIZED_API_KEY',
+        message:
+          'Missing Partner API Key. Provide X-API-Key: tc_live_... or Authorization: Bearer tc_live_...'
+      }
+    });
+    return null;
+  }
+
+  const matched = (serverStore.partnerApiKeys || []).find(
+    (k) => k.apiKey === token && k.status === 'active'
+  );
+  if (!matched) {
+    res.status(401).json({
+      success: false,
+      error: {
+        code: 'INVALID_OR_REVOKED_API_KEY',
+        message: 'The provided Partner API key is invalid or has been revoked.'
+      }
+    });
+    return null;
+  }
+
+  matched.lastUsedAt = new Date().toISOString();
+  matched.totalRequests = (matched.totalRequests || 0) + 1;
+  saveServerPortalStore(serverStore);
+  return matched;
+}
+
+// Serve the root Markdown documentation file ("T-Connect Control Tower - REST API Documentation.md")
+app.get('/api/v1/partner/docs.md', (_req: Request, res: Response) => {
+  const docPath = path.resolve(__dirname, 'T-Connect Control Tower - REST API Documentation.md');
+  if (fs.existsSync(docPath)) {
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    return res.send(fs.readFileSync(docPath, 'utf-8'));
+  }
+  res.status(404).send('# T-Connect Control Tower - REST API Documentation not found');
+});
+
+// 1. GET /api/v1/partner/policies — Inspect partner's authorized hotspot policies & lead capture fields
+app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
+  const partner = authenticatePartnerRequest(req, res);
+  if (!partner) return;
+
+  const savedConfigs = loadSavedPortalConfigs();
+  const allScopeMeta: Record<string, { label: string; defaultTitle: string }> = {
+    hotspot: { label: 'Hotspot (Towns & Retail)', defaultTitle: 'T-CONNECT' },
+    community: { label: 'Community Wi-Fi', defaultTitle: 'T-CONNECT COMMUNITY' },
+    park: { label: 'Public Parks & Plazas', defaultTitle: 'T-CONNECT PARKS' },
+    bus: { label: 'Transit & Fleet Buses', defaultTitle: 'T-CONNECT TRANSIT' },
+    stadium: { label: 'National Stadium & Events', defaultTitle: 'T-CONNECT STADIUM' }
+  };
+
+  const activeScopes = partner.allowedScopes.includes('*')
+    ? Object.keys(allScopeMeta)
+    : partner.allowedScopes;
+
+  const policies = activeScopes.map((scopeKey) => {
+    const cfg = savedConfigs[scopeKey] || {};
+    const meta = allScopeMeta[scopeKey] || { label: scopeKey, defaultTitle: 'T-CONNECT' };
+    return {
+      scope: scopeKey,
+      label: meta.label,
+      brandTitle: cfg.brandTitle || meta.defaultTitle,
+      tagline: cfg.tagline || 'STARLINK HIGH-SPEED',
+      collectName: cfg.collectName !== undefined ? Boolean(cfg.collectName) : true,
+      collectPhone: cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true,
+      collectEmail: cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : true,
+      termsEnabled: cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true,
+      allowFreeAccess: cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : true,
+      sponsorAdEnabled: serverStore.sponsorAd?.enabled !== false,
+      sponsorName: serverStore.sponsorAd?.sponsorName || partner.companyName
+    };
+  });
+
+  res.json({
+    success: true,
+    apiFormat: 'REST/JSON',
+    platform: 'T-Connect Control Tower',
+    version: '1.0.0',
+    partner: {
+      id: partner.id,
+      companyName: partner.companyName,
+      campaignName: partner.campaignName,
+      allowedScopes: partner.allowedScopes,
+      allowedSites: partner.allowedSites
+    },
+    policies
+  });
+});
+
+// 2. GET /api/v1/partner/leads — Retrieve leads with filtering and pagination (Strict Lead-Only Payload)
+app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
+  const partner = authenticatePartnerRequest(req, res);
+  if (!partner) return;
+
+  const reqScope = String(req.query.scope || '').trim().toLowerCase();
+  if (reqScope) {
+    const scopes = partner.allowedScopes.map((s) => s.toLowerCase());
+    if (!scopes.includes('*') && !scopes.includes(reqScope)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN_POLICY_SCOPE',
+          message: `Your Partner API key is not authorized for hotspot policy scope '${reqScope}'. Authorized scopes: ${partner.allowedScopes.join(', ')}`
+        }
+      });
+    }
+  }
+
+  const reqSite = String(req.query.site || '').trim().toLowerCase();
+  const reqCc = String(req.query.country_code || '').trim();
+  const reqSearch = String(req.query.search || '').trim().toLowerCase();
+  const reqSince = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
+  const reqUntil = req.query.until ? new Date(String(req.query.until)).getTime() : 0;
+
+  const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
+
+  const filtered = (serverStore.guestEvents || [])
+    .filter((ev) => isLeadAllowedForPartner(ev, partner))
+    .map((ev) => sanitizeLeadForPartner(ev, partner.campaignName))
+    .filter((lead) => {
+      if (reqScope && lead.hotspotPolicyScope !== reqScope) return false;
+      if (reqSite && !lead.siteName.toLowerCase().includes(reqSite)) return false;
+      if (reqCc && lead.countryCode !== reqCc) return false;
+      if (reqSince && new Date(lead.capturedAt).getTime() < reqSince) return false;
+      if (reqUntil && new Date(lead.capturedAt).getTime() > reqUntil) return false;
+      if (reqSearch) {
+        const hay = `${lead.fullName} ${lead.fullPhone} ${lead.email} ${lead.siteName}`.toLowerCase();
+        if (!hay.includes(reqSearch)) return false;
+      }
+      return true;
+    });
+
+  const totalLeads = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalLeads / limit));
+  const startIdx = (page - 1) * limit;
+  const paginated = filtered.slice(startIdx, startIdx + limit);
+
+  res.json({
+    success: true,
+    apiFormat: 'REST/JSON',
+    partner: {
+      companyName: partner.companyName,
+      campaignName: partner.campaignName,
+      allowedScopes: partner.allowedScopes
+    },
+    pagination: {
+      page,
+      limit,
+      totalLeads,
+      totalPages
+    },
+    leads: paginated
+  });
+});
+
+// 3. POST /api/v1/partner/leads — Submit / capture a new guest lead from an external partner portal or activation
+app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
+  const partner = authenticatePartnerRequest(req, res);
+  if (!partner) return;
+
+  const body = req.body || {};
+  const firstName = String(body.firstName || '').trim();
+  const lastName = String(body.lastName || '').trim();
+  const countryCode = String(body.countryCode || '+266').trim();
+  const phone = String(body.phone || '').replace(/\D/g, '');
+  const email = String(body.email || '').trim();
+  const scope = String(body.hotspotPolicyScope || body.scope || partner.allowedScopes[0] || 'hotspot')
+    .trim()
+    .toLowerCase();
+  const siteName = String(body.siteName || `${partner.companyName} Activation`).trim();
+  const sponsorCampaign = String(body.sponsorCampaign || partner.campaignName).trim();
+
+  const scopes = partner.allowedScopes.map((s) => s.toLowerCase());
+  if (!scopes.includes('*') && !scopes.includes(scope)) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN_POLICY_SCOPE',
+        message: `Your Partner API key cannot submit leads to scope '${scope}'. Authorized scopes: ${partner.allowedScopes.join(', ')}`
+      }
+    });
+  }
+
+  if (!firstName || !phone || phone.length < 7) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_LEAD_PAYLOAD',
+        message: 'firstName and a valid phone number (minimum 7 digits) are required.'
+      }
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  const rawEntry = {
+    id: `guest_partner_${Date.now()}`,
+    firstName,
+    lastName,
+    guestName: `${firstName} ${lastName}`.trim(),
+    countryCode,
+    phone,
+    guestPhone: `${countryCode} ${phone}`,
+    email,
+    scope,
+    siteName,
+    mode: 'free',
+    sponsorCampaign,
+    partnerId: partner.id,
+    partnerCompany: partner.companyName,
+    roamedSites: [siteName],
+    capturedAt: nowIso,
+    lastSeenAt: nowIso
+  };
+
+  serverStore.guestEvents.unshift(rawEntry);
+  if (serverStore.guestEvents.length > 250) serverStore.guestEvents.pop();
+  saveServerPortalStore(serverStore);
+
+  dispatchPartnerWebhooksForLead(rawEntry).catch(() => {});
+
+  res.status(201).json({
+    success: true,
+    message: 'Lead captured and synchronized with T-Connect Control Tower.',
+    lead: sanitizeLeadForPartner(rawEntry, partner.campaignName)
+  });
+});
+
+// 4. GET /api/v1/partner/leads/export.csv — RFC 4180 CSV Export of Partner-Scoped Leads
+app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
+  const partner = authenticatePartnerRequest(req, res);
+  if (!partner) return;
+
+  const reqScope = String(req.query.scope || '').trim().toLowerCase();
+  if (reqScope) {
+    const scopes = partner.allowedScopes.map((s) => s.toLowerCase());
+    if (!scopes.includes('*') && !scopes.includes(reqScope)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN_POLICY_SCOPE',
+          message: `Your Partner API key is not authorized for hotspot policy scope '${reqScope}'.`
+        }
+      });
+    }
+  }
+
+  const reqSite = String(req.query.site || '').trim().toLowerCase();
+  const reqSince = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
+  const reqUntil = req.query.until ? new Date(String(req.query.until)).getTime() : 0;
+
+  const leads = (serverStore.guestEvents || [])
+    .filter((ev) => isLeadAllowedForPartner(ev, partner))
+    .map((ev) => sanitizeLeadForPartner(ev, partner.campaignName))
+    .filter((lead) => {
+      if (reqScope && lead.hotspotPolicyScope !== reqScope) return false;
+      if (reqSite && !lead.siteName.toLowerCase().includes(reqSite)) return false;
+      if (reqSince && new Date(lead.capturedAt).getTime() < reqSince) return false;
+      if (reqUntil && new Date(lead.capturedAt).getTime() > reqUntil) return false;
+      return true;
+    });
+
+  const csvEsc = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+  const headers = [
+    'Lead ID',
+    'First Name',
+    'Surname',
+    'Full Name',
+    'Country Code',
+    'Mobile Number',
+    'Email Address',
+    'Hotspot Policy Scope',
+    'Site Name',
+    'Connection Mode',
+    'Sponsor Campaign',
+    'Terms Accepted',
+    'Captured At'
+  ];
+
+  const rows = leads.map((l) =>
+    [
+      l.leadId,
+      l.firstName,
+      l.lastName,
+      l.fullName,
+      l.countryCode,
+      l.fullPhone,
+      l.email,
+      l.hotspotPolicyScope,
+      l.siteName,
+      l.connectionMode,
+      l.sponsorCampaign,
+      l.termsAccepted ? 'Yes' : 'No',
+      l.capturedAt
+    ]
+      .map(csvEsc)
+      .join(',')
+  );
+
+  const csvContent = [headers.join(','), ...rows].join('\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="tconnect_partner_leads_${new Date().toISOString().slice(0, 10)}.csv"`
+  );
+  res.send(csvContent);
+});
+
+// -----------------------------------------------------------------------------
+// ADMIN ENDPOINTS FOR MANAGING SCOPED PARTNER API KEYS & WEBHOOKS
+// -----------------------------------------------------------------------------
+app.get('/api/admin/partner-keys', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    keys: serverStore.partnerApiKeys || [],
+    webhookLogs: (serverStore.partnerWebhookLogs || []).slice(0, 30)
+  });
+});
+
+app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
+  const { companyName, campaignName, allowedScopes, allowedSites, webhookUrl } = req.body || {};
+  if (!companyName || !String(companyName).trim()) {
+    return res.status(400).json({ success: false, message: 'Partner company name is required.' });
+  }
+
+  const parsedScopes = Array.isArray(allowedScopes) && allowedScopes.length > 0
+    ? allowedScopes.map((s: any) => String(s).toLowerCase().trim()).filter(Boolean)
+    : ['hotspot'];
+
+  const parsedSites = Array.isArray(allowedSites) && allowedSites.length > 0
+    ? allowedSites.map((s: any) => String(s).trim()).filter(Boolean)
+    : ['*'];
+
+  const randomHex = crypto.randomBytes(16).toString('hex');
+  const secretHex = crypto.randomBytes(12).toString('hex');
+
+  const newKey: PartnerApiKeyRecord = {
+    id: `pk_${Date.now()}`,
+    companyName: String(companyName).trim(),
+    campaignName: String(campaignName || 'Sponsored Wi-Fi Campaign').trim(),
+    apiKey: `tc_live_${randomHex}`,
+    allowedScopes: parsedScopes,
+    allowedSites: parsedSites,
+    webhookUrl: String(webhookUrl || '').trim(),
+    webhookSecret: `whsec_${secretHex}`,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    totalRequests: 0
+  };
+
+  serverStore.partnerApiKeys.unshift(newKey);
+  saveServerPortalStore(serverStore);
+
+  res.status(201).json({
+    success: true,
+    key: newKey,
+    keys: serverStore.partnerApiKeys
+  });
+});
+
+app.put('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
+  const keyId = String(req.params.id || '');
+  const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
+  if (!target) {
+    return res.status(404).json({ success: false, message: 'Partner API key not found.' });
+  }
+  const { companyName, campaignName, allowedScopes, allowedSites, webhookUrl, status } = req.body || {};
+  if (companyName !== undefined) target.companyName = String(companyName).trim();
+  if (campaignName !== undefined) target.campaignName = String(campaignName).trim();
+  if (Array.isArray(allowedScopes) && allowedScopes.length > 0) {
+    target.allowedScopes = allowedScopes.map((s: any) => String(s).toLowerCase().trim());
+  }
+  if (Array.isArray(allowedSites) && allowedSites.length > 0) {
+    target.allowedSites = allowedSites.map((s: any) => String(s).trim());
+  }
+  if (webhookUrl !== undefined) target.webhookUrl = String(webhookUrl).trim();
+  if (status === 'active' || status === 'revoked') target.status = status;
+
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, key: target, keys: serverStore.partnerApiKeys });
+});
+
+app.delete('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
+  const keyId = String(req.params.id || '');
+  serverStore.partnerApiKeys = (serverStore.partnerApiKeys || []).filter((k) => k.id !== keyId);
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, keys: serverStore.partnerApiKeys });
+});
+
+app.post('/api/admin/partner-keys/:id/test-webhook', async (req: Request, res: Response) => {
+  const keyId = String(req.params.id || '');
+  const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
+  if (!target) {
+    return res.status(404).json({ success: false, message: 'Partner API key not found.' });
+  }
+  if (!target.webhookUrl || !target.webhookUrl.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please configure a Webhook URL for this partner key first.'
+    });
+  }
+
+  const sampleEvent = {
+    id: `guest_test_${Date.now()}`,
+    firstName: 'Thabo',
+    lastName: 'Mokoena',
+    guestName: 'Thabo Mokoena',
+    countryCode: '+266',
+    phone: '58123456',
+    guestPhone: '+266 58123456',
+    email: 'thabo.mokoena@example.ls',
+    scope: target.allowedScopes[0] || 'hotspot',
+    siteName: 'Maseru Pioneer Mall Hotspot',
+    mode: 'free',
+    sponsorCampaign: target.campaignName,
+    roamedSites: ['Maseru Pioneer Mall Hotspot'],
+    capturedAt: new Date().toISOString()
+  };
+
+  const logs = await dispatchPartnerWebhooksForLead(sampleEvent, target.id);
+  res.json({
+    success: true,
+    result: logs[0] || null,
+    webhookLogs: (serverStore.partnerWebhookLogs || []).slice(0, 30)
+  });
 });
 
 // -----------------------------------------------------------------------------
