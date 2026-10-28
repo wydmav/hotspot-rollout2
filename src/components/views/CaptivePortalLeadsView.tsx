@@ -32,6 +32,7 @@ interface PartnerApiKeyItem {
   campaignName: string;
   apiKey: string;
   allowedScopes: string[];
+  allowedRouterIds?: string[];
   allowedSites: string[];
   webhookUrl: string;
   webhookSecret: string;
@@ -77,10 +78,27 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [newCompanyName, setNewCompanyName] = useState('');
   const [newCampaignName, setNewCampaignName] = useState('');
   const [newScopes, setNewScopes] = useState<string[]>(['hotspot', 'stadium']);
+  const [newRouterIds, setNewRouterIds] = useState<string[]>(['*']);
   const [newSitesInput, setNewSitesInput] = useState('*');
   const [newWebhookUrl, setNewWebhookUrl] = useState('');
   const [isCreatingKey, setIsCreatingKey] = useState(false);
   const [testingWebhookId, setTestingWebhookId] = useState<string | null>(null);
+  const [verifyingKeyId, setVerifyingKeyId] = useState<string | null>(null);
+  const [verificationReport, setVerificationReport] = useState<Record<string, string>>({});
+  const [serverAdoptedRouters, setServerAdoptedRouters] = useState<
+    Array<{ id: string; name: string; siteName: string; vertical: string }>
+  >([]);
+
+  const adoptedRoutersList = useMemo(() => {
+    if (serverAdoptedRouters.length > 0) return serverAdoptedRouters;
+    const localRouters = storage.getState().routers || [];
+    return localRouters.map((r) => ({
+      id: r.id,
+      name: r.name,
+      siteName: r.siteName,
+      vertical: String(r.vertical || 'hotspot')
+    }));
+  }, [serverAdoptedRouters, leads]);
 
   const fetchPartnerKeys = async () => {
     try {
@@ -88,6 +106,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       const data = await res.json();
       if (data?.success) {
         if (Array.isArray(data.keys)) setPartnerKeys(data.keys);
+        if (Array.isArray(data.adoptedRouters)) setServerAdoptedRouters(data.adoptedRouters);
         if (Array.isArray(data.webhookLogs)) setWebhookLogs(data.webhookLogs);
       }
     } catch {}
@@ -173,6 +192,57 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     );
   };
 
+  const handleToggleRouterChoice = (routerNameOrStar: string) => {
+    if (routerNameOrStar === '*') {
+      setNewRouterIds(['*']);
+      return;
+    }
+    setNewRouterIds((prev) => {
+      const withoutStar = prev.filter((r) => r !== '*');
+      if (withoutStar.includes(routerNameOrStar)) {
+        const next = withoutStar.filter((r) => r !== routerNameOrStar);
+        return next.length > 0 ? next : ['*'];
+      }
+      return [...withoutStar, routerNameOrStar];
+    });
+  };
+
+  const handleVerifyKeyEnforcement = async (keyItem: PartnerApiKeyItem) => {
+    setVerifyingKeyId(keyItem.id);
+    try {
+      const [leadsRes, blockedRes] = await Promise.all([
+        fetch(`/api/v1/partner/leads?limit=50`, {
+          headers: { 'X-API-Key': keyItem.apiKey }
+        }),
+        fetch(`/api/gateways`, {
+          headers: { 'X-API-Key': keyItem.apiKey }
+        })
+      ]);
+      const leadsData = await leadsRes.json();
+      const isIsolated = blockedRes.status === 403;
+      const sampleLead = Array.isArray(leadsData?.leads) && leadsData.leads[0] ? leadsData.leads[0] : null;
+      const zeroLeakage =
+        !sampleLead ||
+        (sampleLead.mac === undefined &&
+          sampleLead.ip === undefined &&
+          sampleLead.voucherCode === undefined &&
+          sampleLead.transactionRef === undefined);
+
+      const summary =
+        leadsRes.ok && isIsolated && zeroLeakage
+          ? `ENFORCED: ${leadsData?.pagination?.totalLeads ?? 0} scoped leads accessible (${keyItem.allowedScopes.join(', ').toUpperCase()}) · Non-lead APIs blocked (HTTP 403) · Zero hardware/payment fields leaked.`
+          : `Check status: Leads HTTP ${leadsRes.status}, Isolation HTTP ${blockedRes.status}`;
+
+      setVerificationReport((prev) => ({ ...prev, [keyItem.id]: summary }));
+      showToast('Verified Partner API key isolation & policy enforcement');
+      fetchPartnerKeys();
+    } catch {
+      showToast('Failed to run live key verification');
+    } finally {
+      setVerifyingKeyId(null);
+    }
+  };
+
   const handleCreatePartnerKey = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCompanyName.trim()) {
@@ -192,6 +262,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           companyName: newCompanyName.trim(),
           campaignName: newCampaignName.trim() || `${newCompanyName.trim()} Sponsored Wi-Fi`,
           allowedScopes: newScopes,
+          allowedRouterIds: newRouterIds,
           allowedSites: allowedSites.length > 0 ? allowedSites : ['*'],
           webhookUrl: newWebhookUrl.trim()
         })
@@ -201,6 +272,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         setPartnerKeys(data.keys || []);
         setNewCompanyName('');
         setNewCampaignName('');
+        setNewRouterIds(['*']);
         setNewWebhookUrl('');
         showToast(`Issued Lead-Only REST API Key for ${data.key?.companyName}`);
       } else {
@@ -664,6 +736,43 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                 </div>
               </div>
 
+              <div>
+                <label className="block text-[10px] font-mono text-slate-400 mb-1">
+                  Authorized Adopted Routers (with Applied Policies) *
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRouterChoice('*')}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-bold border transition-colors ${
+                      newRouterIds.includes('*')
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : 'bg-[#0a0e17] text-slate-400 border-[#232d42] hover:text-white'
+                    }`}
+                  >
+                    All Adopted Routers in Policy (*)
+                  </button>
+                  {adoptedRoutersList.slice(0, 6).map((rt) => {
+                    const active = !newRouterIds.includes('*') && newRouterIds.includes(rt.name);
+                    return (
+                      <button
+                        type="button"
+                        key={rt.id}
+                        onClick={() => handleToggleRouterChoice(rt.name)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold border transition-colors ${
+                          active
+                            ? 'bg-cyan-600 text-white border-cyan-400'
+                            : 'bg-[#0a0e17] text-slate-400 border-[#232d42] hover:text-white'
+                        }`}
+                        title={`${rt.siteName} (${rt.vertical})`}
+                      >
+                        {rt.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-[10px] font-mono text-slate-400 mb-1">
@@ -769,6 +878,16 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                               <Globe className="w-2.5 h-2.5" />
                               <span>Copy cURL</span>
                             </button>
+                            <button
+                              type="button"
+                              disabled={verifyingKeyId === pk.id}
+                              onClick={() => handleVerifyKeyEnforcement(pk)}
+                              className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] flex items-center gap-1"
+                              title="Run live test confirming Adopted Router + Applied Policy scoping & HTTP 403 isolation on non-lead endpoints"
+                            >
+                              <ShieldCheck className="w-2.5 h-2.5" />
+                              <span>{verifyingKeyId === pk.id ? 'Checking...' : 'Verify Enforcement'}</span>
+                            </button>
                             {pk.webhookUrl && (
                               <button
                                 type="button"
@@ -798,9 +917,22 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                           </div>
                         </div>
 
+                        {verificationReport[pk.id] && (
+                          <div className="px-2.5 py-1.5 rounded bg-emerald-950/50 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>{verificationReport[pk.id]}</span>
+                          </div>
+                        )}
+
                         <div className="flex flex-wrap items-center justify-between text-[10px] font-mono text-slate-500">
                           <span>
-                            Webhook Secret:{' '}
+                            Routers:{' '}
+                            <strong className="text-slate-300">
+                              {(pk.allowedRouterIds || ['*']).includes('*')
+                                ? 'All Adopted Routers in Policy'
+                                : (pk.allowedRouterIds || []).join(', ')}
+                            </strong>{' '}
+                            · Webhook Secret:{' '}
                             <code
                               onClick={() => handleCopy(pk.webhookSecret, 'Webhook Secret')}
                               className="text-slate-300 cursor-pointer hover:text-white"

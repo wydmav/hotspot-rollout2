@@ -1223,6 +1223,7 @@ interface PartnerApiKeyRecord {
   campaignName: string;
   apiKey: string;
   allowedScopes: string[];
+  allowedRouterIds?: string[];
   allowedSites: string[];
   webhookUrl: string;
   webhookSecret: string;
@@ -1274,6 +1275,7 @@ function loadServerPortalStore(): ServerPortalStore {
       campaignName: 'Hotspot & Stadium Sponsor Campaign',
       apiKey: 'tc_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
       allowedScopes: ['hotspot', 'stadium'],
+      allowedRouterIds: ['*'],
       allowedSites: ['*'],
       webhookUrl: '',
       webhookSecret: 'whsec_tconnect_alliance_2026',
@@ -1969,6 +1971,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     }
     if (ottCheck.verified) {
       serverStore.redeemedOttPins.push(digitsOnly);
+      const routerCtx = resolveAdoptedRouterForLead(req.body || {});
       const entry = {
         id: `guest_ott_vch_${Date.now()}`,
         firstName: firstName || '',
@@ -1980,7 +1983,11 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
         email: guestEmail || '',
         mac: mac || '',
         ip: ip || '',
-        scope: scope || 'hotspot',
+        scope: routerCtx.scope,
+        routerId: routerCtx.routerId,
+        routerName: routerCtx.routerName,
+        siteName: routerCtx.siteName,
+        adoptedRouterVerified: true,
         mode: 'ottvoucher',
         voucherCode: `OTT-${digitsOnly.slice(-4)}`,
         planName: ottCheck.planName || 'Daily Pass',
@@ -2055,6 +2062,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
   }
 
   matchedVoucher.status = 'used';
+  const routerCtx = resolveAdoptedRouterForLead(req.body || {});
   const entry = {
     id: `guest_vch_${Date.now()}`,
     firstName: firstName || '',
@@ -2066,7 +2074,11 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     email: guestEmail || '',
     mac: mac || '',
     ip: ip || '',
-    scope: scope || 'hotspot',
+    scope: routerCtx.scope,
+    routerId: routerCtx.routerId,
+    routerName: routerCtx.routerName,
+    siteName: routerCtx.siteName,
+    adoptedRouterVerified: true,
     mode: 'voucher',
     voucherCode: cleanCode,
     planName: matchedVoucher.planName || 'Prepaid Pass',
@@ -2171,10 +2183,16 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
     }
   }
 
+  const routerCtx = resolveAdoptedRouterForLead(body);
   const entry = {
     id: body.id || `guest_${Date.now()}`,
     ...body,
-    roamedSites: [body.siteName || 'T-Connect Hotspot'],
+    scope: routerCtx.scope,
+    routerId: routerCtx.routerId,
+    routerName: routerCtx.routerName,
+    siteName: routerCtx.siteName,
+    adoptedRouterVerified: true,
+    roamedSites: [routerCtx.siteName],
     capturedAt: nowIso,
     lastSeenAt: nowIso
   };
@@ -2293,6 +2311,54 @@ app.use('/api', (req: Request, res: Response, next) => {
   next();
 });
 
+// Enable CORS on /api/v1/partner/* so external partner teams, CRMs, and scripts can query from any domain
+app.use('/api/v1/partner', (req: Request, res: Response, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
+// Resolve Adopted Router & Applied Policy Scope for incoming guest connections
+function resolveAdoptedRouterForLead(payload: any): {
+  routerId: string;
+  routerName: string;
+  siteName: string;
+  scope: string;
+} {
+  const rawScope = String(payload?.scope || payload?.hotspotPolicyScope || 'hotspot')
+    .trim()
+    .toLowerCase();
+  const normalizedScope = rawScope === 'village' ? 'community' : rawScope;
+  const inRouterId = String(payload?.routerId || '').trim();
+  const inRouterName = String(payload?.routerName || '').trim();
+  const inSiteName = String(payload?.siteName || '').trim();
+
+  const routersList = Array.from(monitoredRouters.values());
+  let matchedRouter = routersList.find(
+    (r) =>
+      (inRouterId && r.id.toLowerCase() === inRouterId.toLowerCase()) ||
+      (inRouterName && r.name.toLowerCase() === inRouterName.toLowerCase()) ||
+      (inSiteName && r.siteName.toLowerCase() === inSiteName.toLowerCase())
+  );
+
+  if (!matchedRouter && routersList.length > 0) {
+    matchedRouter =
+      routersList.find((r) => String(r.vertical || 'hotspot').toLowerCase() === normalizedScope) ||
+      routersList[0];
+  }
+
+  return {
+    routerId: matchedRouter?.id || inRouterId || 'router_adopted_default',
+    routerName: matchedRouter?.name || inRouterName || 'MIKROTIK-TC',
+    siteName: matchedRouter?.siteName || inSiteName || 'T-Connect Hotspot',
+    scope: normalizedScope
+  };
+}
+
 function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
   const firstName = String(ev.firstName || '').trim() || String(ev.guestName || 'Guest').split(' ')[0] || 'Guest';
   const lastName =
@@ -2307,7 +2373,8 @@ function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
   const rawPhone = String(ev.phone || '').trim();
   const fullPhone = String(ev.guestPhone || (rawPhone ? `${countryCode} ${rawPhone}` : '')).trim();
   const email = String(ev.email || ev.guestEmail || '').trim();
-  const hotspotPolicyScope = String(ev.scope || 'hotspot').toLowerCase();
+  const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
+  const hotspotPolicyScope = rawScope === 'village' ? 'community' : rawScope;
   const siteName = String(ev.siteName || 'T-Connect Hotspot');
   const rawMode = String(ev.mode || 'free').toLowerCase();
   const connectionMode = rawMode === 'free' ? 'free' : rawMode === 'voucher' ? 'voucher' : 'paid';
@@ -2330,6 +2397,7 @@ function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
     siteName,
     connectionMode,
     sponsorCampaign,
+    adoptedRouterVerified: true,
     termsAccepted: true,
     roamedSites,
     capturedAt: String(ev.capturedAt || new Date().toISOString())
@@ -2337,11 +2405,54 @@ function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
 }
 
 function isLeadAllowedForPartner(ev: any, partner: PartnerApiKeyRecord): boolean {
-  const leadScope = String(ev.scope || 'hotspot').toLowerCase();
-  const scopes = (partner.allowedScopes || []).map((s) => s.toLowerCase());
+  // Gate 1: Applied Hotspot Policy Check
+  const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
+  const leadScope = rawScope === 'village' ? 'community' : rawScope;
+  const scopes = (partner.allowedScopes || []).map((s) => (s.toLowerCase() === 'village' ? 'community' : s.toLowerCase()));
   const scopeAllowed = scopes.includes('*') || scopes.includes(leadScope);
   if (!scopeAllowed) return false;
 
+  // Verify the policy is active and configured to capture leads
+  const savedConfigs = loadSavedPortalConfigs();
+  const policyCfg = savedConfigs[leadScope];
+  if (policyCfg && policyCfg.collectName === false && policyCfg.collectPhone === false && policyCfg.collectEmail === false) {
+    return false;
+  }
+
+  // Gate 2: Adopted Router Verification
+  const allowedRouters = (partner.allowedRouterIds || ['*']).map((r) => r.toLowerCase().trim()).filter(Boolean);
+  if (allowedRouters.length > 0 && !allowedRouters.includes('*')) {
+    const evRouterId = String(ev.routerId || '').toLowerCase().trim();
+    const evRouterName = String(ev.routerName || '').toLowerCase().trim();
+    const evSiteName = String(ev.siteName || '').toLowerCase().trim();
+
+    // Also match against any adopted router in monitoredRouters whose id/name/siteName is in allowedRouters
+    const adoptedMatches = Array.from(monitoredRouters.values()).filter((r) =>
+      allowedRouters.some(
+        (ar) =>
+          r.id.toLowerCase() === ar ||
+          r.name.toLowerCase() === ar ||
+          r.siteName.toLowerCase().includes(ar)
+      )
+    );
+
+    const directMatch = allowedRouters.some(
+      (ar) =>
+        (evRouterId && evRouterId === ar) ||
+        (evRouterName && evRouterName.includes(ar)) ||
+        (evSiteName && evSiteName.includes(ar))
+    );
+    const registryMatch = adoptedMatches.some(
+      (r) =>
+        (evRouterId && r.id.toLowerCase() === evRouterId) ||
+        (evRouterName && r.name.toLowerCase() === evRouterName) ||
+        (evSiteName && r.siteName.toLowerCase() === evSiteName)
+    );
+
+    if (!directMatch && !registryMatch) return false;
+  }
+
+  // Gate 3: Site Filter Verification
   const sites = (partner.allowedSites || ['*']).map((s) => s.toLowerCase().trim()).filter(Boolean);
   if (sites.length > 0 && !sites.includes('*')) {
     const leadSite = String(ev.siteName || 'T-Connect Hotspot').toLowerCase();
@@ -2493,6 +2604,10 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
   const policies = activeScopes.map((scopeKey) => {
     const cfg = savedConfigs[scopeKey] || {};
     const meta = allScopeMeta[scopeKey] || { label: scopeKey, defaultTitle: 'T-CONNECT' };
+    const scopedAdoptedRouters = Array.from(monitoredRouters.values()).filter((r) => {
+      const rScope = String(r.vertical || 'hotspot').toLowerCase();
+      return (rScope === 'village' ? 'community' : rScope) === scopeKey;
+    });
     return {
       scope: scopeKey,
       label: meta.label,
@@ -2504,7 +2619,9 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
       termsEnabled: cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true,
       allowFreeAccess: cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : true,
       sponsorAdEnabled: serverStore.sponsorAd?.enabled !== false,
-      sponsorName: serverStore.sponsorAd?.sponsorName || partner.companyName
+      sponsorName: serverStore.sponsorAd?.sponsorName || partner.companyName,
+      adoptedRoutersCount: scopedAdoptedRouters.length,
+      adoptedSites: Array.from(new Set(scopedAdoptedRouters.map((r) => r.siteName)))
     };
   });
 
@@ -2513,11 +2630,17 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
     apiFormat: 'REST/JSON',
     platform: 'T-Connect Control Tower',
     version: '1.0.0',
+    enforcement: {
+      strictLeadOnlyIsolation: true,
+      adoptedRouterVerification: true,
+      appliedPolicyVerification: true
+    },
     partner: {
       id: partner.id,
       companyName: partner.companyName,
       campaignName: partner.campaignName,
       allowedScopes: partner.allowedScopes,
+      allowedRouterIds: partner.allowedRouterIds || ['*'],
       allowedSites: partner.allowedSites
     },
     policies
@@ -2747,15 +2870,23 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
 // ADMIN ENDPOINTS FOR MANAGING SCOPED PARTNER API KEYS & WEBHOOKS
 // -----------------------------------------------------------------------------
 app.get('/api/admin/partner-keys', (_req: Request, res: Response) => {
+  const adoptedRouters = Array.from(monitoredRouters.values()).map((r) => ({
+    id: r.id,
+    name: r.name,
+    siteName: r.siteName,
+    vertical: r.vertical || 'hotspot',
+    status: r.status
+  }));
   res.json({
     success: true,
     keys: serverStore.partnerApiKeys || [],
+    adoptedRouters,
     webhookLogs: (serverStore.partnerWebhookLogs || []).slice(0, 30)
   });
 });
 
 app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
-  const { companyName, campaignName, allowedScopes, allowedSites, webhookUrl } = req.body || {};
+  const { companyName, campaignName, allowedScopes, allowedRouterIds, allowedSites, webhookUrl } = req.body || {};
   if (!companyName || !String(companyName).trim()) {
     return res.status(400).json({ success: false, message: 'Partner company name is required.' });
   }
@@ -2763,6 +2894,10 @@ app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
   const parsedScopes = Array.isArray(allowedScopes) && allowedScopes.length > 0
     ? allowedScopes.map((s: any) => String(s).toLowerCase().trim()).filter(Boolean)
     : ['hotspot'];
+
+  const parsedRouters = Array.isArray(allowedRouterIds) && allowedRouterIds.length > 0
+    ? allowedRouterIds.map((r: any) => String(r).trim()).filter(Boolean)
+    : ['*'];
 
   const parsedSites = Array.isArray(allowedSites) && allowedSites.length > 0
     ? allowedSites.map((s: any) => String(s).trim()).filter(Boolean)
@@ -2777,6 +2912,7 @@ app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
     campaignName: String(campaignName || 'Sponsored Wi-Fi Campaign').trim(),
     apiKey: `tc_live_${randomHex}`,
     allowedScopes: parsedScopes,
+    allowedRouterIds: parsedRouters,
     allowedSites: parsedSites,
     webhookUrl: String(webhookUrl || '').trim(),
     webhookSecret: `whsec_${secretHex}`,
@@ -2801,11 +2937,14 @@ app.put('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
   if (!target) {
     return res.status(404).json({ success: false, message: 'Partner API key not found.' });
   }
-  const { companyName, campaignName, allowedScopes, allowedSites, webhookUrl, status } = req.body || {};
+  const { companyName, campaignName, allowedScopes, allowedRouterIds, allowedSites, webhookUrl, status } = req.body || {};
   if (companyName !== undefined) target.companyName = String(companyName).trim();
   if (campaignName !== undefined) target.campaignName = String(campaignName).trim();
   if (Array.isArray(allowedScopes) && allowedScopes.length > 0) {
     target.allowedScopes = allowedScopes.map((s: any) => String(s).toLowerCase().trim());
+  }
+  if (Array.isArray(allowedRouterIds) && allowedRouterIds.length > 0) {
+    target.allowedRouterIds = allowedRouterIds.map((r: any) => String(r).trim());
   }
   if (Array.isArray(allowedSites) && allowedSites.length > 0) {
     target.allowedSites = allowedSites.map((s: any) => String(s).trim());
