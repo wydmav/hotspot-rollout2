@@ -399,6 +399,7 @@ class StorageService {
 
     if (typeof window !== 'undefined') {
       this.hydrateGatewaysFromServer();
+      this.hydrateSponsorAdsFromServer();
       window.addEventListener('storage', (e) => {
         if (e.key === STORAGE_KEY && e.newValue) {
           try {
@@ -408,6 +409,51 @@ class StorageService {
         }
       });
     }
+  }
+
+  async hydrateSponsorAdsFromServer(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const res = await fetch('/api/portal/video-ads');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && data?.sponsorAd && typeof data.sponsorAd === 'object') {
+        const localAd = (this.state as any).sponsorAd;
+        const srvLib = Array.isArray(data.sponsorAd.videoLibrary) ? data.sponsorAd.videoLibrary : [];
+        // Prefer whichever has custom uploaded /images/ or /videos/ or more recent slides
+        const localHasUploadedImages =
+          Array.isArray(localAd?.videoLibrary) &&
+          localAd.videoLibrary.some(
+            (v: any) =>
+              String(v.videoUrl || '').startsWith('/images/') ||
+              String(v.videoUrl || '').startsWith('/videos/') ||
+              (Array.isArray(v.slides) && v.slides.some((s: any) => String(s.imageUrl || '').startsWith('/images/')))
+          );
+        const srvHasUploadedImages = srvLib.some(
+          (v: any) =>
+            String(v.videoUrl || '').startsWith('/images/') ||
+            String(v.videoUrl || '').startsWith('/videos/') ||
+            (Array.isArray(v.slides) && v.slides.some((s: any) => String(s.imageUrl || '').startsWith('/images/')))
+        );
+
+        if (localHasUploadedImages && !srvHasUploadedImages && localAd) {
+          fetch('/api/portal/video-ads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sponsorAd: localAd })
+          }).catch(() => {});
+        } else if (srvLib.length > 0) {
+          (this.state as any).sponsorAd = {
+            ...this.getSponsorAdConfig(),
+            ...data.sponsorAd
+          };
+          if (typeof window.localStorage !== 'undefined') {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+          }
+          this.notify();
+        }
+      }
+    } catch {}
   }
 
   async hydrateGatewaysFromServer(): Promise<void> {

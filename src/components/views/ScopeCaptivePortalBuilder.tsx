@@ -54,6 +54,93 @@ export const formatDuration = (mins: number) => {
   return `${m} Minutes`;
 };
 
+export const OFFICIAL_SESOTHO_TERMS_TEXT = `Amohela Liphelo Tsa Tšebetso
+
+Rea u amohela ho khokelo ea rona ea marang-rang a mahala. Molemong oa hore sechaba sa bo rona se natefeloe ke khokelo ena, latela melao le lipehelo tse latelang:
+
+1.\tItlhomphe.
+Sebelisa marang-rang ka boikarabello. Qoba litlolo tsa molao ka marang-rang.
+
+2. Sireletsa mohala oa hau oa thekeng.
+Polokeho ea mohala oa hau ke boikarabello ba hau. Ha se boikarabello ba T - Connect ha mohala oa hau o lahlehile, o senyehile kapa o hlasetsoe ke likokoanahloko tsa marang-rang.
+
+3. Sebetsa ka toka
+Khokelo ea marang-rang e ka lekanyetsoa ho latela lebelo la eona kapa nako, molemong oa hore batho bohle ba natefeloe ke tšebeliso ea ona.
+
+4. Lekunutu
+Litaba tsa khokelo ea marang-rang li bolokoa e le lekunutu lipakeng tsa moreki le T-Connect.
+
+5. Ipapise le Molao
+Mesebetsi eohle ea marang-rang e tlameha ho latela melao ea tsamaiso ea marang-rang ea Lesotho.
+
+6. Ho fumaneha hoa marang-rang ho ka khaoloa
+T - Connect e ka khaola kapa ea emisa ho fumaneha hoa marang-rang, ha fela melao le melaoana ea tsamaiso ea marang-rang e sa lateloa.
+
+Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-rang.`;
+
+export const normalizeScopeTermsText = (text?: string): string => {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return OFFICIAL_SESOTHO_TERMS_TEXT;
+  if (
+    trimmed.length < 240 &&
+    (trimmed.startsWith('Amohela Liphelo') || trimmed.startsWith('By connecting to T-Connect'))
+  ) {
+    return OFFICIAL_SESOTHO_TERMS_TEXT;
+  }
+  return trimmed;
+};
+
+export const buildInlineFallbackSlideDataUri = (
+  title = 'T-Connect Lesotho Partners',
+  subtitle = 'Fast Starlink Wi-Fi Connectivity'
+): string => {
+  const safeTitle = String(title || 'T-Connect Lesotho Partners')
+    .replace(/[<>&"']/g, '')
+    .slice(0, 68);
+  const safeSubtitle = String(subtitle || 'Enjoy High-Speed Wi-Fi Across Lesotho')
+    .replace(/[<>&"']/g, '')
+    .slice(0, 88);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#070b14"/>
+        <stop offset="50%" stop-color="#131c33"/>
+        <stop offset="100%" stop-color="#2b1308"/>
+      </linearGradient>
+    </defs>
+    <rect width="1080" height="1920" fill="url(#bg)"/>
+    <circle cx="540" cy="640" r="290" fill="#f05e17" fill-opacity="0.14"/>
+    <rect x="90" y="540" width="900" height="760" rx="44" fill="#0b0f19" stroke="#f05e17" stroke-width="3" stroke-opacity="0.65"/>
+    <text x="540" y="720" text-anchor="middle" fill="#f05e17" font-family="sans-serif" font-size="34" font-weight="800" letter-spacing="4">T-CONNECT STARLINK HOTSPOT</text>
+    <text x="540" y="880" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="52" font-weight="900">${safeTitle}</text>
+    <text x="540" y="980" text-anchor="middle" fill="#cbd5e1" font-family="sans-serif" font-size="34" font-weight="600">${safeSubtitle}</text>
+    <rect x="270" y="1080" width="540" height="92" rx="46" fill="#f05e17"/>
+    <text x="540" y="1138" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="32" font-weight="800">TAP X ABOVE TO USE INTERNET</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+export const resolveWalledGardenImageUrl = (
+  rawUrl?: string,
+  title = 'T-Connect Lesotho Partners',
+  subtitle = 'Exclusive Partner Offer'
+): string => {
+  const u = String(rawUrl || '').trim();
+  if (!u) return buildInlineFallbackSlideDataUri(title, subtitle);
+  if (
+    u.startsWith('/') ||
+    u.startsWith('data:') ||
+    u.startsWith('blob:') ||
+    u.includes('/api/portal/media-proxy')
+  ) {
+    return u;
+  }
+  if (/^https?:\/\//i.test(u)) {
+    return `/api/portal/media-proxy?url=${encodeURIComponent(u)}&title=${encodeURIComponent(title)}&subtitle=${encodeURIComponent(subtitle)}`;
+  }
+  return u;
+};
+
 // =============================================================================
 // SCOPE DEFINITIONS & METADATA
 // =============================================================================
@@ -203,7 +290,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'STARLINK AUTHORISED RETAIL HOTSPOT',
     welcomeHeadline: 'WHAT DO YOU CONNECT FOR?',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo Tsa Tšebetso: Rea u amohela ho khokelo ea rona ea marang-rang a cafe. Latela melao ea khokelo.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -275,7 +362,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'SOLAR MESH & VILLAGE WI-FI',
     welcomeHeadline: 'LUMELANG! KHOKELO EA MOTSE',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo: Marang-rang a motse a abelanoa ke bohle. Sebelisa marang-rang ka boikarabelo le toka.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -347,7 +434,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'SOLAR MESH & VILLAGE WI-FI',
     welcomeHeadline: 'LUMELANG! KHOKELO EA MOTSE',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo: Marang-rang a motse a abelanoa ke bohle. Sebelisa marang-rang ka boikarabelo le toka.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -419,7 +506,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'MUNICIPAL SOLAR SMART ZONE',
     welcomeHeadline: 'ENJOY THE PARK & STAY CONNECTED',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo: Rea u amohela serapeng sa sechaba. Boloka tikoloho e hloekile ha u ntse u sebelisa marang-rang.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -491,7 +578,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'HIGH-SPEED WI-FI ONBOARD LESOTHO EXPRESS',
     welcomeHeadline: 'ENJOY YOUR JOURNEY WITH FAST WI-FI',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo: Khokelo ena ke ea bapalami bohle ba beseng. Etsa bonnete ba hore u sebelisa li-earphones.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -563,7 +650,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     tagline: 'HIGH-DENSITY LIVE MATCH STARLINK',
     welcomeHeadline: 'LIVE EVENT TURBO HIGH-SPEED WI-FI',
     termsEnabled: true,
-    termsText: 'Amohela Liphelo: Rea u amohela lebaleng la lipapali. Khokelo e matlafatsoa ke Starlink bakeng sa sechaba sohle se tlileng papaling.',
+    termsText: OFFICIAL_SESOTHO_TERMS_TEXT,
     collectName: true,
     collectPhone: true,
     collectEmail: true,
@@ -652,19 +739,28 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   // Currently selected scope / builder tab
   const [selectedScope, setSelectedScope] = useState<VerticalType>(initialScope);
 
-  // Storage helper: Load config for a scope (ensuring M10, M60, M280 baseline denominations)
+  // Storage helper: Load config for a scope (ensuring M10, M60, M280 baseline denominations & official Sesotho Terms)
   const loadScopeConfig = (scope: VerticalType): ScopePortalConfig => {
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         const stored = window.localStorage.getItem(`tconnect_portal_scope_${scope}`);
         if (stored) {
           const parsed: ScopePortalConfig = JSON.parse(stored);
+          let mutated = false;
           // Ensure baseline denominations M10 (Daily), M60 (Weekly), M280 (Monthly) are seeded
           const has10 = parsed.plans?.some((p) => p.price === 10);
           const has60 = parsed.plans?.some((p) => p.price === 60);
           const has280 = parsed.plans?.some((p) => p.price === 280);
           if (!has10 || !has60 || !has280) {
             parsed.plans = DEFAULT_SCOPE_CONFIGS[scope].plans;
+            mutated = true;
+          }
+          const normalizedTerms = normalizeScopeTermsText(parsed.termsText);
+          if (parsed.termsText !== normalizedTerms) {
+            parsed.termsText = normalizedTerms;
+            mutated = true;
+          }
+          if (mutated) {
             try {
               window.localStorage.setItem(`tconnect_portal_scope_${scope}`, JSON.stringify(parsed));
             } catch {}
@@ -867,9 +963,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       storage.recordVideoAdImpression(ad.id);
       setPreviewStep('video_ad');
     } else {
-      setSavedToast('Connected! Splash redirect dismissed & phone released to internet.');
+      setSavedToast('Connected! Phone authenticated & released to enjoy internet connectivity.');
       setTimeout(() => setSavedToast(null), 3500);
-      setPreviewStep(isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan');
+      setPreviewStep('usage');
     }
   };
 
@@ -960,13 +1056,45 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
   }, [selectedScope, currentConfig.plans]);
 
-  // Sync initial scope configurations with VPS server so guest phones on WiFi receive the exact splash page
+  // Hydrate & sync scope configurations with VPS server so guest phones and admin builder are 100% aligned
   useEffect(() => {
-    fetch('/api/portal/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ configs: scopeConfigs })
-    }).catch(() => {});
+    fetch('/api/portal/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && data?.configs && typeof data.configs === 'object') {
+          setScopeConfigs((prev) => {
+            const merged = { ...prev };
+            Object.entries(data.configs).forEach(([k, v]) => {
+              const scopeKey = k as VerticalType;
+              if (v && typeof v === 'object') {
+                merged[scopeKey] = {
+                  ...(prev[scopeKey] || DEFAULT_SCOPE_CONFIGS.hotspot),
+                  ...(v as ScopePortalConfig),
+                  termsText: normalizeScopeTermsText((v as ScopePortalConfig).termsText)
+                };
+                if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+                  try {
+                    window.localStorage.setItem(`tconnect_portal_scope_${scopeKey}`, JSON.stringify(merged[scopeKey]));
+                  } catch {}
+                }
+              }
+            });
+            fetch('/api/portal/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ configs: merged })
+            }).catch(() => {});
+            return merged;
+          });
+        } else {
+          fetch('/api/portal/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ configs: scopeConfigs })
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Save current scope configuration and push in real time to VPS & MikroTik Routers
@@ -2577,7 +2705,18 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         {slides.map((sl, idx) => (
                           <div key={sl.id || idx} className="w-full h-full shrink-0 relative bg-black">
                             <img
-                              src={sl.imageUrl}
+                              src={resolveWalledGardenImageUrl(
+                                sl.imageUrl,
+                                sl.caption || activePreviewAd.title,
+                                activePreviewAd.sponsorName
+                              )}
+                              onError={(e) => {
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                                  sl.caption || activePreviewAd.title,
+                                  activePreviewAd.sponsorName
+                                );
+                              }}
                               alt={sl.caption || activePreviewAd.title}
                               className="w-full h-full object-cover"
                             />
@@ -2610,9 +2749,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <button
                         type="button"
                         onClick={() => {
-                          setSavedToast('Ad closed — splash popup auto-closed & phone released straight to internet!');
+                          setSavedToast('Ad closed — device is now online and enjoying full internet connectivity!');
                           setTimeout(() => setSavedToast(null), 3500);
-                          setPreviewStep(isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan');
+                          setPreviewStep('usage');
                         }}
                         title="Close ad immediately and enjoy connectivity"
                         className="w-9 h-9 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-xl flex items-center justify-center cursor-pointer transition-all"
@@ -3134,6 +3273,51 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     </div>
                   );
                 })()}
+
+                {/* STEP 4: CONNECTED & ENJOYING INTERNET CONNECTIVITY (After pressing X on Ad) */}
+                {previewStep === 'usage' && (
+                  <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-emerald-500/40 shadow-2xl space-y-2 text-left">
+                    <div className="w-8 h-1 bg-emerald-400/40 rounded-full mx-auto mb-1 shrink-0" />
+                    <div className="flex items-center justify-between bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div>
+                          <div className="text-[11px] font-black text-white leading-tight">
+                            You&apos;re Connected to Wi-Fi!
+                          </div>
+                          <div className="text-[9px] text-emerald-300 font-mono">
+                            {sessionAuthMode === 'free' ? 'Free Wi-Fi Session Active' : 'High-Speed Pass Active'} • Online ({sessionElapsed}s)
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[8px] font-mono">
+                        ONLINE
+                      </span>
+                    </div>
+
+                    <a
+                      href="https://www.google.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>Browse the Internet &rarr;</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewStep(
+                          isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan'
+                        )
+                      }
+                      className="w-full py-1 text-[9px] font-mono text-slate-400 hover:text-white text-center cursor-pointer"
+                    >
+                      Reset Emulator to Sign-Up View
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Footer Powered By Lockup */}

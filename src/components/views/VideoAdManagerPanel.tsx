@@ -27,6 +27,10 @@ import {
 } from 'lucide-react';
 import { SponsorAdConfig, VideoAdItem, AdSlideItem, VerticalType } from '../../types';
 import { storage, STARTER_VIDEO_AD_LIBRARY } from '../../services/storage';
+import {
+  resolveWalledGardenImageUrl,
+  buildInlineFallbackSlideDataUri
+} from './ScopeCaptivePortalBuilder';
 
 interface UploadedServerVideo {
   name: string;
@@ -34,6 +38,12 @@ interface UploadedServerVideo {
   path: string;
   sizeKb: number;
   uploadedAt: string;
+}
+
+interface UploadedServerPhoto {
+  name: string;
+  url: string;
+  size?: number;
 }
 
 const SCOPE_OPTIONS: Array<{ id: VerticalType | 'all'; label: string; badgeClass: string }> = [
@@ -48,32 +58,52 @@ const SCOPE_OPTIONS: Array<{ id: VerticalType | 'all'; label: string; badgeClass
 export const VideoAdManagerPanel: React.FC = () => {
   const [config, setConfig] = useState<SponsorAdConfig>(() => storage.getSponsorAdConfig());
   const [serverVideos, setServerVideos] = useState<UploadedServerVideo[]>([]);
+  const [serverPhotos, setServerPhotos] = useState<UploadedServerPhoto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  // New / Edit Campaign Form State (Video OR Multi-Image Series)
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [mediaType, setMediaType] = useState<'video' | 'image_carousel'>('video');
-  const [title, setTitle] = useState('');
-  const [sponsorName, setSponsorName] = useState('');
-  const [headline, setHeadline] = useState('');
-  const [description, setDescription] = useState('');
-  const [videoUrl, setVideoUrl] = useState('');
-  const [destinationUrl, setDestinationUrl] = useState('');
-  const [slides, setSlides] = useState<AdSlideItem[]>([
-    {
-      id: `slide_${Date.now()}_1`,
-      imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
-      redirectUrl: 'https://tconnect.co.ls',
-      caption: 'Slide 1 — Tap to visit offer'
-    }
-  ]);
-  const [targetScope, setTargetScope] = useState<VerticalType | 'all'>('hotspot');
-  const [watchMode, setWatchMode] = useState<'full_video' | 'skip_after_sec'>('full_video');
-  const [skipAfterSec, setSkipAfterSec] = useState<number>(5);
+  const initialCarouselItem = React.useMemo(() => {
+    const lib = storage.getSponsorAdConfig().videoLibrary || STARTER_VIDEO_AD_LIBRARY;
+    return (
+      lib.find((v) => v.mediaType === 'image_carousel' && v.enabled) ||
+      lib.find((v) => v.mediaType === 'image_carousel') ||
+      null
+    );
+  }, []);
+
+  // New / Edit Campaign Form State (Defaults to active Picture Series so admin can immediately upload/edit ad pictures)
+  const [editingId, setEditingId] = useState<string | null>(() => initialCarouselItem?.id || null);
+  const [mediaType, setMediaType] = useState<'video' | 'image_carousel'>(() =>
+    initialCarouselItem ? 'image_carousel' : 'video'
+  );
+  const [title, setTitle] = useState(() => initialCarouselItem?.title || '');
+  const [sponsorName, setSponsorName] = useState(() => initialCarouselItem?.sponsorName || '');
+  const [headline, setHeadline] = useState(() => initialCarouselItem?.headline || '');
+  const [description, setDescription] = useState(() => initialCarouselItem?.description || '');
+  const [videoUrl, setVideoUrl] = useState(() => initialCarouselItem?.videoUrl || '');
+  const [destinationUrl, setDestinationUrl] = useState(() => initialCarouselItem?.destinationUrl || '');
+  const [slides, setSlides] = useState<AdSlideItem[]>(() =>
+    initialCarouselItem?.slides && initialCarouselItem.slides.length > 0
+      ? initialCarouselItem.slides
+      : [
+          {
+            id: `slide_${Date.now()}_1`,
+            imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
+            redirectUrl: 'https://tconnect.co.ls',
+            caption: 'Slide 1 — Tap to visit offer'
+          }
+        ]
+  );
+  const [targetScope, setTargetScope] = useState<VerticalType | 'all'>(
+    () => initialCarouselItem?.targetScope || 'all'
+  );
+  const [watchMode, setWatchMode] = useState<'full_video' | 'skip_after_sec'>(
+    () => initialCarouselItem?.watchMode || 'skip_after_sec'
+  );
+  const [skipAfterSec, setSkipAfterSec] = useState<number>(() => initialCarouselItem?.skipAfterSec || 5);
 
   // Simulator & Full-Screen Overlay State
   const [previewScope, setPreviewScope] = useState<VerticalType>('hotspot');
@@ -106,19 +136,52 @@ export const VideoAdManagerPanel: React.FC = () => {
       .catch(() => {});
   };
 
+  const fetchServerPhotos = () => {
+    fetch('/api/photos')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && Array.isArray(data.photos)) {
+          setServerPhotos(data.photos);
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     fetchServerVideos();
+    fetchServerPhotos();
     fetch('/api/portal/video-ads')
       .then((r) => r.json())
       .then((data) => {
         if (data?.success && data?.sponsorAd) {
+          const srvLib: VideoAdItem[] =
+            Array.isArray(data.sponsorAd.videoLibrary) && data.sponsorAd.videoLibrary.length > 0
+              ? data.sponsorAd.videoLibrary
+              : videoLibrary;
           setConfig((prev) => ({
             ...prev,
             ...data.sponsorAd,
-            videoLibrary: Array.isArray(data.sponsorAd.videoLibrary) && data.sponsorAd.videoLibrary.length > 0
-              ? data.sponsorAd.videoLibrary
-              : prev.videoLibrary
+            videoLibrary: srvLib
           }));
+          const activeCarousel =
+            srvLib.find((v) => v.mediaType === 'image_carousel' && v.enabled) ||
+            srvLib.find((v) => v.mediaType === 'image_carousel');
+          if (activeCarousel) {
+            setEditingId(activeCarousel.id);
+            setMediaType('image_carousel');
+            setTitle(activeCarousel.title);
+            setSponsorName(activeCarousel.sponsorName);
+            setHeadline(activeCarousel.headline);
+            setDescription(activeCarousel.description);
+            setVideoUrl(activeCarousel.videoUrl || '');
+            setDestinationUrl(activeCarousel.destinationUrl || '');
+            if (Array.isArray(activeCarousel.slides) && activeCarousel.slides.length > 0) {
+              setSlides(activeCarousel.slides);
+            }
+            setTargetScope(activeCarousel.targetScope);
+            setWatchMode(activeCarousel.watchMode);
+            setSkipAfterSec(activeCarousel.skipAfterSec || 5);
+          }
         }
       })
       .catch(() => {});
@@ -236,6 +299,79 @@ export const VideoAdManagerPanel: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const commitSlidesToLibraryAndPersist = (
+    updatedSlides: AdSlideItem[],
+    toastMessage = 'Uploaded ad picture & synced live to all routers and guest phones!'
+  ) => {
+    const validSlides = updatedSlides.filter((s) => s.imageUrl && s.imageUrl.trim());
+    if (validSlides.length === 0) return;
+
+    const targetCampaignId =
+      editingId ||
+      videoLibrary.find((v) => v.mediaType === 'image_carousel' && v.enabled)?.id ||
+      videoLibrary.find((v) => v.mediaType === 'image_carousel')?.id ||
+      `ad_${Date.now()}`;
+
+    const existingCampaign = videoLibrary.find((v) => v.id === targetCampaignId);
+    const primaryDestination =
+      destinationUrl.trim() ||
+      existingCampaign?.destinationUrl ||
+      validSlides[0]?.redirectUrl ||
+      'https://tconnect.co.ls';
+
+    const updatedItem: VideoAdItem = {
+      id: targetCampaignId,
+      title: title.trim() || existingCampaign?.title || 'T-Connect Lesotho Partner Deals (3-Picture Series)',
+      sponsorName: sponsorName.trim() || existingCampaign?.sponsorName || 'T-Connect Lesotho Partners',
+      headline: headline.trim() || existingCampaign?.headline || 'Slide Through Exclusive Partner Deals',
+      description:
+        description.trim() ||
+        existingCampaign?.description ||
+        'Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.',
+      videoUrl: validSlides[0]?.imageUrl || existingCampaign?.videoUrl || '',
+      destinationUrl: primaryDestination,
+      mediaType: 'image_carousel',
+      slides: validSlides.map((s, idx) => ({
+        id: s.id || `slide_${idx + 1}`,
+        imageUrl: s.imageUrl.trim(),
+        redirectUrl: (s.redirectUrl || primaryDestination).trim(),
+        caption: s.caption?.trim() || ''
+      })),
+      targetScope: targetScope || existingCampaign?.targetScope || 'all',
+      enabled: true,
+      watchMode: watchMode || existingCampaign?.watchMode || 'skip_after_sec',
+      skipAfterSec: Number(skipAfterSec) || existingCampaign?.skipAfterSec || 5,
+      durationSec: 8,
+      uploadedAt: new Date().toISOString().slice(0, 10),
+      impressions: existingCampaign?.impressions || 0,
+      clicks: existingCampaign?.clicks || 0
+    };
+
+    const existsInLib = videoLibrary.some((v) => v.id === targetCampaignId);
+    const nextLib = existsInLib
+      ? videoLibrary.map((v) => (v.id === targetCampaignId ? updatedItem : v))
+      : [updatedItem, ...videoLibrary];
+
+    const nextConfig: SponsorAdConfig = {
+      ...config,
+      enabled: true,
+      sponsorName: updatedItem.sponsorName,
+      headline: updatedItem.headline,
+      description: updatedItem.description,
+      imageUrl: validSlides[0]?.imageUrl || config.imageUrl,
+      videoUrl: updatedItem.videoUrl,
+      destinationUrl: updatedItem.destinationUrl,
+      mediaType: 'image_carousel',
+      watchMode: updatedItem.watchMode,
+      countdownDurationSec: updatedItem.skipAfterSec,
+      videoLibrary: nextLib
+    };
+
+    setEditingId(targetCampaignId);
+    setPreviewVideoId(targetCampaignId);
+    persistConfig(nextConfig, toastMessage);
+  };
+
   const handleSlideImageUpload = (slideId: string, file?: File) => {
     if (!file) return;
     setIsUploading(true);
@@ -258,10 +394,16 @@ export const VideoAdManagerPanel: React.FC = () => {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to upload picture');
         }
-        setSlides((prev) =>
-          prev.map((s) => (s.id === slideId ? { ...s, imageUrl: data.url } : s))
-        );
-        setUploadStatus(`Uploaded picture ${data.filename} to /public/images/`);
+        fetchServerPhotos();
+        setSlides((prev) => {
+          const nextSlides = prev.map((s) => (s.id === slideId ? { ...s, imageUrl: data.url } : s));
+          commitSlidesToLibraryAndPersist(
+            nextSlides,
+            `Uploaded "${data.filename}" & synced live to MikroTik splash ad carousel!`
+          );
+          return nextSlides;
+        });
+        setUploadStatus(`Uploaded picture ${data.filename} to server & activated live on routers!`);
       } catch (err: any) {
         setUploadError(err.message || 'Failed to upload picture');
       } finally {
@@ -288,7 +430,11 @@ export const VideoAdManagerPanel: React.FC = () => {
   };
 
   const removeSlide = (id: string) => {
-    setSlides((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
+    setSlides((prev) => {
+      const next = prev.length > 1 ? prev.filter((s) => s.id !== id) : prev;
+      commitSlidesToLibraryAndPersist(next, 'Removed slide & synced ad carousel to routers!');
+      return next;
+    });
   };
 
   const resetCampaignForm = () => {
@@ -385,8 +531,8 @@ export const VideoAdManagerPanel: React.FC = () => {
         ? `Updated "${cleanItem.title}" & pushed live to routers!`
         : `Saved "${cleanItem.title}" (${mediaType === 'image_carousel' ? `${validSlides.length} pictures` : 'Full-Screen Video'}) to active library!`
     );
+    setEditingId(cleanItem.id);
     setPreviewVideoId(cleanItem.id);
-    resetCampaignForm();
   };
 
   const handleEditItem = (item: VideoAdItem) => {
@@ -499,7 +645,18 @@ export const VideoAdManagerPanel: React.FC = () => {
               {previewSlides.map((sl, idx) => (
                 <div key={sl.id || idx} className="w-screen h-screen shrink-0 relative bg-black">
                   <img
-                    src={sl.imageUrl}
+                    src={resolveWalledGardenImageUrl(
+                      sl.imageUrl,
+                      sl.caption || activePreviewAd.headline,
+                      activePreviewAd.sponsorName
+                    )}
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                        sl.caption || activePreviewAd.headline,
+                        activePreviewAd.sponsorName
+                      );
+                    }}
                     alt={sl.caption || activePreviewAd.headline}
                     onClick={() => handleAdClickRedirect(activePreviewAd, idx)}
                     className="w-screen h-screen object-cover cursor-pointer"
@@ -655,7 +812,16 @@ export const VideoAdManagerPanel: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => persistConfig(config)}
+              onClick={() => {
+                if (mediaType === 'image_carousel' && slides.some((s) => s.imageUrl.trim())) {
+                  commitSlidesToLibraryAndPersist(
+                    slides,
+                    'Saved all slide pictures & pushed live to routers and guest phones!'
+                  );
+                } else {
+                  persistConfig(config);
+                }
+              }}
               className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
@@ -907,7 +1073,18 @@ export const VideoAdManagerPanel: React.FC = () => {
                     >
                       <div className="w-20 h-20 rounded-lg bg-slate-900 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center relative">
                         {slide.imageUrl ? (
-                          <img src={slide.imageUrl} alt="" className="w-full h-full object-cover" />
+                          <img
+                            src={resolveWalledGardenImageUrl(slide.imageUrl, slide.caption || `Slide ${idx + 1}`, sponsorName)}
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                                slide.caption || `Slide ${idx + 1}`,
+                                sponsorName || 'T-Connect Sponsor'
+                              );
+                            }}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
                         ) : (
                           <ImageIcon className="w-5 h-5 text-slate-600" />
                         )}
@@ -970,6 +1147,37 @@ export const VideoAdManagerPanel: React.FC = () => {
                             className="w-full px-2.5 py-1.5 bg-[#141b2d] border border-[#232d42] rounded-lg text-slate-200 text-[11px] focus:outline-none focus:border-[#f05e17]"
                           />
                         </div>
+
+                        {serverPhotos.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">
+                              Uploaded Photos:
+                            </span>
+                            {serverPhotos.slice(0, 6).map((photo) => (
+                              <button
+                                key={photo.url}
+                                type="button"
+                                onClick={() => {
+                                  const nextSlides = slides.map((s) =>
+                                    s.id === slide.id ? { ...s, imageUrl: photo.url } : s
+                                  );
+                                  setSlides(nextSlides);
+                                  commitSlidesToLibraryAndPersist(
+                                    nextSlides,
+                                    `Assigned "${photo.name}" to Slide #${idx + 1} & synced to routers!`
+                                  );
+                                }}
+                                className={`px-2 py-0.5 rounded border text-[9px] font-mono cursor-pointer transition-colors ${
+                                  slide.imageUrl === photo.url
+                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold'
+                                    : 'bg-[#141b2d] border-slate-700 text-slate-300 hover:border-slate-500'
+                                }`}
+                              >
+                                {photo.name.slice(0, 22)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1362,7 +1570,18 @@ export const VideoAdManagerPanel: React.FC = () => {
                   {previewSlides.map((sl, idx) => (
                     <div key={sl.id || idx} className="w-full h-full shrink-0 relative bg-black">
                       <img
-                        src={sl.imageUrl}
+                        src={resolveWalledGardenImageUrl(
+                          sl.imageUrl,
+                          sl.caption || activePreviewAd.headline,
+                          activePreviewAd.sponsorName
+                        )}
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                            sl.caption || activePreviewAd.headline,
+                            activePreviewAd.sponsorName
+                          );
+                        }}
                         alt={sl.caption || activePreviewAd.headline}
                         onClick={() => handleAdClickRedirect(activePreviewAd, idx)}
                         className="w-full h-full object-cover cursor-pointer"

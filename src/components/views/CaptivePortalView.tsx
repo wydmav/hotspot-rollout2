@@ -146,7 +146,29 @@ export const CaptivePortalView: React.FC<CaptivePortalViewProps> = ({
   const [welcomeHeading, setWelcomeHeading] = useState('WHAT DO YOU CONNECT FOR?');
   const [termsEnabled, setTermsEnabled] = useState(true);
   const [termsText, setTermsText] = useState(
-    'Amohela Liphelo Tsa Tšebetso: Rea u amohela ho khokelo ea rona ea marang-rang a mahala. Molemong oa hore sechaba sa bo rona se natefeloe ke khokelo ena, latela melao le lipehelo tse latelang: Ha ho lumelloe ho khoasolla litaba tse seng molaong, ho hlasela marang-rang kapa ho sebelisa data ka mokhoa o sa lokang.'
+    `Amohela Liphelo Tsa Tšebetso
+
+Rea u amohela ho khokelo ea rona ea marang-rang a mahala. Molemong oa hore sechaba sa bo rona se natefeloe ke khokelo ena, latela melao le lipehelo tse latelang:
+
+1.\tItlhomphe.
+Sebelisa marang-rang ka boikarabello. Qoba litlolo tsa molao ka marang-rang.
+
+2. Sireletsa mohala oa hau oa thekeng.
+Polokeho ea mohala oa hau ke boikarabello ba hau. Ha se boikarabello ba T - Connect ha mohala oa hau o lahlehile, o senyehile kapa o hlasetsoe ke likokoanahloko tsa marang-rang.
+
+3. Sebetsa ka toka
+Khokelo ea marang-rang e ka lekanyetsoa ho latela lebelo la eona kapa nako, molemong oa hore batho bohle ba natefeloe ke tšebeliso ea ona.
+
+4. Lekunutu
+Litaba tsa khokelo ea marang-rang li bolokoa e le lekunutu lipakeng tsa moreki le T-Connect.
+
+5. Ipapise le Molao
+Mesebetsi eohle ea marang-rang e tlameha ho latela melao ea tsamaiso ea marang-rang ea Lesotho.
+
+6. Ho fumaneha hoa marang-rang ho ka khaoloa
+T - Connect e ka khaola kapa ea emisa ho fumaneha hoa marang-rang, ha fela melao le melaoana ea tsamaiso ea marang-rang e sa lateloa.
+
+Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-rang.`
   );
 
   // Appearance Customizer (Background, Glass Opacity, Box Sizing, Orientation)

@@ -22,18 +22,35 @@ const isProd = process.env.NODE_ENV === 'production';
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
-// Static images and videos directories for captive portal splash backgrounds & video ads
+// Persistent & static images/videos directories for captive portal splash backgrounds & sponsor ads
+const persistentDataDir = path.resolve(__dirname, 'data');
+if (!fs.existsSync(persistentDataDir)) {
+  fs.mkdirSync(persistentDataDir, { recursive: true });
+}
+const persistentImagesDir = path.resolve(persistentDataDir, 'images');
+if (!fs.existsSync(persistentImagesDir)) {
+  fs.mkdirSync(persistentImagesDir, { recursive: true });
+}
 const publicImagesDir = path.resolve(__dirname, 'public/images');
 if (!fs.existsSync(publicImagesDir)) {
   fs.mkdirSync(publicImagesDir, { recursive: true });
 }
-app.use('/images', express.static(publicImagesDir));
+app.use('/images', express.static(persistentImagesDir), express.static(publicImagesDir));
 
+const persistentVideosDir = path.resolve(persistentDataDir, 'videos');
+if (!fs.existsSync(persistentVideosDir)) {
+  fs.mkdirSync(persistentVideosDir, { recursive: true });
+}
 const publicVideosDir = path.resolve(__dirname, 'public/videos');
 if (!fs.existsSync(publicVideosDir)) {
   fs.mkdirSync(publicVideosDir, { recursive: true });
 }
-app.use('/videos', express.static(publicVideosDir));
+app.use('/videos', express.static(persistentVideosDir), express.static(publicVideosDir));
+
+const mediaCacheDir = path.resolve(persistentDataDir, 'media-cache');
+if (!fs.existsSync(mediaCacheDir)) {
+  fs.mkdirSync(mediaCacheDir, { recursive: true });
+}
 
 // CORS for captive portals and mobile money webhook gateways
 app.use((req, res, next) => {
@@ -46,20 +63,142 @@ app.use((req, res, next) => {
   next();
 });
 
-// Photo listing & physical upload endpoints for captive portal backgrounds
-app.get('/api/photos', (req: Request, res: Response) => {
-  try {
-    if (!fs.existsSync(publicImagesDir)) {
-      fs.mkdirSync(publicImagesDir, { recursive: true });
+// Helper to build a sleek fallback SVG poster so Captive Wi-Fi popups never show a broken [?] icon
+function buildFallbackSlideSvg(title = 'T-Connect Lesotho', subtitle = 'High-Speed Starlink Wi-Fi Partner Offer'): string {
+  const safeTitle = String(title || 'T-Connect Lesotho')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const safeSub = String(subtitle || 'Exclusive Partner Offer')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#0b1120"/>
+        <stop offset="50%" stop-color="#1e1b4b"/>
+        <stop offset="100%" stop-color="#0f172a"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="50%" cy="42%" r="55%">
+        <stop offset="0%" stop-color="#f05e17" stop-opacity="0.38"/>
+        <stop offset="100%" stop-color="#0b1120" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1080" height="1920" fill="url(#bg)"/>
+    <circle cx="540" cy="820" r="560" fill="url(#glow)"/>
+    <rect x="90" y="640" width="900" height="580" rx="44" fill="#111827" fill-opacity="0.88" stroke="#f05e17" stroke-width="4"/>
+    <circle cx="540" cy="790" r="64" fill="#f05e17" fill-opacity="0.2" stroke="#f05e17" stroke-width="3"/>
+    <text x="540" y="812" text-anchor="middle" fill="#f05e17" font-family="system-ui, sans-serif" font-size="54" font-weight="900">TC</text>
+    <text x="540" y="945" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="44" font-weight="900">${safeTitle.slice(0, 38)}</text>
+    <text x="540" y="1030" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="30" font-weight="600">${safeSub.slice(0, 56)}</text>
+    <text x="540" y="1140" text-anchor="middle" fill="#34d399" font-family="monospace, sans-serif" font-size="26" font-weight="700">T-CONNECT STARLINK HOTSPOT NETWORK</text>
+  </svg>`;
+}
+
+// Walled-Garden Media Proxy: Serves external ad & wallpaper images directly from the Control Tower
+// origin (169.58.98.92:3000) with disk caching so unauthenticated MikroTik Captive Wi-Fi popups
+// load 100% of images without ever being blocked by the router firewall.
+app.get('/api/portal/media-proxy', async (req: Request, res: Response) => {
+  const rawUrl = String(req.query.url || '').trim();
+  const title = String(req.query.title || 'T-Connect Sponsor').trim();
+  const subtitle = String(req.query.subtitle || '').trim();
+
+  if (!rawUrl) {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(buildFallbackSlideSvg(title, subtitle));
+  }
+
+  // If URL is a local /images/... file, serve from persistentImagesDir or publicImagesDir
+  if (rawUrl.startsWith('/images/')) {
+    const fileName = path.basename(rawUrl.split('?')[0]);
+    const persistCandidate = path.resolve(persistentImagesDir, fileName);
+    const pubCandidate = path.resolve(publicImagesDir, fileName);
+    if (fs.existsSync(persistCandidate)) {
+      return res.sendFile(persistCandidate);
     }
-    const files = fs.readdirSync(publicImagesDir).filter(f => /\.(jpg|jpeg|png|webp|svg)$/i.test(f));
+    if (fs.existsSync(pubCandidate)) {
+      return res.sendFile(pubCandidate);
+    }
+  }
+
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    return res.send(buildFallbackSlideSvg(title, subtitle));
+  }
+
+  const hashKey = crypto.createHash('sha256').update(rawUrl).digest('hex');
+  const cacheDataPath = path.resolve(mediaCacheDir, `${hashKey}.bin`);
+  const cacheMetaPath = path.resolve(mediaCacheDir, `${hashKey}.json`);
+
+  try {
+    if (fs.existsSync(cacheDataPath) && fs.existsSync(cacheMetaPath)) {
+      const meta = JSON.parse(fs.readFileSync(cacheMetaPath, 'utf-8'));
+      res.setHeader('Content-Type', meta.contentType || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+      return res.send(fs.readFileSync(cacheDataPath));
+    }
+  } catch {}
+
+  try {
+    const upstream = await fetch(rawUrl, {
+      headers: {
+        'User-Agent': 'T-Connect-Control-Tower/1.0',
+        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(6500)
+    });
+
+    if (upstream.ok) {
+      const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+      const arrayBuf = await upstream.arrayBuffer();
+      const buffer = Buffer.from(arrayBuf);
+      if (buffer.length > 0) {
+        try {
+          fs.writeFileSync(cacheDataPath, buffer);
+          fs.writeFileSync(cacheMetaPath, JSON.stringify({ contentType, url: rawUrl, cachedAt: new Date().toISOString() }), 'utf-8');
+        } catch {}
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+        return res.send(buffer);
+      }
+    }
+  } catch {}
+
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  return res.send(buildFallbackSlideSvg(title, subtitle));
+});
+
+// Photo listing & physical upload endpoints for captive portal backgrounds & sponsor ad slides
+app.get('/api/photos', (_req: Request, res: Response) => {
+  try {
+    const fileMap = new Map<string, { name: string; url: string; path: string; mtimeMs: number }>();
+    for (const dir of [publicImagesDir, persistentImagesDir]) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const files = fs.readdirSync(dir).filter(f => /\.(jpg|jpeg|png|webp|svg|gif)$/i.test(f));
+      for (const f of files) {
+        try {
+          const full = path.resolve(dir, f);
+          const st = fs.statSync(full);
+          fileMap.set(f, {
+            name: f,
+            url: `/images/${f}`,
+            path: `images/${f}`,
+            mtimeMs: st.mtimeMs
+          });
+        } catch {}
+      }
+    }
+    const sorted = Array.from(fileMap.values()).sort((a, b) => b.mtimeMs - a.mtimeMs);
     res.json({
       success: true,
-      photos: files.map(f => ({
-        name: f,
-        url: `/images/${f}`,
-        path: `public/images/${f}`
-      }))
+      photos: sorted.map(({ name, url, path: p }) => ({ name, url, path: p }))
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -72,25 +211,32 @@ app.post('/api/upload-photo', (req: Request, res: Response) => {
     if (!base64Data) {
       return res.status(400).json({ success: false, error: 'No image data provided' });
     }
+    if (!fs.existsSync(persistentImagesDir)) {
+      fs.mkdirSync(persistentImagesDir, { recursive: true });
+    }
     if (!fs.existsSync(publicImagesDir)) {
       fs.mkdirSync(publicImagesDir, { recursive: true });
     }
     const ext = filename?.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.jpg';
     const cleanBase = filename ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_') : `splash_${Date.now()}`;
     const cleanName = `${cleanBase}${ext}`;
-    const targetPath = path.resolve(publicImagesDir, cleanName);
+    const persistPath = path.resolve(persistentImagesDir, cleanName);
+    const publicPath = path.resolve(publicImagesDir, cleanName);
 
-    const base64Clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const base64Clean = String(base64Data).replace(/^data:[^;]+;base64,/, '');
     const buffer = Buffer.from(base64Clean, 'base64');
-    fs.writeFileSync(targetPath, buffer);
+    fs.writeFileSync(persistPath, buffer);
+    try {
+      fs.writeFileSync(publicPath, buffer);
+    } catch {}
 
-    console.log(`[Photo Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to public/images/`);
+    console.log(`[Photo Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to /data/images/ and /public/images/`);
 
     res.json({
       success: true,
       filename: cleanName,
       url: `/images/${cleanName}`,
-      message: 'Photo saved successfully to public/images/'
+      message: 'Photo saved permanently to server images storage'
     });
   } catch (err: any) {
     console.error('Failed to save photo:', err);
@@ -101,22 +247,28 @@ app.post('/api/upload-photo', (req: Request, res: Response) => {
 // Video listing & physical upload endpoints for post-auth & 3h / 2GB recurring video ads
 app.get('/api/videos', (_req: Request, res: Response) => {
   try {
-    if (!fs.existsSync(publicVideosDir)) {
-      fs.mkdirSync(publicVideosDir, { recursive: true });
+    const videoMap = new Map<string, any>();
+    for (const dir of [publicVideosDir, persistentVideosDir]) {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const files = fs.readdirSync(dir).filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f));
+      for (const f of files) {
+        try {
+          const stat = fs.statSync(path.resolve(dir, f));
+          videoMap.set(f, {
+            name: f,
+            url: `/videos/${f}`,
+            path: `videos/${f}`,
+            sizeKb: Math.round(stat.size / 1024),
+            uploadedAt: stat.mtime.toISOString()
+          });
+        } catch {}
+      }
     }
-    const files = fs.readdirSync(publicVideosDir).filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f));
     res.json({
       success: true,
-      videos: files.map(f => {
-        const stat = fs.statSync(path.resolve(publicVideosDir, f));
-        return {
-          name: f,
-          url: `/videos/${f}`,
-          path: `public/videos/${f}`,
-          sizeKb: Math.round(stat.size / 1024),
-          uploadedAt: stat.mtime.toISOString()
-        };
-      })
+      videos: Array.from(videoMap.values())
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -129,6 +281,9 @@ app.post('/api/upload-video', (req: Request, res: Response) => {
     if (!base64Data) {
       return res.status(400).json({ success: false, error: 'No video file data provided' });
     }
+    if (!fs.existsSync(persistentVideosDir)) {
+      fs.mkdirSync(persistentVideosDir, { recursive: true });
+    }
     if (!fs.existsSync(publicVideosDir)) {
       fs.mkdirSync(publicVideosDir, { recursive: true });
     }
@@ -138,20 +293,24 @@ app.post('/api/upload-video', (req: Request, res: Response) => {
       ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
       : `video_ad_${Date.now()}`;
     const cleanName = `${cleanBase}${ext}`;
+    const persistPath = path.resolve(persistentVideosDir, cleanName);
     const targetPath = path.resolve(publicVideosDir, cleanName);
 
     const base64Clean = String(base64Data).replace(/^data:[^;]+;base64,/, '');
     const buffer = Buffer.from(base64Clean, 'base64');
-    fs.writeFileSync(targetPath, buffer);
+    fs.writeFileSync(persistPath, buffer);
+    try {
+      fs.writeFileSync(targetPath, buffer);
+    } catch {}
 
-    console.log(`[Video Ad Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to public/videos/`);
+    console.log(`[Video Ad Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to /data/videos/ and /public/videos/`);
 
     res.json({
       success: true,
       filename: cleanName,
       url: `/videos/${cleanName}`,
       sizeKb: Math.round(buffer.length / 1024),
-      message: 'Video ad uploaded and saved to public/videos/'
+      message: 'Video ad uploaded and saved to persistent storage'
     });
   } catch (err: any) {
     console.error('Failed to save video ad:', err);
@@ -227,22 +386,62 @@ app.get(['/hotspot-detect.html', '/generate_204', '/ncsi.txt', '/connecttest.txt
 // -----------------------------------------------------------------------------
 // LIVE CAPTIVE PORTAL SPLASH PAGE CONFIG SYNC & ON-ROUTER HTML COMPILER
 // -----------------------------------------------------------------------------
-const persistentDataDir = path.resolve(__dirname, 'data');
-if (!fs.existsSync(persistentDataDir)) {
-  fs.mkdirSync(persistentDataDir, { recursive: true });
+const OFFICIAL_SESOTHO_TERMS_TEXT = `Amohela Liphelo Tsa Tšebetso
+
+Rea u amohela ho khokelo ea rona ea marang-rang a mahala. Molemong oa hore sechaba sa bo rona se natefeloe ke khokelo ena, latela melao le lipehelo tse latelang:
+
+1.\tItlhomphe.
+Sebelisa marang-rang ka boikarabello. Qoba litlolo tsa molao ka marang-rang.
+
+2. Sireletsa mohala oa hau oa thekeng.
+Polokeho ea mohala oa hau ke boikarabello ba hau. Ha se boikarabello ba T - Connect ha mohala oa hau o lahlehile, o senyehile kapa o hlasetsoe ke likokoanahloko tsa marang-rang.
+
+3. Sebetsa ka toka
+Khokelo ea marang-rang e ka lekanyetsoa ho latela lebelo la eona kapa nako, molemong oa hore batho bohle ba natefeloe ke tšebeliso ea ona.
+
+4. Lekunutu
+Litaba tsa khokelo ea marang-rang li bolokoa e le lekunutu lipakeng tsa moreki le T-Connect.
+
+5. Ipapise le Molao
+Mesebetsi eohle ea marang-rang e tlameha ho latela melao ea tsamaiso ea marang-rang ea Lesotho.
+
+6. Ho fumaneha hoa marang-rang ho ka khaoloa
+T - Connect e ka khaola kapa ea emisa ho fumaneha hoa marang-rang, ha fela melao le melaoana ea tsamaiso ea marang-rang e sa lateloa.
+
+Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-rang.`;
+
+function normalizeScopeTermsText(text?: string): string {
+  const trimmed = String(text || '').trim();
+  if (
+    !trimmed ||
+    trimmed.length < 220 ||
+    trimmed.startsWith('By connecting') ||
+    trimmed.startsWith('Amohela Liphelo:') ||
+    trimmed.startsWith('Amohela Liphelo Tsa Tšebetso:')
+  ) {
+    return OFFICIAL_SESOTHO_TERMS_TEXT;
+  }
+  return trimmed;
 }
+
 const portalConfigFilePath = path.resolve(persistentDataDir, 'portal-configs.json');
 const legacyPortalConfigFilePath = path.resolve(__dirname, 'public/portal-configs.json');
 
 function loadSavedPortalConfigs(): Record<string, any> {
   try {
+    let parsed: Record<string, any> | null = null;
     if (fs.existsSync(portalConfigFilePath)) {
-      return JSON.parse(fs.readFileSync(portalConfigFilePath, 'utf-8'));
+      parsed = JSON.parse(fs.readFileSync(portalConfigFilePath, 'utf-8'));
+    } else if (fs.existsSync(legacyPortalConfigFilePath)) {
+      parsed = JSON.parse(fs.readFileSync(legacyPortalConfigFilePath, 'utf-8'));
     }
-    if (fs.existsSync(legacyPortalConfigFilePath)) {
-      const legacy = JSON.parse(fs.readFileSync(legacyPortalConfigFilePath, 'utf-8'));
-      fs.writeFileSync(portalConfigFilePath, JSON.stringify(legacy, null, 2), 'utf-8');
-      return legacy;
+    if (parsed && typeof parsed === 'object') {
+      Object.keys(parsed).forEach((k) => {
+        if (parsed![k] && typeof parsed![k] === 'object') {
+          parsed![k].termsText = normalizeScopeTermsText(parsed![k].termsText);
+        }
+      });
+      return parsed;
     }
   } catch {}
   return {};
@@ -250,10 +449,29 @@ function loadSavedPortalConfigs(): Record<string, any> {
 
 function savePortalConfigsToDisk(configs: Record<string, any>) {
   try {
+    if (configs && typeof configs === 'object') {
+      Object.keys(configs).forEach((k) => {
+        if (configs[k] && typeof configs[k] === 'object') {
+          configs[k].termsText = normalizeScopeTermsText(configs[k].termsText);
+        }
+      });
+    }
     const serialized = JSON.stringify(configs, null, 2);
     fs.writeFileSync(portalConfigFilePath, serialized, 'utf-8');
     fs.writeFileSync(legacyPortalConfigFilePath, serialized, 'utf-8');
   } catch {}
+}
+
+function resolveServerWalledGardenMediaUrl(rawUrl: string, baseUrl: string, title = 'T-Connect', subtitle = ''): string {
+  const clean = String(rawUrl || '').trim();
+  if (!clean) return `${baseUrl}/api/portal/media-proxy?title=${encodeURIComponent(title)}&subtitle=${encodeURIComponent(subtitle)}`;
+  if (clean.startsWith('data:')) return clean;
+  if (clean.startsWith('/')) return `${baseUrl}${clean}`;
+  if (/^https?:\/\//i.test(clean)) {
+    if (clean.startsWith(baseUrl)) return clean;
+    return `${baseUrl}/api/portal/media-proxy?url=${encodeURIComponent(clean)}&title=${encodeURIComponent(title)}&subtitle=${encodeURIComponent(subtitle)}`;
+  }
+  return clean;
 }
 
 function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot'): string {
@@ -274,12 +492,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const collectPhone = cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true;
   const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : true;
   const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
-  const termsText = cfg.termsText || 'By connecting, you agree to the T-Connect acceptable use policy.';
+  const termsText = normalizeScopeTermsText(cfg.termsText);
 
-  let bgImage = cfg.bgImage || 'https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?auto=format&fit=crop&w=1400&q=80';
-  if (bgImage.startsWith('/')) {
-    bgImage = `${baseUrl}${bgImage}`;
-  }
+  const rawBgImage = cfg.bgImage || 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80';
+  const bgImage = resolveServerWalledGardenMediaUrl(rawBgImage, baseUrl, brandTitle, welcomeHeadline);
 
   const defaultPlans = [
     { id: 'hs_1d', name: 'Daily Pass', price: 10, durationLabel: '24 Hours', downloadSpeedMbps: 20, enabled: true },
@@ -1010,7 +1226,12 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
   const mediaType = chosenAd.mediaType || (Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0 ? 'image_carousel' : 'video');
   const rawSlides = Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0
     ? chosenAd.slides.map((s: any) => ({
-        imageUrl: String(s.imageUrl || '').startsWith('/') ? `${baseUrl}${s.imageUrl}` : String(s.imageUrl || ''),
+        imageUrl: resolveServerWalledGardenMediaUrl(
+          String(s.imageUrl || ''),
+          baseUrl,
+          chosenAd.sponsorName || 'T-Connect Partner',
+          String(s.caption || chosenAd.headline || '')
+        ),
         redirectUrl: String(s.redirectUrl || chosenAd.destinationUrl || 'https://www.google.com'),
         caption: String(s.caption || '')
       }))
@@ -1019,7 +1240,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
 
   const slidesTrackHtml = rawSlides.map((s: any, idx: number) => `
     <div class="slide-frame" data-idx="${idx}">
-      <img class="slide-img" src="${s.imageUrl}" alt="Ad Slide ${idx + 1}" draggable="false" />
+      <img class="slide-img" src="${s.imageUrl}" alt="Ad Slide ${idx + 1}" draggable="false" onerror="this.onerror=null;this.src='${baseUrl}/api/portal/media-proxy?title=${encodeURIComponent(chosenAd.sponsorName || 'T-Connect')}&subtitle=${encodeURIComponent(s.caption || 'Partner Offer')}'" />
       ${s.caption ? `<div class="slide-caption">${s.caption}</div>` : ''}
     </div>
   `).join('');
@@ -1065,7 +1286,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
 <div class="top-left-pill" onclick="event.stopPropagation()">
   <span style="width:8px;height:8px;border-radius:999px;background:#34d399;display:inline-block"></span>
   <span>${chosenAd.sponsorName || 'T-Connect Partner Offer'}</span>
-  ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `<span id="slideCounter" style="color:#fbbf24;font-family:monospace;padding-left:6px;border-left:1px solid rgba(255,255,255,0.25)">1/${rawSlides.length}</span>` : ''}
+  ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `<span id="slideCounter" style="color:#fbbf24;font-family:monospace;padding-left:6px;border-left:1px solid rgba(255,255,255,0.25)">Slide 1/${rawSlides.length}</span>` : ''}
 </div>
 
 <div class="top-right-close" onclick="event.stopPropagation()">
@@ -1077,7 +1298,7 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
 <button type="button" class="arrow-btn arrow-right" onclick="nextSlide(event)">&#8250;</button>
 <div class="bottom-dots" onclick="event.stopPropagation()">
   ${dotsHtml}
-  <span style="font-size:11px;color:#e2e8f0;font-family:monospace;font-weight:700;margin-left:4px">Slide &rarr;</span>
+  <span style="font-size:11px;color:#e2e8f0;font-family:monospace;font-weight:700;margin-left:4px">Swipe or tap arrows &rarr;</span>
 </div>
 ` : mediaType === 'video' ? `
 <button type="button" class="mute-pill" id="muteBtn" onclick="toggleAudio(event)">Unmute Audio</button>
@@ -1112,7 +1333,7 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
     var track = document.getElementById('carouselTrack');
     var ctr = document.getElementById('slideCounter');
     if (track) track.style.transform = 'translateX(-' + (slideIdx * 100) + '%)';
-    if (ctr) ctr.textContent = (slideIdx + 1) + '/' + slides.length;
+    if (ctr) ctr.textContent = 'Slide ' + (slideIdx + 1) + '/' + slides.length;
     for (var i = 0; i < slides.length; i++) {
       var d = document.getElementById('dot_' + i);
       if (d) d.className = 'dot-btn' + (i === slideIdx ? ' active' : '');
@@ -1163,19 +1384,51 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
     if (muteBtn) muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
   }
 
+  function sanitizeReleaseUrl(candidate) {
+    var raw = String(candidate || '').trim();
+    if (!raw || raw.indexOf('$(') !== -1) return 'https://www.google.com';
+    var lower = raw.toLowerCase();
+    if (
+      lower.indexOf('/portal') !== -1 ||
+      lower.indexOf('169.58.98.92') !== -1 ||
+      lower.indexOf('10.10.') !== -1 ||
+      lower.indexOf('192.168.') !== -1 ||
+      lower.indexOf('/login') !== -1 ||
+      lower.indexOf('alogin') !== -1 ||
+      lower.indexOf('hotspot-detect') !== -1 ||
+      lower.indexOf('generate_204') !== -1 ||
+      lower.indexOf('captive.apple.com') !== -1
+    ) {
+      return 'https://www.google.com';
+    }
+    return raw;
+  }
+
   function releaseToInternet(e) {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    try { window.close(); } catch (err) {}
-    try { window.open('', '_self', ''); window.close(); } catch (err) {}
     var dst = 'https://www.google.com';
     try {
       var params = new URLSearchParams(window.location.search);
       var orig = params.get('user_url') || params.get('link_orig') || params.get('dst');
-      if (orig && orig.indexOf('$(') === -1) dst = orig;
+      dst = sanitizeReleaseUrl(orig);
+      var loginUrl = params.get('link_login_only');
+      if (loginUrl && loginUrl.indexOf('$(') === -1) {
+        var rUser = params.get('username') || 'T-TRIAL';
+        var rPass = params.get('password') || '123';
+        window.location.replace(
+          loginUrl +
+            '?username=' + encodeURIComponent(rUser) +
+            '&password=' + encodeURIComponent(rPass) +
+            '&dst=' + encodeURIComponent(dst)
+        );
+        return;
+      }
     } catch (err) {}
+    try { window.close(); } catch (err) {}
+    try { window.open('', '_self', ''); window.close(); } catch (err) {}
     if (window.top && window.top !== window.self) {
       try { window.top.location.replace(dst); return; } catch (err) {}
     }
@@ -1190,13 +1443,66 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
 </html>`;
 }
 
-app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
-  const host = req.get('host') || '169.58.98.92:3000';
-  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const scope = (req.query.scope as string) || 'hotspot';
-  const html = compileVideoAdHtml(host, protocol, scope, 'post_auth');
+// MikroTik alogin.html (Served immediately after /login succeeds on the router):
+// Since the user ALREADY viewed the sponsor ad on /portal before pressing "X" to trigger /login,
+// router-alogin.html immediately releases the phone to the internet and signals CNA completion
+// so it never loops back to the sign-up screen or shows the ad twice.
+app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
+  const releaseHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0; url=https://www.google.com">
+<title>Connected — T-Connect Wi-Fi</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
+  body{min-height:100vh;background:#0b0f19;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
+  .card{max-width:360px;width:100%;background:#121829;border:1px solid #232d42;border-radius:20px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.8)}
+  .badge{width:48px;height:48px;border-radius:999px;background:rgba(16,185,129,0.2);border:2px solid #10b981;color:#34d399;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 12px}
+  h1{font-size:18px;font-weight:900;margin-bottom:6px;color:#fff}
+  p{font-size:12px;color:#94a3b8;margin-bottom:16px;line-height:1.4}
+  .btn{display:block;width:100%;padding:12px 16px;border-radius:12px;background:#10b981;color:#052e16;font-weight:800;font-size:13px;text-decoration:none}
+</style>
+<script>
+  (function() {
+    var orig = '$(link-orig-esc)';
+    var target = 'https://www.google.com';
+    if (orig && orig.indexOf('$(') === -1) {
+      try {
+        var decoded = decodeURIComponent(orig);
+        var lower = decoded.toLowerCase();
+        if (
+          decoded.indexOf('http') === 0 &&
+          lower.indexOf('/portal') === -1 &&
+          lower.indexOf('169.58.98.92') === -1 &&
+          lower.indexOf('10.10.') === -1 &&
+          lower.indexOf('192.168.') === -1 &&
+          lower.indexOf('/login') === -1 &&
+          lower.indexOf('captive.apple.com') === -1
+        ) {
+          target = decoded;
+        }
+      } catch (e) {}
+    }
+    try { window.close(); } catch (e) {}
+    setTimeout(function() {
+      window.location.replace(target);
+    }, 80);
+  })();
+</script>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">&#10003;</div>
+    <h1>Connected to T-Connect Wi-Fi</h1>
+    <p>Your device is now online. Enjoy fast, reliable Starlink internet connectivity.</p>
+    <a class="btn" href="https://www.google.com">Browse the Internet &rarr;</a>
+  </div>
+</body>
+</html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
+  res.send(releaseHtml);
 });
 
 app.get('/api/portal/video-ad.html', (req: Request, res: Response) => {

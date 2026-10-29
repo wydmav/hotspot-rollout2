@@ -18,7 +18,14 @@ import {
 } from 'lucide-react';
 import { storage } from '../../services/storage';
 import { ScopePortalConfig, VerticalType, GatewayProvider, SponsorAdConfig, VideoAdItem } from '../../types';
-import { DEFAULT_SCOPE_CONFIGS, SCOPE_LIST } from '../views/ScopeCaptivePortalBuilder';
+import {
+  DEFAULT_SCOPE_CONFIGS,
+  SCOPE_LIST,
+  OFFICIAL_SESOTHO_TERMS_TEXT,
+  normalizeScopeTermsText,
+  resolveWalledGardenImageUrl,
+  buildInlineFallbackSlideDataUri
+} from '../views/ScopeCaptivePortalBuilder';
 import { ProviderLogo } from '../common/BrandLogos';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
 
@@ -28,19 +35,45 @@ interface StandalonePortalViewProps {
   isAdminLoggedIn?: boolean;
 }
 
+const sanitizeDestinationUrl = (rawUrl?: string): string => {
+  const u = String(rawUrl || '').trim();
+  if (
+    !u ||
+    u.includes('$(') ||
+    u.includes('/portal') ||
+    u.includes('/api/portal') ||
+    u.includes('169.58.98.92') ||
+    u.includes('10.10.') ||
+    u.includes('192.168.') ||
+    u.includes('/login') ||
+    u.includes('captive.apple.com') ||
+    u.includes('connectivitycheck.') ||
+    u.includes('msftconnecttest.')
+  ) {
+    return 'https://www.google.com';
+  }
+  return /^https?:\/\//i.test(u) ? u : 'https://www.google.com';
+};
+
 export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   routerGatewayIp = '10.10.0.1'
 }) => {
   const loadLocalScopeConfig = (scope: VerticalType): ScopePortalConfig => {
+    const fallback = DEFAULT_SCOPE_CONFIGS[scope] || DEFAULT_SCOPE_CONFIGS.hotspot;
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         const stored = window.localStorage.getItem(`tconnect_portal_scope_${scope}`);
         if (stored) {
-          return JSON.parse(stored);
+          const parsed: ScopePortalConfig = JSON.parse(stored);
+          return {
+            ...fallback,
+            ...parsed,
+            termsText: normalizeScopeTermsText(parsed.termsText)
+          };
         }
       } catch {}
     }
-    return DEFAULT_SCOPE_CONFIGS[scope] || DEFAULT_SCOPE_CONFIGS.hotspot;
+    return fallback;
   };
 
   const [activeScope, setActiveScope] = useState<VerticalType>(() => {
@@ -74,10 +107,23 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [hasExplicitRouterLogin, setHasExplicitRouterLogin] = useState(false);
   const [userOrigUrl, setUserOrigUrl] = useState('https://www.google.com');
 
-  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'
-  const [portalStep, setPortalStep] = useState<'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad'>(
-    isFreeAccessAllowed ? 'identification' : isVoucherAllowed ? 'voucher' : 'plan'
-  );
+  // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
+  const [portalStep, setPortalStep] = useState<
+    'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
+  >(() => {
+    if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const stepParam = params.get('step');
+        const reasonParam = params.get('reason');
+        if (!stepParam && reasonParam !== 'retrigger') {
+          const activeConn = window.sessionStorage.getItem('tconnect_guest_connected_session');
+          if (activeConn) return 'connected';
+        }
+      } catch {}
+    }
+    return isFreeAccessAllowed ? 'identification' : isVoucherAllowed ? 'voucher' : 'plan';
+  });
 
   // Video Ad Interstitial & 3h / 2GB Re-Trigger State
   const [sponsorAdConfig, setSponsorAdConfig] = useState<SponsorAdConfig>(() => storage.getSponsorAdConfig());
@@ -119,6 +165,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const hiddenFormRef = useRef<HTMLFormElement | null>(null);
   const [routerUsername, setRouterUsername] = useState('test');
   const [routerPassword, setRouterPassword] = useState('123');
+  const routerUsernameRef = useRef<string>('test');
+  const routerPasswordRef = useRef<string>('123');
   const routerAuthSentRef = useRef<boolean>(false);
 
   // Refs for glitch-free digest-based background polling
@@ -210,31 +258,53 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     };
 
     const fetchConfig = () => {
-      // Never interrupt an active connection handshake or post-auth video ad with background config polls
-      if (isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+      // Never interrupt an active connection handshake, post-auth ad, or connected state with background config polls
+      if (
+        isConnectingRef.current ||
+        portalStepRef.current === 'video_ad' ||
+        portalStepRef.current === 'connected'
+      ) {
+        return;
+      }
 
       fetch('/api/portal/config')
         .then((res) => res.json())
         .then((data) => {
-          if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+          if (
+            !mounted ||
+            isConnectingRef.current ||
+            portalStepRef.current === 'video_ad' ||
+            portalStepRef.current === 'connected'
+          ) {
+            return;
+          }
           if (data?.success && data?.configs && typeof data.configs === 'object') {
-            const incomingDigest = JSON.stringify(data.configs);
+            const normalizedConfigs: Record<string, ScopePortalConfig> = {};
+            Object.entries(data.configs).forEach(([k, v]) => {
+              if (v && typeof v === 'object') {
+                normalizedConfigs[k] = {
+                  ...(v as ScopePortalConfig),
+                  termsText: normalizeScopeTermsText((v as ScopePortalConfig).termsText)
+                };
+              }
+            });
+            const incomingDigest = JSON.stringify(normalizedConfigs);
             if (incomingDigest !== lastConfigDigestRef.current) {
               lastConfigDigestRef.current = incomingDigest;
               // Cache server configs to localStorage so subsequent opens have 0ms hydration
               if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-                Object.entries(data.configs).forEach(([k, v]) => {
+                Object.entries(normalizedConfigs).forEach(([k, v]) => {
                   try {
                     window.localStorage.setItem(`tconnect_portal_scope_${k}`, JSON.stringify(v));
                   } catch {}
                 });
               }
               setScopeConfigs((prev) => {
-                const merged = { ...prev, ...data.configs };
+                const merged = { ...prev, ...normalizedConfigs };
                 if (!hasHydratedServerConfigRef.current) {
                   hasHydratedServerConfigRef.current = true;
                   const targetCfg = merged[activeScopeRef.current] || merged.hotspot || DEFAULT_SCOPE_CONFIGS.hotspot;
-                  if (!hasExplicitStepParamRef.current) {
+                  if (!hasExplicitStepParamRef.current && portalStepRef.current !== 'connected') {
                     const preferredStep = targetCfg.allowFreeAccess
                       ? 'identification'
                       : targetCfg.allowVoucherCode !== false
@@ -296,49 +366,76 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     );
   }, [sponsorAdConfig, activeScope]);
 
-  // Preload active background wallpaper and sponsor ad slides so transitions have zero flicker
+  // Preload active background wallpaper and sponsor ad slides via Walled-Garden proxy so transitions have zero flicker
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (currentConfig.bgImage) {
       const bgImg = new Image();
-      bgImg.src = currentConfig.bgImage;
+      bgImg.src = resolveWalledGardenImageUrl(
+        currentConfig.bgImage,
+        currentConfig.brandTitle,
+        currentConfig.welcomeHeadline
+      );
     }
     if (activeVideoAd?.slides && Array.isArray(activeVideoAd.slides)) {
       activeVideoAd.slides.forEach((sl) => {
         if (sl?.imageUrl) {
           const adImg = new Image();
-          adImg.src = sl.imageUrl;
+          adImg.src = resolveWalledGardenImageUrl(
+            sl.imageUrl,
+            sl.caption || activeVideoAd.title,
+            activeVideoAd.sponsorName
+          );
         }
       });
     }
-  }, [currentConfig.bgImage, activeVideoAd]);
+  }, [currentConfig.bgImage, currentConfig.brandTitle, currentConfig.welcomeHeadline, activeVideoAd]);
 
   const releaseAndCloseSplash = () => {
-    const dstUrl = userOrigUrl && !userOrigUrl.includes('$(') ? userOrigUrl : 'https://www.google.com';
-    // Only submit hidden form if connected through a physical MikroTik router and not yet submitted
-    if ((clientMac || hasExplicitRouterLogin) && !routerAuthSentRef.current) {
-      routerAuthSentRef.current = true;
+    const safeDstUrl = sanitizeDestinationUrl(userOrigUrl);
+    if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
       try {
-        if (hiddenFormRef.current) {
-          hiddenFormRef.current.submit();
-        }
+        window.sessionStorage.setItem(
+          'tconnect_guest_connected_session',
+          JSON.stringify({
+            connectedAt: new Date().toISOString(),
+            username: routerUsernameRef.current,
+            scope: activeScope
+          })
+        );
       } catch {}
     }
+
+    // Immediately switch portalStep to 'connected' so the sign-up screen NEVER reappears
+    portalStepRef.current = 'connected';
+    setPortalStep('connected');
+
+    // If connected via physical MikroTik router, perform top-level authentication to $(link-login-only)
+    if ((clientMac || hasExplicitRouterLogin) && !routerAuthSentRef.current) {
+      routerAuthSentRef.current = true;
+      const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
+      const authRedirectUrl = `${targetLoginUrl}?username=${encodeURIComponent(
+        routerUsernameRef.current || routerUsername || 'test'
+      )}&password=${encodeURIComponent(
+        routerPasswordRef.current || routerPassword || '123'
+      )}&dst=${encodeURIComponent(safeDstUrl)}`;
+      if (typeof window !== 'undefined') {
+        window.location.href = authRedirectUrl;
+        return;
+      }
+    }
+
     try {
-      window.close();
-    } catch {}
-    try {
-      window.open('', '_self', '');
       window.close();
     } catch {}
     if (typeof window !== 'undefined') {
       if (window.top && window.top !== window.self) {
         try {
-          window.top.location.replace(dstUrl);
+          window.top.location.replace(safeDstUrl);
           return;
         } catch {}
       }
-      window.location.replace(dstUrl);
+      window.location.href = safeDstUrl;
     }
   };
 
@@ -484,21 +581,26 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   };
 
   /**
-   * Authenticates the client device with the MikroTik Hotspot gateway (10.10.0.1/login)
-   * Uses a single non-blocking background request when on a physical router to prevent double-submit page glitches.
+   * Stores verified MikroTik Hotspot credentials and records active guest session state
+   * so pressing X on the sponsor ad performs a clean top-level router login and releases to internet.
    */
   const authorizeOnMikroTikRouter = (username = 'test', password = '123') => {
+    routerUsernameRef.current = username;
+    routerPasswordRef.current = password;
     setRouterUsername(username);
     setRouterPassword(password);
-    if (!clientMac && !hasExplicitRouterLogin) {
-      return;
+    if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+      try {
+        window.sessionStorage.setItem(
+          'tconnect_guest_connected_session',
+          JSON.stringify({
+            connectedAt: new Date().toISOString(),
+            username,
+            scope: activeScope
+          })
+        );
+      } catch {}
     }
-    const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
-    routerAuthSentRef.current = true;
-    try {
-      const authUrl = `${targetLoginUrl}?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&dst=${encodeURIComponent(userOrigUrl)}`;
-      fetch(authUrl, { mode: 'no-cors', credentials: 'include' }).catch(() => {});
-    } catch {}
   };
 
   // Connect Free Wi-Fi (Unlimited — Only when Free Access is enabled by Admin)
@@ -875,7 +977,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               </button>
             </div>
             <div className="max-h-56 overflow-y-auto text-[11px] text-slate-300 leading-relaxed bg-black/40 p-3 rounded-xl border border-white/10 whitespace-pre-wrap">
-              {currentConfig.termsText || 'By connecting to T-Connect Wi-Fi, you agree to our acceptable use policy, fair bandwidth allocation, and sponsor media terms.'}
+              {normalizeScopeTermsText(currentConfig.termsText) || OFFICIAL_SESOTHO_TERMS_TEXT}
             </div>
             <div className="flex items-center gap-2 pt-1">
               <button
@@ -960,7 +1062,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 {slides.map((sl, idx) => (
                   <div key={sl.id || idx} className="w-screen h-screen shrink-0 relative bg-black">
                     <img
-                      src={sl.imageUrl || activeVideoAd.videoUrl}
+                      src={resolveWalledGardenImageUrl(
+                        sl.imageUrl || activeVideoAd.videoUrl,
+                        sl.caption || activeVideoAd.title,
+                        activeVideoAd.sponsorName
+                      )}
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                          sl.caption || activeVideoAd.title,
+                          activeVideoAd.sponsorName
+                        );
+                      }}
                       alt={sl.caption || activeVideoAd.title}
                       className="w-screen h-screen object-cover block bg-black"
                       draggable={false}
@@ -1102,7 +1215,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       <main
         className="flex-1 min-h-screen relative flex flex-col justify-between items-center bg-cover bg-center transition-all duration-500 overflow-hidden"
         style={{
-          backgroundImage: `url(${currentConfig.bgImage})`
+          backgroundImage: `url(${resolveWalledGardenImageUrl(
+            currentConfig.bgImage,
+            currentConfig.brandTitle,
+            currentConfig.welcomeHeadline
+          )})`
         }}
       >
         {/* Configured Darken Overlay */}
@@ -1458,6 +1575,39 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>
               </button>
             </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* STEP 5: CONNECTED TO WI-FI (Shown after pressing X on Ad)         */}
+          {/* ================================================================= */}
+          {portalStep === 'connected' && (
+            <div className="rounded-t-2xl rounded-b-none p-4 bg-[#0b0f19] border-t border-x border-b-0 border-emerald-500/40 shadow-2xl space-y-3 text-left">
+              <div className="w-8 h-1 bg-emerald-400/40 rounded-full mx-auto mb-1 shrink-0" />
+              <div className="flex items-center justify-between bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-3">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <div className="text-xs font-black text-white leading-tight">
+                      You&apos;re Connected to T-Connect Wi-Fi!
+                    </div>
+                    <div className="text-[10px] text-emerald-300 font-mono mt-0.5">
+                      High-Speed Starlink Session Active • Enjoy Connectivity
+                    </div>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[9px] font-mono">
+                  ONLINE
+                </span>
+              </div>
+
+              <a
+                href={sanitizeDestinationUrl(userOrigUrl)}
+                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all"
+              >
+                <Globe className="w-4 h-4" />
+                <span>Continue to Internet &rarr;</span>
+              </a>
+            </div>
           )}
         </div>
       </main>
