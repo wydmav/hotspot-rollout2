@@ -57,7 +57,7 @@ export function validateEmailAddress(email: string, isRequired = true): { isVali
 
 /**
  * Validates country-specific phone number format:
- * - Lesotho (+266): exactly 8 digits (optional leading 0 stripped)
+ * - Lesotho (+266): strictly 8 digits starting with 5 or 6
  * - South Africa (+27): standard 10 digits starting with 0 (or 9 digits without leading 0)
  */
 export function validatePhoneNumber(phone: string, countryCode: string): { isValid: boolean; error: string; formattedPhone: string } {
@@ -67,9 +67,15 @@ export function validatePhoneNumber(phone: string, countryCode: string): { isVal
   }
 
   if (countryCode === '+266') {
-    // Lesotho (+266): 8-digit exact match
-    const lsDigits = digitsOnly.replace(/^0/, '');
-    if (lsDigits.length === 8) {
+    const lsDigits = digitsOnly.slice(0, 8);
+    if (lsDigits[0] !== '5' && lsDigits[0] !== '6') {
+      return {
+        isValid: false,
+        error: 'Lesotho (+266) numbers must start with 5 or 6 (e.g. 58123456 or 62123456)',
+        formattedPhone: lsDigits
+      };
+    }
+    if (/^[56]\d{7}$/.test(lsDigits)) {
       return { 
         isValid: true, 
         error: '', 
@@ -78,8 +84,8 @@ export function validatePhoneNumber(phone: string, countryCode: string): { isVal
     }
     return {
       isValid: false,
-      error: `Lesotho (+266) numbers must have exactly 8 digits (${lsDigits.length}/8 digits entered)`,
-      formattedPhone: digitsOnly
+      error: `Lesotho (+266) numbers must start with 5 or 6 and have 8 digits (${lsDigits.length}/8 digits entered)`,
+      formattedPhone: lsDigits
     };
   }
 
@@ -120,7 +126,7 @@ export function validatePhoneNumber(phone: string, countryCode: string): { isVal
  * Enforces:
  * 1. At least two characters for First Name
  * 2. At least two characters for Last Name / Surname
- * 3. 8-digit exact match for Lesotho (+266) numbers
+ * 3. 8-digit exact match starting with 5 or 6 for Lesotho (+266) numbers
  * 4. Standard South African mobile format (10 digits starting with 0) for (+27)
  * 5. Valid email address format containing '@' and '.'
  * 6. Terms acceptance (if required)
@@ -139,11 +145,35 @@ export function useConnectFreeValidation(options: UseConnectFreeValidationOption
 
   const [firstName, setFirstName] = useState(initialFirstName);
   const [lastName, setLastName] = useState(initialLastName);
-  const [phone, setPhone] = useState(initialPhone);
-  const [countryCode, setCountryCode] = useState(initialCountryCode);
+  const [phone, setPhoneRaw] = useState(initialPhone);
+  const [countryCode, setCountryCodeRaw] = useState(initialCountryCode);
   const [email, setEmail] = useState(initialEmail);
   const [termsAccepted, setTermsAccepted] = useState(initialTermsAccepted);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const setPhone = useCallback((val: string) => {
+    const digits = (val || '').replace(/\D/g, '');
+    if (countryCode === '+266') {
+      if (digits.length > 0 && digits[0] !== '5' && digits[0] !== '6') {
+        setTouched((prev) => ({ ...prev, phone: true }));
+        return;
+      }
+      setPhoneRaw(digits.slice(0, 8));
+    } else {
+      setPhoneRaw(digits.slice(0, 12));
+    }
+  }, [countryCode]);
+
+  const setCountryCode = useCallback((cc: string) => {
+    setCountryCodeRaw(cc);
+    if (cc === '+266') {
+      setPhoneRaw((prev) => {
+        const d = (prev || '').replace(/\D/g, '');
+        if (d.length > 0 && d[0] !== '5' && d[0] !== '6') return '';
+        return d.slice(0, 8);
+      });
+    }
+  }, []);
 
   // 1. First name validation (at least 2 characters)
   const isFirstNameValid = useMemo(() => {

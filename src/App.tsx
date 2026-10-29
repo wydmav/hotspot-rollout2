@@ -19,6 +19,7 @@ import { StandalonePortalView } from './components/portal/StandalonePortalView';
 import { Fingerprint, CheckCircle2, ShieldCheck, Database, Eye, UserPlus, Mail, Copy, Check, X, Sparkles, ArrowUpRight, PanelLeftOpen } from 'lucide-react';
 import { simulateInviteEmail } from './services/auth';
 import { browserNotificationService } from './services/browserNotifications';
+import { copyToClipboard } from './utils/clipboard';
 
 export default function App() {
   const [state, setState] = useState(() => storage.getState());
@@ -1200,7 +1201,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(recentlyInvitedTeammate.inviteUrl);
+                    void copyToClipboard(recentlyInvitedTeammate.inviteUrl);
                     setCopiedGlobalInviteUrl(true);
                     setTimeout(() => setCopiedGlobalInviteUrl(false), 2000);
                   }}

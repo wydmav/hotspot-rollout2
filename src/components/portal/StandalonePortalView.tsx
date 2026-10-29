@@ -159,6 +159,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [voucherCode, setVoucherCode] = useState('');
   const [voucherError, setVoucherError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [phoneFormatError, setPhoneFormatError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
@@ -480,12 +481,27 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const cleanPhoneDigits = guestPhone.replace(/\D/g, '');
   const isPhoneValid = !currentConfig.collectPhone || (
     guestCountryCode === '+266'
-      ? cleanPhoneDigits.replace(/^0/, '').length === 8
+      ? /^[56]\d{7}$/.test(cleanPhoneDigits)
       : (cleanPhoneDigits.startsWith('0') ? cleanPhoneDigits.length === 10 : cleanPhoneDigits.length === 9)
   );
   const emailValidation = validateEmailAddress(guestEmail, Boolean(currentConfig.collectEmail));
   const isEmailValid = !currentConfig.collectEmail || emailValidation.isValid;
   const isGuestFormValid = isFirstNameValid && isSurnameValid && isPhoneValid && isEmailValid;
+
+  const handleGuestPhoneChange = (rawVal: string, cc: '+266' | '+27' = guestCountryCode) => {
+    const digits = rawVal.replace(/\D/g, '');
+    if (cc === '+266') {
+      if (digits.length > 0 && digits[0] !== '5' && digits[0] !== '6') {
+        setPhoneFormatError('Lesotho (+266) numbers must start with 5 or 6');
+        return;
+      }
+      setPhoneFormatError(null);
+      setGuestPhone(digits.slice(0, 8));
+    } else {
+      setPhoneFormatError(null);
+      setGuestPhone(digits.slice(0, 10));
+    }
+  };
 
   // Video Ad / Multi-Image Ad countdown & unlock timer when in 'video_ad' step
   useEffect(() => {
@@ -731,8 +747,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
     } else if (selectedGateway === 'ecocash') {
-      const normalizedPhone = cleanPhoneDigits.replace(/^0/, '');
-      if (normalizedPhone.length < 8) {
+      if (guestCountryCode === '+266' && !/^[56]\d{7}$/.test(cleanPhoneDigits)) {
+        setPaymentError('Please enter a valid 8-digit Lesotho EcoCash number starting with 5 or 6.');
+        return;
+      }
+      if (cleanPhoneDigits.length < 8) {
         setPaymentError('Please enter a valid 8-digit EcoCash mobile number.');
         return;
       }
@@ -894,13 +913,28 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
         {currentConfig.collectPhone && (
           <div>
-            <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-              Mobile Number <span className="text-red-400">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-0.5">
+              <label className="text-[10px] font-medium text-slate-300">
+                Mobile Number <span className="text-red-400">*</span>
+              </label>
+              {guestCountryCode === '+266' && (
+                <span className="text-[9px] font-mono text-slate-400">
+                  {cleanPhoneDigits.length}/8 digits (starts with 5 or 6)
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1.5">
               <select
                 value={guestCountryCode}
-                onChange={(e) => setGuestCountryCode(e.target.value as '+266' | '+27')}
+                onChange={(e) => {
+                  const nextCc = e.target.value as '+266' | '+27';
+                  setGuestCountryCode(nextCc);
+                  setPhoneFormatError(null);
+                  if (nextCc === '+266') {
+                    const d = guestPhone.replace(/\D/g, '');
+                    setGuestPhone(d.length > 0 && (d[0] === '5' || d[0] === '6') ? d.slice(0, 8) : '');
+                  }
+                }}
                 className="px-2 py-1 bg-[#121829] border border-[#232d42] rounded-lg text-white text-[11px] font-mono focus:outline-none cursor-pointer shrink-0"
               >
                 <option value="+266" className="bg-[#0b0f19] text-white">+266 (LS)</option>
@@ -909,13 +943,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               <input
                 type="tel"
                 inputMode="numeric"
+                maxLength={guestCountryCode === '+266' ? 8 : 10}
                 required
                 value={guestPhone}
-                onChange={(e) => setGuestPhone(e.target.value.replace(/[^\d\s-]/g, ''))}
-                placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
+                onChange={(e) => handleGuestPhoneChange(e.target.value, guestCountryCode)}
+                placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx (8 digits)' : '07xxxxxxxx'}
                 className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] font-mono focus:outline-none"
               />
             </div>
+            {phoneFormatError && (
+              <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
+            )}
           </div>
         )}
 
@@ -1539,21 +1577,30 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 </div>
               ) : (
                 <div>
-                  <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-                    EcoCash Mobile Number ({guestCountryCode}) <span className="text-red-400">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="text-[10px] font-medium text-slate-300">
+                      EcoCash Mobile Number (+266) <span className="text-red-400">*</span>
+                    </label>
+                    <span className="text-[9px] font-mono text-slate-400">
+                      {cleanPhoneDigits.length}/8 digits (starts with 5 or 6)
+                    </span>
+                  </div>
                   <input
                     type="tel"
                     inputMode="numeric"
+                    maxLength={8}
                     required
                     value={guestPhone}
                     onChange={(e) => {
-                      setGuestPhone(e.target.value.replace(/[^\d\s-]/g, ''));
+                      handleGuestPhoneChange(e.target.value, '+266');
                       setPaymentError(null);
                     }}
-                    placeholder="5xxxxxxx / 6xxxxxxx"
+                    placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
                     className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
                   />
+                  {phoneFormatError && (
+                    <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
+                  )}
                 </div>
               )}
 
@@ -1568,7 +1615,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <button
                 type="submit"
-                disabled={!isTermsSatisfied || isConnecting || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                disabled={
+                  !isTermsSatisfied ||
+                  isConnecting ||
+                  (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16) ||
+                  (selectedGateway === 'ecocash' && !/^[56]\d{7}$/.test(cleanPhoneDigits))
+                }
                 className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />

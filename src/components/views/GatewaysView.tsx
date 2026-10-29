@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { GatewayConfig, GatewayProvider } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface GatewaysViewProps {
   gateways: GatewayConfig[];
@@ -320,7 +321,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
 
   const handleCopyWebhook = () => {
     if (!selectedGateway) return;
-    navigator.clipboard.writeText(selectedGateway.webhookUrl);
+    void copyToClipboard(selectedGateway.webhookUrl);
     setCopiedWebhook(true);
     setTimeout(() => setCopiedWebhook(false), 2000);
   };

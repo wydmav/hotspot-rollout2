@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { supabaseService, SUPABASE_SQL_MIGRATIONS } from '../../services/supabase';
 import { storage } from '../../services/storage';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface DatabaseModalProps {
   isOpen: boolean;
@@ -112,7 +113,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
   };
 
   const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_MIGRATIONS);
+    void copyToClipboard(SUPABASE_SQL_MIGRATIONS);
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2000);
   };

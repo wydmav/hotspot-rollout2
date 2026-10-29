@@ -30,6 +30,7 @@ import {
 import { RouterDevice, VerticalType } from '../../types';
 import { auditService } from '../../services/audit';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface RouterTerminalSubTabProps {
   routers: RouterDevice[];
@@ -1595,7 +1596,7 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
                 type="button"
                 onClick={() => {
                   const activeScript = exportScriptType === 'alignment' ? renderedAlignmentScript : renderedRscScript;
-                  navigator.clipboard.writeText(activeScript);
+                  copyToClipboard(activeScript);
                   setCopiedScript(true);
                   setTimeout(() => setCopiedScript(false), 2000);
                 }}

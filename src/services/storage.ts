@@ -1040,6 +1040,27 @@ class StorageService {
     this.saveState();
   }
 
+  resetCaptiveLeads(scope?: VerticalType | 'all'): number {
+    if (!this.state.captiveLeads) {
+      this.state.captiveLeads = [];
+      this.saveState();
+      return 0;
+    }
+    const beforeCount = this.state.captiveLeads.length;
+    if (!scope || scope === 'all') {
+      this.state.captiveLeads = [];
+    } else {
+      const normScope = (scope as string) === 'village' ? 'community' : scope;
+      this.state.captiveLeads = this.state.captiveLeads.filter((l) => {
+        const lScope = (l.vertical as string) === 'village' ? 'community' : l.vertical;
+        return lScope !== normScope;
+      });
+    }
+    const removed = beforeCount - this.state.captiveLeads.length;
+    this.saveState();
+    return removed;
+  }
+
   lookupRoamingSession(mac: string, phone?: string): ActiveSession | null {
     const cleanMac = String(mac || '').trim().toLowerCase();
     const cleanPhoneDigits = String(phone || '').replace(/\D/g, '');

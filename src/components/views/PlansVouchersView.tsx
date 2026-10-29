@@ -14,10 +14,13 @@ import {
   AlertTriangle,
   RefreshCw,
   SlidersHorizontal,
-  Layers
+  Layers,
+  Copy,
+  Check
 } from 'lucide-react';
 import { HotspotPlan, Voucher, VerticalType } from '../../types';
 import { ExportService } from '../../services/exportService';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface PlansVouchersViewProps {
   plans: HotspotPlan[];
@@ -47,6 +50,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const [selectedPlanForBatch, setSelectedPlanForBatch] = useState<string>(plans[0]?.id || '');
   const [batchCount, setBatchCount] = useState<number>(5);
   const [voucherSearch, setVoucherSearch] = useState('');
+  const [copiedVoucherId, setCopiedVoucherId] = useState<string | null>(null);
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
   const [localThreshold, setLocalThreshold] = useState<number>(voucherThreshold);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -522,7 +526,21 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                 filteredVouchers.map((voucher) => (
                   <tr key={voucher.id}>
                     <td className="py-3 font-bold text-white tracking-wider">
-                      {voucher.code}
+                      <div className="flex items-center gap-1.5">
+                        <span>{voucher.code}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void copyToClipboard(voucher.code);
+                            setCopiedVoucherId(voucher.id);
+                            setTimeout(() => setCopiedVoucherId(null), 1800);
+                          }}
+                          className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#1e263b] transition-colors cursor-pointer"
+                          title="Copy Voucher Code"
+                        >
+                          {copiedVoucherId === voucher.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
                     </td>
                     <td className="py-3">
                       <div>{voucher.planName}</div>

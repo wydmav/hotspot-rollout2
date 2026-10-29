@@ -48,6 +48,7 @@ import { RouterAuditModal } from './RouterAuditModal';
 import { RouterActionToolbar } from '../common/RouterActionToolbar';
 import { RouterDetailSlideover } from './RouterDetailSlideover';
 import { auditService } from '../../services/audit';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface AdoptionViewProps {
   routers: RouterDevice[];
@@ -332,13 +333,13 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   }) : '';
 
   const handleCopyOneLiner = () => {
-    navigator.clipboard.writeText(oneLiner);
+    void copyToClipboard(oneLiner);
     setCopiedOneLiner(true);
     setTimeout(() => setCopiedOneLiner(false), 2000);
   };
 
   const handleCopyFullScript = () => {
-    navigator.clipboard.writeText(provisioningScript);
+    void copyToClipboard(provisioningScript);
     setCopiedFullScript(true);
     setTimeout(() => setCopiedFullScript(false), 2000);
   };
@@ -489,7 +490,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       token: router.token || 'tok_live_session',
       rosVersion: router.rosVersion || 'v7'
     });
-    navigator.clipboard.writeText(script);
+    void copyToClipboard(script);
     triggerToast(`Adoption script copied for ${router.name}!`, 'info');
   };
 
@@ -615,7 +616,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
             onClick={() => {
               const portalBaseUrl = `${endpointProtocol}://${controllerHost.trim() || '169.58.98.92:3000'}`;
               const cli = syncedFleetCliScript || RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, bulkAccessMode !== 'PAID_ONLY');
-              navigator.clipboard.writeText(cli);
+              void copyToClipboard(cli);
               setCopiedFleetCliScript(true);
               setTimeout(() => setCopiedFleetCliScript(false), 2500);
             }}
@@ -1379,7 +1380,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       type="button"
                       onClick={() => {
                         const allPortsCmd = RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName);
-                        navigator.clipboard.writeText(allPortsCmd);
+                        void copyToClipboard(allPortsCmd);
                         setCopiedAllPortsBridgeCmd(true);
                         setTimeout(() => setCopiedAllPortsBridgeCmd(false), 2500);
                       }}
@@ -1397,7 +1398,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(
+                          void copyToClipboard(
                             RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName)
                           );
                           setCopiedBridgeCmd(true);
@@ -1447,7 +1448,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                             ap3Ip: '10.10.0.5',
                             vpsHost: controllerHost.trim() || '169.58.98.92:3000'
                           });
-                          navigator.clipboard.writeText(masterScript);
+                          void copyToClipboard(masterScript);
                           setCopiedMasterScript(true);
                           setTimeout(() => setCopiedMasterScript(false), 2500);
                         }}
@@ -1522,7 +1523,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                           hubDomain: controllerHost,
                           routerId: selectedRouter.id,
                         });
-                        navigator.clipboard.writeText(script);
+                        void copyToClipboard(script);
                         setCopiedFailoverScript(true);
                         setTimeout(() => setCopiedFailoverScript(false), 2000);
                       }}
@@ -1887,7 +1888,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   <button
                     onClick={() => {
                       const cleanScript = RouterOSRenderer.renderDeadoptionScript(deadoptModalRouter);
-                      navigator.clipboard.writeText(cleanScript);
+                      void copyToClipboard(cleanScript);
                       setCopiedDeadoptScript(true);
                       setTimeout(() => setCopiedDeadoptScript(false), 2500);
                     }}
@@ -2008,7 +2009,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     type="button"
                     onClick={() => {
                       const cmd = `/tool fetch url="${endpointProtocol}://${controllerHost}/api/devices/${selectedRouter.id}/heartbeat" mode=http check-certificate=no keep-result=yes dst-path=tc-test.txt; /file print where name="tc-test.txt"; /file remove "tc-test.txt"`;
-                      navigator.clipboard.writeText(cmd);
+                      void copyToClipboard(cmd);
                       setCopiedTestCmd(true);
                       setTimeout(() => setCopiedTestCmd(false), 2000);
                     }}
@@ -2038,7 +2039,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     onClick={() => {
                       const hostIp = controllerHost.split(':')[0];
                       const cmd = `/ping count=3 ${hostIp}`;
-                      navigator.clipboard.writeText(cmd);
+                      void copyToClipboard(cmd);
                       setCopiedPingCmd(true);
                       setTimeout(() => setCopiedPingCmd(false), 2000);
                     }}

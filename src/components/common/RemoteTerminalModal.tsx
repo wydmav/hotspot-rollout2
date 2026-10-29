@@ -3,6 +3,7 @@ import { RouterDevice } from '../../types';
 import { auditService } from '../../services/audit';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { WALLED_GARDEN_DOMAINS } from '../../services/storage';
+import { copyToClipboard } from '../../utils/clipboard';
 import { 
   Terminal, 
   X, 
@@ -359,7 +360,7 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
 
   const copyTerminalOutput = () => {
     const text = terminalLines.map(l => l.text).join('\n');
-    navigator.clipboard.writeText(text);
+    void copyToClipboard(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -1253,7 +1254,7 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(renderedRscScript);
+                  void copyToClipboard(renderedRscScript);
                   setCopiedScript(true);
                   setTimeout(() => setCopiedScript(false), 2000);
                 }}

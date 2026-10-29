@@ -825,11 +825,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <div class="field">
         <label class="lbl">Mobile Number *</label>
         <div class="phone-row">
-          <select id="guestCc" class="cc-sel">
+          <select id="guestCc" class="cc-sel" onchange="handleGuestPhoneInput(document.getElementById('guestPhone'))">
             <option value="+266">+266</option>
             <option value="+27">+27</option>
           </select>
-          <input class="inp" type="tel" id="guestPhone" value="" placeholder="5xxxxxxx / 6xxxxxxx">
+          <input class="inp" type="tel" inputmode="numeric" maxlength="8" id="guestPhone" value="" oninput="handleGuestPhoneInput(this)" placeholder="5xxxxxxx / 6xxxxxxx (8 digits)">
         </div>
       </div>` : ''}
       ${collectEmail ? `
@@ -955,6 +955,28 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (inp) handlePayInputFormat(inp);
   }
 
+  function handleGuestPhoneInput(inp) {
+    if (!inp) return;
+    var ccEl = document.getElementById('guestCc');
+    var cc = ccEl ? ccEl.value : '+266';
+    var digits = inp.value.replace(/\\D/g, '');
+    if (cc === '+266') {
+      inp.maxLength = 8;
+      inp.placeholder = '5xxxxxxx / 6xxxxxxx (8 digits)';
+      if (digits.length > 0 && digits.charAt(0) !== '5' && digits.charAt(0) !== '6') {
+        showErr('Lesotho (+266) numbers must start with 5 or 6.');
+        digits = '';
+      } else {
+        showErr('');
+      }
+      inp.value = digits.slice(0, 8);
+    } else {
+      inp.maxLength = 12;
+      inp.placeholder = 'Mobile number';
+      inp.value = digits.slice(0, 12);
+    }
+  }
+
   function validateGuestFields() {
     if (!isTermsChecked()) {
       showErr('Please tick the Terms & Conditions box to proceed.');
@@ -966,7 +988,19 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     var eEl = document.getElementById('guestEmail');
     if (fEl && fEl.value.trim().length < 2) { showErr('Please enter your first name.'); return false; }
     if (lEl && lEl.value.trim().length < 2) { showErr('Please enter your surname.'); return false; }
-    if (pEl && pEl.value.replace(/\\D/g, '').length < 8) { showErr('Please enter a valid mobile number.'); return false; }
+    if (pEl) {
+      var ccVal = document.getElementById('guestCc') ? document.getElementById('guestCc').value : '+266';
+      var phDigits = pEl.value.replace(/\\D/g, '');
+      if (ccVal === '+266') {
+        if (!/^[56]\\d{7}$/.test(phDigits)) {
+          showErr('Lesotho (+266) numbers must start with 5 or 6 and be 8 digits.');
+          return false;
+        }
+      } else if (phDigits.length < 7) {
+        showErr('Please enter a valid mobile number.');
+        return false;
+      }
+    }
     if (eEl) {
       var emVal = eEl.value.trim();
       if (!emVal || emVal.indexOf('@') === -1 || emVal.indexOf('.') === -1) {
@@ -1032,9 +1066,15 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       if (ctr) ctr.textContent = raw.length + ' / 16 digits';
       if (btn) btn.disabled = (raw.length !== 16 || !tcOk);
     } else {
-      raw = raw.slice(0, 12);
+      if (raw.length > 0 && raw.charAt(0) !== '5' && raw.charAt(0) !== '6') {
+        showErr('EcoCash Lesotho (+266) numbers must start with 5 or 6.');
+        raw = '';
+      } else {
+        showErr('');
+      }
+      raw = raw.slice(0, 8);
       inp.value = raw;
-      if (btn) btn.disabled = (raw.length < 8 || !tcOk);
+      if (btn) btn.disabled = (!/^[56]\\d{7}$/.test(raw) || !tcOk);
     }
   }
 
@@ -1057,8 +1097,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       if (ctr) { ctr.style.display = 'inline'; ctr.textContent = '0 / 16 digits'; }
     } else {
       lbl.textContent = 'EcoCash Mobile Number (+266) *';
-      inp.placeholder = '5xxxxxxx / 6xxxxxxx';
-      inp.maxLength = 12;
+      inp.placeholder = '5xxxxxxx / 6xxxxxxx (8 digits)';
+      inp.maxLength = 8;
       if (ctr) ctr.style.display = 'none';
     }
   }
@@ -1114,8 +1154,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       showErr('OTT Voucher PIN must be exactly 16 digits (' + val.length + '/16 digits entered).');
       return false;
     }
-    if (selectedGw === 'ecocash' && val.length < 8) {
-      showErr('Please enter a valid 8-digit EcoCash mobile number.');
+    if (selectedGw === 'ecocash' && !/^[56]\\d{7}$/.test(val)) {
+      showErr('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
       return false;
     }
     var btn = document.getElementById('buySubmitBtn');
@@ -1535,6 +1575,7 @@ interface PartnerApiKeyRecord {
   webhookSecret: string;
   status: 'active' | 'revoked';
   createdAt: string;
+  leadsResetAt?: string;
   lastUsedAt?: string;
   totalRequests?: number;
 }
@@ -2711,6 +2752,17 @@ function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
 }
 
 function isLeadAllowedForPartner(ev: any, partner: PartnerApiKeyRecord): boolean {
+  // Gate 0: Clean-Slate Baseline Timestamp Verification
+  // Ensures newly issued or reset sponsor API keys only receive leads captured at or after key issuance / reset
+  const baselineIso = partner.leadsResetAt || partner.createdAt;
+  if (baselineIso) {
+    const baselineMs = new Date(baselineIso).getTime();
+    const leadMs = ev.capturedAt ? new Date(ev.capturedAt).getTime() : 0;
+    if (!isNaN(baselineMs) && leadMs > 0 && leadMs < baselineMs) {
+      return false;
+    }
+  }
+
   // Gate 1: Applied Hotspot Policy Check
   const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
   const leadScope = rawScope === 'village' ? 'community' : rawScope;
@@ -3058,6 +3110,16 @@ app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
     });
   }
 
+  if (countryCode === '+266' && !/^[56]\d{7}$/.test(phone)) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_LESOTHO_PHONE',
+        message: 'Lesotho (+266) phone numbers must start with 5 or 6 and be exactly 8 digits.'
+      }
+    });
+  }
+
   const nowIso = new Date().toISOString();
   const rawEntry = {
     id: `guest_partner_${Date.now()}`,
@@ -3183,9 +3245,14 @@ app.get('/api/admin/partner-keys', (_req: Request, res: Response) => {
     vertical: r.vertical || 'hotspot',
     status: r.status
   }));
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
   res.json({
     success: true,
-    keys: serverStore.partnerApiKeys || [],
+    keys: keysWithCounts,
     adoptedRouters,
     webhookLogs: (serverStore.partnerWebhookLogs || []).slice(0, 30)
   });
@@ -3211,6 +3278,7 @@ app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
 
   const randomHex = crypto.randomBytes(16).toString('hex');
   const secretHex = crypto.randomBytes(12).toString('hex');
+  const nowIso = new Date().toISOString();
 
   const newKey: PartnerApiKeyRecord = {
     id: `pk_${Date.now()}`,
@@ -3223,17 +3291,24 @@ app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
     webhookUrl: String(webhookUrl || '').trim(),
     webhookSecret: `whsec_${secretHex}`,
     status: 'active',
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso,
+    leadsResetAt: nowIso,
     totalRequests: 0
   };
 
   serverStore.partnerApiKeys.unshift(newKey);
   saveServerPortalStore(serverStore);
 
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
+
   res.status(201).json({
     success: true,
-    key: newKey,
-    keys: serverStore.partnerApiKeys
+    key: { ...newKey, matchedLeadsCount: 0 },
+    keys: keysWithCounts
   });
 });
 
@@ -3259,14 +3334,122 @@ app.put('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
   if (status === 'active' || status === 'revoked') target.status = status;
 
   saveServerPortalStore(serverStore);
-  res.json({ success: true, key: target, keys: serverStore.partnerApiKeys });
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
+  res.json({ success: true, key: target, keys: keysWithCounts });
 });
 
 app.delete('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
   const keyId = String(req.params.id || '');
   serverStore.partnerApiKeys = (serverStore.partnerApiKeys || []).filter((k) => k.id !== keyId);
   saveServerPortalStore(serverStore);
-  res.json({ success: true, keys: serverStore.partnerApiKeys });
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
+  res.json({ success: true, keys: keysWithCounts });
+});
+
+// Reset a specific Partner API Key's leads to a clean slate (0 leads before now)
+app.post('/api/admin/partner-keys/:id/reset-leads', (req: Request, res: Response) => {
+  const keyId = String(req.params.id || '');
+  const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
+  if (!target) {
+    return res.status(404).json({ success: false, message: 'Partner API key not found.' });
+  }
+  const nowIso = new Date().toISOString();
+  target.leadsResetAt = nowIso;
+  saveServerPortalStore(serverStore);
+
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
+
+  res.json({
+    success: true,
+    resetAt: nowIso,
+    message: `Reset "${target.companyName}" (${target.campaignName}) to a clean slate (0 leads). Only new leads captured from now on will be returned.`,
+    key: { ...target, matchedLeadsCount: 0 },
+    keys: keysWithCounts
+  });
+});
+
+// Reset captured leads globally or per hotspot policy scope (and reset matching sponsor baselines)
+app.post('/api/admin/leads/reset', (req: Request, res: Response) => {
+  const { scope, partnerKeyId } = req.body || {};
+  const nowIso = new Date().toISOString();
+
+  if (partnerKeyId) {
+    const target = (serverStore.partnerApiKeys || []).find((k) => k.id === String(partnerKeyId));
+    if (!target) {
+      return res.status(404).json({ success: false, message: 'Sponsor API key not found.' });
+    }
+    target.leadsResetAt = nowIso;
+    saveServerPortalStore(serverStore);
+    const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+      ...k,
+      leadsResetAt: k.leadsResetAt || k.createdAt,
+      matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+    }));
+    return res.json({
+      success: true,
+      mode: 'partner',
+      resetAt: nowIso,
+      removedCount: 0,
+      keys: keysWithCounts,
+      events: serverStore.guestEvents
+    });
+  }
+
+  const rawScope = String(scope || 'all').trim().toLowerCase();
+  const normScope = rawScope === 'village' ? 'community' : rawScope;
+
+  let removedCount = 0;
+  if (!normScope || normScope === 'all') {
+    removedCount = (serverStore.guestEvents || []).length;
+    serverStore.guestEvents = [];
+    (serverStore.partnerApiKeys || []).forEach((k) => {
+      k.leadsResetAt = nowIso;
+    });
+  } else {
+    const beforeCount = (serverStore.guestEvents || []).length;
+    serverStore.guestEvents = (serverStore.guestEvents || []).filter((ev: any) => {
+      const evScopeRaw = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
+      const evScope = evScopeRaw === 'village' ? 'community' : evScopeRaw;
+      return evScope !== normScope;
+    });
+    removedCount = beforeCount - serverStore.guestEvents.length;
+    (serverStore.partnerApiKeys || []).forEach((k) => {
+      const kScopes = (k.allowedScopes || []).map((s) => (s.toLowerCase() === 'village' ? 'community' : s.toLowerCase()));
+      if (kScopes.includes('*') || kScopes.includes(normScope)) {
+        k.leadsResetAt = nowIso;
+      }
+    });
+  }
+
+  saveServerPortalStore(serverStore);
+
+  const keysWithCounts = (serverStore.partnerApiKeys || []).map((k) => ({
+    ...k,
+    leadsResetAt: k.leadsResetAt || k.createdAt,
+    matchedLeadsCount: (serverStore.guestEvents || []).filter((ev) => isLeadAllowedForPartner(ev, k)).length
+  }));
+
+  res.json({
+    success: true,
+    mode: normScope === 'all' ? 'all' : 'scope',
+    scope: normScope,
+    removedCount,
+    resetAt: nowIso,
+    events: serverStore.guestEvents,
+    keys: keysWithCounts
+  });
 });
 
 app.post('/api/admin/partner-keys/:id/test-webhook', async (req: Request, res: Response) => {

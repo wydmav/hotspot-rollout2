@@ -31,6 +31,7 @@ import {
   resolveWalledGardenImageUrl,
   buildInlineFallbackSlideDataUri
 } from './ScopeCaptivePortalBuilder';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface UploadedServerVideo {
   name: string;
@@ -1728,7 +1729,7 @@ export const VideoAdManagerPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(mikrotikScript);
+                  copyToClipboard(mikrotikScript);
                   setCopiedScript(true);
                   setTimeout(() => setCopiedScript(false), 2500);
                 }}

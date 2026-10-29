@@ -2986,10 +2986,12 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           </select>
                           <input
                             type="tel"
+                            inputMode="numeric"
+                            maxLength={guestCountryCode === '+266' ? 8 : 10}
                             required
                             value={guestPhone}
                             onChange={(e) => setGuestPhone(e.target.value)}
-                            placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
+                            placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx (8 digits)' : '07xxxxxxxx'}
                             className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
                               guestPhone && !isPhoneValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
                             }`}

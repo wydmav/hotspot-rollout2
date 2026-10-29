@@ -12,6 +12,7 @@ import {
   Server,
   Database
 } from 'lucide-react';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface SecurityAuthViewProps {
   biometricActive: boolean;
@@ -30,7 +31,7 @@ export const SecurityAuthView: React.FC<SecurityAuthViewProps> = ({
   const [tokenPepper] = useState('c9a8f23018247df8392019483710294817263548910293847561029384756102');
 
   const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopiedKey(label);
     setTimeout(() => setCopiedKey(null), 2000);
   };

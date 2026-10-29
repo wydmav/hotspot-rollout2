@@ -7,6 +7,7 @@ import { RouterActionToolbar } from '../common/RouterActionToolbar';
 import { RemoteTerminalModal } from '../common/RemoteTerminalModal';
 import { WebFigLauncherModal } from './WebFigLauncherModal';
 import { RouterAuditModal } from './RouterAuditModal';
+import { copyToClipboard } from '../../utils/clipboard';
 import { 
   X, 
   Terminal, 
@@ -979,7 +980,7 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(policyPushFeedback.script || '');
+                          copyToClipboard(policyPushFeedback.script || '');
                           setCopiedPolicyScript(true);
                           setTimeout(() => setCopiedPolicyScript(false), 2000);
                         }}

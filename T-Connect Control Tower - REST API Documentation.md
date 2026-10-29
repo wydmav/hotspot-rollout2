@@ -22,16 +22,17 @@ The **T-Connect Control Tower Partner API** is a **RESTful HTTP/HTTPS API** desi
 
 ---
 
-## 2. Security & 3-Gate Lead-Only Isolation Guarantee
+## 2. Security & 4-Gate Lead-Only Isolation Guarantee (Clean Slate Enforcement)
 
-Every API key issued by **T-Connect Control Tower** (`tc_live_...`) is governed by a strict **3-Gate Zero-Trust Enforcement Engine**:
+Every API key issued by **T-Connect Control Tower** (`tc_live_...`) is governed by a strict **4-Gate Zero-Trust Enforcement Engine**:
 
-1. **Gate 1 — Applied Hotspot Policy Verification (`allowedScopes`)**: Each Partner API key is explicitly bound to one or more **Applied Hotspot Policies** (`hotspot`, `community`, `park`, `bus`, `stadium`) and verifies that lead capture is active on that policy. Requests for any other policy scope return `403 FORBIDDEN_POLICY_SCOPE`.
-2. **Gate 2 — Adopted Router Verification (`allowedRouterIds` & `allowedSites`)**: Each Partner API key is scoped either to **All Adopted Routers** running the sponsor's applied policy (`*`) or to specific **Adopted MikroTik Routers** assigned to that sponsor. Leads are only returned or pushed via webhook if they originated on the sponsor's authorized adopted routers with the applied policy (`adoptedRouterVerified: true`).
-3. **Gate 3 — Strict Lead-Only Endpoint & Payload Sanitization**:
+1. **Gate 0 — Clean-Slate Timestamp Isolation (`leadsResetAt` / `createdAt`)**: Whenever a new Sponsor API key is generated, it starts from a **clean slate (`0` historical leads)**. The API key only returns leads captured at or after the key's issuance timestamp (`createdAt`) or its latest admin slate reset (`leadsResetAt`). Administrators can also reset an individual sponsor's slate or reset leads per policy scope at any time from the Control Tower dashboard.
+2. **Gate 1 — Applied Hotspot Policy Verification (`allowedScopes`)**: Each Partner API key is explicitly bound to one or more **Applied Hotspot Policies** (`hotspot`, `community`, `park`, `bus`, `stadium`) and verifies that lead capture is active on that policy. Requests for any other policy scope return `403 FORBIDDEN_POLICY_SCOPE`.
+3. **Gate 2 — Adopted Router Verification (`allowedRouterIds` & `allowedSites`)**: Each Partner API key is scoped either to **All Adopted Routers** running the sponsor's applied policy (`*`) or to specific **Adopted MikroTik Routers** assigned to that sponsor. Leads are only returned or pushed via webhook if they originated on the sponsor's authorized adopted routers with the applied policy (`adoptedRouterVerified: true`).
+4. **Gate 3 — Strict Lead-Only Endpoint & Payload Sanitization**:
    - Partner API keys can **only** access `/api/v1/partner/*` endpoints. Any attempt to use a Partner API key against internal dashboard routes (`/api/devices`, `/api/gateways`, `/api/vouchers`, `/api/portal/config`, etc.) is immediately rejected with `403 Forbidden (FORBIDDEN_PARTNER_KEY_SCOPE)`.
    - Responses return verified subscriber lead fields (`firstName`, `lastName`, `fullName`, `countryCode`, `phone`, `fullPhone`, `email`, `hotspotPolicyScope`, `siteName`, `sponsorCampaign`, `adoptedRouterVerified`, `capturedAt`) while **strictly stripping** all internal network and billing data (client MAC addresses, internal DHCP IPs, MikroTik router IDs/WireGuard IPs, voucher codes, and payment gateway references).
-4. **Cross-Origin (`CORS`) Ready for External Teams**: All `/api/v1/partner/*` endpoints include `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type, X-API-Key, Authorization` so external partner servers, CRM integrations, and analytics pipelines can connect from any domain.
+5. **Cross-Origin (`CORS`) Ready for External Teams**: All `/api/v1/partner/*` endpoints include `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type, X-API-Key, Authorization` so external partner servers, CRM integrations, and analytics pipelines can connect from any domain.
 
 ---
 

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ContentFilterRule, RouterDevice, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface BandwidthFilterViewProps {
   contentFilters: ContentFilterRule[];
@@ -202,7 +203,7 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
         <div className="flex justify-end pt-2 border-t border-[#232d42]">
           <button
             onClick={() => {
-              navigator.clipboard.writeText(generatedQosScript);
+              copyToClipboard(generatedQosScript);
               setCopiedQosScript(true);
               setTimeout(() => setCopiedQosScript(false), 2000);
             }}
@@ -272,7 +273,7 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
             </div>
             <button
               onClick={() => {
-                navigator.clipboard.writeText(generatedDnsScript);
+                copyToClipboard(generatedDnsScript);
                 setCopiedDnsScript(true);
                 setTimeout(() => setCopiedDnsScript(false), 2000);
               }}

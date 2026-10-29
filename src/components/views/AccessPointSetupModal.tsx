@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { RouterDevice } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
+import { copyToClipboard as copyText } from '../../utils/clipboard';
 
 interface AccessPointSetupModalProps {
   isOpen: boolean;
@@ -67,7 +68,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
   const winboxCliCommand = `winbox.exe ${routerGatewayIp}:8291 admin`;
 
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    void copyText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2500);
   };

@@ -37,6 +37,7 @@ import { ScopeCaptivePortalBuilder } from './ScopeCaptivePortalBuilder';
 import { TenantGroupsModal } from './TenantGroupsModal';
 import { VideoAdManagerPanel } from './VideoAdManagerPanel';
 import { useConnectFreeValidation } from '../../hooks/useConnectFreeValidation';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface CaptivePortalViewProps {
   plans: HotspotPlan[];
@@ -625,7 +626,7 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
 `;
 
   const handleCopyLockdownScript = () => {
-    navigator.clipboard.writeText(strictCnaLockdownScript);
+    copyToClipboard(strictCnaLockdownScript);
     setCopiedLockdownScript(true);
     setTimeout(() => setCopiedLockdownScript(false), 2000);
   };
@@ -1291,9 +1292,11 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
 
                             <input
                               type="tel"
+                              inputMode="numeric"
+                              maxLength={guestCountry.code === '+266' ? 8 : 10}
                               value={guestPhone}
                               onChange={(e) => setGuestPhone(e.target.value)}
-                              placeholder={guestCountry.code === '+266' ? '5xxxxxxx / 6xxxxxxx' : '07xxxxxxxx'}
+                              placeholder={guestCountry.code === '+266' ? '5xxxxxxx / 6xxxxxxx (8 digits)' : '07xxxxxxxx'}
                               required
                               className={`w-full px-2.5 py-1.5 bg-black/40 border rounded-xl text-white text-xs font-mono focus:outline-none transition-colors ${
                                 guestPhone && !isPhoneValid ? 'border-red-400' : 'border-white/20 focus:border-[#f05e17]'
@@ -2028,7 +2031,7 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                             <button
                               type="button"
                               onClick={() => {
-                                navigator.clipboard.writeText(feedback.script || '');
+                                copyToClipboard(feedback.script || '');
                                 setCopiedScriptId(router.id);
                                 setTimeout(() => setCopiedScriptId(null), 2000);
                               }}

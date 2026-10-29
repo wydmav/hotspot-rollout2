@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { TeamMember, AuditLogEntry, RouterDevice } from '../../types';
 import { auditService } from '../../services/audit';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface TeamRbacViewProps {
   team: TeamMember[];
@@ -114,7 +115,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
     const resolvedToken = token || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const resolvedName = name || email.split('@')[0];
     const inviteUrl = `${origin}/#invite?token=${resolvedToken}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}&name=${encodeURIComponent(resolvedName)}`;
-    navigator.clipboard.writeText(inviteUrl);
+    copyToClipboard(inviteUrl);
     setCopiedInviteUrl(email);
     setTimeout(() => setCopiedInviteUrl(null), 2500);
   };
@@ -612,7 +613,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(issuedTempPass);
+                    copyToClipboard(issuedTempPass);
                     setCopiedTempPass(true);
                     setTimeout(() => setCopiedTempPass(false), 2000);
                   }}
@@ -861,7 +862,7 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(recentlyInvited.inviteUrl);
+                    copyToClipboard(recentlyInvited.inviteUrl);
                     setCopiedRecentlyInvitedUrl(true);
                     setTimeout(() => setCopiedRecentlyInvitedUrl(false), 2000);
                   }}

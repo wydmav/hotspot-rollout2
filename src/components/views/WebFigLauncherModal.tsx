@@ -23,6 +23,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { AccessPointSetupModal } from './AccessPointSetupModal';
+import { copyToClipboard as copyText } from '../../utils/clipboard';
 
 interface WebFigLauncherModalProps {
   router: RouterDevice;
@@ -52,7 +53,7 @@ export const WebFigLauncherModal: React.FC<WebFigLauncherModalProps> = ({
   const winboxCommand = isPending ? 'winbox.exe 192.168.88.1:8291 admin' : `winbox.exe ${wireguardIp}:8291 admin`;
 
   const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
+    void copyText(text);
     setCopiedText(label);
     setTimeout(() => setCopiedText(null), 2500);
   };

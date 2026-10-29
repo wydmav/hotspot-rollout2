@@ -21,10 +21,13 @@ import {
   Copy,
   Send,
   Lock,
-  Globe
+  Globe,
+  RotateCcw,
+  AlertTriangle
 } from 'lucide-react';
 import { CaptivePortalLead, VerticalType } from '../../types';
 import { storage } from '../../services/storage';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface PartnerApiKeyItem {
   id: string;
@@ -38,6 +41,8 @@ interface PartnerApiKeyItem {
   webhookSecret: string;
   status: 'active' | 'revoked';
   createdAt: string;
+  leadsResetAt?: string;
+  matchedLeadsCount?: number;
   lastUsedAt?: string;
   totalRequests?: number;
 }
@@ -84,6 +89,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [isCreatingKey, setIsCreatingKey] = useState(false);
   const [testingWebhookId, setTestingWebhookId] = useState<string | null>(null);
   const [verifyingKeyId, setVerifyingKeyId] = useState<string | null>(null);
+  const [resettingKeyId, setResettingKeyId] = useState<string | null>(null);
+  const [showResetLeadsModal, setShowResetLeadsModal] = useState(false);
+  const [resetTargetScope, setResetTargetScope] = useState<VerticalType | 'all'>('all');
+  const [isResettingLeads, setIsResettingLeads] = useState(false);
   const [verificationReport, setVerificationReport] = useState<Record<string, string>>({});
   const [serverAdoptedRouters, setServerAdoptedRouters] = useState<
     Array<{ id: string; name: string; siteName: string; vertical: string }>
@@ -274,7 +283,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         setNewCampaignName('');
         setNewRouterIds(['*']);
         setNewWebhookUrl('');
-        showToast(`Issued Lead-Only REST API Key for ${data.key?.companyName}`);
+        showToast(`Issued Lead-Only REST API Key for ${data.key?.companyName} (Clean Slate — 0 prior leads)`);
       } else {
         showToast(data?.message || 'Failed to issue Partner API key');
       }
@@ -282,6 +291,65 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       showToast('Network error while issuing Partner API key');
     } finally {
       setIsCreatingKey(false);
+    }
+  };
+
+  const handleResetPartnerKeySlate = async (keyItem: PartnerApiKeyItem) => {
+    setResettingKeyId(keyItem.id);
+    try {
+      const res = await fetch(`/api/admin/partner-keys/${keyItem.id}/reset-leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data?.success) {
+        if (Array.isArray(data.keys)) setPartnerKeys(data.keys);
+        setVerificationReport((prev) => {
+          const next = { ...prev };
+          delete next[keyItem.id];
+          return next;
+        });
+        showToast(`Reset ${keyItem.companyName} API Key to a clean slate (0 leads)`);
+      } else {
+        showToast(data?.message || 'Failed to reset sponsor key leads');
+      }
+    } catch {
+      showToast('Network error resetting sponsor key leads');
+    } finally {
+      setResettingKeyId(null);
+    }
+  };
+
+  const handleExecuteLeadsReset = async (scopeToReset: VerticalType | 'all') => {
+    setIsResettingLeads(true);
+    try {
+      const res = await fetch('/api/admin/leads/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: scopeToReset })
+      });
+      const data = await res.json();
+      storage.resetCaptiveLeads(scopeToReset);
+      setLeads([...storage.getCaptiveLeads()]);
+      if (Array.isArray(data?.keys)) {
+        setPartnerKeys(data.keys);
+      } else {
+        fetchPartnerKeys();
+      }
+      setVerificationReport({});
+      setShowResetLeadsModal(false);
+      showToast(
+        scopeToReset === 'all'
+          ? 'All captured leads and sponsor API slates have been reset to 0'
+          : `Reset all captured leads for ${scopeToReset.toUpperCase()} policy scope`
+      );
+    } catch {
+      storage.resetCaptiveLeads(scopeToReset);
+      setLeads([...storage.getCaptiveLeads()]);
+      setShowResetLeadsModal(false);
+      showToast('Reset local captured leads');
+    } finally {
+      setIsResettingLeads(false);
     }
   };
 
@@ -365,10 +433,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async (text: string, label: string) => {
+    const ok = await copyToClipboard(text);
     setCopiedText(text);
-    showToast(`Copied ${label} to clipboard`);
+    showToast(ok ? `Copied ${label} to clipboard` : `Copied ${label}`);
     setTimeout(() => setCopiedText(null), 2000);
   };
 
@@ -632,6 +700,18 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           </button>
 
           <button
+            onClick={() => {
+              setResetTargetScope(selectedVertical === 'all' ? 'all' : selectedVertical);
+              setShowResetLeadsModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition-colors font-bold"
+            title="Reset leads globally, per policy scope, or reset a sponsor API key to a clean slate"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+            <span>Reset Leads</span>
+          </button>
+
+          <button
             onClick={refreshLeads}
             className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-slate-300 border border-[#232d42] transition-colors"
             title="Refresh Leads Table"
@@ -640,6 +720,126 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Reset Leads & Sponsor Clean Slate Modal */}
+      {showResetLeadsModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#1b233a] pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                  <RotateCcw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">Reset Captured Leads &amp; Sponsor Slates</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Start a policy scope or sponsor campaign from a clean slate (0 leads)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowResetLeadsModal(false)}
+                className="text-slate-400 hover:text-white text-sm font-bold px-2 py-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs font-mono">
+              <div className="p-3 rounded-xl bg-[#121829] border border-[#1f283d] space-y-2.5">
+                <div className="text-white font-bold flex items-center justify-between">
+                  <span>1. Reset by Hotspot Policy Scope or Globally</span>
+                  <span className="text-[10px] text-slate-400">{leads.length} total leads in ledger</span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                  {(['all', 'hotspot', 'community', 'park', 'bus', 'stadium'] as const).map((sc) => (
+                    <button
+                      type="button"
+                      key={sc}
+                      onClick={() => setResetTargetScope(sc)}
+                      className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase border transition-colors ${
+                        resetTargetScope === sc
+                          ? 'bg-rose-600 text-white border-rose-400'
+                          : 'bg-[#0a0e17] text-slate-400 border-[#232d42] hover:text-white'
+                      }`}
+                    >
+                      {sc === 'all' ? 'All Global' : sc}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                  {resetTargetScope === 'all'
+                    ? 'Wipes all captured leads across every hotspot policy scope and resets all Sponsor API Keys to 0 leads.'
+                    : `Wipes all captured leads under the ${resetTargetScope.toUpperCase()} policy scope and resets Sponsor API Keys assigned to ${resetTargetScope.toUpperCase()} to a clean slate.`}
+                </p>
+                <button
+                  type="button"
+                  disabled={isResettingLeads}
+                  onClick={() => handleExecuteLeadsReset(resetTargetScope)}
+                  className="w-full py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>
+                    {isResettingLeads
+                      ? 'Resetting Leads...'
+                      : resetTargetScope === 'all'
+                      ? 'Reset All Leads Globally (Clean Slate)'
+                      : `Reset ${resetTargetScope.toUpperCase()} Policy Leads`}
+                  </span>
+                </button>
+              </div>
+
+              {partnerKeys.length > 0 && (
+                <div className="p-3 rounded-xl bg-[#121829] border border-[#1f283d] space-y-2">
+                  <div className="text-white font-bold">
+                    2. Reset Individual Sponsor API Key to Clean Slate (Keep Global Ledger)
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-sans">
+                    Updates the sponsor key&apos;s baseline timestamp so their API &amp; CSV feed starts at 0 leads from right now without deleting historical records from your admin dashboard.
+                  </p>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {partnerKeys.map((pk) => (
+                      <div
+                        key={pk.id}
+                        className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#0a0e17] border border-[#232d42]"
+                      >
+                        <div className="truncate">
+                          <div className="text-white font-bold text-[11px] truncate">{pk.companyName}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {pk.campaignName} ·{' '}
+                            <span className="text-emerald-400 font-bold">
+                              {pk.matchedLeadsCount ?? 0} leads on slate
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={resettingKeyId === pk.id}
+                          onClick={() => handleResetPartnerKeySlate(pk)}
+                          className="px-2.5 py-1 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-bold shrink-0 flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>{resettingKeyId === pk.id ? 'Resetting...' : 'Reset Sponsor Slate'}</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-[#1b233a]">
+              <button
+                type="button"
+                onClick={() => setShowResetLeadsModal(false)}
+                className="px-3.5 py-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-xs font-mono text-slate-300"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Partner REST API & Scoped Keys Management Panel */}
       {showPartnerApiPanel && (
@@ -825,6 +1025,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                   {partnerKeys.map((pk) => {
                     const sampleCurl = `curl -s -H "X-API-Key: ${pk.apiKey}" "${window.location.origin}/api/v1/partner/leads?scope=${pk.allowedScopes[0] || 'hotspot'}&limit=25"`;
+                    const csvCurl = `curl -s -H "X-API-Key: ${pk.apiKey}" "${window.location.origin}/api/v1/partner/leads/export.csv" -o leads.csv`;
                     return (
                       <div
                         key={pk.id}
@@ -842,7 +1043,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                               ({pk.campaignName})
                             </span>
                           </div>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             {pk.allowedScopes.map((sc) => (
                               <span
                                 key={sc}
@@ -851,6 +1052,12 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                                 {sc}
                               </span>
                             ))}
+                            <span
+                              className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-mono font-bold"
+                              title={`Clean Slate Baseline: ${new Date(pk.leadsResetAt || pk.createdAt).toLocaleString()}`}
+                            >
+                              {pk.matchedLeadsCount ?? 0} slate leads
+                            </span>
                             <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[9px] font-mono">
                               {pk.totalRequests || 0} calls
                             </span>
@@ -861,22 +1068,53 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                           <div className="flex items-center gap-2 truncate">
                             <span className="text-amber-300 select-all">{pk.apiKey}</span>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
                             <button
                               type="button"
                               onClick={() => handleCopy(pk.apiKey, `${pk.companyName} API Key`)}
                               className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white text-[10px] flex items-center gap-1"
                             >
-                              <Copy className="w-2.5 h-2.5" />
-                              <span>Copy Key</span>
+                              {copiedText === pk.apiKey ? (
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-2.5 h-2.5" />
+                              )}
+                              <span>{copiedText === pk.apiKey ? 'Copied!' : 'Copy Key'}</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleCopy(sampleCurl, 'cURL command')}
                               className="px-2 py-0.5 rounded bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-[10px] flex items-center gap-1"
                             >
-                              <Globe className="w-2.5 h-2.5" />
-                              <span>Copy cURL</span>
+                              {copiedText === sampleCurl ? (
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-2.5 h-2.5" />
+                              )}
+                              <span>{copiedText === sampleCurl ? 'Copied cURL!' : 'Copy cURL'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(csvCurl, 'CSV Export cURL command')}
+                              className="px-2 py-0.5 rounded bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-[10px] flex items-center gap-1"
+                              title="Copy cURL command for CSV export"
+                            >
+                              {copiedText === csvCurl ? (
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-2.5 h-2.5" />
+                              )}
+                              <span>{copiedText === csvCurl ? 'Copied CSV!' : 'Copy CSV cURL'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={resettingKeyId === pk.id}
+                              onClick={() => handleResetPartnerKeySlate(pk)}
+                              className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] flex items-center gap-1"
+                              title="Reset this sponsor's API key to a clean slate (0 leads before right now)"
+                            >
+                              <RotateCcw className="w-2.5 h-2.5" />
+                              <span>{resettingKeyId === pk.id ? 'Resetting...' : 'Reset Slate'}</span>
                             </button>
                             <button
                               type="button"
@@ -932,18 +1170,53 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                                 ? 'All Adopted Routers in Policy'
                                 : (pk.allowedRouterIds || []).join(', ')}
                             </strong>{' '}
+                            · Clean Slate Since:{' '}
+                            <strong className="text-emerald-400">
+                              {new Date(pk.leadsResetAt || pk.createdAt).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </strong>{' '}
                             · Webhook Secret:{' '}
-                            <code
+                            <button
+                              type="button"
                               onClick={() => handleCopy(pk.webhookSecret, 'Webhook Secret')}
-                              className="text-slate-300 cursor-pointer hover:text-white"
+                              className="text-slate-300 hover:text-white inline-flex items-center gap-1 underline decoration-dotted"
+                              title="Click to copy Webhook Secret"
                             >
-                              {pk.webhookSecret}
-                            </code>
+                              <span>{pk.webhookSecret}</span>
+                              <Copy className="w-2.5 h-2.5" />
+                            </button>
                           </span>
-                          <span>
-                            GET <code className="text-slate-300">/api/v1/partner/leads</code> · POST{' '}
-                            <code className="text-slate-300">/api/v1/partner/leads</code> · CSV{' '}
-                            <code className="text-slate-300">/api/v1/partner/leads/export.csv</code>
+                          <span className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopy(`${window.location.origin}/api/v1/partner/leads`, 'GET /api/v1/partner/leads URL')
+                              }
+                              className="hover:text-white inline-flex items-center gap-1"
+                              title="Copy GET leads endpoint URL"
+                            >
+                              GET <code className="text-slate-300">/api/v1/partner/leads</code>
+                              <Copy className="w-2.5 h-2.5" />
+                            </button>
+                            <span>·</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopy(
+                                  `${window.location.origin}/api/v1/partner/leads/export.csv`,
+                                  'CSV Export Endpoint URL'
+                                )
+                              }
+                              className="hover:text-white inline-flex items-center gap-1"
+                              title="Copy CSV export endpoint URL"
+                            >
+                              CSV <code className="text-slate-300">/api/v1/partner/leads/export.csv</code>
+                              <Copy className="w-2.5 h-2.5" />
+                            </button>
                           </span>
                         </div>
                       </div>

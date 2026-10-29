@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { TenantGroup, RouterDevice } from '../../types';
 import { storage } from '../../services/storage';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface TenantGroupsModalProps {
   isOpen: boolean;
@@ -89,7 +90,7 @@ export const TenantGroupsModal: React.FC<TenantGroupsModalProps> = ({
   };
 
   const handleCopyTag = (t: string) => {
-    navigator.clipboard.writeText(t);
+    copyToClipboard(t);
     setCopiedTag(t);
     setTimeout(() => setCopiedTag(null), 2000);
   };

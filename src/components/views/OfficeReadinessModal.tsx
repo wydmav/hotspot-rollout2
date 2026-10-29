@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { RouterDevice } from '../../types';
 import { storage, WALLED_GARDEN_DOMAINS } from '../../services/storage';
+import { copyToClipboard as writeToClipboard } from '../../utils/clipboard';
 
 interface OfficeReadinessModalProps {
   isOpen: boolean;
@@ -107,7 +108,7 @@ export const OfficeReadinessModal: React.FC<OfficeReadinessModalProps> = ({
   const routerGatewayIp = '192.168.88.1';
 
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    writeToClipboard(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2500);
   };
