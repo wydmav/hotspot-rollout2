@@ -208,7 +208,7 @@ export interface CaptivePortalLead {
   status: 'active' | 'expired';
 }
 
-export type GatewayProvider = 'ottvoucher' | 'ecocash';
+export type GatewayProvider = 'ottvoucher' | 'ecocash' | 'paylesotho';
 
 export interface GatewayConfig {
   provider: GatewayProvider;

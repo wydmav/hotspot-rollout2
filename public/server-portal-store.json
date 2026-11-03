@@ -3,7 +3,7 @@
     {
       "provider": "ecocash",
       "name": "EcoCash Lesotho",
-      "subtitle": "Econet Telecom Mobile Money STK Push",
+      "subtitle": "Econet Telecom Mobile Money (*199# Push)",
       "currency": "M",
       "isLive": false,
       "isSandbox": true,
@@ -13,17 +13,18 @@
       "bearerToken": "",
       "merchantId": "TCONNECTLES1",
       "webhookSecret": "",
-      "webhookUrl": "https://app.tconnect.co.ls/api/webhooks/ecocash",
+      "webhookUrl": "http://169.58.98.92:3000/api/webhooks/ecocash",
       "successRate24h": 0,
       "avgLatencyMs": 0,
       "testPassedOnce": false,
       "apiPassword": "",
       "vendorId": "11, 1",
-      "username": "TCONNECTLES1"
+      "username": "TCONNECTLES1",
+      "endpointUrl": "https://api.ottlesotho.com"
     },
     {
       "provider": "ottvoucher",
-      "name": "OTTvoucher Lesotho",
+      "name": "OTT Voucher Lesotho",
       "subtitle": "16-Digit PIN & Retail Voucher Redemption (api.ottlesotho.com)",
       "currency": "M",
       "isLive": true,
@@ -37,91 +38,140 @@
       "bearerToken": "",
       "merchantId": "TCONNECTLES1",
       "webhookSecret": "",
-      "webhookUrl": "https://app.tconnect.co.ls/api/webhooks/ottvoucher",
+      "webhookUrl": "http://169.58.98.92:3000/api/webhooks/ottvoucher",
       "successRate24h": 100,
       "avgLatencyMs": 320,
       "testPassedOnce": true,
       "vendorId": "1, 11"
     }
   ],
-  "vouchers": [
+  "vouchers": [],
+  "redeemedOttPins": [],
+  "guestEvents": [
     {
-      "id": "v_1791360453735_0",
-      "code": "TC-5100-M10",
-      "planId": "plan_daily_m10",
+      "id": "guest_pl_1793660222864",
+      "firstName": "T-Connect",
+      "lastName": "Guest",
+      "guestName": "T-Connect Guest",
+      "countryCode": "+266",
+      "phone": "58123456",
+      "guestPhone": "+266 58123456",
+      "email": "guest@tconnect.ls",
+      "mac": "",
+      "ip": "",
+      "scope": "hotspot",
+      "routerId": "router_adopted_default",
+      "routerName": "MIKROTIK-TC",
+      "siteName": "T-Connect Hotspot",
+      "adoptedRouterVerified": true,
+      "mode": "paid",
       "planName": "Daily Pass",
-      "price": 10,
-      "currency": "M",
       "durationSeconds": 86400,
-      "deviceLimit": 2,
-      "status": "active",
-      "generatedAt": "2026-10-07 08:07:33",
-      "expiresAt": "2026-11-06T08:07:33.735Z",
-      "associatedDevices": [],
-      "batchId": "batch_1791360453735"
-    },
-    {
-      "id": "v_1791360453735_1",
-      "code": "TC-4081-M10",
-      "planId": "plan_daily_m10",
-      "planName": "Daily Pass",
-      "price": 10,
-      "currency": "M",
-      "durationSeconds": 86400,
-      "deviceLimit": 2,
-      "status": "active",
-      "generatedAt": "2026-10-07 08:07:33",
-      "expiresAt": "2026-11-06T08:07:33.735Z",
-      "associatedDevices": [],
-      "batchId": "batch_1791360453735"
-    },
-    {
-      "id": "v_1791360453735_2",
-      "code": "TC-6008-M10",
-      "planId": "plan_daily_m10",
-      "planName": "Daily Pass",
-      "price": 10,
-      "currency": "M",
-      "durationSeconds": 86400,
-      "deviceLimit": 2,
-      "status": "active",
-      "generatedAt": "2026-10-07 08:07:33",
-      "expiresAt": "2026-11-06T08:07:33.735Z",
-      "associatedDevices": [],
-      "batchId": "batch_1791360453735"
-    },
-    {
-      "id": "v_1791360453735_3",
-      "code": "TC-8103-M10",
-      "planId": "plan_daily_m10",
-      "planName": "Daily Pass",
-      "price": 10,
-      "currency": "M",
-      "durationSeconds": 86400,
-      "deviceLimit": 2,
-      "status": "active",
-      "generatedAt": "2026-10-07 08:07:33",
-      "expiresAt": "2026-11-06T08:07:33.735Z",
-      "associatedDevices": [],
-      "batchId": "batch_1791360453735"
-    },
-    {
-      "id": "v_1791360453735_4",
-      "code": "TC-7719-M10",
-      "planId": "plan_daily_m10",
-      "planName": "Daily Pass",
-      "price": 10,
-      "currency": "M",
-      "durationSeconds": 86400,
-      "deviceLimit": 2,
-      "status": "active",
-      "generatedAt": "2026-10-07 08:07:33",
-      "expiresAt": "2026-11-06T08:07:33.735Z",
-      "associatedDevices": [],
-      "batchId": "batch_1791360453735"
+      "amount": 10,
+      "transactionRef": "PL-TC-1793660218458-880",
+      "capturedAt": "2026-11-02T22:57:02.864Z"
     }
   ],
-  "redeemedOttPins": [],
-  "guestEvents": [],
-  "transactions": []
+  "transactions": [
+    {
+      "id": "tx_pl_1793660218458",
+      "transactionRef": "PL-TC-1793660218458-880",
+      "provider": "paylesotho",
+      "channel": "ecocash",
+      "amount": 10,
+      "currency": "M",
+      "phoneNumber": "+266 58123456",
+      "msisdn": "26658123456",
+      "customerName": "T-Connect Guest",
+      "customerEmail": "guest@tconnect.ls",
+      "planId": "plan_daily_m10",
+      "planName": "Daily Pass",
+      "vertical": "hotspot",
+      "siteName": "T-Connect Hotspot",
+      "routerName": "MIKROTIK-TC",
+      "clientMac": "",
+      "clientIp": "",
+      "status": "completed",
+      "createdAt": "2026-11-02T22:56:58.458Z",
+      "debugLogs": {
+        "requestTimestamp": "2026-11-02T22:56:58.458Z",
+        "endpoint": "https://gateway.paylesotho.co.ls/api/v1/payments/request",
+        "channel": "ecocash",
+        "merchantId": "PL_MERCHANT_TCONNECT"
+      },
+      "completedAt": "2026-11-02T22:57:02.864Z"
+    }
+  ],
+  "sponsorAd": {
+    "enabled": true,
+    "title": "T-Connect Partner & Sponsor Showcase",
+    "headline": "High-Speed Starlink Connectivity Powered by Partners",
+    "sponsorName": "T-Connect Lesotho Partners",
+    "retriggerEveryHours": 3,
+    "retriggerEveryGb": 2,
+    "videoLibrary": [
+      {
+        "id": "carousel_tconnect_offers",
+        "title": "T-Connect & Partner Picture Series (3 Slides)",
+        "sponsorName": "T-Connect Lesotho Partners",
+        "headline": "Slide Through Exclusive Partner Deals",
+        "description": "Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.",
+        "videoUrl": "",
+        "destinationUrl": "https://tconnect.co.ls",
+        "mediaType": "image_carousel",
+        "slides": [
+          {
+            "id": "slide_1",
+            "imageUrl": "/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg",
+            "redirectUrl": "https://alliance.co.ls",
+            "caption": "Alliance Insurance Lesotho — Instant Motor & Business Cover"
+          },
+          {
+            "id": "slide_2",
+            "imageUrl": "/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg",
+            "redirectUrl": "https://tconnect.co.ls",
+            "caption": "Maseru Cafe & Hotspot Partner Offers — Tap to Explore"
+          },
+          {
+            "id": "slide_3",
+            "imageUrl": "/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg",
+            "redirectUrl": "https://ottlesotho.com",
+            "caption": "Top Up With 16-Digit OTT Lesotho Vouchers Anywhere"
+          }
+        ],
+        "targetScope": "all",
+        "enabled": true,
+        "watchMode": "skip_after_sec",
+        "skipAfterSec": 0,
+        "durationSec": 10,
+        "impressions": 0,
+        "clicks": 0
+      }
+    ]
+  },
+  "partnerApiKeys": [
+    {
+      "id": "pk_alliance_ls",
+      "companyName": "Alliance Insurance Lesotho",
+      "campaignName": "Hotspot & Stadium Sponsor Campaign",
+      "apiKey": "tc_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c",
+      "allowedScopes": [
+        "hotspot",
+        "stadium"
+      ],
+      "allowedRouterIds": [
+        "*"
+      ],
+      "allowedSites": [
+        "*"
+      ],
+      "webhookUrl": "",
+      "webhookSecret": "whsec_tconnect_alliance_2026",
+      "status": "active",
+      "createdAt": "2026-10-01T08:00:00.000Z",
+      "totalRequests": 1,
+      "lastUsedAt": "2026-11-02T22:56:10.123Z"
+    }
+  ],
+  "partnerWebhookLogs": []
 }

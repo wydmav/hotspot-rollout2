@@ -111,13 +111,15 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [portalStep, setPortalStep] = useState<
     'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
   >(() => {
-    if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+    if (typeof window !== 'undefined') {
       try {
         const params = new URLSearchParams(window.location.search);
         const stepParam = params.get('step');
         const reasonParam = params.get('reason');
         if (!stepParam && reasonParam !== 'retrigger') {
-          const activeConn = window.sessionStorage.getItem('tconnect_guest_connected_session');
+          const activeConn =
+            window.localStorage?.getItem('tconnect_active_connected_session') ||
+            window.sessionStorage?.getItem('tconnect_guest_connected_session');
           if (activeConn) return 'connected';
         }
       } catch {}
@@ -149,12 +151,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
 
-  // Plan & Payment State (Strictly EcoCash and OTT Voucher only)
+  // Plan & Payment State (PayLesotho Aggregator & Official 16-Digit OTT Voucher)
   const enabledPlans = currentConfig.plans.filter((p) => p.enabled !== false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     () => enabledPlans[0]?.id || currentConfig.plans[0]?.id || 'hs_1d'
   );
-  const [selectedGateway, setSelectedGateway] = useState<'ecocash' | 'ottvoucher'>('ottvoucher');
+  const [selectedGateway, setSelectedGateway] = useState<'paylesotho' | 'ottvoucher'>('paylesotho');
+  const [payLesothoChannel, setPayLesothoChannel] = useState<'ecocash' | 'mpesa' | 'card'>('ecocash');
   const [ottPin, setOttPin] = useState('');
   const [voucherCode, setVoucherCode] = useState('');
   const [voucherError, setVoucherError] = useState<string | null>(null);
@@ -394,16 +397,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
   const releaseAndCloseSplash = () => {
     const safeDstUrl = sanitizeDestinationUrl(userOrigUrl);
-    if (typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined') {
+    const sessionRecord = {
+      connectedAt: new Date().toISOString(),
+      username: routerUsernameRef.current || routerUsername || 'test',
+      scope: activeScope,
+      gatewayIp: routerGatewayIp
+    };
+
+    if (typeof window !== 'undefined') {
       try {
-        window.sessionStorage.setItem(
-          'tconnect_guest_connected_session',
-          JSON.stringify({
-            connectedAt: new Date().toISOString(),
-            username: routerUsernameRef.current,
-            scope: activeScope
-          })
-        );
+        window.localStorage.setItem('tconnect_active_connected_session', JSON.stringify(sessionRecord));
+        window.sessionStorage.setItem('tconnect_guest_connected_session', JSON.stringify(sessionRecord));
       } catch {}
     }
 
@@ -411,8 +415,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     portalStepRef.current = 'connected';
     setPortalStep('connected');
 
-    // If connected via physical MikroTik router, perform top-level authentication to $(link-login-only)
-    if ((clientMac || hasExplicitRouterLogin) && !routerAuthSentRef.current) {
+    // Authorize physical MikroTik router in background via hidden iframe + beacon
+    // so the phone's MAC address is instantly granted internet connectivity in RouterOS
+    // without triggering an iOS/Android CNA browser reload that resets the UI state
+    if (!routerAuthSentRef.current) {
       routerAuthSentRef.current = true;
       const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
       const authRedirectUrl = `${targetLoginUrl}?username=${encodeURIComponent(
@@ -420,23 +426,22 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       )}&password=${encodeURIComponent(
         routerPasswordRef.current || routerPassword || '123'
       )}&dst=${encodeURIComponent(safeDstUrl)}`;
-      if (typeof window !== 'undefined') {
-        window.location.href = authRedirectUrl;
-        return;
-      }
-    }
 
-    try {
-      window.close();
-    } catch {}
-    if (typeof window !== 'undefined') {
-      if (window.top && window.top !== window.self) {
-        try {
-          window.top.location.replace(safeDstUrl);
-          return;
-        } catch {}
-      }
-      window.location.href = safeDstUrl;
+      try {
+        let authIframe = document.getElementById('tc_router_auth_frame') as HTMLIFrameElement | null;
+        if (!authIframe) {
+          authIframe = document.createElement('iframe');
+          authIframe.id = 'tc_router_auth_frame';
+          authIframe.style.display = 'none';
+          authIframe.setAttribute('aria-hidden', 'true');
+          document.body.appendChild(authIframe);
+        }
+        authIframe.src = authRedirectUrl;
+      } catch {}
+
+      try {
+        fetch(authRedirectUrl, { mode: 'no-cors' }).catch(() => {});
+      } catch {}
     }
   };
 
@@ -527,7 +532,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
    * Sends captured guest details, session, and payment telemetry to the Admin Controller & Supabase
    */
   const syncGuestSessionToAdmin = async (payload: {
-    mode: 'free' | 'voucher' | 'ecocash' | 'ottvoucher';
+    mode: 'free' | 'voucher' | 'ecocash' | 'ottvoucher' | 'paylesotho';
     planName: string;
     durationSeconds: number;
     voucherCode: string;
@@ -728,7 +733,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Complete EcoCash or 16-Digit OTT Voucher Payment
+  // Complete PayLesotho Aggregator or 16-Digit OTT Voucher Payment
   const handleCompletePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
@@ -746,89 +751,159 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setPaymentError(`OTT Voucher PIN must be exactly 16 digits (${cleanPin.length}/16 digits entered).`);
         return;
       }
-    } else if (selectedGateway === 'ecocash') {
-      if (guestCountryCode === '+266' && !/^[56]\d{7}$/.test(cleanPhoneDigits)) {
-        setPaymentError('Please enter a valid 8-digit Lesotho EcoCash number starting with 5 or 6.');
-        return;
-      }
-      if (cleanPhoneDigits.length < 8) {
-        setPaymentError('Please enter a valid 8-digit EcoCash mobile number.');
+    } else {
+      if ((payLesothoChannel === 'ecocash' || payLesothoChannel === 'mpesa') && !/^[56]\d{7}$/.test(cleanPhoneDigits)) {
+        setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
         return;
       }
     }
 
     isConnectingRef.current = true;
     setIsConnecting(true);
+
+    if (selectedGateway === 'ottvoucher') {
+      setStatusBanner('Verifying official 16-digit OTT Voucher PIN with OTT Lesotho...');
+      try {
+        const response = await fetch('/api/vouchers/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: cleanPin,
+            mac: clientMac,
+            ip: clientIp,
+            scope: activeScope,
+            firstName: guestFirstName.trim(),
+            lastName: guestSurname.trim(),
+            guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'OTT Customer',
+            countryCode: guestCountryCode,
+            phone: guestPhone.trim(),
+            guestPhone: guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '',
+            guestEmail: guestEmail.trim()
+          })
+        });
+
+        const data = await response.json().catch(() => ({ success: false, message: 'Invalid response from OTT server.' }));
+        if (!response.ok || !data.success) {
+          setIsConnecting(false);
+          isConnectingRef.current = false;
+          setStatusBanner(null);
+          setPaymentError(data.message || '16-Digit OTT Voucher verification failed.');
+          return;
+        }
+
+        await syncGuestSessionToAdmin({
+          mode: 'ottvoucher',
+          planName: selectedPlan?.name || 'Daily Pass',
+          durationSeconds: selectedPlan?.durationSeconds || 86400,
+          voucherCode: `OTT-${cleanPin.slice(-4)}`,
+          amount: selectedPlan?.price || 10,
+          transactionRef: data.transactionRef,
+          speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
+        });
+
+        authorizeOnMikroTikRouter('test', '123');
+        setIsConnecting(false);
+        isConnectingRef.current = false;
+        setStatusBanner(null);
+        startOrEnterConnectedSession('post_auth');
+      } catch {
+        setIsConnecting(false);
+        isConnectingRef.current = false;
+        setStatusBanner(null);
+        setPaymentError('Network error connecting to OTT Voucher verification server.');
+      }
+      return;
+    }
+
+    // PayLesotho Aggregator Flow (EcoCash, Vodacom M-Pesa, Card/EFT)
     setStatusBanner(
-      selectedGateway === 'ottvoucher'
-        ? 'Verifying 16-digit OTT Voucher PIN with OTT Lesotho...'
-        : `Sending EcoCash (*199#) payment prompt to ${guestCountryCode} ${guestPhone}...`
+      payLesothoChannel === 'card'
+        ? 'Connecting to PayLesotho secure card payment gateway...'
+        : payLesothoChannel === 'mpesa'
+          ? `Initiating Vodacom M-Pesa (*111#) payment prompt for ${guestCountryCode} ${guestPhone}...`
+          : `Initiating Econet EcoCash (*199#) payment prompt for ${guestCountryCode} ${guestPhone}...`
     );
 
     try {
-      const endpoint =
-        selectedGateway === 'ottvoucher'
-          ? '/api/gateways/ottvoucher/redeem'
-          : '/api/gateways/ecocash/charge';
-
-      const response = await fetch(endpoint, {
+      const response = await fetch('/api/gateways/paylesotho/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ottPin: cleanPin,
-          phoneNumber: `${guestCountryCode} ${guestPhone.trim()}`,
           amount: selectedPlan?.price || 10,
+          channel: payLesothoChannel,
+          phoneNumber: `${guestCountryCode} ${guestPhone.trim()}`,
+          customerName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'T-Connect Guest',
+          customerEmail: guestEmail.trim() || 'guest@tconnect.co.ls',
           planId: selectedPlan?.id || 'hs_1d',
           planName: selectedPlan?.name || 'Daily Pass',
-          durationSeconds: selectedPlan?.durationSeconds || 86400,
-          currency: currencySymbol,
-          mac: clientMac,
-          ip: clientIp,
-          scope: activeScope,
-          firstName: guestFirstName.trim(),
-          lastName: guestSurname.trim(),
-          guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' '),
-          guestEmail: guestEmail.trim()
+          clientMac,
+          clientIp,
+          vertical: activeScope,
+          siteName: currentConfig.brandTitle || 'T-Connect Hotspot'
         })
       });
 
-      const data = await response.json().catch(() => ({ success: false, message: 'Invalid response from payment server.' }));
-
+      const data = await response.json().catch(() => ({ success: false, message: 'Invalid response from PayLesotho.' }));
       if (!response.ok || !data.success) {
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        setPaymentError(
-          data.message ||
-            (selectedGateway === 'ottvoucher'
-              ? 'OTT Voucher PIN verification failed. Please enter a valid 16-digit OTT Voucher PIN.'
-              : 'EcoCash payment authorization failed. Please check your number and try again.')
-        );
+        setPaymentError(data.error || data.message || 'Payment initiation failed via PayLesotho.');
         return;
       }
 
-      // Payment / OTT PIN genuinely verified! Record transaction & guest lead in Admin storage
-      await syncGuestSessionToAdmin({
-        mode: selectedGateway,
-        planName: selectedPlan?.name || 'Daily Pass',
-        durationSeconds: selectedPlan?.durationSeconds || 86400,
-        voucherCode: data.voucherCode || `OTT-${cleanPin.slice(-4)}`,
-        amount: selectedPlan?.price || 10,
-        transactionRef: data.transactionRef,
-        speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
-      });
+      setStatusBanner(data.message || 'Payment prompt sent. Waiting for subscriber approval...');
 
-      authorizeOnMikroTikRouter('test', '123');
+      if (payLesothoChannel === 'card' && data.checkoutUrl) {
+        window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
+      }
 
-      setIsConnecting(false);
-      isConnectingRef.current = false;
-      setStatusBanner(null);
-      startOrEnterConnectedSession('post_auth');
+      const txId = data.transactionId;
+      let attempts = 0;
+      const pollInterval = setInterval(async () => {
+        attempts++;
+        try {
+          const pollRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
+          const pollData = await pollRes.json();
+          if (pollData.success && pollData.status === 'completed') {
+            clearInterval(pollInterval);
+
+            await syncGuestSessionToAdmin({
+              mode: 'paylesotho',
+              planName: selectedPlan?.name || 'Daily Pass',
+              durationSeconds: selectedPlan?.durationSeconds || 86400,
+              voucherCode: `PL-${data.reference?.slice(-6) || 'PAID'}`,
+              amount: selectedPlan?.price || 10,
+              transactionRef: data.reference,
+              speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
+            });
+
+            authorizeOnMikroTikRouter('test', '123');
+            setIsConnecting(false);
+            isConnectingRef.current = false;
+            setStatusBanner(null);
+            startOrEnterConnectedSession('post_auth');
+          } else if (pollData.status === 'failed' || attempts > 20) {
+            clearInterval(pollInterval);
+            setIsConnecting(false);
+            isConnectingRef.current = false;
+            setStatusBanner(null);
+            setPaymentError(pollData.errorMessage || 'Transaction was not approved within the allotted time.');
+          }
+        } catch {
+          if (attempts > 20) {
+            clearInterval(pollInterval);
+            setIsConnecting(false);
+            isConnectingRef.current = false;
+            setStatusBanner(null);
+          }
+        }
+      }, 1500);
     } catch {
       setIsConnecting(false);
       isConnectingRef.current = false;
       setStatusBanner(null);
-      setPaymentError('Network error communicating with payment gateway. Please try again.');
+      setPaymentError('Network error communicating with PayLesotho gateway.');
     }
   };
 
@@ -1249,7 +1324,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         );
       })()}
 
-      {/* Pure Full-Viewport Splash Page Container */}
+      {/* Pure Full-Viewport Splash Page Container — Hidden completely during Ad or Connected view to guarantee zero background text bleed */}
+      {portalStep !== 'video_ad' && portalStep !== 'connected' && (
       <main
         className="flex-1 min-h-screen relative flex flex-col justify-between items-center bg-cover bg-center transition-all duration-500 overflow-hidden"
         style={{
@@ -1525,31 +1601,115 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 </button>
               </div>
 
-              {/* 2-Column Payment Selector: EcoCash & OTT Voucher Only */}
+              {/* 2-Option Payment Selector: PayLesotho Aggregator & Official 16-Digit OTT Voucher */}
               <div className="grid grid-cols-2 gap-1.5">
-                {(['ecocash', 'ottvoucher'] as const).map((gw) => (
-                  <button
-                    key={gw}
-                    type="button"
-                    onClick={() => {
-                      setSelectedGateway(gw);
-                      setPaymentError(null);
-                    }}
-                    className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                      selectedGateway === gw
-                        ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                        : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <ProviderLogo provider={gw as GatewayProvider} className="w-5 h-5 shrink-0" />
-                    <span className="text-[10px] font-bold truncate">
-                      {gw === 'ecocash' ? 'EcoCash' : 'OTT Voucher'}
-                    </span>
-                  </button>
-                ))}
+                <button
+                  key="paylesotho"
+                  type="button"
+                  onClick={() => {
+                    setSelectedGateway('paylesotho');
+                    setPaymentError(null);
+                  }}
+                  className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    selectedGateway === 'paylesotho'
+                      ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
+                      : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ProviderLogo provider="paylesotho" className="w-5 h-5 shrink-0" />
+                  <span className="text-[10px] font-bold truncate">PayLesotho</span>
+                </button>
+
+                <button
+                  key="ottvoucher"
+                  type="button"
+                  onClick={() => {
+                    setSelectedGateway('ottvoucher');
+                    setPaymentError(null);
+                  }}
+                  className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    selectedGateway === 'ottvoucher'
+                      ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
+                      : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ProviderLogo provider="ottvoucher" className="w-5 h-5 shrink-0" />
+                  <span className="text-[10px] font-bold truncate">OTT Voucher</span>
+                </button>
               </div>
 
-              {selectedGateway === 'ottvoucher' ? (
+              {selectedGateway === 'paylesotho' ? (
+                <div className="space-y-2">
+                  {/* Channel Sub-Selector: EcoCash, M-Pesa, Card */}
+                  <div>
+                    <label className="text-[9px] font-medium text-slate-400 block mb-1">
+                      Select Payment Method (Aggregated via PayLesotho):
+                    </label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(
+                        [
+                          { id: 'ecocash', label: 'EcoCash', sub: 'Econet *199#' },
+                          { id: 'mpesa', label: 'M-Pesa', sub: 'Vodacom *111#' },
+                          { id: 'card', label: 'Card / EFT', sub: 'Visa · Master' }
+                        ] as const
+                      ).map((ch) => (
+                        <button
+                          key={ch.id}
+                          type="button"
+                          onClick={() => {
+                            setPayLesothoChannel(ch.id);
+                            setPaymentError(null);
+                          }}
+                          className={`py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                            payLesothoChannel === ch.id
+                              ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
+                              : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-[10px] font-bold leading-tight">{ch.label}</div>
+                          <div className="text-[8px] text-slate-400 truncate">{ch.sub}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {payLesothoChannel === 'card' ? (
+                    <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-300">
+                      <div className="font-bold text-white mb-0.5">Secure Card &amp; Instant EFT</div>
+                      <div className="text-[9px] text-slate-400">
+                        Redirects to 3D-Secure 256-bit encrypted checkout powered by PayLesotho Gateway.
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] font-medium text-slate-300">
+                          {payLesothoChannel === 'mpesa' ? 'Vodacom M-Pesa' : 'EcoCash'} Number (+266) <span className="text-red-400">*</span>
+                        </label>
+                        <span className="text-[9px] font-mono text-slate-400">
+                          {cleanPhoneDigits.length}/8 digits (5/6)
+                        </span>
+                      </div>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={8}
+                        required
+                        value={guestPhone}
+                        onChange={(e) => {
+                          handleGuestPhoneChange(e.target.value, '+266');
+                          setPaymentError(null);
+                        }}
+                        placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
+                      />
+                      {phoneFormatError && (
+                        <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
                 <div>
                   <div className="flex items-center justify-between mb-0.5">
                     <label className="text-[10px] font-medium text-slate-300">
@@ -1574,33 +1734,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     placeholder="1234 5678 9012 3456"
                     className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
                   />
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[10px] font-medium text-slate-300">
-                      EcoCash Mobile Number (+266) <span className="text-red-400">*</span>
-                    </label>
-                    <span className="text-[9px] font-mono text-slate-400">
-                      {cleanPhoneDigits.length}/8 digits (starts with 5 or 6)
-                    </span>
-                  </div>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={8}
-                    required
-                    value={guestPhone}
-                    onChange={(e) => {
-                      handleGuestPhoneChange(e.target.value, '+266');
-                      setPaymentError(null);
-                    }}
-                    placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
-                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
-                  />
-                  {phoneFormatError && (
-                    <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
-                  )}
+                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                    Buy official 16-digit OTT vouchers at any shop or online in Lesotho.
+                  </p>
                 </div>
               )}
 
@@ -1619,50 +1755,89 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   !isTermsSatisfied ||
                   isConnecting ||
                   (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16) ||
-                  (selectedGateway === 'ecocash' && !/^[56]\d{7}$/.test(cleanPhoneDigits))
+                  (selectedGateway === 'paylesotho' &&
+                    payLesothoChannel !== 'card' &&
+                    !/^[56]\d{7}$/.test(cleanPhoneDigits))
                 }
                 className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{isConnecting ? 'Verifying Payment...' : 'Pay & Connect Internet \u2192'}</span>
+                <span>{isConnecting ? 'Processing with Gateway...' : 'Pay & Connect Internet \u2192'}</span>
               </button>
             </form>
           )}
-
-          {/* ================================================================= */}
-          {/* STEP 5: CONNECTED TO WI-FI (Shown after pressing X on Ad)         */}
-          {/* ================================================================= */}
-          {portalStep === 'connected' && (
-            <div className="rounded-t-2xl rounded-b-none p-4 bg-[#0b0f19] border-t border-x border-b-0 border-emerald-500/40 shadow-2xl space-y-3 text-left">
-              <div className="w-8 h-1 bg-emerald-400/40 rounded-full mx-auto mb-1 shrink-0" />
-              <div className="flex items-center justify-between bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-3">
-                <div className="flex items-center gap-2.5">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <div>
-                    <div className="text-xs font-black text-white leading-tight">
-                      You&apos;re Connected to T-Connect Wi-Fi!
-                    </div>
-                    <div className="text-[10px] text-emerald-300 font-mono mt-0.5">
-                      High-Speed Starlink Session Active • Enjoy Connectivity
-                    </div>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[9px] font-mono">
-                  ONLINE
-                </span>
-              </div>
-
-              <a
-                href={sanitizeDestinationUrl(userOrigUrl)}
-                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all"
-              >
-                <Globe className="w-4 h-4" />
-                <span>Continue to Internet &rarr;</span>
-              </a>
-            </div>
-          )}
         </div>
       </main>
+      )}
+
+      {/* ================================================================= */}
+      {/* FULL-PAGE EDGE-TO-EDGE CONNECTED DASHBOARD                        */}
+      {/* Rendered cleanly when user closes the ad or connects to Wi-Fi     */}
+      {/* Zero background bleed, zero sign-up reset loop                   */}
+      {/* ================================================================= */}
+      {portalStep === 'connected' && (
+        <div className="min-h-screen w-full bg-[#05070c] flex flex-col justify-between items-center px-4 py-8 text-center text-white relative">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-950/40 via-transparent to-transparent pointer-events-none" />
+
+          {/* Top Brand & Connected Badge */}
+          <div className="relative z-10 pt-4 max-w-sm w-full flex flex-col items-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold uppercase tracking-wider mb-5 shadow-lg">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span>Internet Active &bull; Starlink Online</span>
+            </div>
+
+            <div className="w-20 h-20 rounded-3xl bg-emerald-500/15 border-2 border-emerald-500/40 flex items-center justify-center mb-4 shadow-[0_0_60px_rgba(16,185,129,0.35)]">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+            </div>
+
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white mb-2">
+              You&apos;re Online!
+            </h1>
+            <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
+              Your device is authenticated on the <strong className="text-white">{currentConfig.brandTitle || 'T-Connect'}</strong> high-speed Starlink network. You can now use your phone, browse apps, stream, and use WhatsApp freely.
+            </p>
+          </div>
+
+          {/* Live Session Telemetry Card */}
+          <div className="relative z-10 w-full max-w-sm my-6 p-4 rounded-2xl bg-[#0b101d] border border-[#232d42] shadow-2xl text-left space-y-3">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2">
+              <span className="text-[11px] font-mono uppercase text-slate-400">Network Uplink</span>
+              <span className="text-xs font-bold text-white flex items-center gap-1.5 font-mono">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                Starlink High-Speed
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
+                <div className="text-[10px] text-slate-400 font-mono">Hotspot Node</div>
+                <div className="text-xs font-bold text-slate-200 truncate mt-0.5">
+                  {currentConfig.brandTitle || 'Maseru Hotspot'}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
+                <div className="text-[10px] text-slate-400 font-mono">Access Status</div>
+                <div className="text-xs font-bold text-emerald-400 mt-0.5">
+                  Authorized &bull; Active
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Button: Start Browsing */}
+          <div className="relative z-10 max-w-sm w-full space-y-2.5">
+            <a
+              href={sanitizeDestinationUrl(userOrigUrl)}
+              className="w-full py-3.5 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-2xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+            >
+              <Globe className="w-5 h-5" />
+              <span>Start Browsing &bull; Open Web &rarr;</span>
+            </a>
+            <p className="text-[10px] text-slate-500 font-mono">
+              You can safely close this screen or press Home/Done on your phone to use other apps.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

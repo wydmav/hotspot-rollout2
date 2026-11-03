@@ -86,10 +86,61 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     return matchesVertical && matchesSearch;
   });
 
-  const handleGenerateBatch = () => {
-    if (!selectedPlanForBatch) return;
-    const generated = onGenerateBatch(selectedPlanForBatch, batchCount);
-    ExportService.exportVouchersToCsv(generated);
+  // 16-Digit OTT Voucher Live Inspector State
+  const [ottPin, setOttPin] = useState('');
+  const [ottMobile, setOttMobile] = useState('26658000000');
+  const [ottResult, setOttResult] = useState<{
+    success: boolean;
+    message: string;
+    receipt?: string;
+    planName?: string;
+    amount?: number;
+    stages?: any[];
+  } | null>(null);
+  const [isVerifyingOtt, setIsVerifyingOtt] = useState(false);
+
+  const handleVerifyOttPin = async () => {
+    const clean = ottPin.replace(/\D/g, '');
+    if (clean.length !== 16) {
+      setOttResult({
+        success: false,
+        message: 'Please enter all 16 digits of the OTT Voucher PIN.'
+      });
+      return;
+    }
+    setIsVerifyingOtt(true);
+    setOttResult(null);
+    try {
+      const res = await fetch('/api/gateways/ottvoucher/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: clean,
+          mobile: ottMobile,
+          amount: 10
+        })
+      });
+      const data = await res.json();
+      setOttResult({
+        success: Boolean(data.success),
+        message: data.message || (data.success ? '16-Digit PIN validated with OTT Lesotho API' : 'Verification failed'),
+        receipt: `REC-${Date.now().toString().slice(-6)}`,
+        planName: 'Daily Pass (24 Hours)',
+        amount: 10,
+        stages: data.diagnosticStages
+      });
+    } catch (err: any) {
+      setOttResult({
+        success: false,
+        message: err.message || 'Failed to reach OTT Lesotho API gateway'
+      });
+    } finally {
+      setIsVerifyingOtt(false);
+    }
+  };
+
+  const handleExportOttLedger = () => {
+    ExportService.exportVouchersToCsv(filteredVouchers);
   };
 
   const handleCreatePlan = (e: React.FormEvent) => {
@@ -113,39 +164,6 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
 
     setShowCreatePlanModal(false);
     setPlanName('');
-  };
-
-  const runConcurrencyDoubleSpendTest = (codeToTest?: string) => {
-    const code = codeToTest || testCode;
-    if (!code) return;
-
-    setIsTestingConcurrency(true);
-    setTestResults([]);
-
-    const devices = [
-      { name: 'Device #1 (Client Phone)', mac: 'AA:BB:CC:11:22:33' },
-      { name: 'Device #2 (Client Laptop)', mac: 'AA:BB:CC:44:55:66' },
-      { name: 'Device #3 (Unauthorized 3rd Device)', mac: 'AA:BB:CC:99:99:99' }
-    ];
-
-    const results: any[] = [];
-    devices.forEach((d, idx) => {
-      setTimeout(() => {
-        const res = onRedeemVoucher(code, d.mac, d.name);
-        results.push({
-          device: d.name,
-          mac: d.mac,
-          success: res.success,
-          message: res.message,
-          slot: res.deviceSlot
-        });
-        setTestResults([...results]);
-
-        if (idx === devices.length - 1) {
-          setIsTestingConcurrency(false);
-        }
-      }, (idx + 1) * 350);
-    });
   };
 
   return (
@@ -374,138 +392,152 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
         );
       })()}
 
-      {/* Batch Voucher Generator & Concurrency Verification Box */}
+      {/* 16-Digit OTT Voucher Live Inspector & Official OTT Lesotho Network */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Batch Generator */}
+        {/* 16-Digit OTT Voucher Inspector */}
         <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
-          <div className="flex items-center gap-2">
-            <Ticket className="w-4 h-4 text-[#f05e17]" />
-            <h2 className="text-sm font-extrabold text-white uppercase tracking-wider font-mono">
-              BATCH VOUCHER GENERATOR
-            </h2>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Ticket className="w-4 h-4 text-[#f05e17]" />
+              <h2 className="text-sm font-extrabold text-white uppercase tracking-wider font-mono">
+                16-DIGIT OTT VOUCHER INSPECTOR
+              </h2>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+              api.ottlesotho.com Live
+            </span>
           </div>
+
           <p className="text-xs text-slate-400">
-            Generate printable or exportable voucher codes for retail points of sale, front desks, or cafe counters.
+            Verify official 16-digit OTT Voucher PINs in real time against the OTT Lesotho API gateway before redeeming.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+          <div className="space-y-3 font-mono text-xs">
             <div>
-              <label className="text-slate-400 block mb-1">Select Hotspot Plan</label>
-              <select
-                value={selectedPlanForBatch}
-                onChange={(e) => setSelectedPlanForBatch(e.target.value)}
-                className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-              >
-                {plans.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({currency}{p.price} - {p.durationLabel})
-                  </option>
-                ))}
-              </select>
+              <label className="text-slate-400 block mb-1">16-Digit OTT PIN (Digits only)</label>
+              <input
+                type="text"
+                maxLength={16}
+                value={ottPin}
+                onChange={(e) => setOttPin(e.target.value.replace(/\D/g, ''))}
+                placeholder="e.g. 5821948201948291"
+                className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono tracking-widest text-sm focus:outline-none focus:border-[#f05e17]"
+              />
             </div>
 
             <div>
-              <label className="text-slate-400 block mb-1">Number of Vouchers</label>
+              <label className="text-slate-400 block mb-1">Subscriber Mobile Number (MSISDN)</label>
               <input
-                type="number"
-                min="1"
-                max="50"
-                value={batchCount}
-                onChange={(e) => setBatchCount(Number(e.target.value))}
-                className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                type="text"
+                value={ottMobile}
+                onChange={(e) => setOttMobile(e.target.value)}
+                placeholder="26658000000"
+                className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
               />
             </div>
           </div>
 
           <button
-            onClick={handleGenerateBatch}
-            className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-mono text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm"
+            onClick={handleVerifyOttPin}
+            disabled={isVerifyingOtt || ottPin.length !== 16}
+            className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-mono text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
           >
-            <Download className="w-4 h-4" />
-            <span>Generate &amp; Download CSV Batch</span>
+            {isVerifyingOtt ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            <span>{isVerifyingOtt ? 'Querying api.ottlesotho.com...' : 'Verify 16-Digit OTT PIN'}</span>
           </button>
+
+          {ottResult && (
+            <div className={`p-3 rounded-lg border text-xs font-mono space-y-1.5 ${
+              ottResult.success
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+            }`}>
+              <div className="flex items-center gap-2 font-bold">
+                {ottResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <XCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+                <span>{ottResult.success ? 'Verified Official OTT Voucher' : 'Verification Alert'}</span>
+              </div>
+              <p className="text-[11px] text-slate-300">{ottResult.message}</p>
+              {ottResult.receipt && (
+                <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400 border-t border-emerald-500/20">
+                  <span>Serial Receipt: {ottResult.receipt}</span>
+                  <span>Amount: M{ottResult.amount} ({ottResult.planName})</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Concurrency & Anti-Double-Spend Tester */}
+        {/* Official OTT Lesotho Network Integration Card */}
         <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <h2 className="text-sm font-extrabold text-white uppercase tracking-wider font-mono">
-                CONCURRENCY &amp; DOUBLE-SPEND TESTER
+                OFFICIAL OTT LESOTHO NETWORK
               </h2>
             </div>
-            <span className="text-[10px] font-mono text-slate-400">Acceptance Test</span>
+            <span className="text-[10px] font-mono text-cyan-400 font-bold">Exclusive Provider</span>
           </div>
 
-          <p className="text-xs text-slate-400">
-            Simulate 3 devices attempting concurrent authentication on an M10 / 2-device voucher to verify atomic locking and quota enforcement.
-          </p>
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={testCode}
-              onChange={(e) => setTestCode(e.target.value)}
-              placeholder="Enter voucher code (e.g. TC-9482-10M)"
-              className="flex-1 px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-xs text-white font-mono placeholder-slate-500 focus:outline-none focus:border-[#f05e17]"
-            />
-            <button
-              onClick={() => runConcurrencyDoubleSpendTest()}
-              disabled={isTestingConcurrency || !testCode.trim()}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-mono font-bold rounded-lg transition-colors"
-            >
-              {isTestingConcurrency ? 'Testing...' : 'Run Test'}
-            </button>
+          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 text-xs leading-relaxed">
+            <p className="font-bold mb-1">Internal Custom Voucher Generation Removed</p>
+            <p className="text-[11px] text-slate-300">
+              Per executive instructions, internally generated custom vouchers have been permanently deleted and purged from the platform. T-Connect Starlink Hotspots exclusively accept official 16-digit OTT Vouchers.
+            </p>
           </div>
 
-          {/* Test Results Output */}
-          <div className="bg-[#0a0e17] border border-[#1b233a] rounded-lg p-3 space-y-2 min-h-24 text-xs font-mono">
-            {testResults.length === 0 ? (
-              <p className="text-slate-500 text-center py-4">
-                Pick a voucher below or enter a code above, then click &quot;Run Test&quot;.
-              </p>
-            ) : (
-              testResults.map((res, i) => (
-                <div key={i} className="flex items-start gap-2 pt-1 border-b border-[#1b233a] last:border-0 pb-1">
-                  {res.success ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  ) : (
-                    <XCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  )}
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-white font-bold">{res.device}</span>
-                      {res.slot && <span className="text-emerald-400 font-bold">[{res.slot}]</span>}
-                    </div>
-                    <p className={`text-[11px] ${res.success ? 'text-slate-300' : 'text-rose-300'}`}>
-                      {res.message}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="space-y-2 text-xs font-mono">
+            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
+              <div>
+                <span className="text-white font-bold block">Daily Pass (24 Hours)</span>
+                <span className="text-[10px] text-slate-400">Available at all retail spazas &amp; vendors</span>
+              </div>
+              <span className="text-emerald-400 font-extrabold text-sm">M10.00</span>
+            </div>
+            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
+              <div>
+                <span className="text-white font-bold block">Weekly Pass (7 Days)</span>
+                <span className="text-[10px] text-slate-400">High-speed Starlink Wi-Fi pass</span>
+              </div>
+              <span className="text-emerald-400 font-extrabold text-sm">M60.00</span>
+            </div>
+            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
+              <div>
+                <span className="text-white font-bold block">Monthly Pass (30 Days)</span>
+                <span className="text-[10px] text-slate-400">Unlimited 30-day business pass</span>
+              </div>
+              <span className="text-emerald-400 font-extrabold text-sm">M280.00</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Voucher Ledger Table */}
+      {/* 16-Digit OTT Voucher Ledger Table */}
       <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-sm font-extrabold text-white">Active Voucher Inventory &amp; Entitlement Tracking</h3>
-            <p className="text-xs text-slate-400 font-mono">Single-use tokens with duration counting upon first login</p>
+            <h3 className="text-sm font-extrabold text-white">16-Digit OTT Voucher Redemptions Ledger</h3>
+            <p className="text-xs text-slate-400 font-mono">Live audit trail of official OTT Lesotho voucher PINs redeemed on Starlink hotspots</p>
           </div>
 
-          <div className="relative w-64">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={voucherSearch}
-              onChange={(e) => setVoucherSearch(e.target.value)}
-              placeholder="Search code or plan..."
-              className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
-            />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExportOttLedger}
+              className="px-3 py-1 bg-[#161d31] hover:bg-[#1e263b] text-slate-200 border border-[#232d42] rounded-lg text-xs font-mono flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-400" />
+              <span>Export CSV</span>
+            </button>
+            <div className="relative w-56">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={voucherSearch}
+                onChange={(e) => setVoucherSearch(e.target.value)}
+                placeholder="Search OTT PIN or plan..."
+                className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
+              />
+            </div>
           </div>
         </div>
 
@@ -587,13 +619,13 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                     </td>
                     <td className="py-3 text-right">
                       <button
+                        type="button"
                         onClick={() => {
-                          setTestCode(voucher.code);
-                          runConcurrencyDoubleSpendTest(voucher.code);
+                          setOttPin(voucher.code.replace(/\D/g, ''));
                         }}
-                        className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300 hover:text-white"
+                        className="px-2.5 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-emerald-400 hover:text-white cursor-pointer"
                       >
-                        Test Concurrency
+                        Inspect PIN
                       </button>
                     </td>
                   </tr>
@@ -603,9 +635,9 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                   <td colSpan={6} className="py-8 text-center text-slate-500">
                     <div className="max-w-sm mx-auto space-y-2">
                       <Ticket className="w-6 h-6 mx-auto text-slate-600" />
-                      <p className="text-slate-400 font-medium">No Vouchers Generated Yet</p>
+                      <p className="text-slate-400 font-medium">No 16-Digit OTT Vouchers Redeemed Yet</p>
                       <p className="text-[11px] text-slate-500">
-                        Use the "Batch Voucher Generator" above or issue a single voucher from any configured plan to generate single-use access codes.
+                        Official 16-digit OTT Lesotho Vouchers will appear here automatically as guests redeem them on captive portals across Lesotho.
                       </p>
                     </div>
                   </td>

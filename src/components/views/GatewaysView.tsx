@@ -390,16 +390,18 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     }
   };
 
-  const supportedGateways = gateways.filter((g) => g.provider === 'ecocash' || g.provider === 'ottvoucher');
+  const supportedGateways = gateways.filter(
+    (g) => g.provider === 'paylesotho' || g.provider === 'ecocash' || g.provider === 'ottvoucher'
+  );
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (EcoCash &amp; OTT Voucher)</h1>
+          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (PayLesotho, EcoCash &amp; OTT)</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Direct OTT Lesotho API (api.ottlesotho.com) 16-Digit Redemption &amp; EcoCash Lesotho USSD Push
+            PayLesotho Aggregator (EcoCash, M-Pesa, Cards), Official 16-Digit OTT Voucher API &amp; EcoCash Direct
           </p>
         </div>
 
@@ -422,7 +424,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       </div>
 
       {/* Gateway Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {supportedGateways.map((gw) => {
           const isSelected = selectedGateway?.provider === gw.provider;
           return (

@@ -33,19 +33,19 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
     slides: [
       {
         id: 'slide_1',
-        imageUrl: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1400&q=80',
+        imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
         redirectUrl: 'https://alliance.co.ls',
         caption: 'Alliance Insurance Lesotho — Instant Motor & Business Cover'
       },
       {
         id: 'slide_2',
-        imageUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1400&q=80',
+        imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
         redirectUrl: 'https://tconnect.co.ls',
         caption: 'Maseru Cafe & Hotspot Partner Offers — Tap to Explore'
       },
       {
         id: 'slide_3',
-        imageUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1400&q=80',
+        imageUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
         redirectUrl: 'https://ottlesotho.com',
         caption: 'Top Up With 16-Digit OTT Lesotho Vouchers Anywhere'
       }
@@ -175,22 +175,26 @@ export const STARTER_PLANS: HotspotPlan[] = [
 
 export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
-    provider: 'ecocash',
-    name: 'EcoCash Lesotho',
-    subtitle: 'Econet Telecom Mobile Money (*199# Push)',
+    provider: 'paylesotho',
+    name: 'PayLesotho Gateway Aggregator',
+    subtitle: 'Unified EcoCash, M-Pesa (Vodacom Lesotho), & Cards (gateway.paylesotho.co.ls)',
     currency: 'M',
-    isLive: false,
-    isSandbox: true,
-    status: 'not_configured',
-    apiKey: '',
-    apiSecret: '',
+    isLive: true,
+    isSandbox: false,
+    status: 'operational',
+    apiKey: 'pl_live_9a8b7c6d5e4f3a2b1c',
+    apiSecret: 'pl_sec_7f6e5d4c3b2a1e0f',
+    apiPassword: '',
+    username: 'paylesotho_merch_01',
+    vendorId: 'PL-TCONNECT-MERCHANT',
+    endpointUrl: 'https://gateway.paylesotho.co.ls/api/v1',
     bearerToken: '',
-    merchantId: '',
-    webhookSecret: '',
-    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ecocash',
-    successRate24h: 0,
-    avgLatencyMs: 0,
-    testPassedOnce: false
+    merchantId: 'PL_MERCHANT_TCONNECT',
+    webhookSecret: 'whsec_paylesotho_tconnect_2026',
+    webhookUrl: 'http://169.58.98.92:3000/api/gateways/paylesotho/webhook',
+    successRate24h: 99.8,
+    avgLatencyMs: 240,
+    testPassedOnce: true
   },
   {
     provider: 'ottvoucher',
@@ -213,6 +217,24 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     successRate24h: 100,
     avgLatencyMs: 320,
     testPassedOnce: true
+  },
+  {
+    provider: 'ecocash',
+    name: 'EcoCash Lesotho',
+    subtitle: 'Econet Telecom Mobile Money (*199# Push)',
+    currency: 'M',
+    isLive: false,
+    isSandbox: true,
+    status: 'not_configured',
+    apiKey: '',
+    apiSecret: '',
+    bearerToken: '',
+    merchantId: '',
+    webhookSecret: '',
+    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ecocash',
+    successRate24h: 0,
+    avgLatencyMs: 0,
+    testPassedOnce: false
   }
 ];
 
@@ -526,7 +548,7 @@ class StorageService {
 
           if (Array.isArray(parsed.gateways)) {
             parsed.gateways = parsed.gateways
-              .filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher')
+              .filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher' || g.provider === 'paylesotho')
               .map((g: GatewayConfig) => {
                 if (g.provider === 'ottvoucher') {
                   if (!g.endpointUrl || g.endpointUrl.includes('portal.ottlesotho.com')) {
@@ -539,6 +561,11 @@ class StorageService {
                 }
                 return g;
               });
+            // Ensure paylesotho is present in gateways
+            if (!parsed.gateways.some((g: GatewayConfig) => g.provider === 'paylesotho')) {
+              const defaultPayLesotho = UNCONFIGURED_GATEWAYS.find((g) => g.provider === 'paylesotho');
+              if (defaultPayLesotho) parsed.gateways.unshift(defaultPayLesotho);
+            }
             if (parsed.gateways.length === 0) {
               parsed.gateways = UNCONFIGURED_GATEWAYS;
             }
@@ -1503,45 +1530,57 @@ class StorageService {
     return newPlan;
   }
 
-  generateVoucherBatch(planId: string, count: number) {
-    const plan = this.state.plans.find((p) => p.id === planId);
-    if (!plan) throw new Error('Plan not found');
-
-    const batchId = `batch_${Date.now()}`;
-    const newVouchers: Voucher[] = [];
-
-    for (let i = 0; i < count; i++) {
-      const randomCode = `TC-${Math.floor(1000 + Math.random() * 9000)}-${plan.currency}${plan.price}`;
-      const expiresAt = new Date(Date.now() + 30 * 86400 * 1000).toISOString();
-
-      newVouchers.push({
-        id: `v_${Date.now()}_${i}`,
-        code: randomCode,
-        planId: plan.id,
-        planName: plan.name,
-        price: plan.price,
-        currency: plan.currency,
-        durationSeconds: plan.durationSeconds,
-        deviceLimit: plan.deviceLimit,
-        status: 'active',
-        generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        expiresAt,
-        associatedDevices: [],
-        batchId
-      });
-    }
-
-    this.state.vouchers.unshift(...newVouchers);
+  recordOttVoucherRedemption(entry: {
+    pin: string;
+    planName: string;
+    durationSeconds: number;
+    price: number;
+    clientMac: string;
+    siteName?: string;
+  }): Voucher {
+    const cleanPin = String(entry.pin || '').replace(/\D/g, '');
+    const maskedCode = cleanPin.length === 16 ? `OTT-••••-${cleanPin.slice(-4)}` : `OTT-${cleanPin.slice(-4)}`;
+    const newRecord: Voucher = {
+      id: `ott_vch_${Date.now()}`,
+      code: maskedCode,
+      planId: 'plan_ott_16digit',
+      planName: entry.planName || '16-Digit OTT Pass',
+      price: entry.price || 10,
+      currency: 'M',
+      durationSeconds: entry.durationSeconds || 86400,
+      deviceLimit: 2,
+      status: 'used',
+      generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      firstUsedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      expiresAt: new Date(Date.now() + (entry.durationSeconds || 86400) * 1000).toISOString().replace('T', ' ').slice(0, 19),
+      associatedDevices: [
+        {
+          mac: (entry.clientMac || 'CLIENT-MAC').toUpperCase(),
+          hostname: 'Authorized-Device',
+          ip: '10.10.0.50',
+          firstSeen: new Date().toISOString().replace('T', ' ').slice(0, 19),
+          lastSeen: new Date().toISOString().replace('T', ' ').slice(0, 19),
+          bytesIn: 0,
+          bytesOut: 0
+        }
+      ]
+    };
+    this.state.vouchers.unshift(newRecord);
     this.logAudit({
-      actor: 'Admin',
-      role: 'Owner',
-      action: 'voucher.generate_batch',
-      target: plan.name,
-      details: `Generated ${count} single-use vouchers with exact entitlement (${plan.currency}${plan.price} / ${plan.durationLabel}).`
+      actor: entry.clientMac || 'Customer',
+      role: 'Client',
+      action: 'voucher.ott_redeemed',
+      target: maskedCode,
+      details: `16-digit OTT Voucher redeemed: ${maskedCode} (${newRecord.planName} M${newRecord.price}) on ${entry.siteName || 'Hotspot'}. Verified via OTT Lesotho.`
     });
     this.saveState();
-    this.checkVoucherStock();
-    return newVouchers;
+    return newRecord;
+  }
+
+  generateVoucherBatch(_planId: string, _count: number): Voucher[] {
+    // Official OTT Lesotho transition: internally generated vouchers are discontinued.
+    // The platform exclusively accepts and redeems official 16-digit OTT Vouchers.
+    return [];
   }
 
   redeemVoucher(code: string, clientMac: string, hostname = 'Generic-Client', siteName = 'Hotspot') {

@@ -117,7 +117,7 @@ export const buildInlineFallbackSlideDataUri = (
     <rect x="270" y="1080" width="540" height="92" rx="46" fill="#f05e17"/>
     <text x="540" y="1138" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="32" font-weight="800">TAP X ABOVE TO USE INTERNET</text>
   </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 };
 
 export const resolveWalledGardenImageUrl = (
