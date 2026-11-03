@@ -14,7 +14,9 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  Copy,
+  Check
 } from 'lucide-react';
 import { storage } from '../../services/storage';
 import { ScopePortalConfig, VerticalType, GatewayProvider, SponsorAdConfig, VideoAdItem } from '../../types';
@@ -28,6 +30,7 @@ import {
 } from '../views/ScopeCaptivePortalBuilder';
 import { ProviderLogo } from '../common/BrandLogos';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
+import { copyToClipboard } from '../../utils/clipboard';
 
 interface StandalonePortalViewProps {
   onBackToDashboard?: () => void;
@@ -165,6 +168,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [phoneFormatError, setPhoneFormatError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
+
+  // Post-Payment Issued OTT Voucher Copy -> Redeem State (PayLesotho M-Pesa / EcoCash / Card)
+  const [issuedOttVoucherPin, setIssuedOttVoucherPin] = useState<string | null>(null);
+  const [issuedOttVoucherAmount, setIssuedOttVoucherAmount] = useState<number | null>(null);
+  const [issuedOttVoucherRef, setIssuedOttVoucherRef] = useState<string | null>(null);
+  const [hasCopiedIssuedOttVoucher, setHasCopiedIssuedOttVoucher] = useState(false);
+  const [redeemIssuedPinInput, setRedeemIssuedPinInput] = useState('');
 
   const hiddenFormRef = useRef<HTMLFormElement | null>(null);
   const [routerUsername, setRouterUsername] = useState('test');
@@ -670,40 +680,40 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     startOrEnterConnectedSession('post_auth');
   };
 
-  // Redeem Voucher Code (Strictly verifies against active platform / OTT Lesotho API)
+  // Redeem 16-Digit OTT Voucher Code (Strictly verifies against OTT Lesotho API & Issued PayLesotho OTT Vouchers)
   const handleRedeemVoucher = async (e: React.FormEvent) => {
     e.preventDefault();
     setVoucherError(null);
+
+    if (!isGuestFormValid) {
+      setVoucherError('Please complete your First Name, Surname, 8-digit Lesotho mobile number (5/6), and Email first.');
+      return;
+    }
 
     if (!isTermsSatisfied) {
       setVoucherError('Please tick the Terms & Conditions box to proceed.');
       return;
     }
 
-    const code = voucherCode.trim().toUpperCase();
-    if (!code) {
-      setVoucherError('Please enter your voucher code.');
+    const cleanDigits = voucherCode.replace(/\D/g, '');
+    if (cleanDigits.length !== 16) {
+      setVoucherError(`Only official 16-digit OTT Voucher PINs are accepted (${cleanDigits.length}/16 digits entered).`);
       return;
     }
 
+    const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+
     isConnectingRef.current = true;
     setIsConnecting(true);
-    setStatusBanner('Verifying voucher code...');
+    setStatusBanner('Verifying 16-digit OTT Voucher PIN...');
 
     try {
-      // 1. Check local storage vouchers
-      const localRes = storage.redeemVoucher(
-        code,
-        clientMac || 'Client-MAC',
-        [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join('-') || 'Guest-Device'
-      );
-
-      // 2. Verify with backend server (which checks synced platform vouchers & Supabase)
       const apiRes = await fetch('/api/vouchers/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code,
+          code: cleanDigits,
+          expectedAmount: selectedPlan?.price,
           mac: clientMac,
           ip: clientIp,
           scope: activeScope,
@@ -718,27 +728,26 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       });
       const apiData = await apiRes.json().catch(() => ({ success: false }));
 
-      const isVerified = Boolean(localRes.success || (apiRes.ok && apiData.success));
-
-      if (!isVerified) {
+      if (!apiRes.ok || !apiData.success) {
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
         setVoucherError(
-          apiData.message || localRes.message || 'Invalid or expired voucher code. Please check your code and try again.'
+          apiData.message || 'Invalid, expired, or mismatched denomination 16-digit OTT Voucher PIN.'
         );
         return;
       }
 
-      const planTitle = apiData.planName || localRes.planName || 'Prepaid Wi-Fi Pass';
-      const durationSecs = apiData.durationSeconds || localRes.durationSeconds || 86400;
+      const planTitle = apiData.planName || selectedPlan?.name || 'OTT Voucher Pass';
+      const durationSecs = apiData.durationSeconds || selectedPlan?.durationSeconds || 86400;
 
       await syncGuestSessionToAdmin({
-        mode: 'voucher',
+        mode: 'ottvoucher',
         planName: planTitle,
         durationSeconds: durationSecs,
-        voucherCode: code,
-        amount: apiData.price || 0
+        voucherCode: `OTT-${cleanDigits.slice(-4)}`,
+        amount: apiData.price || selectedPlan?.price || 10,
+        transactionRef: apiData.transactionRef
       });
 
       authorizeOnMikroTikRouter('test', '123');
@@ -751,7 +760,102 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setIsConnecting(false);
       isConnectingRef.current = false;
       setStatusBanner(null);
-      setVoucherError('Could not verify voucher at this time. Please try again.');
+      setVoucherError('Could not verify 16-digit OTT Voucher at this time. Please try again.');
+    }
+  };
+
+  // Step 4b: Copy Issued OTT Voucher PIN after M-Pesa / EcoCash / Card payment
+  const handleCopyIssuedOttVoucher = async () => {
+    if (!issuedOttVoucherPin) return;
+    await copyToClipboard(issuedOttVoucherPin);
+    setHasCopiedIssuedOttVoucher(true);
+    const formatted = issuedOttVoucherPin.replace(/\D/g, '').slice(0, 16).match(/.{1,4}/g)?.join(' ') || issuedOttVoucherPin;
+    setRedeemIssuedPinInput(formatted);
+    setPaymentError(null);
+    try {
+      await fetch('/api/gateways/paylesotho/ott-voucher/mark-copied', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: issuedOttVoucherPin })
+      });
+    } catch {}
+  };
+
+  // Step 5: Redeem Copied OTT Voucher PIN in Captive Portal -> Show Sponsor Ad (if enabled) -> Resume to Device
+  const handleRedeemIssuedOttVoucher = async () => {
+    setPaymentError(null);
+    if (!issuedOttVoucherPin) return;
+    if (!hasCopiedIssuedOttVoucher) {
+      setPaymentError('Please click "Copy OTT Voucher PIN" first before redeeming your voucher.');
+      return;
+    }
+
+    const cleanPinToRedeem = (redeemIssuedPinInput || issuedOttVoucherPin).replace(/\D/g, '');
+    if (cleanPinToRedeem.length !== 16) {
+      setPaymentError(`Please paste your 16-digit OTT Voucher PIN (${cleanPinToRedeem.length}/16 digits).`);
+      return;
+    }
+
+    const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+    const expectedPrice = selectedPlan?.price || issuedOttVoucherAmount || 10;
+
+    isConnectingRef.current = true;
+    setIsConnecting(true);
+    setStatusBanner(`Redeeming OTT Voucher (M${expectedPrice}) & activating connectivity...`);
+
+    try {
+      const response = await fetch('/api/vouchers/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cleanPinToRedeem,
+          expectedAmount: expectedPrice,
+          requireCopiedFirst: true,
+          mac: clientMac,
+          ip: clientIp,
+          scope: activeScope,
+          firstName: guestFirstName.trim(),
+          lastName: guestSurname.trim(),
+          guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'T-Connect Guest',
+          countryCode: guestCountryCode,
+          phone: guestPhone.trim(),
+          guestPhone: guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '',
+          guestEmail: guestEmail.trim()
+        })
+      });
+
+      const data = await response.json().catch(() => ({ success: false, message: 'Invalid response from OTT server.' }));
+      if (!response.ok || !data.success) {
+        setIsConnecting(false);
+        isConnectingRef.current = false;
+        setStatusBanner(null);
+        setPaymentError(data.message || '16-Digit OTT Voucher redemption failed.');
+        return;
+      }
+
+      await syncGuestSessionToAdmin({
+        mode: 'paylesotho',
+        planName: selectedPlan?.name || 'Daily Pass',
+        durationSeconds: selectedPlan?.durationSeconds || 86400,
+        voucherCode: `OTT-${cleanPinToRedeem.slice(-4)}`,
+        amount: expectedPrice,
+        transactionRef: data.transactionRef || issuedOttVoucherRef || undefined,
+        speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
+      });
+
+      authorizeOnMikroTikRouter('test', '123');
+      setIssuedOttVoucherPin(null);
+      setHasCopiedIssuedOttVoucher(false);
+      setRedeemIssuedPinInput('');
+      setIsConnecting(false);
+      isConnectingRef.current = false;
+      setStatusBanner(null);
+      startOrEnterConnectedSession('post_auth');
+    } catch {
+      setIsConnecting(false);
+      isConnectingRef.current = false;
+      setStatusBanner(null);
+      setPaymentError('Network error redeeming OTT Voucher.');
     }
   };
 
@@ -759,6 +863,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const handleCompletePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
+
+    if (!isGuestFormValid) {
+      setPaymentError('Please complete your First Name, Surname, 8-digit Lesotho mobile number (5/6), and Email.');
+      return;
+    }
 
     if (!isTermsSatisfied) {
       setPaymentError('Please tick the Terms & Conditions box to proceed.');
@@ -784,13 +893,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     setIsConnecting(true);
 
     if (selectedGateway === 'ottvoucher') {
-      setStatusBanner('Verifying official 16-digit OTT Voucher PIN with OTT Lesotho...');
+      setStatusBanner(`Verifying 16-digit OTT Voucher PIN for M${selectedPlan?.price || 10} package...`);
       try {
         const response = await fetch('/api/vouchers/redeem', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code: cleanPin,
+            expectedAmount: selectedPlan?.price || 10,
             mac: clientMac,
             ip: clientIp,
             scope: activeScope,
@@ -827,7 +937,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        releaseAndCloseSplash();
+        startOrEnterConnectedSession('post_auth');
       } catch {
         setIsConnecting(false);
         isConnectingRef.current = false;
@@ -837,13 +947,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       return;
     }
 
-    // PayLesotho Aggregator Flow (EcoCash, Vodacom M-Pesa, Card/EFT)
+    // PayLesotho Aggregator Flow (EcoCash, Vodacom M-Pesa, Card/EFT via XPayments)
     setStatusBanner(
       payLesothoChannel === 'card'
-        ? 'Connecting to PayLesotho secure card payment gateway...'
+        ? 'Connecting to PayLesotho XPayments secure checkout...'
         : payLesothoChannel === 'mpesa'
-          ? `Initiating Vodacom M-Pesa (*111#) payment prompt for ${guestCountryCode} ${guestPhone}...`
-          : `Initiating Econet EcoCash (*199#) payment prompt for ${guestCountryCode} ${guestPhone}...`
+          ? `Initiating Vodacom M-Pesa (*111#) payment prompt (M${selectedPlan?.price || 10}) for ${guestCountryCode} ${guestPhone}...`
+          : `Initiating Econet EcoCash (*199#) payment prompt (M${selectedPlan?.price || 10}) for ${guestCountryCode} ${guestPhone}...`
     );
 
     try {
@@ -874,7 +984,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
 
-      setStatusBanner(data.message || 'Payment prompt sent. Waiting for subscriber approval...');
+      setStatusBanner(data.message || 'Payment prompt sent. Waiting for subscriber approval & OTT Voucher generation...');
 
       if (payLesothoChannel === 'card' && data.checkoutUrl) {
         window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
@@ -890,22 +1000,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           if (pollData.success && pollData.status === 'completed') {
             clearInterval(pollInterval);
 
-            await syncGuestSessionToAdmin({
-              mode: 'paylesotho',
-              planName: selectedPlan?.name || 'Daily Pass',
-              durationSeconds: selectedPlan?.durationSeconds || 86400,
-              voucherCode: `PL-${data.reference?.slice(-6) || 'PAID'}`,
-              amount: selectedPlan?.price || 10,
-              transactionRef: data.reference,
-              speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
-            });
+            const generatedPin = String(pollData.ottVoucherPin || '').replace(/\D/g, '');
+            const voucherAmt = Number(pollData.ottVoucherAmount) || selectedPlan?.price || 10;
 
-            authorizeOnMikroTikRouter('test', '123');
+            setIssuedOttVoucherPin(generatedPin);
+            setIssuedOttVoucherAmount(voucherAmt);
+            setIssuedOttVoucherRef(pollData.ottVoucherRef || data.reference || txId);
+            setHasCopiedIssuedOttVoucher(false);
+            setRedeemIssuedPinInput('');
             setIsConnecting(false);
             isConnectingRef.current = false;
             setStatusBanner(null);
-            releaseAndCloseSplash();
-          } else if (pollData.status === 'failed' || attempts > 20) {
+          } else if (pollData.status === 'failed' || attempts > 25) {
             clearInterval(pollInterval);
             setIsConnecting(false);
             isConnectingRef.current = false;
@@ -913,7 +1019,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             setPaymentError(pollData.errorMessage || 'Transaction was not approved within the allotted time.');
           }
         } catch {
-          if (attempts > 20) {
+          if (attempts > 25) {
             clearInterval(pollInterval);
             setIsConnecting(false);
             isConnectingRef.current = false;
@@ -1480,7 +1586,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 )}
 
                 {/* ================================================================= */}
-                {/* STEP 2: VOUCHER CODE LOGIN (Only when Voucher Mode is ON)         */}
+                {/* STEP 2: 16-DIGIT OTT VOUCHER CODE LOGIN (Only when Voucher is ON) */}
                 {/* ================================================================= */}
                 {portalStep === 'voucher' && isVoucherAllowed && (
                   <form
@@ -1491,19 +1597,30 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     {renderModeQuickTabs('voucher')}
 
+                    {renderGuestIdentificationInputs()}
+
                     <div>
-                      <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-                        Voucher Code <span className="text-red-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] font-medium text-slate-300">
+                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
+                        </label>
+                        <span className="text-[9px] font-mono text-emerald-400 font-bold tabular-nums">
+                          {voucherCode.replace(/\D/g, '').length}/16 digits
+                        </span>
+                      </div>
                       <input
                         type="text"
+                        inputMode="numeric"
+                        maxLength={19}
                         value={voucherCode}
                         onChange={(e) => {
-                          setVoucherCode(e.target.value);
+                          const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
+                          setVoucherCode(formatted);
                           setVoucherError(null);
                         }}
-                        placeholder="Enter voucher code (e.g. TC-XXXX or 16-digit OTT PIN)"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tracking-wider uppercase focus:outline-none"
+                        placeholder="1234 5678 9012 3456 (16-digit OTT PIN)"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tracking-widest uppercase focus:outline-none"
                       />
                       {voucherError && (
                         <div className="mt-1 p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
@@ -1517,23 +1634,25 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     <button
                       type="submit"
-                      disabled={!isTermsSatisfied || isConnecting || !voucherCode.trim()}
+                      disabled={!isTermsSatisfied || !isGuestFormValid || isConnecting || voucherCode.replace(/\D/g, '').length !== 16}
                       className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
-                      <span>{isConnecting ? 'Verifying Voucher...' : 'Activate Voucher & Connect \u2192'}</span>
+                      <span>{isConnecting ? 'Verifying 16-Digit OTT Voucher...' : 'Redeem OTT Voucher & Connect \u2192'}</span>
                     </button>
                   </form>
                 )}
 
                 {/* ================================================================= */}
-                {/* STEP 3: PLAN SELECTION (Only when Buy Pass Mode is ON)            */}
+                {/* STEP 3: PLAN SELECTION + DETAILS (Only when Buy Pass Mode is ON)  */}
                 {/* ================================================================= */}
                 {portalStep === 'plan' && isBuyPassAllowed && (
                   <div className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left">
                     <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
 
                     {renderModeQuickTabs('plan')}
+
+                    {renderGuestIdentificationInputs()}
 
                     <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
                       {enabledPlans.map((plan) => {
@@ -1581,14 +1700,16 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     <button
                       type="button"
-                      disabled={!isTermsSatisfied}
+                      disabled={!isTermsSatisfied || !isGuestFormValid}
                       onClick={() => {
                         setPaymentError(null);
+                        setIssuedOttVoucherPin(null);
+                        setHasCopiedIssuedOttVoucher(false);
                         setPortalStep('payment');
                       }}
                       className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      <span>Continue to Payment</span>
+                      <span>Continue to PayLesotho Payment</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1598,7 +1719,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           })()}
 
           {/* ================================================================= */}
-          {/* STEP 4: ECOCASH & 16-DIGIT OTT VOUCHER PAYMENT                    */}
+          {/* STEP 4 & 5: PAYLESOTHO PAYMENT -> COPY OTT VOUCHER -> REDEEM      */}
           {/* ================================================================= */}
           {portalStep === 'payment' && (
             <form
@@ -1609,12 +1730,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
                 <span className="text-[11px] font-bold text-white font-mono uppercase">
-                  Payment &amp; Voucher PIN
+                  {issuedOttVoucherPin ? 'Copy & Redeem Your OTT Voucher' : 'PayLesotho & OTT Voucher Checkout'}
                 </span>
                 <button
                   type="button"
                   onClick={() => {
                     setPaymentError(null);
+                    setIssuedOttVoucherPin(null);
+                    setHasCopiedIssuedOttVoucher(false);
                     setPortalStep('plan');
                   }}
                   className="text-[10px] text-slate-400 hover:text-white cursor-pointer font-mono"
@@ -1623,169 +1746,263 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 </button>
               </div>
 
-              {/* 2-Option Payment Selector: PayLesotho Aggregator & Official 16-Digit OTT Voucher */}
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  key="paylesotho"
-                  type="button"
-                  onClick={() => {
-                    setSelectedGateway('paylesotho');
-                    setPaymentError(null);
-                  }}
-                  className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    selectedGateway === 'paylesotho'
-                      ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
-                      : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <ProviderLogo provider="paylesotho" className="w-5 h-5 shrink-0" />
-                  <span className="text-[10px] font-bold truncate">PayLesotho</span>
-                </button>
-
-                <button
-                  key="ottvoucher"
-                  type="button"
-                  onClick={() => {
-                    setSelectedGateway('ottvoucher');
-                    setPaymentError(null);
-                  }}
-                  className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    selectedGateway === 'ottvoucher'
-                      ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
-                      : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <ProviderLogo provider="ottvoucher" className="w-5 h-5 shrink-0" />
-                  <span className="text-[10px] font-bold truncate">OTT Voucher</span>
-                </button>
-              </div>
-
-              {selectedGateway === 'paylesotho' ? (
-                <div className="space-y-2">
-                  {/* Channel Sub-Selector: EcoCash, M-Pesa, Card */}
-                  <div>
-                    <label className="text-[9px] font-medium text-slate-400 block mb-1">
-                      Select Payment Method (Aggregated via PayLesotho):
-                    </label>
-                    <div className="grid grid-cols-3 gap-1">
-                      {(
-                        [
-                          { id: 'ecocash', label: 'EcoCash', sub: 'Econet *199#' },
-                          { id: 'mpesa', label: 'M-Pesa', sub: 'Vodacom *111#' },
-                          { id: 'card', label: 'Card / EFT', sub: 'Visa · Master' }
-                        ] as const
-                      ).map((ch) => (
-                        <button
-                          key={ch.id}
-                          type="button"
-                          onClick={() => {
-                            setPayLesothoChannel(ch.id);
-                            setPaymentError(null);
-                          }}
-                          className={`py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
-                            payLesothoChannel === ch.id
-                              ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
-                              : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <div className="text-[10px] font-bold leading-tight">{ch.label}</div>
-                          <div className="text-[8px] text-slate-400 truncate">{ch.sub}</div>
-                        </button>
-                      ))}
+              {issuedOttVoucherPin ? (
+                /* ============================================================= */
+                /* STEP 4b & 5: COPY ISSUED OTT VOUCHER -> REDEEM IN PORTAL      */
+                /* ============================================================= */
+                <div className="space-y-2.5 pt-1">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-emerald-300 uppercase font-mono">
+                        Payment Verified ({currencySymbol}{issuedOttVoucherAmount})
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-300">
+                        16-Digit OTT Voucher Issued
+                      </span>
                     </div>
+                    <div className="p-2 rounded-lg bg-black/70 border border-emerald-400/40 text-center font-mono text-sm font-black tracking-widest text-emerald-400 select-all">
+                      {issuedOttVoucherPin.replace(/\D/g, '').match(/.{1,4}/g)?.join(' ') || issuedOttVoucherPin}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyIssuedOttVoucher}
+                      className={`w-full py-1.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        hasCopiedIssuedOttVoucher
+                          ? 'bg-emerald-500/25 border border-emerald-400 text-emerald-200'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow'
+                      }`}
+                    >
+                      {hasCopiedIssuedOttVoucher ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-300" />
+                          <span>Step 1 Complete: OTT Voucher Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Step 1: Copy OTT Voucher PIN</span>
+                        </>
+                      )}
+                    </button>
                   </div>
 
-                  {payLesothoChannel === 'card' ? (
-                    <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-300">
-                      <div className="font-bold text-white mb-0.5">Secure Card &amp; Instant EFT</div>
-                      <div className="text-[9px] text-slate-400">
-                        Redirects to 3D-Secure 256-bit encrypted checkout powered by PayLesotho Gateway.
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-[10px] font-medium text-slate-300">
+                        Step 2: Paste &amp; Redeem OTT Voucher ({currencySymbol}{issuedOttVoucherAmount})
+                      </label>
+                      <span className="text-[9px] font-mono text-emerald-400">
+                        {hasCopiedIssuedOttVoucher ? 'Ready to redeem' : 'Copy PIN above first'}
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={19}
+                      disabled={!hasCopiedIssuedOttVoucher}
+                      value={redeemIssuedPinInput}
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                        const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
+                        setRedeemIssuedPinInput(formatted);
+                        setPaymentError(null);
+                      }}
+                      placeholder={hasCopiedIssuedOttVoucher ? '1234 5678 9012 3456' : 'Click "Copy OTT Voucher PIN" above first'}
+                      className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 disabled:opacity-50 rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
+                    />
+                  </div>
+
+                  {paymentError && (
+                    <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                      <span>{paymentError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleRedeemIssuedOttVoucher}
+                    disabled={!hasCopiedIssuedOttVoucher || isConnecting || redeemIssuedPinInput.replace(/\D/g, '').length !== 16}
+                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isConnecting ? 'Redeeming OTT Voucher...' : 'Step 2: Redeem OTT Voucher & Connect \u2192'}</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* 2-Option Payment Selector: PayLesotho Aggregator & Official 16-Digit OTT Voucher */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      key="paylesotho"
+                      type="button"
+                      onClick={() => {
+                        setSelectedGateway('paylesotho');
+                        setPaymentError(null);
+                      }}
+                      className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        selectedGateway === 'paylesotho'
+                          ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
+                          : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <ProviderLogo provider="paylesotho" className="w-5 h-5 shrink-0" />
+                      <span className="text-[10px] font-bold truncate">PayLesotho (M-Pesa / EcoCash)</span>
+                    </button>
+
+                    <button
+                      key="ottvoucher"
+                      type="button"
+                      onClick={() => {
+                        setSelectedGateway('ottvoucher');
+                        setPaymentError(null);
+                      }}
+                      className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        selectedGateway === 'ottvoucher'
+                          ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
+                          : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <ProviderLogo provider="ottvoucher" className="w-5 h-5 shrink-0" />
+                      <span className="text-[10px] font-bold truncate">Have OTT Voucher</span>
+                    </button>
+                  </div>
+
+                  {selectedGateway === 'paylesotho' ? (
+                    <div className="space-y-2">
+                      {/* Channel Sub-Selector: EcoCash, M-Pesa, Card */}
+                      <div>
+                        <label className="text-[9px] font-medium text-slate-400 block mb-1">
+                          Select Payment Method (via PayLesotho / XPayments):
+                        </label>
+                        <div className="grid grid-cols-3 gap-1">
+                          {(
+                            [
+                              { id: 'ecocash', label: 'EcoCash', sub: 'Econet *199#' },
+                              { id: 'mpesa', label: 'M-Pesa', sub: 'Vodacom *111#' },
+                              { id: 'card', label: 'Card / EFT', sub: 'XPayments' }
+                            ] as const
+                          ).map((ch) => (
+                            <button
+                              key={ch.id}
+                              type="button"
+                              onClick={() => {
+                                setPayLesothoChannel(ch.id);
+                                setPaymentError(null);
+                              }}
+                              className={`py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
+                                payLesothoChannel === ch.id
+                                  ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
+                                  : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              <div className="text-[10px] font-bold leading-tight">{ch.label}</div>
+                              <div className="text-[8px] text-slate-400 truncate">{ch.sub}</div>
+                            </button>
+                          ))}
+                        </div>
                       </div>
+
+                      {payLesothoChannel === 'card' ? (
+                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-300">
+                          <div className="font-bold text-white mb-0.5">PayLesotho XPayments Card Checkout</div>
+                          <div className="text-[9px] text-slate-400">
+                            Generates an OTT Voucher for your selected package denomination upon payment approval.
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <label className="text-[10px] font-medium text-slate-300">
+                              {payLesothoChannel === 'mpesa' ? 'Vodacom M-Pesa' : 'EcoCash'} Number (+266) <span className="text-red-400">*</span>
+                            </label>
+                            <span className="text-[9px] font-mono text-slate-400">
+                              {cleanPhoneDigits.length}/8 digits (5/6)
+                            </span>
+                          </div>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            maxLength={8}
+                            required
+                            value={guestPhone}
+                            onChange={(e) => {
+                              handleGuestPhoneChange(e.target.value, '+266');
+                              setPaymentError(null);
+                            }}
+                            placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
+                            className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
+                          />
+                          {phoneFormatError && (
+                            <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div>
                       <div className="flex items-center justify-between mb-0.5">
                         <label className="text-[10px] font-medium text-slate-300">
-                          {payLesothoChannel === 'mpesa' ? 'Vodacom M-Pesa' : 'EcoCash'} Number (+266) <span className="text-red-400">*</span>
+                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
                         </label>
-                        <span className="text-[9px] font-mono text-slate-400">
-                          {cleanPhoneDigits.length}/8 digits (5/6)
+                        <span className="text-[10px] font-mono tabular-nums text-emerald-400 font-bold">
+                          {ottPin.replace(/\D/g, '').length}/16 digits
                         </span>
                       </div>
                       <input
-                        type="tel"
+                        type="text"
                         inputMode="numeric"
-                        maxLength={8}
+                        maxLength={19}
                         required
-                        value={guestPhone}
+                        value={ottPin}
                         onChange={(e) => {
-                          handleGuestPhoneChange(e.target.value, '+266');
+                          const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
+                          setOttPin(formatted);
                           setPaymentError(null);
                         }}
-                        placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
+                        placeholder="1234 5678 9012 3456"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
                       />
-                      {phoneFormatError && (
-                        <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
-                      )}
+                      <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                        Voucher value must match your selected package price.
+                      </p>
                     </div>
                   )}
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[10px] font-medium text-slate-300">
-                      16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
-                    </label>
-                    <span className="text-[10px] font-mono tabular-nums text-emerald-400 font-bold">
-                      {ottPin.replace(/\D/g, '').length}/16 digits
+
+                  {renderTermsAndConditionsRow()}
+
+                  {paymentError && (
+                    <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                      <span>{paymentError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={
+                      !isTermsSatisfied ||
+                      !isGuestFormValid ||
+                      isConnecting ||
+                      (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16) ||
+                      (selectedGateway === 'paylesotho' &&
+                        payLesothoChannel !== 'card' &&
+                        !/^[56]\d{7}$/.test(cleanPhoneDigits))
+                    }
+                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>
+                      {isConnecting
+                        ? 'Processing with PayLesotho...'
+                        : selectedGateway === 'ottvoucher'
+                        ? 'Redeem OTT Voucher & Connect \u2192'
+                        : 'Pay & Generate OTT Voucher \u2192'}
                     </span>
-                  </div>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={19}
-                    required
-                    value={ottPin}
-                    onChange={(e) => {
-                      const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                      const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
-                      setOttPin(formatted);
-                      setPaymentError(null);
-                    }}
-                    placeholder="1234 5678 9012 3456"
-                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
-                  />
-                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">
-                    Buy official 16-digit OTT vouchers at any shop or online in Lesotho.
-                  </p>
-                </div>
+                  </button>
+                </>
               )}
-
-              {renderTermsAndConditionsRow()}
-
-              {paymentError && (
-                <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                  <span>{paymentError}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={
-                  !isTermsSatisfied ||
-                  isConnecting ||
-                  (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16) ||
-                  (selectedGateway === 'paylesotho' &&
-                    payLesothoChannel !== 'card' &&
-                    !/^[56]\d{7}$/.test(cleanPhoneDigits))
-                }
-                className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{isConnecting ? 'Processing with Gateway...' : 'Pay & Connect Internet \u2192'}</span>
-              </button>
             </form>
           )}
         </div>

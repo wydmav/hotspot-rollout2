@@ -73,12 +73,25 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [apiPassword, setApiPassword] = useState(selectedGateway?.apiPassword || '');
   const [showPassword, setShowPassword] = useState(false);
   const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
+  const [ottBearerToken, setOttBearerToken] = useState(selectedGateway?.ottBearerToken || '');
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
+  const [mpesaMerchantId, setMpesaMerchantId] = useState(selectedGateway?.mpesaMerchantId || '');
+  const [ecocashMerchantId, setEcocashMerchantId] = useState(selectedGateway?.ecocashMerchantId || '');
+  const [xpaymentsAppId, setXpaymentsAppId] = useState(selectedGateway?.xpaymentsAppId || '');
+  const [xpaymentsCertId, setXpaymentsCertId] = useState(selectedGateway?.xpaymentsCertId || '');
   const [vendorId, setVendorId] = useState(selectedGateway?.vendorId || '11, 1, TCONNECTLES1');
   const [endpointUrl, setEndpointUrl] = useState(
     selectedGateway?.endpointUrl && !selectedGateway.endpointUrl.includes('portal.ottlesotho.com')
       ? selectedGateway.endpointUrl
+      : selectedGateway?.provider === 'paylesotho'
+      ? 'https://api.paylesotho.co.ls'
       : 'https://api.ottlesotho.com'
+  );
+  const [xpaymentsEndpointUrl, setXpaymentsEndpointUrl] = useState(
+    selectedGateway?.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls'
+  );
+  const [ottVoucherEndpointUrl, setOttVoucherEndpointUrl] = useState(
+    selectedGateway?.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get'
   );
   const [webhookSecret, setWebhookSecret] = useState(selectedGateway?.webhookSecret || '');
 
@@ -114,6 +127,39 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               if (srvOtt.endpointUrl) setEndpointUrl(srvOtt.endpointUrl);
             }
           }
+          const srvPl = data.gateways.find((g: any) => g.provider === 'paylesotho');
+          if (srvPl) {
+            onUpdateCredentials('paylesotho', {
+              apiKey: srvPl.apiKey || '',
+              apiSecret: srvPl.apiSecret || '',
+              bearerToken: srvPl.bearerToken || '',
+              ottBearerToken: srvPl.ottBearerToken || '',
+              merchantId: srvPl.merchantId || '',
+              mpesaMerchantId: srvPl.mpesaMerchantId || '',
+              ecocashMerchantId: srvPl.ecocashMerchantId || '',
+              xpaymentsAppId: srvPl.xpaymentsAppId || '',
+              xpaymentsCertId: srvPl.xpaymentsCertId || '',
+              endpointUrl: srvPl.endpointUrl || 'https://api.paylesotho.co.ls',
+              xpaymentsEndpointUrl: srvPl.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls',
+              ottVoucherEndpointUrl: srvPl.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+              status: 'operational',
+              isLive: Boolean(srvPl.isLive ?? true)
+            });
+            if (selectedGateway?.provider === 'paylesotho') {
+              if (srvPl.apiKey) setApiKey(srvPl.apiKey);
+              if (srvPl.apiSecret) setApiSecret(srvPl.apiSecret);
+              if (srvPl.bearerToken) setBearerToken(srvPl.bearerToken);
+              if (srvPl.ottBearerToken) setOttBearerToken(srvPl.ottBearerToken);
+              if (srvPl.merchantId) setMerchantId(srvPl.merchantId);
+              if (srvPl.mpesaMerchantId) setMpesaMerchantId(srvPl.mpesaMerchantId);
+              if (srvPl.ecocashMerchantId) setEcocashMerchantId(srvPl.ecocashMerchantId);
+              if (srvPl.xpaymentsAppId) setXpaymentsAppId(srvPl.xpaymentsAppId);
+              if (srvPl.xpaymentsCertId) setXpaymentsCertId(srvPl.xpaymentsCertId);
+              if (srvPl.endpointUrl) setEndpointUrl(srvPl.endpointUrl);
+              if (srvPl.xpaymentsEndpointUrl) setXpaymentsEndpointUrl(srvPl.xpaymentsEndpointUrl);
+              if (srvPl.ottVoucherEndpointUrl) setOttVoucherEndpointUrl(srvPl.ottVoucherEndpointUrl);
+            }
+          }
         }
       })
       .catch(() => {});
@@ -125,13 +171,22 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setApiSecret(gw.apiSecret || '');
     setApiPassword(gw.apiPassword || '');
     setBearerToken(gw.bearerToken || '');
+    setOttBearerToken(gw.ottBearerToken || '');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
+    setMpesaMerchantId(gw.mpesaMerchantId || '');
+    setEcocashMerchantId(gw.ecocashMerchantId || '');
+    setXpaymentsAppId(gw.xpaymentsAppId || '');
+    setXpaymentsCertId(gw.xpaymentsCertId || '');
     setVendorId(gw.vendorId || '1, 11');
     setEndpointUrl(
       gw.endpointUrl && !gw.endpointUrl.includes('portal.ottlesotho.com')
         ? gw.endpointUrl
+        : gw.provider === 'paylesotho'
+        ? 'https://api.paylesotho.co.ls'
         : 'https://api.ottlesotho.com'
     );
+    setXpaymentsEndpointUrl(gw.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls');
+    setOttVoucherEndpointUrl(gw.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get');
     setWebhookSecret(gw.webhookSecret || '');
     setTestResult(null);
     setRedeemTestResult(null);
@@ -149,9 +204,12 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     if (!selectedGateway) return;
     const cleanKey = apiKey.trim();
     const cleanPass = apiPassword.trim();
-    const cleanUser = (merchantId || 'TCONNECTLES1').trim();
+    const cleanUser = (merchantId || (selectedGateway.provider === 'ottvoucher' ? 'TCONNECTLES1' : '')).trim();
     const cleanVendor = (vendorId || '1, 11').trim();
-    const cleanEndpoint = (endpointUrl || 'https://api.ottlesotho.com').trim();
+    const cleanEndpoint = (
+      endpointUrl ||
+      (selectedGateway.provider === 'paylesotho' ? 'https://api.paylesotho.co.ls' : 'https://api.ottlesotho.com')
+    ).trim();
 
     onUpdateCredentials(selectedGateway.provider, {
       apiKey: cleanKey,
@@ -160,12 +218,46 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       username: cleanUser,
       vendorId: cleanVendor,
       endpointUrl: cleanEndpoint,
+      xpaymentsEndpointUrl: xpaymentsEndpointUrl.trim() || 'https://xpayments.paylesotho.co.ls',
+      ottVoucherEndpointUrl: ottVoucherEndpointUrl.trim() || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
       bearerToken: bearerToken.trim(),
+      ottBearerToken: ottBearerToken.trim(),
       merchantId: cleanUser,
+      mpesaMerchantId: mpesaMerchantId.trim(),
+      ecocashMerchantId: ecocashMerchantId.trim(),
+      xpaymentsAppId: xpaymentsAppId.trim(),
+      xpaymentsCertId: xpaymentsCertId.trim(),
       webhookSecret: webhookSecret.trim(),
       isLive: true,
       status: 'operational'
     });
+
+    if (selectedGateway.provider === 'paylesotho') {
+      setIsProcessing(true);
+      try {
+        await fetch('/api/gateways/paylesotho/credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: cleanKey,
+            apiSecret: apiSecret.trim(),
+            bearerToken: bearerToken.trim(),
+            ottBearerToken: ottBearerToken.trim(),
+            merchantId: cleanUser,
+            mpesaMerchantId: mpesaMerchantId.trim(),
+            ecocashMerchantId: ecocashMerchantId.trim(),
+            xpaymentsAppId: xpaymentsAppId.trim(),
+            xpaymentsCertId: xpaymentsCertId.trim(),
+            endpointUrl: cleanEndpoint,
+            xpaymentsEndpointUrl: xpaymentsEndpointUrl.trim() || 'https://xpayments.paylesotho.co.ls',
+            ottVoucherEndpointUrl: ottVoucherEndpointUrl.trim() || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+            webhookSecret: webhookSecret.trim(),
+            isLive: true
+          })
+        });
+      } catch {}
+      setIsProcessing(false);
+    }
 
     if (selectedGateway.provider === 'ottvoucher') {
       setIsProcessing(true);
@@ -725,6 +817,147 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     >
                       <Check className="w-4 h-4" />
                       <span>Save Credentials &amp; Continue to Connection Test &rarr;</span>
+                    </button>
+                  </div>
+                </div>
+              ) : selectedGateway.provider === 'paylesotho' ? (
+                /* Specialized PayLesotho Postman API + XPayments + OTT Voucher Generation Form */
+                <div className="space-y-4 bg-[#121829] p-4 rounded-xl border border-[#1f283d]">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span className="text-slate-300 font-bold">PAYLESOTHO API + OTT VOUCHER:</span>
+                      <code className="bg-black/60 px-2.5 py-0.5 rounded text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
+                        {endpointUrl || 'https://api.paylesotho.co.ls'}
+                      </code>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        M-Pesa (/api/v2/vcl/payment) · EcoCash (/api/v2/econet/payment) · OTT (/api/ott/voucher/get)
+                      </span>
+                    </div>
+                    <a
+                      href="https://documenter.getpostman.com/view/22835775/2s9Y5ZwN7r"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-mono font-bold shrink-0"
+                    >
+                      <span>PayLesotho Postman Docs</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+
+                  {/* Row 1: PayLesotho Base URL, XPayments URL, OTT Voucher Generation URL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">1. PAYLESOTHO API BASE URL</label>
+                      <input
+                        type="text"
+                        value={endpointUrl}
+                        onChange={(e) => setEndpointUrl(e.target.value)}
+                        placeholder="https://api.paylesotho.co.ls"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">2. XPAYMENTS CARD BASE URL</label>
+                      <input
+                        type="text"
+                        value={xpaymentsEndpointUrl}
+                        onChange={(e) => setXpaymentsEndpointUrl(e.target.value)}
+                        placeholder="https://xpayments.paylesotho.co.ls"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">3. OTT VOUCHER GENERATE URL</label>
+                      <input
+                        type="text"
+                        value={ottVoucherEndpointUrl}
+                        onChange={(e) => setOttVoucherEndpointUrl(e.target.value)}
+                        placeholder="https://api.paylesotho.co.ls/api/ott/voucher/get"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: PayLesotho Bearer Token & OTT Voucher Bearer Token / API Key */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">
+                        4. PAYLESOTHO BEARER TOKEN <span className="text-slate-400 font-normal">(M-Pesa &amp; EcoCash Auth)</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={bearerToken}
+                        onChange={(e) => setBearerToken(e.target.value)}
+                        placeholder="Authorization: Bearer <token> for api.paylesotho.co.ls"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">
+                        5. OTT VOUCHER API KEY / BEARER TOKEN <span className="text-emerald-400 font-normal">(/api/ott/voucher/get)</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={ottBearerToken}
+                        onChange={(e) => setOttBearerToken(e.target.value)}
+                        placeholder="Paste OTT Bearer Token / API Key when shared..."
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 3: M-Pesa Merchant ID, EcoCash Merchant ID, XPayments AppID & CertID */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">6. M-PESA MERCHANT ID</label>
+                      <input
+                        type="text"
+                        value={mpesaMerchantId}
+                        onChange={(e) => setMpesaMerchantId(e.target.value)}
+                        placeholder="service_provider_code"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">7. ECOCASH MERCHANT ID</label>
+                      <input
+                        type="text"
+                        value={ecocashMerchantId}
+                        onChange={(e) => setEcocashMerchantId(e.target.value)}
+                        placeholder="merchantid"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">8. XPAYMENTS APP ID</label>
+                      <input
+                        type="text"
+                        value={xpaymentsAppId}
+                        onChange={(e) => setXpaymentsAppId(e.target.value)}
+                        placeholder="AppID"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">9. XPAYMENTS CERT ID</label>
+                      <input
+                        type="text"
+                        value={xpaymentsCertId}
+                        onChange={(e) => setXpaymentsCertId(e.target.value)}
+                        placeholder="CertID"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={handleSaveCredentials}
+                      className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Save PayLesotho &amp; OTT Voucher Credentials &rarr;</span>
                     </button>
                   </div>
                 </div>

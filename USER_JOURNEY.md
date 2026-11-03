@@ -1,107 +1,74 @@
-# T-Connect Lesotho — End-to-End User Journey & Control Tower Blueprint
+# T-Connect Lesotho — End-to-End User Journey & PayLesotho / OTT Voucher Blueprint
 
-This document specifies the complete user and administrative journey across the **T-Connect Starlink Hotspot Network** deployed throughout the Kingdom of Lesotho. It details how phones authenticate, pay, and automatically resume connectivity without friction, alongside how internal and external teams interact with the Control Tower.
-
----
-
-## 1. System Architecture Overview
-
-```
- [ Guest Phone / Device ]
-   │  (iOS CNA / Android Captive Portal)
-   ▼
- [ MikroTik RouterOS Gateway ]  (e.g., 10.10.0.1 / DNS Walled Garden)
-   │  (Uplink: Starlink Low-Latency Satellite)
-   ▼
- [ T-Connect Control Tower Backend ] (Origin: 169.58.98.92:3000)
-   ├── Express REST API + Static Asset Engine
-   ├── PayLesotho Gateway Aggregator (M-Pesa, EcoCash, Cards)
-   ├── OTT Lesotho Direct API (api.ottlesotho.com — 16-digit verification)
-   └── External Partner API (Isolated Policies & Leads with District)
-```
+This document specifies the complete user and administrative journey across the **T-Connect Starlink Hotspot Network** deployed throughout the Kingdom of Lesotho. It details the exact 5-step captive portal payment, OTT Voucher generation (`https://api.paylesotho.co.ls/api/ott/voucher/get`), Copy-then-Redeem verification, sponsor ad display, and automatic device connection flow.
 
 ---
 
-## 2. End-User Captive Portal Journeys
+## 1. Official 5-Step Captive Portal User Journey
 
-### Journey 1: Free Wi-Fi Mode (Sponsored Ad & Instant Device Resume)
-1. **Wi-Fi Association**: The user connects to the open SSID (e.g., `T-Connect_Cafe_FreeWiFi`).
-2. **Captive Sheet Trigger**: Apple Captive Network Assistant (iOS CNA) or Android Captive Login automatically opens `http://10.10.0.1/login`, instantly routing to `/portal`.
-3. **Guest Identification**:
-   - First Name & Surname (mandatory).
-   - Lesotho Mobile Number: strictly enforces **8 digits starting with 5 or 6** (`+266 5xxxxxxx` or `+266 6xxxxxxx`).
-   - Email Address: verified format with auto-domain suggestions.
-   - Terms & Conditions: mandatory Sesotho legal checkbox (*"Amohela Liphelo Tsa Tšebetso"*).
-4. **Partner Sponsor Ad**:
-   - High-definition partner slide/carousel loads with zero delay directly from local server storage (`/assets/aistudio/...`).
-   - **No Background Text Bleed**: The underlying sign-up layout is unmounted while viewing the ad.
-5. **Instant Device Resume**:
-   - When the user taps **"✕"** on the ad:
-     1. MikroTik RouterOS is authenticated in the background via hidden form/iframe beacon (`/login?username=T-TRIAL&password=123`).
-     2. Active session is saved in `localStorage`.
-     3. Captive mini-browser receives `window.close()` and redirects to destination (`https://www.google.com`), immediately dismissing the sheet so the user resumes to their device apps (WhatsApp, TikTok, browser) without any lingering *"You're online!"* blocker.
+1. **Step 1 — User Connects to the Wi-Fi**:
+   - The user associates with the T-Connect Starlink Wi-Fi SSID on their phone or laptop.
+   - Apple Captive Network Assistant (iOS CNA) or Android Captive Portal automatically opens the T-Connect captive portal (`http://10.10.0.1/login` -> `/portal`).
 
----
+2. **Step 2 — Mandatory Guest Details Entry**:
+   - Before any payment or voucher redemption can proceed, the user enters their mandatory details:
+     - **First Name** & **Surname** (mandatory).
+     - **Lesotho Mobile Number**: Strictly validated as **8 digits starting with `5` or `6`** (`+266 5xxxxxxx` for Vodacom or `+266 6xxxxxxx` for Econet).
+     - **Email Address**: Validated format.
+     - **Terms & Conditions**: Mandatory Sesotho legal checkbox (*"Amohela Liphelo Tsa Tšebetso"*).
 
-### Journey 2: 16-Digit OTT Voucher Redemption (Retail & Spaza PINs)
-1. **Voucher Acquisition**: The user purchases an official 16-digit OTT Voucher at a local shop, retail partner, or online.
-2. **Portal Entry**: Guest selects the **"Voucher"** tab or **"Buy Pass -> OTT Voucher"**.
-3. **16-Digit PIN Validation**:
-   - Input automatically formats the code into 4-digit readable clusters: `1234 5678 9012 3456`.
-   - Real-time digit counter enforces all 16 numeric digits.
-   - Platform rejects any legacy/mock vouchers (such as `TC-XXXX`), accepting **exclusively genuine 16-digit OTT Lesotho Vouchers**.
-4. **Direct API Verification**:
-   - The Control Tower makes a real-time call to `https://api.ottlesotho.com` using HTTP Basic Auth + SHA-256 digital signature.
-   - Checks against the active redeemed PIN ledger to prevent double-spending.
-5. **Automatic Connection**:
-   - Once verified, the user is authorized on MikroTik and **automatically released to their device** to start browsing immediately.
+3. **Step 3 — PayLesotho / XPayments Payment Prompt (M-Pesa, EcoCash, or Card)**:
+   - The user selects a Wi-Fi package (e.g., Daily Pass `M10`, Weekly Pass `M60`, Monthly Pass `M280`) and is prompted for payment via **Vodacom M-Pesa** (`*111#`), **Econet EcoCash** (`*199#`), or **XPayments Card** through **PayLesotho** (`https://api.paylesotho.co.ls` / `https://xpayments.paylesotho.co.ls`).
+
+4. **Step 4 — Denomination Verification & 16-Digit OTT Voucher Issuance**:
+   - Only after PayLesotho verifies that the user has paid the **exact denomination** matching the selected package value (`INS-0` for M-Pesa, `200` for EcoCash, or `00` for XPayments), the backend calls `https://api.paylesotho.co.ls/api/ott/voucher/get` using the configured OTT API Key / Bearer Token to issue a **16-digit OTT Voucher PIN** for that exact denomination.
+   - The 16-digit OTT Voucher PIN is displayed inside the captive portal.
+
+5. **Step 5 — Copy OTT Voucher First -> Redeem in Captive Portal -> Sponsor Ad -> Automatic Device Resume**:
+   - The user **must click "Step 1: Copy OTT Voucher PIN"** first to copy the 16-digit PIN to their clipboard.
+   - Only after copying the OTT Voucher does **"Step 2: Redeem OTT Voucher & Connect"** unlock in the captive portal.
+   - When redeemed, the backend strictly verifies that:
+     1. The voucher is a genuine 16-digit OTT Voucher (zero internally generated `TC-XXXX` vouchers exist anywhere in the platform).
+     2. The OTT Voucher denomination **strictly equals** the selected package price (`voucher.amount === selectedPlan.price`).
+   - Upon successful redemption:
+     - If **Sponsor Ads** are enabled for the hotspot scope, the full-screen sponsor ad carousel/video is displayed with **zero background text bleed**.
+     - Immediately after the ad (or immediately upon redemption if ads are disabled), MikroTik RouterOS authorizes the device in the background and the captive portal **automatically closes/resumes to the user's device** with no *"You're online!"* screen.
 
 ---
 
-### Journey 3: PayLesotho Payment Gateway Aggregator (M-Pesa, EcoCash & Cards)
-1. **Plan Selection**: User selects their desired Starlink speed pass (e.g., Daily M10, Weekly M60, Monthly M280).
-2. **Payment Method Selection**: User taps **"PayLesotho"** and chooses their payment channel:
-   - **Vodacom M-Pesa** (`mpesa`): Prompts USSD `*111#` push to their Vodacom Lesotho number (`5xxxxxxx`).
-   - **Econet EcoCash** (`ecocash`): Prompts USSD `*199#` push to their Econet Lesotho number (`6xxxxxxx`).
-   - **Credit / Debit Card & Instant EFT** (`card`): Directs to 3D-Secure 256-bit encrypted checkout powered by PayLesotho Gateway.
-3. **Automated Status Polling**:
-   - Frontend polls `/api/gateways/paylesotho/status/:transactionId` every 1.5 seconds.
-   - Instant webhook callback listener at `/api/gateways/paylesotho/webhook` marks the transaction completed upon receiving provider IPN.
-4. **Immediate Device Release**:
-   - As soon as the transaction is approved, the subscriber is authenticated on the router and **automatically resumes to their device**. No intermediate screens, no delay.
+## 2. PayLesotho Postman API Endpoints in Full Effect
+
+Reference Documentation: `https://documenter.getpostman.com/view/22835775/2s9Y5ZwN7r`
+
+| # | Postman Section | Upstream Endpoint | Method | Success Condition |
+|---|---|---|---|---|
+| 1 | **M-Pesa Payment (USSD Push)** (`#23c9c4c9-df20-4d62-977f-b8222a6c666a`) | `https://api.paylesotho.co.ls/api/v2/vcl/payment` | `POST` | `status_code === "INS-0"` |
+| 2 | **M-Pesa Verify Transaction** (`#b05e5278-37ce-4726-a18f-4bbc4421d998`) | `https://api.paylesotho.co.ls/api/v1/vcl/verify/:mpesa_reference/:service_provider_code` | `GET` | `status_code === "INS-0"` |
+| 3 | **EcoCash Payment (USSD Push)** (`#4f71df8d-c3f1-44ac-bdfa-65b3022d1fd0`) | `https://api.paylesotho.co.ls/api/v2/econet/payment` | `POST` | `status_code === "200"` |
+| 4 | **EcoCash Verify Transaction** (`#7df2735e-ddf9-45ad-b49f-1f75f8d3aa7e`) | `https://api.paylesotho.co.ls/api/v2/econet/verify/:reference` | `GET` | `status_code === "200"` |
+| 5 | **XPayments Card Initiate & Verify** (`#159537ea-2504-4fbd-9ccf-f4ebc3895fab`) | `https://xpayments.paylesotho.co.ls/api/v1/initiate-payment` & `/api/transactions/status` | `POST` | `statusCode === "00"` |
+| 6 | **PayLesotho OTT Voucher Generation** | `https://api.paylesotho.co.ls/api/ott/voucher/get` | `POST` / `GET` | Issues 16-digit OTT Voucher PIN for paid denomination |
+| 7 | **OTT Lesotho Voucher Remittance** | `https://api.ottlesotho.com/api/v1/RemitVoucher` | `POST` | HTTP `200`/`201` (`success: true`, exact denomination match) |
 
 ---
 
-## 3. Control Tower Operator / Admin Experience
+## 3. Configuring the OTT Bearer Token / API Key & PayLesotho Credentials
 
-### Payment Gateway Hub
-- Located at **Payment Gateways** tab in the Control Tower.
-- Manages three primary channels:
-  1. **PayLesotho Gateway Aggregator**: Full credentials (API Key, Merchant ID, Secret), channel selector (EcoCash, M-Pesa, Card), live ping latency test, and sandbox/production toggle.
-  2. **OTT Voucher Lesotho**: Direct `api.ottlesotho.com` integration, live credentials verification, balance checks, and vendor ID routing (`1, 11`).
-  3. **EcoCash Lesotho Direct**: Direct Cassava/Econet USSD push backup integration.
-
-### 16-Digit OTT Voucher Live Inspector & Audit Ledger
-- Replaces all legacy code generators.
-- Allows operators to test any 16-digit PIN in real time against the OTT Lesotho production or test API.
-- Live redemptions table records timestamp, plan, subscriber phone, price in Maloti (M), and receipt reference with one-click clipboard copying.
-
-### Fleet Synchronization & Hardware Bridging
-- Operators can click **"Sync OTT & 5-Port Bridge to All Routers"** to push:
-  - Bridge configuration binding ports 1 through 5 to `bridgeLocal`.
-  - Walled-garden entries allowing `api.ottlesotho.com`, `gateway.paylesotho.co.ls`, and Control Tower IP (`169.58.98.92`).
-  - Latest compact Sesotho Terms & Conditions splash pages.
-
-### Reset Leads Feature (Clean Slate for Sponsors)
-- When a new sponsor or partner API key is issued, leads can be reset either globally or per-policy.
-- Only leads captured **after** key issuance are delivered to external partners.
-- Every command, API key, cURL snippet, and voucher has an instant **Copy to Clipboard** button with visual feedback.
+1. Open the Control Tower Dashboard -> **Payment Gateways** -> Select **PayLesotho Gateway Aggregator**.
+2. Under **Step 1: Merchant Credentials**, enter or update:
+   - **1. PAYLESOTHO API BASE URL**: `https://api.paylesotho.co.ls`
+   - **2. XPAYMENTS CARD BASE URL**: `https://xpayments.paylesotho.co.ls`
+   - **3. OTT VOUCHER GENERATE URL**: `https://api.paylesotho.co.ls/api/ott/voucher/get`
+   - **4. PAYLESOTHO BEARER TOKEN**: Your `Authorization: Bearer <token>` for M-Pesa & EcoCash requests.
+   - **5. OTT VOUCHER API KEY / BEARER TOKEN**: Paste the OTT API key or Bearer token for `https://api.paylesotho.co.ls/api/ott/voucher/get` once shared.
+   - **6. M-PESA MERCHANT ID**: `service_provider_code` / `merchantid` for Vodacom M-Pesa.
+   - **7. ECOCASH MERCHANT ID**: `merchantid` for Econet EcoCash.
+   - **8. XPAYMENTS APP ID** & **9. XPAYMENTS CERT ID**: Credentials for XPayments Card checkout.
+3. Click **Save PayLesotho & OTT Voucher Credentials**.
 
 ---
 
 ## 4. External Partner Integration Contract Rules
-
-For third-party insurance, retail, and corporate sponsors integrating with T-Connect:
 
 - **Base URL**:
   ```
@@ -109,54 +76,11 @@ For third-party insurance, retail, and corporate sponsors integrating with T-Con
   ```
 - **Strictly Enforced Mandatory Fields**:
   - `fullName`: First Name and Surname required.
-  - `phone`: Exactly 8 digits starting with 5 or 6 (e.g., `58123456`).
+  - `phone`: Exactly 8 digits starting with `5` or `6` (e.g., `58123456`).
   - `email`: Valid RFC 5322 email string.
 - **Hotspot Location Metadata**:
-  - Each partner's hotspot data returns:
-    - `district`: One of the 10 official Lesotho districts (Maseru, Berea, Leribe, Mafeteng, Mohale's Hoek, Quthing, Qacha's Nek, Mokhotlong, Thaba-Tseka, Butha-Buthe).
-    - `hotspotName`: Actual operational name assigned by internal team (e.g. *Alliance Maseru Central Hub*).
-    - `optInDateTime`: ISO-8601 timestamp of user opt-in.
+  - `district`: Official Lesotho district (Maseru, Berea, Leribe, Mafeteng, Mohale's Hoek, Quthing, Qacha's Nek, Mokhotlong, Thaba-Tseka, Butha-Buthe).
+  - `hotspotName`: Internal hotspot name assigned by the T-Connect team.
+  - `optInDateTime`: ISO-8601 timestamp of user opt-in.
 - **Privacy Enforcement**:
-  - `mac` (Device MAC Address) is **strictly withheld from external partners** and visible only to the internal network engineering team.
-
----
-
-## 5. API Verification Quick Reference
-
-### Test PayLesotho Gateway
-```bash
-curl -X POST http://localhost:3000/api/gateways/paylesotho/test \
-  -H "Content-Type: application/json" \
-  -d '{"apiKey":"pl_live_key"}'
-```
-
-### Initiate M-Pesa / EcoCash / Card Transaction
-```bash
-# Vodacom M-Pesa
-curl -X POST http://localhost:3000/api/gateways/paylesotho/initiate \
-  -H "Content-Type: application/json" \
-  -d '{"amount":10,"channel":"mpesa","phoneNumber":"58123456","customerName":"Thabo Mokoena","customerEmail":"thabo@example.com"}'
-
-# Econet EcoCash
-curl -X POST http://localhost:3000/api/gateways/paylesotho/initiate \
-  -H "Content-Type: application/json" \
-  -d '{"amount":10,"channel":"ecocash","phoneNumber":"62123456","customerName":"Lerato Nko","customerEmail":"lerato@example.com"}'
-
-# Bank Card / Instant EFT
-curl -X POST http://localhost:3000/api/gateways/paylesotho/initiate \
-  -H "Content-Type: application/json" \
-  -d '{"amount":60,"channel":"card","customerName":"Palesa Moloi","customerEmail":"palesa@example.com"}'
-```
-
-### Test 16-Digit OTT Voucher Redemption
-```bash
-curl -X POST http://localhost:3000/api/vouchers/redeem \
-  -H "Content-Type: application/json" \
-  -d '{"code":"1234567890123456","phone":"58123456"}'
-```
-
-### Query External Partner Policies & Leads
-```bash
-curl -H "Authorization: Bearer <PARTNER_API_KEY>" \
-  https://your-control-tower-domain.com/api/v1/partner/policies
-```
+  - `mac` (Device MAC Address) is **strictly stripped from all external partner responses** and visible only to the internal team.
