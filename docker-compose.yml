@@ -23,10 +23,14 @@ services:
       - OTTVOUCHER_API_PASSWORD=${OTTVOUCHER_API_PASSWORD:-}
       - OTTVOUCHER_VENDOR_ID=${OTTVOUCHER_VENDOR_ID:-1, 11}
       - OTTVOUCHER_ENDPOINT_URL=${OTTVOUCHER_ENDPOINT_URL:-https://api.ottlesotho.com}
+      - PAYLESOTHO_MERCHANT_ID=${PAYLESOTHO_MERCHANT_ID:-PL_MERCHANT_TCONNECT}
+      - PAYLESOTHO_API_KEY=${PAYLESOTHO_API_KEY:-}
+      - PAYLESOTHO_ENDPOINT_URL=${PAYLESOTHO_ENDPOINT_URL:-https://gateway.paylesotho.co.ls/api/v1}
     volumes:
       - ./data:/app/data
       - ./public/images:/app/public/images
       - ./public/videos:/app/public/videos
+      - ./public/assets:/app/public/assets
     networks:
       - tconnect-net
 

@@ -443,6 +443,28 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         fetch(authRedirectUrl, { mode: 'no-cors' }).catch(() => {});
       } catch {}
     }
+
+    // Direct automatic release to device:
+    // Dismiss mobile captive sheet (iOS CNA / Android) or redirect directly to destination
+    try {
+      window.close();
+    } catch {}
+    try {
+      window.open('', '_self', '');
+      window.close();
+    } catch {}
+
+    setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        if (window.top && window.top !== window.self) {
+          try {
+            window.top.location.replace(safeDstUrl);
+            return;
+          } catch {}
+        }
+        window.location.replace(safeDstUrl);
+      }
+    }, 350);
   };
 
   const startOrEnterConnectedSession = (reason: 'post_auth' | 'retrigger' = 'post_auth') => {
@@ -805,7 +827,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        startOrEnterConnectedSession('post_auth');
+        releaseAndCloseSplash();
       } catch {
         setIsConnecting(false);
         isConnectingRef.current = false;
@@ -882,7 +904,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             setIsConnecting(false);
             isConnectingRef.current = false;
             setStatusBanner(null);
-            startOrEnterConnectedSession('post_auth');
+            releaseAndCloseSplash();
           } else if (pollData.status === 'failed' || attempts > 20) {
             clearInterval(pollInterval);
             setIsConnecting(false);
@@ -1775,67 +1797,28 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       {/* Rendered cleanly when user closes the ad or connects to Wi-Fi     */}
       {/* Zero background bleed, zero sign-up reset loop                   */}
       {/* ================================================================= */}
+      {/* ================================================================= */}
+      {/* AUTOMATIC CONNECTION RELEASE — RESUME TO DEVICE                  */}
+      {/* Instant redirection & window close; no "You're online!" screen    */}
+      {/* ================================================================= */}
       {portalStep === 'connected' && (
-        <div className="min-h-screen w-full bg-[#05070c] flex flex-col justify-between items-center px-4 py-8 text-center text-white relative">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-950/40 via-transparent to-transparent pointer-events-none" />
-
-          {/* Top Brand & Connected Badge */}
-          <div className="relative z-10 pt-4 max-w-sm w-full flex flex-col items-center">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold uppercase tracking-wider mb-5 shadow-lg">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <span>Internet Active &bull; Starlink Online</span>
-            </div>
-
-            <div className="w-20 h-20 rounded-3xl bg-emerald-500/15 border-2 border-emerald-500/40 flex items-center justify-center mb-4 shadow-[0_0_60px_rgba(16,185,129,0.35)]">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white mb-2">
-              You&apos;re Online!
-            </h1>
-            <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
-              Your device is authenticated on the <strong className="text-white">{currentConfig.brandTitle || 'T-Connect'}</strong> high-speed Starlink network. You can now use your phone, browse apps, stream, and use WhatsApp freely.
-            </p>
+        <div className="fixed inset-0 z-50 bg-[#05070c] flex flex-col justify-center items-center px-4 py-8 text-center text-white">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mb-4 shadow-lg">
+            <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
           </div>
-
-          {/* Live Session Telemetry Card */}
-          <div className="relative z-10 w-full max-w-sm my-6 p-4 rounded-2xl bg-[#0b101d] border border-[#232d42] shadow-2xl text-left space-y-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <span className="text-[11px] font-mono uppercase text-slate-400">Network Uplink</span>
-              <span className="text-xs font-bold text-white flex items-center gap-1.5 font-mono">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
-                Starlink High-Speed
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-center">
-              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="text-[10px] text-slate-400 font-mono">Hotspot Node</div>
-                <div className="text-xs font-bold text-slate-200 truncate mt-0.5">
-                  {currentConfig.brandTitle || 'Maseru Hotspot'}
-                </div>
-              </div>
-              <div className="p-2.5 rounded-xl bg-black/40 border border-white/5">
-                <div className="text-[10px] text-slate-400 font-mono">Access Status</div>
-                <div className="text-xs font-bold text-emerald-400 mt-0.5">
-                  Authorized &bull; Active
-                </div>
-              </div>
-            </div>
+          <div className="text-sm font-bold text-white mb-1">
+            Connected — Resuming to Device
           </div>
-
-          {/* Action Button: Start Browsing */}
-          <div className="relative z-10 max-w-sm w-full space-y-2.5">
-            <a
-              href={sanitizeDestinationUrl(userOrigUrl)}
-              className="w-full py-3.5 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-2xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
-            >
-              <Globe className="w-5 h-5" />
-              <span>Start Browsing &bull; Open Web &rarr;</span>
-            </a>
-            <p className="text-[10px] text-slate-500 font-mono">
-              You can safely close this screen or press Home/Done on your phone to use other apps.
-            </p>
-          </div>
+          <p className="text-xs text-slate-400 max-w-xs mb-6">
+            Your high-speed Starlink Wi-Fi is active. You are now free to use your phone and apps.
+          </p>
+          <a
+            href={sanitizeDestinationUrl(userOrigUrl)}
+            onClick={() => releaseAndCloseSplash()}
+            className="text-xs font-mono text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+          >
+            Tap here if your browser does not close automatically &rarr;
+          </a>
         </div>
       )}
     </div>

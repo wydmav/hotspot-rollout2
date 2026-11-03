@@ -27,12 +27,14 @@ ENV PORT=3000
 COPY package*.json ./
 RUN npm install --omit=dev --legacy-peer-deps && npm install -g tsx
 
-# Copy built frontend dist and backend server
+# Copy built frontend dist, public assets, and backend server
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/USER_JOURNEY.md ./USER_JOURNEY.md
 
 EXPOSE 3000
 

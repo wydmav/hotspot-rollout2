@@ -2379,10 +2379,10 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
     const cleanPhone = String(phoneNumber || '').replace(/\D/g, '');
     const selectedChannel = String(channel || 'ecocash').toLowerCase(); // 'ecocash' | 'mpesa' | 'card'
 
-    if (!cleanPhone || cleanPhone.length < 8) {
+    if (selectedChannel !== 'card' && (!cleanPhone || cleanPhone.length < 8)) {
       return res.status(400).json({
         success: false,
-        message: 'Valid Lesotho mobile number (8 digits starting with 5 or 6) is required for PayLesotho.'
+        message: 'Valid Lesotho mobile number (8 digits starting with 5 or 6) is required for PayLesotho mobile money.'
       });
     }
 
