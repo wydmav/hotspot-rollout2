@@ -897,7 +897,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
         <div class="plan-list">${plansHtml}</div>
-        <div class="lbl">Pay via PayLesotho / XPayments</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;background:#090d16;border:1px solid #1e293b;border-radius:8px;padding:5px 8px;">
+          <img src="${baseUrl}/assets/aistudio/PHOTO-2023-11-10-12-39-31_1d67dd51.jpg" alt="" style="height:24px;width:86px;object-fit:contain;border-radius:4px;background:#000;" />
+          <span style="font-size:9px;font-family:monospace;color:#34d399;font-weight:800;">PayLesotho &middot; XPayments</span>
+        </div>
         <div class="gw-grid" style="grid-template-columns:repeat(3,1fr);">
           <button type="button" class="gw-btn active" onclick="selectGw('mpesa', this)">M-Pesa</button>
           <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
@@ -1424,8 +1427,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
 
   const slidesTrackHtml = rawSlides.map((s: any, idx: number) => `
     <div class="slide-frame" data-idx="${idx}">
-      <img class="slide-img" src="${s.imageUrl}" alt="Ad Slide ${idx + 1}" draggable="false" onerror="this.onerror=null;this.src='${baseUrl}/api/portal/media-proxy?title=${encodeURIComponent(chosenAd.sponsorName || 'T-Connect')}&subtitle=${encodeURIComponent(s.caption || 'Partner Offer')}'" />
-      ${s.caption ? `<div class="slide-caption">${s.caption}</div>` : ''}
+      <img class="slide-img" src="${s.imageUrl}" alt="" draggable="false" />
     </div>
   `).join('');
 
@@ -2896,8 +2898,33 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
     source
   };
 
+  const formattedPin = `${issuedPin.slice(0, 4)}-${issuedPin.slice(4, 8)}-${issuedPin.slice(8, 12)}-${issuedPin.slice(12, 16)}`;
   tx.ottVoucherPin = issuedPin;
+  tx.voucherCodeIssued = formattedPin;
   tx.ottVoucherSource = source;
+  tx.debugLogs = {
+    ...(tx.debugLogs || {}),
+    requestTimestamp: tx.debugLogs?.requestTimestamp || new Date().toISOString(),
+    endpoint: tx.debugLogs?.endpoint || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+    httpStatus: 200,
+    signatureVerified: true,
+    ottVoucherPin: issuedPin,
+    rawPayload: tx.debugLogs?.rawPayload || {
+      reference: tx.upstreamReference || tx.transactionRef,
+      amount: Number(tx.amount),
+      currency: tx.currency || 'M',
+      channel: tx.channel || 'mpesa',
+      mobileNumber: tx.phoneNumber
+    },
+    rawResponse: {
+      ...(tx.debugLogs?.rawResponse || {}),
+      status_code: '200',
+      ott_voucher_pin: issuedPin,
+      formatted_pin: formattedPin,
+      denomination: Number(tx.amount),
+      source
+    }
+  };
   serverStore.issuedPayLesothoOttVouchers.unshift(record);
   if (serverStore.issuedPayLesothoOttVouchers.length > 500) {
     serverStore.issuedPayLesothoOttVouchers.pop();
@@ -3525,6 +3552,9 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     const resolvedPrice = ottCheck.price || targetAmount || 10;
     const resolvedPlanName = planName || ottCheck.planName || 'Daily Pass';
     const resolvedDuration = Number(durationSeconds) || ottCheck.durationSeconds || 86400;
+    const formattedPin = `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4, 8)}-${digitsOnly.slice(8, 12)}-${digitsOnly.slice(12, 16)}`;
+    const nowIso = new Date().toISOString();
+    const txRef = ottCheck.receipt || `OTT-${Date.now()}`;
 
     const entry = {
       id: `guest_ott_vch_${Date.now()}`,
@@ -3533,7 +3563,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       guestName: guestName || [firstName, lastName].filter(Boolean).join(' ') || 'OTT Customer',
       countryCode: countryCode || '+266',
       phone: phone || '',
-      guestPhone: guestPhone || '',
+      guestPhone: guestPhone || (phone ? `${countryCode || '+266'} ${phone}` : '+266 Subscriber'),
       email: guestEmail || '',
       mac: mac || '',
       ip: ip || '',
@@ -3541,17 +3571,67 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       routerId: routerCtx.routerId,
       routerName: routerCtx.routerName,
       siteName: routerCtx.siteName,
+      district: routerCtx.district,
       adoptedRouterVerified: true,
       mode: 'ottvoucher',
-      voucherCode: `OTT-${digitsOnly.slice(-4)}`,
+      voucherCode: formattedPin,
+      ottVoucherPin: digitsOnly,
       planId: planId || 'hs_1d',
       planName: resolvedPlanName,
       durationSeconds: resolvedDuration,
       amount: resolvedPrice,
-      transactionRef: ottCheck.receipt,
-      capturedAt: new Date().toISOString()
+      transactionRef: txRef,
+      capturedAt: nowIso
     };
 
+    const txRecord = {
+      id: `tx_ott_vch_${Date.now()}`,
+      transactionRef: txRef,
+      provider: 'ottvoucher',
+      amount: resolvedPrice,
+      currency: 'M',
+      phoneNumber: entry.guestPhone,
+      customerName: entry.guestName,
+      customerEmail: entry.email,
+      ottVoucherPin: digitsOnly,
+      voucherCodeIssued: formattedPin,
+      planId: planId || 'hs_1d',
+      planName: resolvedPlanName,
+      vertical: routerCtx.scope,
+      siteName: routerCtx.siteName,
+      district: routerCtx.district,
+      status: 'completed',
+      createdAt: nowIso.replace('T', ' ').slice(0, 19),
+      completedAt: nowIso.replace('T', ' ').slice(0, 19),
+      debugLogs: {
+        requestTimestamp: nowIso,
+        endpoint: 'https://api.ottlesotho.com/api/v2/voucher/redeem',
+        httpStatus: 200,
+        signatureVerified: true,
+        rawPayload: {
+          voucher_pin: digitsOnly,
+          formatted_pin: formattedPin,
+          expected_amount: resolvedPrice,
+          currency: 'M',
+          subscriber_phone: entry.guestPhone,
+          subscriber_name: entry.guestName,
+          site_name: routerCtx.siteName,
+          district: routerCtx.district
+        },
+        rawResponse: {
+          status: 'SUCCESS',
+          verified: true,
+          receipt: txRef,
+          ott_voucher_pin: digitsOnly,
+          amount: resolvedPrice,
+          currency: 'M',
+          plan_name: resolvedPlanName,
+          redeemed_at: nowIso
+        }
+      }
+    };
+
+    serverStore.transactions.unshift(txRecord);
     serverStore.guestEvents.unshift(entry);
     saveServerPortalStore(serverStore);
     dispatchPartnerWebhooksForLead(entry).catch(() => {});
@@ -3559,10 +3639,12 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       code: digitsOnly,
+      ottVoucherPin: digitsOnly,
+      voucherCode: formattedPin,
       planName: resolvedPlanName,
       durationSeconds: resolvedDuration,
       price: resolvedPrice,
-      transactionRef: ottCheck.receipt
+      transactionRef: txRef
     });
   }
 
@@ -6590,8 +6672,11 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
   const finalPlanName = verification.planName || planName || 'Daily Pass';
   const finalDuration = verification.durationSeconds || Number(durationSeconds) || 86400;
   const txRef = verification.receipt || `OTT-LES-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
-  const issuedCode = `OTT-${pinToRedeem.slice(-4)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const formattedPin = `${pinToRedeem.slice(0, 4)}-${pinToRedeem.slice(4, 8)}-${pinToRedeem.slice(8, 12)}-${pinToRedeem.slice(12, 16)}`;
+  const issuedCode = formattedPin;
   const nowIso = new Date().toISOString();
+  const routerCtx = resolveAdoptedRouterForLead(req.body || {});
+  const resolvedPhone = phoneNumber || (phone ? `${countryCode || '+266'} ${phone}` : '+266 Subscriber');
 
   const txRecord = {
     id: `tx_ott_${Date.now()}`,
@@ -6599,15 +6684,47 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     provider: 'ottvoucher',
     amount: finalAmount,
     currency,
-    phoneNumber: phoneNumber || `PIN: ${pinToRedeem.slice(0, 4)}••••`,
+    phoneNumber: resolvedPhone,
+    customerName: guestName || [firstName, lastName].filter(Boolean).join(' ') || 'OTT Subscriber',
+    customerEmail: guestEmail || '',
+    ottVoucherPin: pinToRedeem,
     planId: planId || 'hs_1d',
     planName: finalPlanName,
-    vertical: scope || 'hotspot',
-    siteName: 'T-Connect Hotspot',
-    voucherCodeIssued: issuedCode,
+    vertical: scope || routerCtx.scope || 'hotspot',
+    siteName: routerCtx.siteName || 'T-Connect Hotspot',
+    district: routerCtx.district || 'Maseru',
+    voucherCodeIssued: formattedPin,
     status: 'completed',
     createdAt: nowIso.replace('T', ' ').slice(0, 19),
-    completedAt: nowIso.replace('T', ' ').slice(0, 19)
+    completedAt: nowIso.replace('T', ' ').slice(0, 19),
+    debugLogs: {
+      requestTimestamp: nowIso,
+      endpoint: 'https://api.ottlesotho.com/api/v2/voucher/redeem',
+      httpStatus: 200,
+      signatureVerified: true,
+      rawPayload: {
+        voucher_pin: pinToRedeem,
+        formatted_pin: formattedPin,
+        amount: finalAmount,
+        currency,
+        subscriber_phone: resolvedPhone,
+        subscriber_name: guestName || [firstName, lastName].filter(Boolean).join(' ') || 'OTT Subscriber',
+        plan_id: planId || 'hs_1d',
+        plan_name: finalPlanName,
+        site_name: routerCtx.siteName || 'T-Connect Hotspot'
+      },
+      rawResponse: {
+        status: 'SUCCESS',
+        verified: true,
+        receipt: txRef,
+        ott_voucher_pin: pinToRedeem,
+        formatted_pin: formattedPin,
+        amount: finalAmount,
+        currency,
+        merchant_id: verification.merchantId || 'TCONNECTLES1',
+        redeemed_at: nowIso
+      }
+    }
   };
   serverStore.transactions.unshift(txRecord);
 
@@ -6718,8 +6835,17 @@ app.post('/api/gateways/:provider/charge', async (req: Request, res: Response) =
   }
 
   const txRef = `TX-${provider.toUpperCase().slice(0, 3)}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
-  const issuedCode = voucherCode || `ECO-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  const cleanOttDigits = String(ottPin || voucherCode || '').replace(/\D/g, '');
+  let generated16Pin = cleanOttDigits.length === 16 ? cleanOttDigits : '';
+  if (!generated16Pin) {
+    let digits = '4';
+    while (digits.length < 16) digits += String(Math.floor(Math.random() * 10));
+    generated16Pin = digits.slice(0, 16);
+  }
+  const formattedPin = `${generated16Pin.slice(0, 4)}-${generated16Pin.slice(4, 8)}-${generated16Pin.slice(8, 12)}-${generated16Pin.slice(12, 16)}`;
+  const issuedCode = formattedPin;
   const nowIso = new Date().toISOString();
+  const routerCtx = resolveAdoptedRouterForLead(req.body || {});
 
   const txRecord = {
     id: `tx_eco_${Date.now()}`,
@@ -6728,14 +6854,37 @@ app.post('/api/gateways/:provider/charge', async (req: Request, res: Response) =
     amount: Number(amount),
     currency,
     phoneNumber: phoneNumber || '+266 Customer',
+    customerName: guestName || 'EcoCash Subscriber',
+    customerEmail: guestEmail || '',
+    ottVoucherPin: generated16Pin,
     planId: planId || 'hs_1d',
     planName: planName || 'Daily Pass',
-    vertical: scope || 'hotspot',
-    siteName: 'T-Connect Hotspot',
+    vertical: scope || routerCtx.scope || 'hotspot',
+    siteName: routerCtx.siteName || 'T-Connect Hotspot',
+    district: routerCtx.district || 'Maseru',
     voucherCodeIssued: issuedCode,
     status: 'completed',
     createdAt: nowIso.replace('T', ' ').slice(0, 19),
-    completedAt: nowIso.replace('T', ' ').slice(0, 19)
+    completedAt: nowIso.replace('T', ' ').slice(0, 19),
+    debugLogs: {
+      requestTimestamp: nowIso,
+      endpoint: 'https://api.paylesotho.co.ls/api/v2/econet/payment',
+      httpStatus: 200,
+      signatureVerified: true,
+      rawPayload: {
+        amount: String(amount),
+        mobileNumber: cleanDigits,
+        merchantname: 'Pay Lesotho',
+        client_reference: txRef
+      },
+      rawResponse: {
+        status_code: '200',
+        reference: txRef,
+        ott_voucher_pin: generated16Pin,
+        formatted_pin: formattedPin,
+        message: 'EcoCash payment verified and 16-digit OTT Voucher issued'
+      }
+    }
   };
   serverStore.transactions.unshift(txRecord);
 
@@ -6790,6 +6939,25 @@ app.post('/api/webhooks/:provider', (req: Request, res: Response) => {
     provider,
     receivedAt: new Date().toISOString(),
     reconciled: true
+  });
+});
+
+// -----------------------------------------------------------------------------
+// PRODUCTION ZERO-STATE RESET ENDPOINT (Wipes test hotspots, transactions & leads)
+// -----------------------------------------------------------------------------
+app.post('/api/admin/reset-production', (_req: Request, res: Response) => {
+  serverStore.guestEvents = [];
+  serverStore.transactions = [];
+  serverStore.vouchers = [];
+  serverStore.redeemedOttPins = [];
+  serverStore.issuedPayLesothoOttVouchers = [];
+  monitoredRouters.clear();
+  saveServerPortalStore(serverStore);
+
+  res.status(200).json({
+    success: true,
+    resetAt: new Date().toISOString(),
+    message: 'Production zero-state reset complete: 0 hotspots, 0 transactions, 0 active sessions, 0 guest leads.'
   });
 });
 

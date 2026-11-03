@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MapPin, 
-  Wifi, 
   Radio, 
   Layers, 
   Zap, 
@@ -12,14 +11,15 @@ import {
   Search, 
   CheckCircle2, 
   AlertTriangle, 
-  Clock, 
-  Users, 
   Server, 
-  SlidersHorizontal,
   Compass,
-  Info
+  Plus,
+  ShieldCheck,
+  Building2,
+  RotateCcw
 } from 'lucide-react';
-import { RouterDevice, VerticalType, LESOTHO_DISTRICTS } from '../../types';
+import { RouterDevice, LESOTHO_DISTRICTS, LesothoDistrict } from '../../types';
+import { storage } from '../../services/storage';
 
 interface RegionalFleetMapProps {
   routers: RouterDevice[];
@@ -27,212 +27,38 @@ interface RegionalFleetMapProps {
   onNavigateTab?: (tab: string) => void;
 }
 
-// Canonical Lesotho Regions & Coordinates for Mapping
-export interface RegionNode {
+// Canonical base coordinates for each of the 10 Lesotho Districts
+// Used strictly to position real added hotspots inside their assigned district
+const DISTRICT_ANCHORS: Record<LesothoDistrict, { lat: number; lng: number; posX: number; posY: number; category: 'urban' | 'transit' | 'highland' | 'border' | 'rural' }> = {
+  'Maseru': { lat: -29.3151, lng: 27.4869, posX: 22, posY: 38, category: 'urban' },
+  'Berea': { lat: -29.1472, lng: 27.7490, posX: 30, posY: 30, category: 'urban' },
+  'Leribe': { lat: -28.8719, lng: 28.0450, posX: 39, posY: 19, category: 'border' },
+  'Butha-Buthe': { lat: -28.7667, lng: 28.2400, posX: 49, posY: 14, category: 'transit' },
+  'Mokhotlong': { lat: -29.2894, lng: 29.0675, posX: 78, posY: 36, category: 'highland' },
+  'Thaba-Tseka': { lat: -29.5220, lng: 28.6080, posX: 59, posY: 45, category: 'highland' },
+  "Qacha's Nek": { lat: -30.1154, lng: 28.6894, posX: 65, posY: 71, category: 'border' },
+  'Quthing': { lat: -30.4000, lng: 27.7000, posX: 28, posY: 83, category: 'rural' },
+  "Mohale's Hoek": { lat: -30.1514, lng: 27.4764, posX: 19, posY: 73, category: 'urban' },
+  'Mafeteng': { lat: -29.8230, lng: 27.2374, posX: 12, posY: 58, category: 'transit' },
+};
+
+export interface PlottedHotspotNode {
   id: string;
-  name: string;
-  district: string;
+  router: RouterDevice;
+  venueName: string;
+  physicalAddress: string;
+  district: LesothoDistrict;
+  scope: string;
+  partnerName: string;
+  policyName: string;
   category: 'urban' | 'transit' | 'highland' | 'border' | 'rural';
   lat: number;
   lng: number;
-  // Normalized percentage coordinate inside Lesotho bounding box
-  // [Lat: -28.4 to -30.8], [Lng: 27.0 to 29.6]
-  posX: number; // 0 - 100%
-  posY: number; // 0 - 100%
-  defaultModel: string;
-  defaultUplink: string;
-}
-
-const LESOTHO_HUBS: RegionNode[] = [
-  {
-    id: 'hub_maseru_mall',
-    name: 'Maseru Mall & Pioneer Mall',
-    district: 'Maseru',
-    category: 'urban',
-    lat: -29.3151,
-    lng: 27.4869,
-    posX: 19,
-    posY: 38,
-    defaultModel: 'MikroTik hAP ax³ (Wi-Fi 6)',
-    defaultUplink: 'Starlink Business + Metro Fiber',
-  },
-  {
-    id: 'hub_maseru_kingsway',
-    name: 'Kingsway CBD & Taxi Rank',
-    district: 'Maseru',
-    category: 'urban',
-    lat: -29.3100,
-    lng: 27.4800,
-    posX: 18,
-    posY: 35,
-    defaultModel: 'MikroTik hAP ax³ + cAP ax',
-    defaultUplink: 'Starlink Standard (500GB)',
-  },
-  {
-    id: 'hub_roma_nul',
-    name: 'National University of Lesotho (Roma)',
-    district: 'Maseru',
-    category: 'urban',
-    lat: -29.4486,
-    lng: 27.7081,
-    posX: 27,
-    posY: 43,
-    defaultModel: 'MikroTik CCR2004 + hAP ax³',
-    defaultUplink: 'Starlink High Performance',
-  },
-  {
-    id: 'hub_ty_crafts',
-    name: 'Teyateyaneng Crafts & Market',
-    district: 'Berea',
-    category: 'urban',
-    lat: -29.1472,
-    lng: 27.7490,
-    posX: 29,
-    posY: 31,
-    defaultModel: 'MikroTik hAP ax³',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_maputsoe_border',
-    name: 'Maputsoe Border Gateway',
-    district: 'Leribe',
-    category: 'border',
-    lat: -28.8872,
-    lng: 27.9000,
-    posX: 35,
-    posY: 20,
-    defaultModel: 'MikroTik hAP ax³ (Outdoor Enclosure)',
-    defaultUplink: 'Starlink Priority + Econet LTE',
-  },
-  {
-    id: 'hub_hlotse_market',
-    name: 'Hlotse Commercial Hub',
-    district: 'Leribe',
-    category: 'urban',
-    lat: -28.8719,
-    lng: 28.0450,
-    posX: 40,
-    posY: 19,
-    defaultModel: 'MikroTik hAP ax³',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_butha_buthe',
-    name: 'Butha-Buthe Public Transport Terminal',
-    district: 'Butha-Buthe',
-    category: 'transit',
-    lat: -28.7667,
-    lng: 28.2400,
-    posX: 48,
-    posY: 15,
-    defaultModel: 'MikroTik hAP ax³',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_katse_dam',
-    name: 'Katse Dam Hydro & Tourism Complex',
-    district: 'Thaba-Tseka',
-    category: 'highland',
-    lat: -29.3333,
-    lng: 28.5000,
-    posX: 58,
-    posY: 39,
-    defaultModel: 'MikroTik Solar Mesh (48V PoE)',
-    defaultUplink: 'Starlink Mobile Priority',
-  },
-  {
-    id: 'hub_mokhotlong',
-    name: 'Mokhotlong High-Altitude Station',
-    district: 'Mokhotlong',
-    category: 'highland',
-    lat: -29.2894,
-    lng: 29.0675,
-    posX: 79,
-    posY: 37,
-    defaultModel: 'MikroTik hAP ax³ Solar Hybrid',
-    defaultUplink: 'Starlink High Performance LEO',
-  },
-  {
-    id: 'hub_sani_pass',
-    name: 'Sani Pass Mountain Outpost',
-    district: 'Mokhotlong',
-    category: 'highland',
-    lat: -29.5850,
-    lng: 29.2860,
-    posX: 88,
-    posY: 49,
-    defaultModel: 'MikroTik hAP ax³ Rugged',
-    defaultUplink: 'Starlink Satellite',
-  },
-  {
-    id: 'hub_thaba_tseka',
-    name: 'Thaba-Tseka Central Clinic & Post',
-    district: 'Thaba-Tseka',
-    category: 'rural',
-    lat: -29.5220,
-    lng: 28.6080,
-    posX: 62,
-    posY: 47,
-    defaultModel: 'MikroTik hAP ax³ Solar',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_mafeteng_taxi',
-    name: 'Mafeteng Bus & Taxi Interchange',
-    district: 'Mafeteng',
-    category: 'transit',
-    lat: -29.8230,
-    lng: 27.2374,
-    posX: 10,
-    posY: 59,
-    defaultModel: 'MikroTik hAP ax³',
-    defaultUplink: 'Starlink Standard + Vodacom LTE',
-  },
-  {
-    id: 'hub_mohale_hoek',
-    name: 'Mohale\'s Hoek Retail Center',
-    district: 'Mohale\'s Hoek',
-    category: 'urban',
-    lat: -30.1514,
-    lng: 27.4764,
-    posX: 18,
-    posY: 73,
-    defaultModel: 'MikroTik hAP ax³',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_quthing_clinic',
-    name: 'Quthing Moorosi Health Clinic',
-    district: 'Quthing',
-    category: 'rural',
-    lat: -30.4000,
-    lng: 27.7000,
-    posX: 27,
-    posY: 83,
-    defaultModel: 'MikroTik hAP ax³ Solar',
-    defaultUplink: 'Starlink Standard',
-  },
-  {
-    id: 'hub_qachas_nek',
-    name: 'Qacha\'s Nek Border Outpost',
-    district: 'Qacha\'s Nek',
-    category: 'border',
-    lat: -30.1154,
-    lng: 28.6894,
-    posX: 65,
-    posY: 71,
-    defaultModel: 'MikroTik hAP ax³ Rugged',
-    defaultUplink: 'Starlink Priority',
-  }
-];
-
-export interface MappedRegionNode extends RegionNode {
-  assignedRouters: RouterDevice[];
-  status: 'online' | 'pending' | 'offline' | 'unbound';
+  posX: number;
+  posY: number;
+  status: 'online' | 'pending' | 'offline';
   activeSessions: number;
-  isFreeMode: boolean;
   hasSolar: boolean;
-  hasFailover: boolean;
 }
 
 export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
@@ -241,122 +67,145 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
   onNavigateTab,
 }) => {
   const [selectedDistrict, setSelectedDistrict] = useState<string>('all');
-  const [selectedHubId, setSelectedHubId] = useState<string>(() => {
-    // If routers exist, find the hub for the first router
-    if (routers.length > 0) {
-      const firstRouterDistrict = routers[0].district?.toLowerCase() || 'maseru';
-      const found = LESOTHO_HUBS.find(h => h.district.toLowerCase() === firstRouterDistrict);
-      if (found) return found.id;
-    }
-    return LESOTHO_HUBS[0].id;
-  });
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [mapStyle, setMapStyle] = useState<'cyber' | 'topo' | 'satellite'>('cyber');
   const [showLabels, setShowLabels] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isResettingProd, setIsResettingProd] = useState(false);
 
-  // Keep selected hub synced with adopted routers if routers change
-  useEffect(() => {
-    if (routers.length > 0) {
-      const firstRouterDistrict = routers[0].district?.toLowerCase() || 'maseru';
-      const matchingHub = LESOTHO_HUBS.find(h => h.district.toLowerCase() === firstRouterDistrict);
-      if (matchingHub) {
-        setSelectedHubId(prev => {
-          const currentHubHasRouters = routers.some(r => r.district?.toLowerCase() === LESOTHO_HUBS.find(h => h.id === prev)?.district.toLowerCase());
-          return currentHubHasRouters ? prev : matchingHub.id;
-        });
-      }
-    }
-  }, [routers]);
+  const tenantGroups = useMemo(() => storage.getTenantGroups(), [routers]);
 
-  // Map physical routers from fleet state to nearest regional hub or direct coordinates
-  const mappedHubs = useMemo(() => {
-    return LESOTHO_HUBS.map((hub) => {
-      // Find matching routers by district, physicalAddress, siteName, or id
-      const matchedRouters = routers.filter((r) => {
-        if (r.district && r.district.toLowerCase() === hub.district.toLowerCase()) {
-          const text = `${r.siteName} ${r.physicalAddress || ''} ${r.name}`.toLowerCase();
-          const hubWords = `${hub.name} ${hub.district}`.toLowerCase().split(/\s+/);
-          const hasSpecificMatch = hubWords.some((word) => word.length > 3 && text.includes(word));
-          if (hasSpecificMatch) return true;
-          const districtHubs = LESOTHO_HUBS.filter(h => h.district.toLowerCase() === r.district!.toLowerCase());
-          return districtHubs[0]?.id === hub.id;
-        }
-        const text = `${r.siteName} ${r.physicalAddress || ''} ${r.name} ${r.model}`.toLowerCase();
-        const hubWords = `${hub.name} ${hub.district}`.toLowerCase().split(/\s+/);
-        return hubWords.some((word) => word.length > 3 && text.includes(word));
-      });
-
-      const hasOnline = matchedRouters.some((r) => r.status === 'online');
-      const hasPending = matchedRouters.some((r) => r.status === 'pending_adoption');
-      const totalSessions = matchedRouters.reduce((acc, curr) => acc + (curr.activeSessions || 0), 0);
-      const isFreeMode = matchedRouters.some((r) => r.freeModeEnabled);
-      const hasSolar = matchedRouters.some((r) => r.solarTelemetry && r.solarTelemetry.batteryPercent > 0);
-      const hasFailover = matchedRouters.some((r) => r.wanFailoverEnabled);
-
-      const nodeStatus: 'online' | 'pending' | 'offline' | 'unbound' = 
-        matchedRouters.length > 0
-          ? (hasOnline ? 'online' : hasPending ? 'pending' : 'offline')
-          : 'unbound';
-
-      const node: MappedRegionNode = {
-        ...hub,
-        assignedRouters: matchedRouters,
-        status: nodeStatus,
-        activeSessions: totalSessions,
-        isFreeMode,
-        hasSolar,
-        hasFailover,
-      };
-      return node;
+  // Strictly plot ONLY added routers/hotspots that have Scope, Partner/Group, Policy, District, and Venue
+  const plottedNodes: PlottedHotspotNode[] = useMemo(() => {
+    const validRouters = routers.filter((r) => {
+      const hasScope = Boolean(r.vertical);
+      const hasDistrict = Boolean(r.district && LESOTHO_DISTRICTS.includes(r.district));
+      const hasVenue = Boolean(r.siteName && r.siteName.trim().length > 0);
+      return hasScope && hasDistrict && hasVenue;
     });
-  }, [routers]);
 
-  // Filtered hubs by district and search
-  const filteredHubs = useMemo(() => {
-    return mappedHubs.filter((hub) => {
-      const matchDistrict = selectedDistrict === 'all' || hub.district.toLowerCase() === selectedDistrict.toLowerCase();
-      const matchSearch = searchQuery === '' || 
-        hub.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        hub.district.toLowerCase().includes(searchQuery.toLowerCase());
+    // Track per-district index so multiple hotspots in the same district spread cleanly without overlapping
+    const districtIndexCounter: Record<string, number> = {};
+
+    return validRouters.map((r) => {
+      const dist: LesothoDistrict = (r.district && DISTRICT_ANCHORS[r.district]) ? r.district : 'Maseru';
+      const anchor = DISTRICT_ANCHORS[dist];
+      const idx = districtIndexCounter[dist] || 0;
+      districtIndexCounter[dist] = idx + 1;
+
+      // Deterministic spiral offset for multiple hotspots in the same district
+      const angle = idx * 2.1;
+      const radiusX = idx === 0 ? 0 : Math.min(8, 2.8 + idx * 1.3);
+      const radiusY = idx === 0 ? 0 : Math.min(8, 2.8 + idx * 1.3);
+
+      const posX = Math.max(8, Math.min(92, anchor.posX + Math.cos(angle) * radiusX));
+      const posY = Math.max(10, Math.min(90, anchor.posY + Math.sin(angle) * radiusY));
+
+      const matchedGroup = tenantGroups.find((g) => g.id === r.tenantGroupId || (r.tags && r.tags.includes(g.tag)));
+      const resolvedPartner =
+        r.partnerName ||
+        matchedGroup?.name ||
+        (r.tags?.find((t) => t.startsWith('client:'))?.replace('client:', '') || 'T-Connect Internal Fleet');
+
+      const resolvedPolicy =
+        r.policyName ||
+        (r.accessMode === 'COMPLETELY_FREE'
+          ? 'Sponsored Free Opt-In + Ad Carousel Policy'
+          : r.accessMode === 'FREE_TRIAL_AND_PAID'
+            ? 'Hybrid Trial + PayLesotho OTT Policy'
+            : 'PayLesotho (M-Pesa/EcoCash/Card) + 16-Digit OTT Policy');
+
+      return {
+        id: r.id,
+        router: r,
+        venueName: r.siteName,
+        physicalAddress: r.physicalAddress || r.siteName,
+        district: dist,
+        scope: r.vertical.toUpperCase(),
+        partnerName: resolvedPartner,
+        policyName: resolvedPolicy,
+        category: r.vertical === 'bus' ? 'transit' : anchor.category,
+        lat: r.gpsTelemetry?.latitude || (anchor.lat + idx * 0.008),
+        lng: r.gpsTelemetry?.longitude || (anchor.lng + idx * 0.008),
+        posX,
+        posY,
+        status: r.status === 'online' ? 'online' : r.status === 'pending_adoption' ? 'pending' : 'offline',
+        activeSessions: r.activeSessions || 0,
+        hasSolar: Boolean(r.solarTelemetry && r.solarTelemetry.batteryPercent > 0),
+      };
+    });
+  }, [routers, tenantGroups]);
+
+  // Keep selectedNodeId synced with plottedNodes
+  useEffect(() => {
+    if (plottedNodes.length === 0) {
+      setSelectedNodeId(null);
+      return;
+    }
+    if (!selectedNodeId || !plottedNodes.some((n) => n.id === selectedNodeId)) {
+      setSelectedNodeId(plottedNodes[0].id);
+    }
+  }, [plottedNodes, selectedNodeId]);
+
+  const filteredNodes = useMemo(() => {
+    return plottedNodes.filter((node) => {
+      const matchDistrict =
+        selectedDistrict === 'all' || node.district.toLowerCase() === selectedDistrict.toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        q === '' ||
+        node.venueName.toLowerCase().includes(q) ||
+        node.physicalAddress.toLowerCase().includes(q) ||
+        node.district.toLowerCase().includes(q) ||
+        node.partnerName.toLowerCase().includes(q) ||
+        node.policyName.toLowerCase().includes(q) ||
+        node.router.name.toLowerCase().includes(q);
       return matchDistrict && matchSearch;
     });
-  }, [mappedHubs, selectedDistrict, searchQuery]);
+  }, [plottedNodes, selectedDistrict, searchQuery]);
 
-  const uniqueDistricts = useMemo(() => {
-    return ['all', ...LESOTHO_DISTRICTS];
-  }, []);
+  const uniqueDistricts = useMemo(() => ['all', ...LESOTHO_DISTRICTS], []);
 
-  const adoptedRoutersCount = routers.length;
-  const onlineRoutersCount = routers.filter(r => r.status === 'online').length;
-  const pendingRoutersCount = routers.filter(r => r.status === 'pending_adoption').length;
-  const totalActiveSubscribers = routers.reduce((acc, curr) => acc + (curr.activeSessions || 0), 0);
+  const adoptedRoutersCount = plottedNodes.length;
+  const onlineRoutersCount = plottedNodes.filter((n) => n.status === 'online').length;
+  const totalActiveSubscribers = plottedNodes.reduce((acc, curr) => acc + curr.activeSessions, 0);
 
-  // Exact 10-district distribution calculation
+  // Exact 10-district distribution calculation strictly from added hotspots
   const districtDistribution = useMemo(() => {
     const map = new Map<string, { count: number; online: number; sessions: number }>();
     LESOTHO_DISTRICTS.forEach((d) => map.set(d, { count: 0, online: 0, sessions: 0 }));
 
-    routers.forEach((r) => {
-      const d = r.district || 'Maseru';
-      const prev = map.get(d) || { count: 0, online: 0, sessions: 0 };
-      map.set(d, {
+    plottedNodes.forEach((n) => {
+      const prev = map.get(n.district) || { count: 0, online: 0, sessions: 0 };
+      map.set(n.district, {
         count: prev.count + 1,
-        online: prev.online + (r.status === 'online' ? 1 : 0),
-        sessions: prev.sessions + (r.activeSessions || 0)
+        online: prev.online + (n.status === 'online' ? 1 : 0),
+        sessions: prev.sessions + n.activeSessions,
       });
     });
 
     return Array.from(map.entries()).map(([district, data]) => ({
       district,
       ...data,
-      percentOfFleet: routers.length > 0 ? Math.round((data.count / routers.length) * 100) : 0
+      percentOfFleet: plottedNodes.length > 0 ? Math.round((data.count / plottedNodes.length) * 100) : 0,
     }));
-  }, [routers]);
+  }, [plottedNodes]);
 
-  const selectedHub: MappedRegionNode = useMemo(() => {
-    return mappedHubs.find((h) => h.id === selectedHubId) || mappedHubs[0];
-  }, [mappedHubs, selectedHubId]);
+  const selectedNode: PlottedHotspotNode | null = useMemo(() => {
+    if (filteredNodes.length === 0) return null;
+    return filteredNodes.find((n) => n.id === selectedNodeId) || filteredNodes[0];
+  }, [filteredNodes, selectedNodeId]);
+
+  const handleProductionReset = async () => {
+    setIsResettingProd(true);
+    try {
+      await fetch('/api/admin/reset-production', { method: 'POST' });
+    } catch {}
+    storage.clearAllToScratch();
+    setSelectedNodeId(null);
+    setTimeout(() => setIsResettingProd(false), 500);
+  };
 
   return (
     <div className={`bg-[#0f1422] rounded-xl border border-[#232d42] overflow-hidden transition-all duration-300 ${
@@ -377,7 +226,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Real-time geospatial layout of Starlink LEO gateways, community mesh nodes, and transit links
+            Strict zero-preset map: Locations appear only after adding a hotspot bound to Scope, Partner/Group, Policy, District &amp; Venue
           </p>
         </div>
 
@@ -390,7 +239,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search region or city..."
+              placeholder="Search venue, partner, district..."
               className="pl-8 pr-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-[#f05e17]"
             />
           </div>
@@ -431,9 +280,21 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                 ? 'bg-[#161d31] border-[#232d42] text-slate-200'
                 : 'bg-black/40 border-slate-700 text-slate-500'
             }`}
-            title="Toggle City & Station Labels"
+            title="Toggle Venue Labels"
           >
             Labels: {showLabels ? 'ON' : 'OFF'}
+          </button>
+
+          {/* Production Zero-State Reset Button */}
+          <button
+            type="button"
+            onClick={handleProductionReset}
+            disabled={isResettingProd}
+            className="px-2.5 py-1.5 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Reset all hotspots, sessions, and test transactions for production rollout"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isResettingProd ? 'animate-spin' : ''}`} />
+            <span>{isResettingProd ? 'Resetting...' : 'Production Reset'}</span>
           </button>
 
           {/* Expand Toggle */}
@@ -480,7 +341,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
             <div className="bg-[#0f1422]/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#232d42] text-[11px] font-mono text-slate-300 flex items-center gap-2 shadow-lg pointer-events-auto">
               <span className={`w-2 h-2 rounded-full ${onlineRoutersCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               <span>
-                <strong>{adoptedRoutersCount}</strong> {adoptedRoutersCount === 1 ? 'Router' : 'Routers'} Adopted
+                <strong>{adoptedRoutersCount}</strong> {adoptedRoutersCount === 1 ? 'Hotspot' : 'Hotspots'} Plotted
                 {adoptedRoutersCount > 0 ? ` (${onlineRoutersCount} Online)` : ' (0 Online)'}
               </span>
               <span className="text-slate-500">|</span>
@@ -584,83 +445,103 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               </text>
             </svg>
 
-            {/* STATIC & DYNAMIC PINS OVERLAY (ABSOLUTE PERCENTAGE POSITIONING) */}
-            <div className="absolute inset-0 pointer-events-none p-6">
-              {filteredHubs.map((hub) => {
-                const isSelected = selectedHub?.id === hub.id;
-                const isOnline = hub.status === 'online';
-                const isUnbound = hub.status === 'unbound';
-                const hasVouchers = hub.activeSessions > 0;
+            {/* DYNAMIC PINS OVERLAY — ONLY ADDED HOTSPOTS */}
+            {filteredNodes.length > 0 ? (
+              <div className="absolute inset-0 pointer-events-none p-6">
+                {filteredNodes.map((node) => {
+                  const isSelected = selectedNode?.id === node.id;
+                  const isOnline = node.status === 'online';
+                  const hasVouchers = node.activeSessions > 0;
 
-                return (
-                  <div
-                    key={hub.id}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-transform duration-200 z-10"
-                    style={{
-                      left: `${hub.posX}%`,
-                      top: `${hub.posY}%`,
-                    }}
-                  >
-                    {/* Pin Outer Wrapper */}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedHubId(hub.id)}
-                      className="group relative flex flex-col items-center focus:outline-none cursor-pointer"
+                  return (
+                    <div
+                      key={node.id}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto transition-transform duration-200 z-10"
+                      style={{
+                        left: `${node.posX}%`,
+                        top: `${node.posY}%`,
+                      }}
                     >
-                      {/* Pulsing Beacon Wave Ring */}
-                      {isOnline && (
-                        <span
-                          className={`absolute w-8 h-8 rounded-full pointer-events-none animate-ping ${
-                            isSelected ? 'bg-[#f05e17]/40' : 'bg-emerald-500/25'
-                          }`}
-                        />
-                      )}
-
-                      {/* Main Static Pin Badge */}
-                      <div
-                        className={`relative w-7 h-7 rounded-full flex items-center justify-center border shadow-xl transition-all ${
-                          isSelected
-                            ? 'bg-[#f05e17] border-white scale-125 z-30 shadow-[#f05e17]/50'
-                            : isOnline
-                            ? 'bg-[#0f172a] border-emerald-400 text-emerald-400 group-hover:scale-110 group-hover:border-white'
-                            : isUnbound
-                            ? 'bg-[#090d16] border-slate-700/80 text-slate-500 group-hover:border-slate-500'
-                            : 'bg-[#1e293b] border-amber-400 text-amber-400'
-                        }`}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedNodeId(node.id)}
+                        className="group relative flex flex-col items-center focus:outline-none cursor-pointer"
                       >
-                        {hub.hasSolar ? (
-                          <Sun className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-amber-400'}`} />
-                        ) : hub.category === 'transit' ? (
-                          <span className="text-[11px] leading-none">🚌</span>
-                        ) : (
-                          <MapPin className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : isOnline ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        {isOnline && (
+                          <span
+                            className={`absolute w-8 h-8 rounded-full pointer-events-none animate-ping ${
+                              isSelected ? 'bg-[#f05e17]/40' : 'bg-emerald-500/25'
+                            }`}
+                          />
                         )}
 
-                        {/* Top Mini Badge for Active Sessions */}
-                        {hasVouchers && (
-                          <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-black font-mono font-black text-[9px] px-1 rounded-full shadow-sm">
-                            {hub.activeSessions}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Station Label Badge */}
-                      {showLabels && (
                         <div
-                          className={`mt-1 px-2 py-0.5 rounded backdrop-blur-md text-[10px] font-mono whitespace-nowrap transition-all shadow-md ${
+                          className={`relative w-7 h-7 rounded-full flex items-center justify-center border shadow-xl transition-all ${
                             isSelected
-                              ? 'bg-[#f05e17] text-white font-bold border border-white/40 scale-105 z-30'
-                              : 'bg-black/80 text-slate-300 border border-slate-700/60 group-hover:text-white group-hover:border-slate-500'
+                              ? 'bg-[#f05e17] border-white scale-125 z-30 shadow-[#f05e17]/50'
+                              : isOnline
+                              ? 'bg-[#0f172a] border-emerald-400 text-emerald-400 group-hover:scale-110 group-hover:border-white'
+                              : 'bg-[#1e293b] border-amber-400 text-amber-400'
                           }`}
                         >
-                          <span className="font-bold">{hub.name.split('&')[0].trim()}</span>
+                          {node.hasSolar ? (
+                            <Sun className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-amber-400'}`} />
+                          ) : node.category === 'transit' ? (
+                            <span className="text-[11px] leading-none">🚌</span>
+                          ) : (
+                            <MapPin className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : isOnline ? 'text-emerald-400' : 'text-amber-400'}`} />
+                          )}
+
+                          {hasVouchers && (
+                            <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-black font-mono font-black text-[9px] px-1 rounded-full shadow-sm">
+                              {node.activeSessions}
+                            </span>
+                          )}
                         </div>
-                      )}
-                    </button>
+
+                        {showLabels && (
+                          <div
+                            className={`mt-1 px-2 py-0.5 rounded backdrop-blur-md text-[10px] font-mono whitespace-nowrap transition-all shadow-md ${
+                              isSelected
+                                ? 'bg-[#f05e17] text-white font-bold border border-white/40 scale-105 z-30'
+                                : 'bg-black/80 text-slate-300 border border-slate-700/60 group-hover:text-white group-hover:border-slate-500'
+                            }`}
+                          >
+                            <span className="font-bold">{node.venueName}</span>
+                            <span className="text-[9px] opacity-80 ml-1">({node.district})</span>
+                          </div>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Clean Zero-State Overlay when 0 Hotspots are Added */
+              <div className="absolute inset-0 flex items-center justify-center p-6 pointer-events-none">
+                <div className="bg-[#0b101d]/90 backdrop-blur-md border border-[#232d42] rounded-2xl p-5 max-w-md text-center space-y-3 shadow-2xl pointer-events-auto font-mono">
+                  <div className="w-10 h-10 rounded-xl bg-[#f05e17]/15 border border-[#f05e17]/40 flex items-center justify-center mx-auto text-[#f05e17]">
+                    <MapPin className="w-5 h-5" />
                   </div>
-                );
-              })}
-            </div>
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-extrabold text-white">0 Hotspots Plotted on Map</h3>
+                    <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                      Map pins appear strictly after you add a hotspot with its <strong className="text-slate-200">Vertical Scope</strong>, <strong className="text-slate-200">Partner / Group</strong>, <strong className="text-slate-200">Policy</strong>, <strong className="text-slate-200">District</strong>, and <strong className="text-slate-200">Venue</strong>.
+                    </p>
+                  </div>
+                  {onNavigateTab && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('fleet')}
+                      className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs rounded-lg transition-colors inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Hotspot / Router</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Bottom Map Legend Bar */}
@@ -672,15 +553,11 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#f05e17] border border-white" />
-                <span className="text-white">Selected Hub</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-600 border border-slate-500" />
-                <span>Unbound Point (0 Nodes)</span>
+                <span className="text-white">Selected Venue</span>
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                <span>Solar Off-Grid Node</span>
+                <span>Pending Adoption / Solar Node</span>
               </span>
             </div>
 
@@ -692,60 +569,63 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
           </div>
         </div>
 
-        {/* RIGHT (4 COLS): REGIONAL HUB INSPECTOR & ROUTER ACTIONS */}
+        {/* RIGHT (4 COLS): HOTSPOT VENUE, PARTNER, SCOPE & POLICY INSPECTOR */}
         <div className="lg:col-span-4 space-y-3 flex flex-col">
-          {selectedHub ? (
+          {selectedNode ? (
             <div className="bg-[#0a0e17] p-4 rounded-xl border border-[#232d42] space-y-4 font-mono text-xs flex-1 flex flex-col justify-between">
               <div className="space-y-3">
-                {/* Station Title & Status */}
+                {/* Venue Title & Status */}
                 <div className="flex items-start justify-between gap-2 border-b border-[#1b233a] pb-3">
                   <div>
                     <span className="text-[10px] text-[#f05e17] font-bold uppercase tracking-wider">
-                      {selectedHub.district} District · {selectedHub.category.toUpperCase()}
+                      {selectedNode.district} District · {selectedNode.scope} SCOPE
                     </span>
                     <h3 className="text-base font-extrabold text-white leading-tight mt-0.5">
-                      {selectedHub.name}
+                      {selectedNode.venueName}
                     </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{selectedNode.physicalAddress}</p>
                   </div>
 
-                  {selectedHub.assignedRouters.length > 0 && selectedHub.status === 'online' ? (
+                  {selectedNode.status === 'online' ? (
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>ONLINE</span>
                     </span>
-                  ) : selectedHub.assignedRouters.length > 0 ? (
+                  ) : (
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1 shrink-0">
                       <AlertTriangle className="w-3 h-3" />
-                      <span>{selectedHub.status.toUpperCase()}</span>
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1 shrink-0">
-                      <Radio className="w-3 h-3" />
-                      <span>UNBOUND (0 NODES)</span>
+                      <span>{selectedNode.status.toUpperCase()}</span>
                     </span>
                   )}
                 </div>
 
-                {/* GPS Coordinates & Uplink Info */}
+                {/* Mandatory 5-Attribute Binding Card: Scope, Partner/Group, Policy, District, Venue */}
                 <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-2 text-[11px]">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Coordinates:</span>
-                    <span className="text-slate-200 font-bold">
-                      {selectedHub.lat.toFixed(4)}° S, {selectedHub.lng.toFixed(4)}° E
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Vertical Scope:</span>
+                    <span className="text-cyan-300 font-bold uppercase">{selectedNode.scope}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Partner / Group:</span>
+                    <span className="text-emerald-400 font-bold flex items-center gap-1">
+                      <Building2 className="w-3 h-3" />
+                      <span>{selectedNode.partnerName}</span>
                     </span>
                   </div>
-
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Backhaul Uplink:</span>
-                    <span className="text-cyan-300 font-bold flex items-center gap-1">
-                      <Radio className="w-3 h-3 text-[#f05e17]" />
-                      <span>{selectedHub.defaultUplink}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Bound Policy:</span>
+                    <span className="text-amber-300 font-bold flex items-center gap-1 text-right">
+                      <ShieldCheck className="w-3 h-3 shrink-0" />
+                      <span className="truncate max-w-[175px]" title={selectedNode.policyName}>{selectedNode.policyName}</span>
                     </span>
                   </div>
-
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Hardware Node:</span>
-                    <span className="text-slate-200">{selectedHub.defaultModel}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">District &amp; Venue:</span>
+                    <span className="text-white font-bold">{selectedNode.district} · {selectedNode.venueName}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Router / Hardware:</span>
+                    <span className="text-slate-200">{selectedNode.router.name} ({selectedNode.router.model})</span>
                   </div>
                 </div>
 
@@ -754,58 +634,28 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                   <div className="p-2.5 bg-[#121829] rounded-lg border border-[#1f283d]">
                     <div className="text-[10px] text-slate-400">Active Subscribers</div>
                     <div className="text-lg font-black text-emerald-400 mt-0.5">
-                      {selectedHub.activeSessions}
+                      {selectedNode.activeSessions}
                     </div>
                   </div>
 
                   <div className="p-2.5 bg-[#121829] rounded-lg border border-[#1f283d]">
-                    <div className="text-[10px] text-slate-400">WAN Redundancy</div>
-                    <div className="text-xs font-bold text-amber-300 mt-1 flex items-center justify-center gap-1">
-                      <Zap className="w-3 h-3" /> Failover Ready
+                    <div className="text-[10px] text-slate-400">WireGuard Tunnel</div>
+                    <div className="text-xs font-bold text-cyan-300 mt-1 flex items-center justify-center gap-1">
+                      <Zap className="w-3 h-3" /> {selectedNode.router.wireguardIp}
                     </div>
                   </div>
                 </div>
 
-                {/* Associated Real Routers in this Region */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                    Assigned MikroTik Routers ({selectedHub.assignedRouters.length})
+                {/* Internal MAC & Telemetry */}
+                <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] text-[11px] space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Internal MAC:</span>
+                    <span className="text-white font-bold">{selectedNode.router.macAddress}</span>
                   </div>
-
-                  {selectedHub.assignedRouters.length > 0 ? (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {selectedHub.assignedRouters.map((r) => (
-                        <div
-                          key={r.id}
-                          onClick={() => {
-                            if (onSelectRouter) onSelectRouter(r.id);
-                            if (onNavigateTab) onNavigateTab('fleet');
-                          }}
-                          className="p-2.5 bg-[#161d31] hover:bg-[#1b233a] hover:border-[#f05e17] rounded-lg border border-[#232d42] space-y-1 text-[11px] cursor-pointer transition-all"
-                          title="Click to view and configure this router in Fleet view"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-white font-bold">{r.name}</span>
-                            <span className="text-emerald-400 text-[10px] font-bold">
-                              {r.activeSessions || 0} online
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-cyan-300 flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-cyan-400 shrink-0" />
-                            <span className="truncate">{r.district || selectedHub.district} · {r.physicalAddress || r.siteName}</span>
-                          </div>
-                          <div className="text-slate-400 text-[10px] flex items-center justify-between pt-0.5">
-                            <span>WG: {r.wireguardIp}</span>
-                            <span className="text-slate-500 font-mono">{r.macAddress}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-2.5 bg-[#121829] rounded-lg border border-dashed border-slate-700 text-slate-400 text-[11px] leading-relaxed">
-                      Hotspot coverage point ready for adoption. To bind a physical hAP ax³ to this station, use the adoption one-liner script.
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Coordinates:</span>
+                    <span className="text-slate-300">{selectedNode.lat.toFixed(4)}° S, {selectedNode.lng.toFixed(4)}° E</span>
+                  </div>
                 </div>
               </div>
 
@@ -813,11 +663,14 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               <div className="pt-2 border-t border-[#1b233a] flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => onNavigateTab && onNavigateTab('fleet')}
+                  onClick={() => {
+                    if (onSelectRouter) onSelectRouter(selectedNode.router.id);
+                    if (onNavigateTab) onNavigateTab('fleet');
+                  }}
                   className="flex-1 py-2 px-3 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                 >
                   <Server className="w-3.5 h-3.5" />
-                  <span>Manage Fleet Node</span>
+                  <span>Manage Hotspot Node</span>
                 </button>
 
                 <button
@@ -831,10 +684,24 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               </div>
             </div>
           ) : (
-            <div className="p-8 text-center text-slate-500 bg-[#0a0e17] rounded-xl border border-[#232d42] space-y-2 flex-1 flex flex-col items-center justify-center font-mono">
-              <MapPin className="w-8 h-8 text-slate-600 mb-1" />
-              <p className="text-xs text-white font-bold">No Regional Hub Selected</p>
-              <p className="text-[11px] text-slate-400">Click any hotspot pin on the map to inspect regional backhaul, hardware models, and live client sessions.</p>
+            <div className="p-6 text-center text-slate-500 bg-[#0a0e17] rounded-xl border border-[#232d42] space-y-3 flex-1 flex flex-col items-center justify-center font-mono">
+              <MapPin className="w-8 h-8 text-slate-600" />
+              <div className="space-y-1">
+                <p className="text-xs text-white font-bold">No Active Hotspots Added Yet</p>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Add a hotspot in Routers &amp; Adoption with its Scope, Partner/Group, Policy, District, and Venue to plot it on the map.
+                </p>
+              </div>
+              {onNavigateTab && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('fleet')}
+                  className="px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add First Hotspot</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -849,11 +716,11 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
               Lesotho 10-District Hotspot Distribution
             </h3>
             <span className="text-[10px] text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded font-bold">
-              {adoptedRoutersCount} Adopted {adoptedRoutersCount === 1 ? 'Node' : 'Nodes'}
+              {adoptedRoutersCount} Plotted {adoptedRoutersCount === 1 ? 'Hotspot' : 'Hotspots'}
             </span>
           </div>
           <span className="text-[11px] text-slate-400">
-            Real-time physical fleet mapping synchronized with MikroTik adoption database
+            Strictly reflects added hotspots bound to Scope, Partner/Group, Policy, District &amp; Venue
           </span>
         </div>
 
@@ -891,7 +758,7 @@ export const RegionalFleetMap: React.FC<RegionalFleetMapProps> = ({
                 </div>
                 <div className="mt-1 text-[10px] flex items-center justify-between text-slate-400">
                   <span className={hasNodes ? 'text-emerald-300' : 'text-slate-500'}>
-                    {hasNodes ? `${item.online} Online` : '0 Adopted'}
+                    {hasNodes ? `${item.online} Online` : '0 Hotspots'}
                   </span>
                   {hasNodes && (
                     <span className="text-cyan-400 font-bold">{item.percentOfFleet}%</span>

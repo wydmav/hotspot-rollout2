@@ -99,46 +99,24 @@ export const EcoCashLogo: React.FC<{ className?: string; variant?: 'card' | 'tra
   </svg>
 );
 
+export const PAYLESOTHO_LOGO_SRC = '/assets/aistudio/PHOTO-2023-11-10-12-39-31_1d67dd51.jpg';
+
 export const PayLesothoLogo: React.FC<{ className?: string; variant?: 'card' | 'transparent' }> = ({ 
   className = 'w-28 h-9',
   variant = 'card'
 }) => (
-  <svg viewBox="0 0 240 76" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
-    {variant === 'card' && (
-      <rect width="240" height="76" rx="10" fill="#0A0F1D" stroke="#1E293B" strokeWidth="1.2" />
-    )}
-    <g transform="translate(14, 11)">
-      {/* Emblem: Shield/Wallet hexagon in blue and emerald */}
-      <rect x="0" y="4" width="46" height="46" rx="12" fill="#00205B" stroke="#009A44" strokeWidth="2.5" />
-      <path d="M 14 27 L 22 35 L 34 19" stroke="#FFFFFF" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-      
-      {/* Wordmark */}
-      <text 
-        x="56" 
-        y="31" 
-        fontFamily="system-ui, -apple-system, sans-serif" 
-        fontWeight="900" 
-        fontSize="24" 
-        fill="#FFFFFF" 
-        letterSpacing="0.2"
-      >
-        Pay<tspan fill="#009A44">Lesotho</tspan>
-      </text>
-
-      {/* Subtitle */}
-      <text 
-        x="57" 
-        y="46" 
-        fontFamily="system-ui, -apple-system, sans-serif" 
-        fontWeight="700" 
-        fontSize="9" 
-        fill="#94A3B8" 
-        letterSpacing="1.2"
-      >
-        ECOCASH &middot; M-PESA &middot; CARD
-      </text>
-    </g>
-  </svg>
+  <div
+    className={`inline-flex items-center justify-center overflow-hidden bg-black ${
+      variant === 'card' ? 'rounded-lg border border-[#1E293B]' : 'rounded'
+    } ${className}`}
+  >
+    <img
+      src={PAYLESOTHO_LOGO_SRC}
+      alt="PayLesotho"
+      className="w-full h-full object-contain scale-110 select-none"
+      draggable={false}
+    />
+  </div>
 );
 
 export const MikroTikLogo: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (

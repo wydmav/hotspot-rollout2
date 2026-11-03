@@ -117,9 +117,13 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [copiedFailoverScript, setCopiedFailoverScript] = useState(false);
   const [simulatedFailoverActive, setSimulatedFailoverActive] = useState(false);
 
-  // Add Router Form State
+  // Add Router Form State (Mandatory 5-Attribute Map Binding: Scope, Partner/Group, Policy, District, Venue)
   const [newName, setNewName] = useState('');
   const [newVertical, setNewVertical] = useState<VerticalType>('hotspot');
+  const [newPartnerName, setNewPartnerName] = useState('Alliance Insurance Lesotho');
+  const [newTenantGroupId, setNewTenantGroupId] = useState('');
+  const [newPolicyName, setNewPolicyName] = useState('PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy');
+  const [newAccessMode, setNewAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
   const [newSiteName, setNewSiteName] = useState('');
   const [newDistrict, setNewDistrict] = useState<LesothoDistrict>('Maseru');
   const [newPhysicalAddress, setNewPhysicalAddress] = useState('');
@@ -346,7 +350,10 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
   const handleCreateRouter = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newSiteName.trim()) return;
+    if (!newName.trim() || !newSiteName.trim() || !newPartnerName.trim() || !newPolicyName.trim()) return;
+
+    const matchedGroup = tenantGroups.find((g) => g.id === newTenantGroupId || g.name.toLowerCase() === newPartnerName.trim().toLowerCase());
+    const partnerTag = matchedGroup?.tag || `client:${newPartnerName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
     const created = onAddRouter({
       name: newName.trim(),
@@ -354,6 +361,11 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       siteName: newSiteName.trim(),
       district: newDistrict,
       physicalAddress: newPhysicalAddress.trim() || newSiteName.trim(),
+      partnerName: newPartnerName.trim(),
+      tenantGroupId: matchedGroup?.id || newTenantGroupId || undefined,
+      policyName: newPolicyName.trim(),
+      accessMode: newAccessMode,
+      tags: [partnerTag, `scope:${newVertical}`, `district:${newDistrict.toLowerCase()}`],
       model: newModel,
       boardName: newModel.includes('ax3') ? 'hAP ax3' : 'RouterBOARD',
       rosVersion: newRosVersion,
@@ -822,19 +834,24 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Access Policy Badge */}
-                    <div className="mt-1 flex items-center gap-1.5">
+                    {/* Access Policy & Partner Badge */}
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {router.partnerName && (
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 truncate max-w-[130px]">
+                          🤝 {router.partnerName}
+                        </span>
+                      )}
                       {router.accessMode === 'COMPLETELY_FREE' ? (
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                          <Unlock className="w-2.5 h-2.5" /> 100% FREE ACCESS
+                          <Unlock className="w-2.5 h-2.5" /> {router.policyName || '100% FREE ACCESS'}
                         </span>
                       ) : (router.accessMode === 'FREE_TRIAL_AND_PAID' || router.freeModeEnabled) ? (
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <Zap className="w-2.5 h-2.5 fill-current" /> FREE TRIAL ({router.freeDurationMinutes || 30}m)
+                          <Zap className="w-2.5 h-2.5 fill-current" /> {router.policyName || `FREE TRIAL (${router.freeDurationMinutes || 30}m)`}
                         </span>
                       ) : (
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1">
-                          <Lock className="w-2.5 h-2.5" /> PAID ONLY
+                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1 truncate max-w-[165px]">
+                          <Lock className="w-2.5 h-2.5 shrink-0" /> <span className="truncate">{router.policyName || 'PayLesotho + 16-Digit OTT'}</span>
                         </span>
                       )}
                     </div>
@@ -1614,12 +1631,17 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         </div>
       </div>
 
-      {/* Add Router Modal */}
+      {/* Add Router / Hotspot Modal (Enforces Scope, Partner/Group, Policy, District & Venue) */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl my-6">
             <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
-              <h3 className="text-base font-extrabold text-white">Add New MikroTik Router</h3>
+              <div>
+                <h3 className="text-base font-extrabold text-white">Add New Hotspot &amp; MikroTik Router</h3>
+                <p className="text-[11px] font-mono text-cyan-400 mt-0.5">
+                  Mandatory Map Binding: Scope &middot; Partner/Group &middot; Policy &middot; District &middot; Venue
+                </p>
+              </div>
               <button 
                 onClick={() => setShowAddModal(false)}
                 className="text-slate-400 hover:text-white text-sm"
@@ -1629,36 +1651,95 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateRouter} className="space-y-3.5 text-xs font-mono">
-              <div>
-                <label className="text-slate-400 block mb-1">Router Name / Identifier</label>
-                <input
-                  type="text"
-                  required
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. hAP-ax3-Roma-Campus"
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                />
-              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Router Name / Identifier *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. hAP-ax3-Maseru-Mall"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
 
-              <div>
-                <label className="text-slate-400 block mb-1">Vertical Target</label>
-                <select
-                  value={newVertical}
-                  onChange={(e) => setNewVertical(e.target.value as VerticalType)}
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                >
-                  <option value="hotspot">☕ Connected Hotspots (Cafes &amp; Retail)</option>
-                  <option value="village">🏡 Connected Villages / Mesh (Rural Solar)</option>
-                  <option value="bus">🚌 Connected Buses (Transit Wi-Fi)</option>
-                  <option value="stadium">🏟️ Connected Stadiums (Events/VIP)</option>
-                  <option value="park">🌳 Connected Parks (Municipal Green Zones)</option>
-                </select>
+                <div>
+                  <label className="text-slate-400 block mb-1">1. Vertical Scope *</label>
+                  <select
+                    value={newVertical}
+                    onChange={(e) => setNewVertical(e.target.value as VerticalType)}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  >
+                    <option value="hotspot">☕ Connected Hotspots (Cafes &amp; Retail)</option>
+                    <option value="village">🏡 Connected Villages / Mesh (Rural Solar)</option>
+                    <option value="bus">🚌 Connected Buses (Transit Wi-Fi)</option>
+                    <option value="stadium">🏟️ Connected Stadiums (Events/VIP)</option>
+                    <option value="park">🌳 Connected Parks (Municipal Green Zones)</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1">Lesotho District</label>
+                  <label className="text-slate-400 block mb-1">2. Partner / Sponsor Group *</label>
+                  <input
+                    type="text"
+                    required
+                    list="partner-group-options"
+                    value={newPartnerName}
+                    onChange={(e) => {
+                      setNewPartnerName(e.target.value);
+                      const found = tenantGroups.find((g) => g.name.toLowerCase() === e.target.value.toLowerCase());
+                      setNewTenantGroupId(found?.id || '');
+                    }}
+                    placeholder="e.g. Alliance Insurance Lesotho"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                  <datalist id="partner-group-options">
+                    <option value="Alliance Insurance Lesotho" />
+                    <option value="Maluti Mountain Brewery" />
+                    <option value="PayLesotho Retail Partner" />
+                    <option value="T-Connect Internal Fleet" />
+                    {tenantGroups.map((g) => (
+                      <option key={g.id} value={g.name} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1">3. Bound Hotspot Policy *</label>
+                  <select
+                    value={newPolicyName}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewPolicyName(val);
+                      if (val.includes('Sponsored Free')) {
+                        setNewAccessMode('COMPLETELY_FREE');
+                      } else if (val.includes('Hybrid')) {
+                        setNewAccessMode('FREE_TRIAL_AND_PAID');
+                      } else {
+                        setNewAccessMode('PAID_ONLY');
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  >
+                    <option value="PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy">
+                      PayLesotho + 16-Digit OTT Policy (Paid)
+                    </option>
+                    <option value="Hybrid Trial + PayLesotho 16-Digit OTT Policy">
+                      Hybrid Trial + PayLesotho OTT Policy
+                    </option>
+                    <option value="Sponsored Free Opt-In + Partner Ad Carousel Policy">
+                      Sponsored Free Opt-In + Ad Carousel Policy
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">4. Lesotho District *</label>
                   <select
                     value={newDistrict}
                     onChange={(e) => setNewDistrict(e.target.value as LesothoDistrict)}
@@ -1671,7 +1752,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Site / Venue Name</label>
+                  <label className="text-slate-400 block mb-1">5. Venue / Site Name *</label>
                   <input
                     type="text"
                     required
@@ -1685,8 +1766,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
               <div>
                 <label className="text-slate-400 block mb-1 flex items-center justify-between">
-                  <span>Physical Street / Building Location</span>
-                  <span className="text-[10px] text-cyan-400 font-normal">Plotted on Regional Fleet Map</span>
+                  <span>Physical Street / Venue Address *</span>
+                  <span className="text-[10px] text-emerald-400 font-normal">Plots Hotspot on Regional Fleet Map</span>
                 </label>
                 <input
                   type="text"
@@ -1729,7 +1810,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Ethernet MAC Address</label>
+                <label className="text-slate-400 block mb-1">Ethernet MAC Address (Internal Team Only)</label>
                 <input
                   type="text"
                   required
@@ -1752,7 +1833,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   type="submit"
                   className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
                 >
-                  Generate One-Liner
+                  Add Hotspot &amp; Plot on Map
                 </button>
               </div>
             </form>

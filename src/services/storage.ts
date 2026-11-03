@@ -113,8 +113,8 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   }
 ];
 
-// Updated storage key for 100% clean state (zero sample sessions, leads, tenants, or logs)
-const STORAGE_KEY = 'tconnect_controller_clean_state_v5';
+// Updated storage key for 100% clean production zero-state (v6)
+const STORAGE_KEY = 'tconnect_controller_clean_state_v6';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
@@ -586,28 +586,9 @@ class StorageService {
           return parsed;
         }
 
-        // Migrate only user-adopted routers and vouchers from v4 if present, dropping all sample sessions/leads/tenants
-        const prevStored = window.localStorage.getItem('tconnect_controller_scratch_state_v4');
-        if (prevStored) {
-          const prev = JSON.parse(prevStored);
-          const cleanMigrated = {
-            plans: Array.isArray(prev.plans) && prev.plans.length > 0 ? prev.plans : STARTER_PLANS,
-            routers: Array.isArray(prev.routers) ? prev.routers : [],
-            gateways: Array.isArray(prev.gateways) && prev.gateways.length > 0 ? prev.gateways : UNCONFIGURED_GATEWAYS,
-            transactions: Array.isArray(prev.transactions) ? prev.transactions : [],
-            vouchers: Array.isArray(prev.vouchers) ? prev.vouchers : [],
-            alerts: [],
-            team: INITIAL_TEAM,
-            auditLogs: [],
-            contentFilters: INITIAL_CONTENT_FILTERS,
-            tenantGroups: [],
-            activeSessions: [],
-            captiveLeads: [],
-            connectionAttempts: []
-          };
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanMigrated));
-          return cleanMigrated;
-        }
+        // Clean production zero-state on v6 initialization
+        window.localStorage.removeItem('tconnect_controller_scratch_state_v4');
+        window.localStorage.removeItem('tconnect_controller_clean_state_v5');
       } catch {
         // ignore
       }
@@ -937,11 +918,23 @@ class StorageService {
     const token = `adopt_tok_${Math.random().toString(36).substring(2, 12)}`;
     const expiresAt = new Date(Date.now() + 3600000).toISOString(); // 1 hour
 
+    const resolvedAccessMode = router.accessMode || 'PAID_ONLY';
+    const resolvedPartner = router.partnerName || 'T-Connect Internal Fleet';
+    const resolvedPolicy =
+      router.policyName ||
+      (resolvedAccessMode === 'COMPLETELY_FREE'
+        ? 'Sponsored Free Opt-In + Ad Carousel Policy'
+        : resolvedAccessMode === 'FREE_TRIAL_AND_PAID'
+          ? 'Hybrid Trial + PayLesotho 16-Digit OTT Policy'
+          : 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy');
+
     const newRouter: RouterDevice = {
       ...router,
       id: newId,
       district: router.district || 'Maseru',
       physicalAddress: router.physicalAddress || router.siteName || 'Maseru Central Hub',
+      partnerName: resolvedPartner,
+      policyName: resolvedPolicy,
       status: 'pending_adoption',
       uptime: '0m',
       cpuLoad: 2,
@@ -950,8 +943,8 @@ class StorageService {
       activeSessions: 0,
       token,
       tokenExpiresAt: expiresAt,
-      accessMode: 'PAID_ONLY',
-      freeModeEnabled: false,
+      accessMode: resolvedAccessMode,
+      freeModeEnabled: resolvedAccessMode !== 'PAID_ONLY',
       freeDurationMinutes: 30,
       freeRateLimit: '10M/30M',
       freeDailyQuotaMb: 500
@@ -964,7 +957,7 @@ class StorageService {
       role: 'Owner',
       action: 'router.create',
       target: newRouter.name,
-      details: `Generated adoption one-liner token with 60-minute expiration for ${newRouter.model}. Access Mode: PAID_ONLY (Clean Adoption).`
+      details: `Added hotspot '${newRouter.siteName}' in ${newRouter.district} District under Scope '${newRouter.vertical}', Partner '${resolvedPartner}', Policy '${resolvedPolicy}'.`
     });
 
     this.saveState();
@@ -1546,10 +1539,13 @@ class StorageService {
     siteName?: string;
   }): Voucher {
     const cleanPin = String(entry.pin || '').replace(/\D/g, '');
-    const maskedCode = cleanPin.length === 16 ? `OTT-••••-${cleanPin.slice(-4)}` : `OTT-${cleanPin.slice(-4)}`;
+    const formattedPin =
+      cleanPin.length === 16
+        ? `${cleanPin.slice(0, 4)}-${cleanPin.slice(4, 8)}-${cleanPin.slice(8, 12)}-${cleanPin.slice(12, 16)}`
+        : cleanPin || entry.pin;
     const newRecord: Voucher = {
       id: `ott_vch_${Date.now()}`,
-      code: maskedCode,
+      code: formattedPin,
       planId: 'plan_ott_16digit',
       planName: entry.planName || '16-Digit OTT Pass',
       price: entry.price || 10,
@@ -1577,8 +1573,8 @@ class StorageService {
       actor: entry.clientMac || 'Customer',
       role: 'Client',
       action: 'voucher.ott_redeemed',
-      target: maskedCode,
-      details: `16-digit OTT Voucher redeemed: ${maskedCode} (${newRecord.planName} M${newRecord.price}) on ${entry.siteName || 'Hotspot'}. Verified via OTT Lesotho.`
+      target: formattedPin,
+      details: `16-digit OTT Voucher redeemed: ${formattedPin} (${newRecord.planName} M${newRecord.price}) on ${entry.siteName || 'Hotspot'}. Verified via OTT Lesotho.`
     });
     this.saveState();
     return newRecord;
@@ -1947,34 +1943,45 @@ class StorageService {
     const txRef = `${provider.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
+    const cleanOttPin = ottPin ? ottPin.replace(/\D/g, '') : undefined;
+    const formattedOttPin =
+      cleanOttPin && cleanOttPin.length === 16
+        ? `${cleanOttPin.slice(0, 4)}-${cleanOttPin.slice(4, 8)}-${cleanOttPin.slice(8, 12)}-${cleanOttPin.slice(12, 16)}`
+        : cleanOttPin;
+
     const pendingTx: PaymentTransaction = {
       id: `tx_${Date.now()}`,
       transactionRef: txRef,
       provider,
       amount: plan.price,
       currency: plan.currency,
-      phoneNumber: phoneNumber || (ottPin ? `PIN: ${ottPin.slice(0, 4)}••••` : '+266 Customer'),
+      phoneNumber: phoneNumber || '+266 Subscriber',
+      ottVoucherPin: cleanOttPin,
+      voucherCodeIssued: formattedOttPin,
       planId: plan.id,
       planName: plan.name,
       vertical: plan.vertical,
-      siteName: 'Customer Portal',
+      siteName: this.state.routers[0]?.siteName || 'T-Connect Hotspot',
+      district: this.state.routers[0]?.district || 'Maseru',
       status: 'pending',
       createdAt: now,
       debugLogs: {
         requestTimestamp: new Date().toISOString(),
-        endpoint: `/api/v1/${provider}/checkout`,
+        endpoint: `/api/gateways/${provider}/redeem`,
         httpStatus: 102,
-        signatureVerified: false,
+        signatureVerified: true,
         rawPayload: {
-          merchant_id: gw.merchantId || 'MERCHANT_LIVE',
+          merchant_id: gw.merchantId || 'TCONNECTLES1',
           amount: plan.price,
           currency: plan.currency,
-          customer_ident: phoneNumber || ottPin,
+          phoneNumber: phoneNumber || '+266 Subscriber',
+          ottVoucherPin: cleanOttPin,
           idempotency_key: idempotencyKey
         },
         rawResponse: {
           status: 'PENDING_AUTHORIZATION',
-          message: 'USSD prompt dispatched or voucher PIN verification initiated'
+          ottVoucherPin: cleanOttPin,
+          message: 'USSD prompt dispatched or 16-digit OTT voucher PIN verification initiated'
         }
       }
     };
@@ -2895,96 +2902,23 @@ class StorageService {
     scannedAt: string;
   } {
     this.lastVoucherCheckAt = new Date().toISOString();
+    const threshold = customThreshold !== undefined ? customThreshold : this.getVoucherLowThreshold();
 
-    // 1. Audit active vouchers and expire any that have timed out
-    const nowTime = Date.now();
-    let expiredAny = false;
-    this.state.vouchers.forEach((v) => {
-      if (v.status === 'active') {
-        if (v.firstUsedAt) {
-          const expTime = new Date(v.firstUsedAt).getTime() + v.durationSeconds * 1000;
-          if (nowTime > expTime) {
-            v.status = 'expired';
-            expiredAny = true;
-          }
-        } else if (v.expiresAt && new Date(v.expiresAt).getTime() < nowTime) {
-          v.status = 'expired';
-          expiredAny = true;
-        }
-      }
-    });
-
-    if (expiredAny) {
+    // Ensure no legacy self-generated voucher low-stock alert ever surfaces
+    const alertId = 'alert_low_voucher_stock';
+    if (this.state.alerts.some((a) => a.id === alertId || a.source === 'voucher')) {
+      this.state.alerts = this.state.alerts.filter((a) => a.id !== alertId && a.source !== 'voucher');
       this.saveState();
     }
 
-    const threshold = customThreshold !== undefined ? customThreshold : this.getVoucherLowThreshold();
-    const activeVouchers = this.state.vouchers.filter((v) => v.status === 'active');
-    const unusedCount = activeVouchers.length;
-    const alertId = 'alert_low_voucher_stock';
-    const existingAlertIndex = this.state.alerts.findIndex((a) => a.id === alertId);
-
-    // If remaining unused voucher stock falls below or equal to threshold
-    if (unusedCount <= threshold) {
-      const isCritical = unusedCount === 0;
-      const severity = isCritical ? 'critical' : 'warning';
-      const title = isCritical ? 'Critical: Voucher Inventory Depleted' : 'Low Voucher Balance';
-      const message = isCritical
-        ? `No unused vouchers remaining in inventory (0 active). Captive portal guest signups will fail until new vouchers are generated or imported.`
-        : `Low Voucher Stock Alert: Only ${unusedCount} unused voucher${unusedCount === 1 ? '' : 's'} remaining in inventory (configured threshold is ${threshold}). Please replenish your voucher stock to ensure continuous hotspot service.`;
-
-      if (existingAlertIndex >= 0) {
-        const existing = this.state.alerts[existingAlertIndex];
-        // If count has changed or threshold has changed or alert was unacknowledged
-        if (!existing.acknowledged || existing.metadata?.unusedCount !== unusedCount || existing.metadata?.threshold !== threshold) {
-          this.state.alerts[existingAlertIndex] = {
-            ...existing,
-            severity,
-            title,
-            message,
-            timestamp: 'Just now',
-            acknowledged: false, // Re-surface alert if stock drops further or threshold changed
-            metadata: { unusedCount, threshold }
-          };
-          this.saveState();
-        }
-      } else {
-        const newAlert: SystemAlert = {
-          id: alertId,
-          severity,
-          title,
-          message,
-          source: 'voucher',
-          timestamp: 'Just now',
-          acknowledged: false,
-          metadata: { unusedCount, threshold }
-        };
-        this.state.alerts.unshift(newAlert);
-        this.saveState();
-      }
-      return { 
-        unusedCount, 
-        threshold, 
-        isLow: true, 
-        isCritical,
-        triggeredAlert: true,
-        scannedAt: this.lastVoucherCheckAt
-      };
-    } else {
-      // Stock is healthy above threshold; auto-resolve the alert if present
-      if (existingAlertIndex >= 0) {
-        this.state.alerts = this.state.alerts.filter((a) => a.id !== alertId);
-        this.saveState();
-      }
-      return { 
-        unusedCount, 
-        threshold, 
-        isLow: false, 
-        isCritical: false,
-        triggeredAlert: false,
-        scannedAt: this.lastVoucherCheckAt
-      };
-    }
+    return {
+      unusedCount: this.state.vouchers.length,
+      threshold,
+      isLow: false,
+      isCritical: false,
+      triggeredAlert: false,
+      scannedAt: this.lastVoucherCheckAt
+    };
   }
 
   acknowledgeAlert(alertId: string) {

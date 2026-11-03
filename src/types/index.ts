@@ -99,8 +99,11 @@ export interface RouterDevice {
     speedKmh: number;
     currentZone: string;
   };
-  // External Client Tenant Group & Splash Customization
+  // External Client Tenant Group, Policy & Splash Customization
   tenantGroupId?: string;
+  partnerName?: string;
+  policyId?: string;
+  policyName?: string;
   tags?: string[];
   customBgUrl?: string;
 }
@@ -246,15 +249,24 @@ export interface GatewayConfig {
 export interface PaymentTransaction {
   id: string;
   transactionRef: string;
+  upstreamReference?: string;
   provider: GatewayProvider;
+  channel?: string;
   amount: number;
   currency: string;
   phoneNumber?: string;
+  customerName?: string;
+  customerEmail?: string;
   planId: string;
   planName: string;
   vertical: VerticalType;
   siteName: string;
+  district?: string;
+  partnerName?: string;
+  policyName?: string;
   voucherCodeIssued?: string;
+  ottVoucherPin?: string;
+  ottVoucherSource?: string;
   status: 'completed' | 'pending' | 'failed' | 'refunded';
   errorMessage?: string;
   debugLogs: {

@@ -1315,17 +1315,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                           activeVideoAd.sponsorName
                         );
                       }}
-                      alt={sl.caption || activeVideoAd.title}
+                      alt=""
                       className="w-screen h-screen object-cover block bg-black"
                       draggable={false}
                     />
-                    {sl.caption && (
-                      <div className="absolute bottom-20 inset-x-4 z-30 flex justify-center pointer-events-none">
-                        <div className="px-4 py-2 rounded-2xl bg-black/75 backdrop-blur-md border border-white/20 text-white text-xs sm:text-sm font-bold text-center max-w-md shadow-2xl">
-                          {sl.caption}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -1728,10 +1721,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             >
               <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
 
-              <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
-                <span className="text-[11px] font-bold text-white font-mono uppercase">
-                  {issuedOttVoucherPin ? 'Copy & Redeem Your OTT Voucher' : 'PayLesotho & OTT Voucher Checkout'}
-                </span>
+              <div className="flex items-center justify-between border-b border-[#232d42] pb-1.5">
+                <div className="flex items-center gap-2">
+                  <ProviderLogo provider="paylesotho" className="w-14 h-5 shrink-0" />
+                  <span className="text-[11px] font-bold text-white font-mono uppercase">
+                    {issuedOttVoucherPin ? 'Copy & Redeem OTT Voucher' : 'PayLesotho Checkout'}
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -1846,7 +1842,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                           : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
                       }`}
                     >
-                      <ProviderLogo provider="paylesotho" className="w-5 h-5 shrink-0" />
+                      <ProviderLogo provider="paylesotho" className="w-12 h-5 shrink-0" />
                       <span className="text-[10px] font-bold truncate">PayLesotho (M-Pesa / EcoCash)</span>
                     </button>
 

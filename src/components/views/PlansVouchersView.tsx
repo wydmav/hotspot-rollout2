@@ -179,13 +179,6 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => ExportService.exportVouchersToCsv(vouchers)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-xs font-mono text-slate-300 rounded-lg transition-colors"
-          >
-            <Download className="w-3.5 h-3.5 text-slate-400" />
-            <span>Export Vouchers CSV</span>
-          </button>
-          <button
             onClick={() => setShowCreatePlanModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
           >
@@ -234,163 +227,57 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               </div>
             </div>
 
-            <div className="mt-5 pt-3 border-t border-[#1f283d]">
-              <button
-                onClick={() => {
-                  setSelectedPlanForBatch(plan.id);
-                  onGenerateBatch(plan.id, 1);
-                }}
-                className="w-full py-1.5 px-3 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-xs font-mono text-slate-200 rounded-lg transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Ticket className="w-3.5 h-3.5 text-[#f05e17]" />
-                <span>Issue Single Voucher</span>
-              </button>
+            <div className="mt-5 pt-3 border-t border-[#1f283d] flex items-center justify-between text-[11px] font-mono">
+              <span className="text-slate-400">OTT Denomination:</span>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                Exact {currency}{plan.price.toFixed(2)} Match
+              </span>
             </div>
           </div>
         ))}
       </div>
 
       {/* ======================================================= */}
-      {/* VOUCHER INVENTORY STATUS & BACKGROUND SENTINEL CONTROL  */}
+      {/* PAYLESOTHO & 16-DIGIT OTT VOUCHER DENOMINATION POLICY   */}
       {/* ======================================================= */}
-      {(() => {
-        const activeCount = vouchers.filter((v) => v.status === 'active').length;
-        const usedCount = vouchers.filter((v) => v.status === 'used').length;
-        const expiredCount = vouchers.filter((v) => v.status === 'expired').length;
-        const isLow = activeCount <= localThreshold;
-        const isDepleted = activeCount === 0;
-
-        return (
-          <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className={`p-2 rounded-lg ${isLow ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                  {isLow ? <AlertTriangle className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-white font-mono flex items-center gap-2">
-                    VOUCHER INVENTORY &amp; BACKGROUND SENTINEL
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-normal">
-                      Background Check: Every 15s
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-400 font-mono">
-                    Automated background check alerts the top Header when unused stock falls below threshold
-                  </p>
-                </div>
-              </div>
-
-              {/* Threshold Controller & Manual Audit */}
-              <div className="flex items-center gap-2 self-start sm:self-auto font-mono text-xs">
-                {onUpdateVoucherThreshold && (
-                  <div className="flex items-center gap-1.5 bg-[#161d31] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
-                    <SlidersHorizontal className="w-3.5 h-3.5 text-[#f05e17]" />
-                    <span className="text-[11px] text-slate-400">Threshold:</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={localThreshold}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        if (!isNaN(val) && val >= 0) {
-                          setLocalThreshold(val);
-                          onUpdateVoucherThreshold(val);
-                        }
-                      }}
-                      className="w-12 bg-[#0b0f19] border border-[#232d42] rounded px-1.5 py-0.5 text-center text-white font-bold"
-                    />
-                  </div>
-                )}
-
-                <button
-                  onClick={() => {
-                    setIsAuditing(true);
-                    if (onTriggerVoucherCheck) onTriggerVoucherCheck();
-                    setTimeout(() => setIsAuditing(false), 600);
-                  }}
-                  disabled={isAuditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded-lg text-slate-200 transition-colors"
-                  title="Run background inventory audit now"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isAuditing ? 'animate-spin text-[#f05e17]' : 'text-slate-400'}`} />
-                  <span>{isAuditing ? 'Auditing...' : 'Audit Stock'}</span>
-                </button>
-              </div>
+      <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
+              <ShieldCheck className="w-4 h-4" />
             </div>
-
-            {/* Metric KPI Chips */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
-              <div className={`p-3 rounded-lg border ${
-                isDepleted 
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' 
-                  : isLow 
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
-                  : 'bg-[#161d31] border-[#232d42] text-slate-200'
-              }`}>
-                <div className="text-[11px] text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Unused Stock</span>
-                  {isLow && (
-                    <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold">
-                      LOW
-                    </span>
-                  )}
-                </div>
-                <div className="text-xl font-bold flex items-baseline gap-1.5">
-                  <span>{activeCount}</span>
-                  <span className="text-[11px] text-slate-500 font-normal">tokens</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-                <div className="text-[11px] text-slate-400 mb-1">Active Threshold</div>
-                <div className="text-xl font-bold flex items-baseline gap-1.5 text-slate-200">
-                  <span>{localThreshold}</span>
-                  <span className="text-[11px] text-slate-500 font-normal">trigger limit</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-                <div className="text-[11px] text-slate-400 mb-1">Redeemed / Used</div>
-                <div className="text-xl font-bold flex items-baseline gap-1.5 text-cyan-400">
-                  <span>{usedCount}</span>
-                  <span className="text-[11px] text-slate-500 font-normal">sessions</span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-                <div className="text-[11px] text-slate-400 mb-1">Expired / Revoked</div>
-                <div className="text-xl font-bold flex items-baseline gap-1.5 text-slate-400">
-                  <span>{expiredCount}</span>
-                  <span className="text-[11px] text-slate-500 font-normal">vouchers</span>
-                </div>
-              </div>
+            <div>
+              <h3 className="text-sm font-extrabold text-white font-mono flex items-center gap-2">
+                PAYLESOTHO AGGREGATOR &amp; 16-DIGIT OTT VOUCHER ENFORCEMENT
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
+                  100% On-Demand OTT PINs
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 font-mono">
+                Zero self-generated platform vouchers. Subscribers pay via PayLesotho (M-Pesa / EcoCash / XPayments), copy their 16-digit OTT Voucher PIN, and redeem exact package denominations.
+              </p>
             </div>
-
-            {/* Low Voucher Balance Warning Banner if low */}
-            {isLow && (
-              <div className={`p-3 rounded-lg border flex items-start gap-3 ${
-                isDepleted 
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-200' 
-                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
-              }`}>
-                <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${isDepleted ? 'text-rose-400' : 'text-amber-400'}`} />
-                <div className="space-y-1 text-xs">
-                  <p className="font-bold">
-                    {isDepleted
-                      ? 'Critical Depletion: 0 unused vouchers remaining in inventory!'
-                      : `Low Voucher Balance Alert: Only ${activeCount} unused voucher${activeCount === 1 ? '' : 's'} remaining.`}
-                  </p>
-                  <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
-                    The background daemon has triggered an active &quot;Low Voucher Balance&quot; alert in the top Header navigation.
-                    Generate a new batch using the generator below to restock inventory and maintain continuous captive portal operation.
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
-        );
-      })()}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+          <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+            <div className="text-[11px] text-slate-400 mb-1">1. PayLesotho Payment</div>
+            <div className="text-sm font-bold text-emerald-400">M-Pesa &middot; EcoCash &middot; Card</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Verified via api.paylesotho.co.ls</div>
+          </div>
+          <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+            <div className="text-[11px] text-slate-400 mb-1">2. Copy 16-Digit OTT PIN</div>
+            <div className="text-sm font-bold text-amber-300">/api/ott/voucher/get</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">User must tap Copy PIN before redeeming</div>
+          </div>
+          <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
+            <div className="text-[11px] text-slate-400 mb-1">3. Exact Value Redemption</div>
+            <div className="text-sm font-bold text-cyan-400">{vouchers.length} OTT Redemptions</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Enforces exact voucher-to-package amount</div>
+          </div>
+        </div>
+      </div>
 
       {/* 16-Digit OTT Voucher Live Inspector & Official OTT Lesotho Network */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
