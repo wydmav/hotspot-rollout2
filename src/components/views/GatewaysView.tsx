@@ -67,13 +67,20 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     }
   }, [gateways]);
 
+  const DEFAULT_PL_BEARER = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
   // Edit fields for selected gateway
-  const [apiKey, setApiKey] = useState(selectedGateway?.apiKey || '');
+  const [apiKey, setApiKey] = useState(
+    selectedGateway?.apiKey || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')
+  );
   const [apiSecret, setApiSecret] = useState(selectedGateway?.apiSecret || '');
   const [apiPassword, setApiPassword] = useState(selectedGateway?.apiPassword || '');
   const [showPassword, setShowPassword] = useState(false);
-  const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
-  const [ottBearerToken, setOttBearerToken] = useState(selectedGateway?.ottBearerToken || '');
+  const [bearerToken, setBearerToken] = useState(
+    selectedGateway?.bearerToken || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')
+  );
+  const [ottBearerToken, setOttBearerToken] = useState(
+    selectedGateway?.ottBearerToken || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')
+  );
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
   const [merchantName, setMerchantName] = useState(selectedGateway?.merchantName || selectedGateway?.username || 'T-Connect');
   const [mpesaMerchantId, setMpesaMerchantId] = useState(selectedGateway?.mpesaMerchantId || '62915');
@@ -133,11 +140,13 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           }
           const srvPl = data.gateways.find((g: any) => g.provider === 'paylesotho');
           if (srvPl) {
+            const resolvedPlBearer = srvPl.bearerToken || srvPl.apiKey || DEFAULT_PL_BEARER;
+            const resolvedPlOttBearer = srvPl.ottBearerToken || resolvedPlBearer;
             onUpdateCredentials('paylesotho', {
-              apiKey: srvPl.apiKey || '',
+              apiKey: resolvedPlBearer,
               apiSecret: srvPl.apiSecret || '',
-              bearerToken: srvPl.bearerToken || '',
-              ottBearerToken: srvPl.ottBearerToken || '',
+              bearerToken: resolvedPlBearer,
+              ottBearerToken: resolvedPlOttBearer,
               username: 'T-Connect',
               merchantName: 'T-Connect',
               merchantId: srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915',
@@ -153,10 +162,10 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               isLive: Boolean(srvPl.isLive ?? true)
             });
             if (selectedGateway?.provider === 'paylesotho') {
-              if (srvPl.apiKey) setApiKey(srvPl.apiKey);
+              setApiKey(resolvedPlBearer);
               if (srvPl.apiSecret) setApiSecret(srvPl.apiSecret);
-              if (srvPl.bearerToken) setBearerToken(srvPl.bearerToken);
-              if (srvPl.ottBearerToken) setOttBearerToken(srvPl.ottBearerToken);
+              setBearerToken(resolvedPlBearer);
+              setOttBearerToken(resolvedPlOttBearer);
               setMerchantName('T-Connect');
               setMerchantId(srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915');
               setMpesaMerchantId(srvPl.mpesaMerchantId && srvPl.mpesaMerchantId !== '00000' ? srvPl.mpesaMerchantId : '62915');
@@ -176,11 +185,11 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
 
   const handleSelectGateway = (gw: GatewayConfig) => {
     setSelectedGateway(gw);
-    setApiKey(gw.apiKey || '');
+    setApiKey(gw.apiKey || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
     setApiSecret(gw.apiSecret || '');
     setApiPassword(gw.apiPassword || '');
-    setBearerToken(gw.bearerToken || '');
-    setOttBearerToken(gw.ottBearerToken || '');
+    setBearerToken(gw.bearerToken || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
+    setOttBearerToken(gw.ottBearerToken || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
     setMerchantName(gw.merchantName || gw.username || 'T-Connect');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
     setMpesaMerchantId(gw.mpesaMerchantId || '62915');

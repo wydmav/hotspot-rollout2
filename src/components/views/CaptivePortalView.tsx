@@ -220,11 +220,13 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
   const emailErrorMsg = validation.emailError;
   const isFormValid = validation.isFormValid;
 
-  // Payment & Voucher
+  // Payment & 16-Digit OTT Voucher
   const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || '');
-  const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ecocash');
+  const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('paylesotho');
+  const [paylesothoChannel, setPaylesothoChannel] = useState<'mpesa' | 'ecocash'>('mpesa');
   const [ottPin, setOttPin] = useState('');
-  const [voucherCodeInput, setVoucherCodeInput] = useState('');
+  const [issuedOttVoucherPin, setIssuedOttVoucherPin] = useState<string | null>(null);
+  const [hasCopiedOttVoucher, setHasCopiedOttVoucher] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -534,43 +536,92 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
       return;
     }
 
+    // PayLesotho (Vodacom M-Pesa 62915 / Econet EcoCash 63165430 under Merchant T-Connect) -> Issues 16-Digit OTT Voucher
     setIsProcessing(true);
-    setTimeout(() => {
-      const res = onProcessPayment(selectedGateway, selectedPlan.id, fullPhone, ottPin);
-      setIssuedCode(res.voucher.code);
-      setIsProcessing(false);
-      setLastConnectedAuthMode('paid');
-      setPreviewStep('success');
-
-      if (selectedPlan.name.toLowerCase().includes('month')) {
-        setRemainingSeconds(2592000);
-        setTotalPackageSeconds(2592000);
-      } else if (selectedPlan.name.toLowerCase().includes('week')) {
-        setRemainingSeconds(604800);
-        setTotalPackageSeconds(604800);
-      } else if (selectedPlan.name.toLowerCase().includes('day')) {
-        setRemainingSeconds(86400);
-        setTotalPackageSeconds(86400);
-      } else {
-        setRemainingSeconds(7200);
-        setTotalPackageSeconds(7200);
+    try {
+      const clean8 = guestPhone.replace(/\D/g, '').slice(-8) || (paylesothoChannel === 'mpesa' ? '58000000' : '62000000');
+      const initRes = await fetch('/api/gateways/paylesotho/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: selectedPlan?.price || 10,
+          phoneNumber: clean8,
+          channel: paylesothoChannel,
+          planId: selectedPlan?.id || 'hs_1d',
+          planName: selectedPlan?.name || 'Daily Pass',
+          durationSeconds: selectedPlan?.durationSeconds || 86400,
+          guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim() || 'T-Connect Guest',
+          guestEmail: guestEmail.trim() || 'guest@tconnect.ls',
+          clientMac: '7A:91:02:11:44:99',
+          scope: selectedVertical
+        })
+      });
+      const initData = await initRes.json().catch(() => ({ success: false }));
+      if (!initRes.ok || !initData.success) {
+        setIsProcessing(false);
+        setPaymentError(initData.message || 'Failed to initiate PayLesotho payment.');
+        return;
       }
-    }, 1000);
+
+      if (initData.ottVoucherPin && String(initData.ottVoucherPin).replace(/\D/g, '').length === 16) {
+        const cleanPin = String(initData.ottVoucherPin).replace(/\D/g, '');
+        const formatted = cleanPin.match(/.{1,4}/g)?.join('-') || cleanPin;
+        setIssuedOttVoucherPin(formatted);
+        setHasCopiedOttVoucher(false);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Poll /api/gateways/paylesotho/status/:transactionId for completion & 16-digit OTT Voucher PIN
+      const txId = initData.transactionId;
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
+        const stData = await stRes.json().catch(() => ({}));
+        if (stData?.status === 'completed' && stData?.ottVoucherPin) {
+          const cleanPin = String(stData.ottVoucherPin).replace(/\D/g, '');
+          const formatted = cleanPin.match(/.{1,4}/g)?.join('-') || cleanPin;
+          setIssuedOttVoucherPin(formatted);
+          setHasCopiedOttVoucher(false);
+          setIsProcessing(false);
+          return;
+        }
+      }
+      setIsProcessing(false);
+    } catch {
+      setIsProcessing(false);
+      setPaymentError('Unable to reach PayLesotho payment gateway.');
+    }
   };
 
-  // Direct Voucher Code Redemption
-  const handleRedeemDirectCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPaymentError(null);
-    if (!voucherCodeInput.trim()) return;
+  const handleCopyIssuedOttPin = async () => {
+    if (!issuedOttVoucherPin) return;
+    const cleanPin = issuedOttVoucherPin.replace(/\D/g, '');
+    await copyToClipboard(issuedOttVoucherPin);
+    await fetch('/api/gateways/paylesotho/ott-voucher/mark-copied', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voucherPin: cleanPin })
+    }).catch(() => {});
+    setHasCopiedOttVoucher(true);
+    setOttPin(cleanPin.match(/.{1,4}/g)?.join(' ') || cleanPin);
+  };
 
+  const handleRedeemCopiedOttPin = async () => {
+    if (!issuedOttVoucherPin || !hasCopiedOttVoucher) return;
+    const cleanPin = issuedOttVoucherPin.replace(/\D/g, '');
     setIsProcessing(true);
     try {
       const res = await fetch('/api/vouchers/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: voucherCodeInput.trim(),
+          code: cleanPin,
+          expectedAmount: selectedPlan?.price || 10,
+          planId: selectedPlan?.id || 'hs_1d',
+          planName: selectedPlan?.name || 'Daily Pass',
+          durationSeconds: selectedPlan?.durationSeconds || 86400,
+          requireCopiedFirst: true,
           mac: '7A:91:02:11:44:99',
           guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim()
         })
@@ -578,15 +629,19 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
       const data = await res.json().catch(() => ({ success: false }));
       setIsProcessing(false);
       if (res.ok && data.success) {
-        setIssuedCode(voucherCodeInput.trim().toUpperCase());
+        setIssuedCode(issuedOttVoucherPin);
+        setIssuedOttVoucherPin(null);
         setLastConnectedAuthMode('paid');
         setPreviewStep('success');
+        const dur = data.durationSeconds || selectedPlan?.durationSeconds || 86400;
+        setRemainingSeconds(dur);
+        setTotalPackageSeconds(dur);
       } else {
-        setPaymentError(data.message || 'Invalid or expired voucher code.');
+        setPaymentError(data.message || 'Failed to redeem 16-digit OTT Voucher PIN.');
       }
     } catch {
       setIsProcessing(false);
-      setPaymentError('Failed to verify voucher code.');
+      setPaymentError('Failed to verify 16-digit OTT Voucher PIN.');
     }
   };
 
@@ -1457,11 +1512,11 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                           <span className="text-[10px] font-mono font-bold text-emerald-300">Digital PIN</span>
                         </label>
 
-                        {/* EcoCash Lesotho (Econet) */}
+                        {/* PayLesotho Aggregator (M-Pesa 62915 & EcoCash 63165430 -> Issues 16-Digit OTT Voucher) */}
                         <label
                           className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            selectedGateway === 'ecocash'
-                              ? 'bg-red-600/20 border-red-500'
+                            selectedGateway === 'paylesotho'
+                              ? 'bg-emerald-600/20 border-emerald-500'
                               : 'bg-black/40 border-white/10 hover:border-white/30'
                           }`}
                         >
@@ -1469,13 +1524,13 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                             <input
                               type="radio"
                               name="gateway"
-                              checked={selectedGateway === 'ecocash'}
-                              onChange={() => setSelectedGateway('ecocash')}
-                              className="accent-red-500"
+                              checked={selectedGateway === 'paylesotho'}
+                              onChange={() => setSelectedGateway('paylesotho')}
+                              className="accent-emerald-500"
                             />
-                            <ProviderLogo provider="ecocash" className="w-24 h-7" />
+                            <ProviderLogo provider="paylesotho" className="w-24 h-7" />
                           </div>
-                          <span className="text-[10px] font-mono font-bold text-red-300">Spache-Fono</span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-300">M-Pesa / EcoCash</span>
                         </label>
                       </div>
 
@@ -1502,22 +1557,73 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                           />
 
                           <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between pt-0.5">
-                            <span>Strict 16-digit OTT API &amp; DB check</span>
+                            <span>Exact 1:1 denomination match ({currency}{selectedPlan.price})</span>
                             <span className="text-blue-300">TCONNECTLES1 Partner</span>
                           </div>
                         </div>
                       )}
 
-                      {/* EcoCash *199# Push Prompt Notice */}
-                      {selectedGateway === 'ecocash' && (
-                        <div className="pt-1 p-2.5 rounded-xl bg-red-950/40 border border-red-500/30 text-xs font-mono space-y-1">
-                          <div className="flex justify-between font-bold text-red-200">
-                            <span>EcoCash Lesotho STK Push</span>
+                      {/* PayLesotho M-Pesa (62915) / EcoCash (63165430) -> Copy & Redeem OTT Voucher Flow */}
+                      {selectedGateway === 'paylesotho' && (
+                        <div className="pt-1 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs font-mono space-y-2">
+                          <div className="flex justify-between font-bold text-emerald-200">
+                            <span>PayLesotho (Merchant: T-Connect)</span>
                             <span className="text-emerald-400">{currency}{selectedPlan.price}</span>
                           </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setPaylesothoChannel('mpesa')}
+                              className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                                paylesothoChannel === 'mpesa'
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                  : 'bg-black/40 text-slate-300 border-white/15'
+                              }`}
+                            >
+                              M-Pesa (62915)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPaylesothoChannel('ecocash')}
+                              className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border cursor-pointer ${
+                                paylesothoChannel === 'ecocash'
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                  : 'bg-black/40 text-slate-300 border-white/15'
+                              }`}
+                            >
+                              EcoCash (63165430)
+                            </button>
+                          </div>
                           <p className="text-slate-300 text-[10px]">
-                            An automated prompt for <strong>{currency}{selectedPlan.price}</strong> will be sent to <strong>{guestCountry.code} {guestPhone}</strong>. Approve on your handset via *199# Push to activate internet.
+                            Generates a <strong>{currency}{selectedPlan.price} 16-Digit OTT Voucher</strong> via PayLesotho (`api.paylesotho.co.ls/api/ott/voucher/get`). Copy your PIN first, then redeem to connect.
                           </p>
+                          {issuedOttVoucherPin && (
+                            <div className="p-2.5 rounded-xl bg-black/70 border border-emerald-400/50 space-y-2 text-center">
+                              <div className="text-[10px] text-emerald-300 font-bold uppercase">
+                                Issued {currency}{selectedPlan.price} 16-Digit OTT Voucher PIN
+                              </div>
+                              <div className="text-sm font-black tracking-widest text-white bg-emerald-950/60 py-1.5 px-2 rounded-lg border border-emerald-500/40">
+                                {issuedOttVoucherPin}
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={handleCopyIssuedOttPin}
+                                  className="py-1.5 px-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                                >
+                                  {hasCopiedOttVoucher ? '✓ 1. PIN Copied' : '1. Copy OTT PIN'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!hasCopiedOttVoucher || isProcessing}
+                                  onClick={handleRedeemCopiedOttPin}
+                                  className="py-1.5 px-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 text-slate-950 font-extrabold text-[10px] cursor-pointer"
+                                >
+                                  2. Redeem &amp; Connect
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1528,48 +1634,30 @@ add chain=dstnat in-interface=bridgeLocal protocol=tcp dst-port=53 action=redire
                       )}
 
                       {/* Pay / Redeem Button */}
-                      <button
-                        onClick={handleExecutePayment}
-                        disabled={isProcessing || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
-                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        {isProcessing ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
+                      {!issuedOttVoucherPin && (
+                        <button
+                          onClick={handleExecutePayment}
+                          disabled={isProcessing || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
+                          className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          {isProcessing ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>
+                                {selectedGateway === 'ottvoucher'
+                                  ? 'Redeeming 16-Digit OTT PIN...'
+                                  : `Processing PayLesotho (${paylesothoChannel.toUpperCase()})...`}
+                              </span>
+                            </>
+                          ) : (
                             <span>
                               {selectedGateway === 'ottvoucher'
-                                ? 'Redeeming PIN via OTT Lesotho...'
-                                : 'Processing EcoCash (*199# Push)...'}
+                                ? `Redeem 16-Digit OTT Voucher (${currency}${selectedPlan.price}) & Connect →`
+                                : `Pay ${currency}${selectedPlan.price} via PayLesotho (${paylesothoChannel.toUpperCase()}) →`}
                             </span>
-                          </>
-                        ) : (
-                          <span>
-                            {selectedGateway === 'ottvoucher'
-                              ? `Redeem OTT Voucher (${currency}${selectedPlan.price}) & Connect →`
-                              : `Pay ${currency}${selectedPlan.price} via EcoCash (*199# Push) →`}
-                          </span>
-                        )}
-                      </button>
-
-                      {/* Alternative: Voucher Code Redemption */}
-                      <div className="pt-2 border-t border-white/10">
-                        <span className="text-[10px] text-slate-400 font-mono block mb-1.5">Have a physical paper voucher?</span>
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={voucherCodeInput}
-                            onChange={(e) => setVoucherCodeInput(e.target.value)}
-                            placeholder="Enter Voucher Code"
-                            className="flex-1 px-3 py-1.5 bg-black/40 border border-white/20 rounded-lg text-white font-mono text-xs uppercase"
-                          />
-                          <button
-                            onClick={handleRedeemDirectCode}
-                            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white font-bold text-xs font-mono rounded-lg"
-                          >
-                            Redeem
-                          </button>
-                        </div>
-                      </div>
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
 

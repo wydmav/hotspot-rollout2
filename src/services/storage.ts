@@ -113,8 +113,8 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   }
 ];
 
-// Updated storage key for 100% clean production zero-state (v7 — PayLesotho 62915/63165430 & OTT-only)
-const STORAGE_KEY = 'tconnect_controller_clean_state_v7';
+// Updated storage key for 100% clean production zero-state (v8 — PayLesotho Live Bearer Token & OTT-only)
+const STORAGE_KEY = 'tconnect_controller_clean_state_v8';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
@@ -173,6 +173,8 @@ export const STARTER_PLANS: HotspotPlan[] = [
   }
 ];
 
+export const DEFAULT_PAYLESOTHO_BEARER_TOKEN = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
+
 export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
     provider: 'paylesotho',
@@ -182,7 +184,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     isLive: true,
     isSandbox: false,
     status: 'operational',
-    apiKey: '',
+    apiKey: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
     apiSecret: '',
     apiPassword: '',
     username: 'T-Connect',
@@ -192,8 +194,8 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     xpaymentsEndpointUrl: 'https://xpayments.paylesotho.co.ls',
     ottVoucherEndpointUrl: 'https://api.paylesotho.co.ls/api/ott/voucher/get',
     ottVoucherCheckUrl: 'https://api.paylesotho.co.ls/ott/voucher/check',
-    bearerToken: '',
-    ottBearerToken: '',
+    bearerToken: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
+    ottBearerToken: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
     merchantId: '62915',
     mpesaMerchantId: '62915',
     ecocashMerchantId: '63165430',
@@ -413,6 +415,7 @@ class StorageService {
     if (typeof window !== 'undefined') {
       this.hydrateGatewaysFromServer();
       this.hydrateSponsorAdsFromServer();
+      this.hydrateRoutersFromServer();
       window.addEventListener('storage', (e) => {
         if (e.key === STORAGE_KEY && e.newValue) {
           try {
@@ -421,6 +424,100 @@ class StorageService {
           } catch {}
         }
       });
+    }
+  }
+
+  async hydrateRoutersFromServer(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const res = await fetch('/api/devices/watchdog/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && Array.isArray(data.routers) && data.routers.length > 0) {
+        this.mergeRoutersFromServer(data.routers);
+      } else if (this.state.routers.length > 0) {
+        fetch('/api/devices/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ routers: this.state.routers })
+        }).catch(() => {});
+      }
+    } catch {}
+  }
+
+  mergeRoutersFromServer(serverRouters: any[]): void {
+    if (!Array.isArray(serverRouters) || serverRouters.length === 0) return;
+    let mutated = false;
+    const localById = new Map<string, RouterDevice>();
+    this.state.routers.forEach((r) => localById.set(r.id, r));
+
+    serverRouters.forEach((sr: any) => {
+      if (!sr || !sr.id) return;
+      const existing = localById.get(sr.id);
+      const isAdopted = Boolean(
+        sr.status === 'online' ||
+        sr.keepAliveAdopted ||
+        sr.adoptedAt ||
+        existing?.status === 'online' ||
+        existing?.adoptedAt
+      );
+      if (!existing) {
+        mutated = true;
+        const hydrated: RouterDevice = {
+          id: sr.id,
+          name: sr.name || `MikroTik-${String(sr.id).slice(-6)}`,
+          vertical: sr.vertical || 'hotspot',
+          siteName: sr.siteName || 'Hotspot Site',
+          district: sr.district || 'Maseru',
+          physicalAddress: sr.physicalAddress || sr.siteName || 'Hotspot Site',
+          partnerName: sr.partnerName || 'T-Connect Internal Fleet',
+          tenantGroupId: sr.tenantGroupId,
+          policyName: sr.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
+          tags: Array.isArray(sr.tags) ? sr.tags : [],
+          model: sr.model || 'MikroTik hAP ax³ (v7)',
+          boardName: sr.boardName || 'hAP ax3',
+          rosVersion: sr.rosVersion || 'v7',
+          macAddress: sr.macAddress || 'D4:01:C3:AA:BB:CC',
+          wireguardIp: sr.wireguardIp || '10.99.1.50',
+          publicWanIp: sr.publicWanIp || '127.0.0.1',
+          status: isAdopted ? 'online' : (sr.status || 'pending_adoption'),
+          uptime: sr.uptime || (isAdopted ? '1h' : '0m'),
+          cpuLoad: sr.cpuLoad || 2,
+          memoryUsage: sr.memoryUsage || 18,
+          lastHeartbeat: isAdopted ? 'Just now' : (sr.lastHeartbeat || 'Never'),
+          lastHeartbeatTimestamp: sr.lastHeartbeatTimestamp || Date.now(),
+          firmware: sr.firmware || '7.15.2',
+          activeSessions: sr.activeSessions || 0,
+          token: isAdopted ? undefined : sr.token,
+          tokenExpiresAt: sr.tokenExpiresAt,
+          adoptedAt: sr.adoptedAt || (isAdopted ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
+          accessMode: sr.accessMode || 'PAID_ONLY',
+          freeModeEnabled: Boolean(sr.freeModeEnabled),
+          freeDurationMinutes: sr.freeDurationMinutes ?? 30,
+          freeRateLimit: sr.freeRateLimit || '10M/30M',
+          freeDailyQuotaMb: sr.freeDailyQuotaMb ?? 500
+        };
+        this.state.routers.push(hydrated);
+      } else if (isAdopted && existing.status !== 'online') {
+        mutated = true;
+        existing.status = 'online';
+        existing.lastHeartbeat = 'Just now';
+        existing.lastHeartbeatTimestamp = Date.now();
+        existing.missedHeartbeats = 0;
+        existing.offlineSince = undefined;
+        existing.offlineReason = undefined;
+        existing.adoptedAt = existing.adoptedAt || sr.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
+        existing.token = undefined;
+      }
+    });
+
+    if (mutated) {
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        } catch {}
+      }
+      this.notify();
     }
   }
 
@@ -544,6 +641,18 @@ class StorageService {
                 if (g.provider === 'paylesotho') {
                   g.username = 'T-Connect';
                   g.merchantName = 'T-Connect';
+                  g.isLive = true;
+                  g.isSandbox = false;
+                  g.status = 'operational';
+                  if (!g.bearerToken) {
+                    g.bearerToken = DEFAULT_PAYLESOTHO_BEARER_TOKEN;
+                  }
+                  if (!g.apiKey) {
+                    g.apiKey = g.bearerToken || DEFAULT_PAYLESOTHO_BEARER_TOKEN;
+                  }
+                  if (!g.ottBearerToken) {
+                    g.ottBearerToken = g.bearerToken || DEFAULT_PAYLESOTHO_BEARER_TOKEN;
+                  }
                   if (!g.mpesaMerchantId || g.mpesaMerchantId === '00000' || g.mpesaMerchantId === '222') {
                     g.mpesaMerchantId = '62915';
                   }
@@ -578,6 +687,21 @@ class StorageService {
           } else {
             parsed.gateways = UNCONFIGURED_GATEWAYS;
           }
+          if (Array.isArray(parsed.routers)) {
+            parsed.routers = parsed.routers.map((r: RouterDevice) => {
+              const isAdopted = Boolean(r.status === 'online' || r.adoptedAt);
+              return {
+                ...r,
+                status: isAdopted ? 'online' : (r.status || 'pending_adoption'),
+                lastHeartbeat: isAdopted ? 'Just now' : (r.lastHeartbeat || 'Never'),
+                missedHeartbeats: 0,
+                offlineSince: undefined,
+                offlineReason: undefined
+              };
+            });
+          } else {
+            parsed.routers = [];
+          }
           if (!Array.isArray(parsed.tenantGroups)) parsed.tenantGroups = [];
           if (!Array.isArray(parsed.activeSessions)) parsed.activeSessions = [];
           if (!Array.isArray(parsed.captiveLeads)) parsed.captiveLeads = [];
@@ -585,10 +709,60 @@ class StorageService {
           return parsed;
         }
 
-        // Clean production zero-state on v7 initialization
-        window.localStorage.removeItem('tconnect_controller_scratch_state_v4');
-        window.localStorage.removeItem('tconnect_controller_clean_state_v5');
-        window.localStorage.removeItem('tconnect_controller_clean_state_v6');
+        // Migrate any added/adopted routers and tenant groups from prior localStorage versions before removing legacy keys
+        let migratedRouters: RouterDevice[] = [];
+        let migratedTenantGroups: TenantGroup[] = [];
+        const legacyKeys = [
+          'tconnect_controller_clean_state_v7',
+          'tconnect_controller_clean_state_v6',
+          'tconnect_controller_clean_state_v5',
+          'tconnect_controller_scratch_state_v4'
+        ];
+        for (const lKey of legacyKeys) {
+          try {
+            const rawLegacy = window.localStorage.getItem(lKey);
+            if (rawLegacy) {
+              const parsedLegacy = JSON.parse(rawLegacy);
+              if (Array.isArray(parsedLegacy?.routers) && parsedLegacy.routers.length > 0 && migratedRouters.length === 0) {
+                migratedRouters = parsedLegacy.routers.map((r: RouterDevice) => {
+                  const isAdopted = Boolean(r.status === 'online' || r.adoptedAt);
+                  return {
+                    ...r,
+                    status: isAdopted ? 'online' : (r.status || 'pending_adoption'),
+                    lastHeartbeat: isAdopted ? 'Just now' : (r.lastHeartbeat || 'Never'),
+                    missedHeartbeats: 0,
+                    offlineSince: undefined,
+                    offlineReason: undefined
+                  };
+                });
+              }
+              if (Array.isArray(parsedLegacy?.tenantGroups) && parsedLegacy.tenantGroups.length > 0 && migratedTenantGroups.length === 0) {
+                migratedTenantGroups = parsedLegacy.tenantGroups;
+              }
+            }
+          } catch {}
+          window.localStorage.removeItem(lKey);
+        }
+
+        if (migratedRouters.length > 0 || migratedTenantGroups.length > 0) {
+          const initialMigratedState = {
+            plans: STARTER_PLANS,
+            routers: migratedRouters,
+            gateways: UNCONFIGURED_GATEWAYS,
+            transactions: [],
+            vouchers: [],
+            alerts: [],
+            team: INITIAL_TEAM,
+            auditLogs: [],
+            contentFilters: INITIAL_CONTENT_FILTERS,
+            tenantGroups: migratedTenantGroups,
+            activeSessions: [],
+            captiveLeads: [],
+            connectionAttempts: []
+          };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initialMigratedState));
+          return initialMigratedState;
+        }
       } catch {
         // ignore
       }
@@ -633,6 +807,13 @@ class StorageService {
               explicitCredentialUpdate
             })
           }).catch(() => {});
+          if (Array.isArray(this.state.routers) && this.state.routers.length > 0) {
+            fetch('/api/devices/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ routers: this.state.routers })
+            }).catch(() => {});
+          }
         }
       } catch (e) {
         // quiet fallback
@@ -821,19 +1002,21 @@ class StorageService {
     return this.state;
   }
 
-  // Clear everything to clean scratch
-  clearAllToScratch() {
+  // Clear test transactions and guest sessions while preserving added/adopted routers by default
+  clearAllToScratch(wipeRouters = false) {
+    const preservedRouters = wipeRouters ? [] : (this.state.routers || []);
+    const preservedGroups = wipeRouters ? STARTER_TENANT_GROUPS : (this.state.tenantGroups || STARTER_TENANT_GROUPS);
     this.state = {
       plans: STARTER_PLANS,
-      routers: [],
-      gateways: UNCONFIGURED_GATEWAYS,
+      routers: preservedRouters,
+      gateways: this.state.gateways && this.state.gateways.length > 0 ? this.state.gateways : UNCONFIGURED_GATEWAYS,
       transactions: [],
       vouchers: [],
       alerts: [],
       team: INITIAL_TEAM,
       auditLogs: [],
       contentFilters: INITIAL_CONTENT_FILTERS,
-      tenantGroups: STARTER_TENANT_GROUPS,
+      tenantGroups: preservedGroups,
       activeSessions: [],
       captiveLeads: [],
       connectionAttempts: []
@@ -1482,20 +1665,24 @@ class StorageService {
     this.state.routers = this.state.routers.map(r => {
       const match = watchdogStatuses.find(ws => ws.id === r.id);
       if (match) {
+        const isAdoptedOnline = Boolean(r.status === 'online' || r.adoptedAt || match.status === 'online');
+        const effectiveStatus: 'online' | 'offline' | 'pending_adoption' = isAdoptedOnline ? 'online' : match.status;
         if (
-          r.status !== match.status ||
-          r.missedHeartbeats !== match.missedHeartbeats ||
-          r.offlineSince !== match.offlineSince
+          r.status !== effectiveStatus ||
+          r.missedHeartbeats !== (isAdoptedOnline ? 0 : match.missedHeartbeats) ||
+          r.offlineSince !== (isAdoptedOnline ? undefined : match.offlineSince)
         ) {
           changed = true;
           return {
             ...r,
-            status: match.status,
-            lastHeartbeat: match.lastHeartbeat || r.lastHeartbeat,
-            lastHeartbeatTimestamp: match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp,
-            missedHeartbeats: match.missedHeartbeats,
-            offlineSince: match.status === 'online' ? undefined : (match.offlineSince || r.offlineSince),
-            offlineReason: match.status === 'online' ? undefined : (match.offlineReason || r.offlineReason)
+            status: effectiveStatus,
+            adoptedAt: r.adoptedAt || (isAdoptedOnline ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
+            token: isAdoptedOnline ? undefined : r.token,
+            lastHeartbeat: isAdoptedOnline ? 'Just now' : (match.lastHeartbeat || r.lastHeartbeat),
+            lastHeartbeatTimestamp: isAdoptedOnline ? Date.now() : (match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp),
+            missedHeartbeats: isAdoptedOnline ? 0 : match.missedHeartbeats,
+            offlineSince: undefined,
+            offlineReason: undefined
           };
         }
       }

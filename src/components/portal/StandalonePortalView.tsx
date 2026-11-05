@@ -989,6 +989,20 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
 
+      if (data.status === 'completed' && data.ottVoucherPin) {
+        const generatedPin = String(data.ottVoucherPin || '').replace(/\D/g, '');
+        const voucherAmt = Number(data.amount) || selectedPlan?.price || 10;
+        setIssuedOttVoucherPin(generatedPin);
+        setIssuedOttVoucherAmount(voucherAmt);
+        setIssuedOttVoucherRef(data.reference || data.transactionId);
+        setHasCopiedIssuedOttVoucher(false);
+        setRedeemIssuedPinInput('');
+        setIsConnecting(false);
+        isConnectingRef.current = false;
+        setStatusBanner(null);
+        return;
+      }
+
       setStatusBanner(data.message || 'Payment prompt sent. Waiting for subscriber approval & OTT Voucher generation...');
 
       if (payLesothoChannel === 'card' && data.checkoutUrl) {

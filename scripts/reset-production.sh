@@ -5,17 +5,23 @@ echo "================================================================"
 echo "  T-CONNECT CLOUD CONTROLLER — PRODUCTION ZERO-STATE RESET"
 echo "================================================================"
 
+WIPE_ROUTERS="false"
+if [ "${1:-}" = "--wipe-routers" ]; then
+  WIPE_ROUTERS="true"
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="$ROOT_DIR/data"
 STORE_FILE="$DATA_DIR/portal-guest-store.json"
 
 mkdir -p "$DATA_DIR"
 
-# If store file exists, preserve only the 2 active gateways (PayLesotho & 16-Digit OTT Voucher) & ad config while wiping all runtime records
-node -e '
+# Preserve the 2 active gateways (PayLesotho & 16-Digit OTT Voucher), ad config, and added/adopted routers (unless --wipe-routers is passed)
+WIPE_ROUTERS="$WIPE_ROUTERS" node -e '
 const fs = require("fs");
 const path = require("path");
 const storeFile = path.resolve(process.cwd(), "data/portal-guest-store.json");
+const wipeRouters = process.env.WIPE_ROUTERS === "true";
 
 let existing = {};
 if (fs.existsSync(storeFile)) {
@@ -26,6 +32,7 @@ if (fs.existsSync(storeFile)) {
   }
 }
 
+const defaultPlBearer = "$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2";
 const rawGateways = Array.isArray(existing.gateways) ? existing.gateways : [];
 const filteredGateways = rawGateways
   .filter((g) => g.provider === "paylesotho" || g.provider === "ottvoucher")
@@ -33,30 +40,55 @@ const filteredGateways = rawGateways
     if (g.provider === "paylesotho") {
       return {
         ...g,
-        merchantName: g.merchantName || "T-Connect",
-        username: g.username || "T-Connect",
-        merchantId: g.merchantId || "62915",
-        mpesaMerchantId: g.mpesaMerchantId || "62915",
-        ecocashMerchantId: g.ecocashMerchantId || "63165430",
+        isLive: true,
+        isSandbox: false,
+        status: "operational",
+        merchantName: "T-Connect",
+        username: "T-Connect",
+        merchantId: "62915",
+        mpesaMerchantId: "62915",
+        ecocashMerchantId: "63165430",
+        apiKey: g.apiKey || g.bearerToken || defaultPlBearer,
+        bearerToken: g.bearerToken || g.apiKey || defaultPlBearer,
+        ottBearerToken: g.ottBearerToken || g.bearerToken || defaultPlBearer,
+        endpointUrl: g.endpointUrl || "https://api.paylesotho.co.ls",
+        xpaymentsEndpointUrl: g.xpaymentsEndpointUrl || "https://xpayments.paylesotho.co.ls",
         ottVoucherEndpointUrl: g.ottVoucherEndpointUrl || "https://api.paylesotho.co.ls/api/ott/voucher/get",
         ottVoucherCheckUrl: g.ottVoucherCheckUrl || "https://api.paylesotho.co.ls/ott/voucher/check"
       };
     }
+    if (g.provider === "ottvoucher") {
+      return {
+        ...g,
+        isLive: true,
+        isSandbox: false,
+        status: "operational",
+        merchantId: g.merchantId || "TCONNECTLES1",
+        username: g.username || "TCONNECTLES1",
+        apiKey: g.apiKey || "4323e6fa-09b2-4eaa-9b73-f275dad58787",
+        apiPassword: g.apiPassword || "3*68pF&24*",
+        vendorId: g.vendorId || "1, 11",
+        endpointUrl: "https://api.ottlesotho.com"
+      };
+    }
     return g;
   });
+
+const preservedRouters = wipeRouters ? [] : (Array.isArray(existing.routers) ? existing.routers : []);
 
 const cleanState = {
   ...existing,
   gateways: filteredGateways.length > 0 ? filteredGateways : [
     {
       provider: "paylesotho",
-      isLive: false,
-      isSandbox: true,
+      isLive: true,
+      isSandbox: false,
       merchantId: "62915",
       merchantName: "T-Connect",
       username: "T-Connect",
-      apiKey: "",
-      bearerToken: "",
+      apiKey: defaultPlBearer,
+      bearerToken: defaultPlBearer,
+      ottBearerToken: defaultPlBearer,
       mpesaMerchantId: "62915",
       ecocashMerchantId: "63165430",
       xpaymentsAppId: "",
@@ -65,19 +97,20 @@ const cleanState = {
       xpaymentsEndpointUrl: "https://xpayments.paylesotho.co.ls",
       ottVoucherEndpointUrl: "https://api.paylesotho.co.ls/api/ott/voucher/get",
       ottVoucherCheckUrl: "https://api.paylesotho.co.ls/ott/voucher/check",
-      status: "unconfigured"
+      status: "operational"
     },
     {
       provider: "ottvoucher",
-      isLive: false,
-      isSandbox: true,
-      merchantId: "",
-      username: "",
-      password: "",
-      apiKey: "",
+      isLive: true,
+      isSandbox: false,
+      merchantId: "TCONNECTLES1",
+      username: "TCONNECTLES1",
+      apiPassword: "3*68pF&24*",
+      apiKey: "4323e6fa-09b2-4eaa-9b73-f275dad58787",
+      vendorId: "1, 11",
       webhookSecret: "",
-      endpointUrl: "https://api.ottvoucher.co.ls/api/v1/RemitVoucher",
-      status: "unconfigured"
+      endpointUrl: "https://api.ottlesotho.com",
+      status: "operational"
     }
   ],
   guestEvents: [],
@@ -85,21 +118,21 @@ const cleanState = {
   vouchers: [],
   redeemedOttPins: [],
   issuedPayLesothoOttVouchers: [],
-  routers: [],
+  routers: preservedRouters,
   auditLogs: []
 };
 
 fs.writeFileSync(storeFile, JSON.stringify(cleanState, null, 2), "utf8");
-console.log("[OK] Reset data/portal-guest-store.json to zero-state (2 gateways: PayLesotho [M-Pesa 62915 / EcoCash 63165430 / T-Connect] & 16-Digit OTT Voucher; 0 transactions, 0 hotspots, 0 guest events).");
+console.log(`[OK] Reset data/portal-guest-store.json (0 test transactions, 0 guest events; ${preservedRouters.length} router(s) preserved).`);
 '
 
 # Also notify running local server if reachable on port 3000
 if command -v curl >/dev/null 2>&1; then
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:3000/api/admin/reset-production || true)
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "{\"wipeRouters\": $WIPE_ROUTERS}" http://localhost:3000/api/admin/reset-production || true)
   if [ "$HTTP_CODE" = "200" ]; then
     echo "[OK] Triggered live POST /api/admin/reset-production on port 3000."
   else
-    echo "[INFO] Local server not active or returned HTTP $HTTP_CODE; disk store is already wiped."
+    echo "[INFO] Local server not active or returned HTTP $HTTP_CODE; disk store is already updated."
   fi
 fi
 

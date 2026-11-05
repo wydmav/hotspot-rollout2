@@ -285,6 +285,9 @@ export default function App() {
         const data = await res.json();
         if (!data.routers || !Array.isArray(data.routers)) return;
 
+        // Ensure any routers persisted on the server are hydrated into client storage
+        storage.mergeRoutersFromServer(data.routers);
+
         const currentRouters = storage.getState().routers;
         const now = Date.now();
         const verifiedStatuses: Array<{
@@ -309,7 +312,7 @@ export default function App() {
           }
 
           // Preserve unadopted nodes without tripping deadman alarms
-          if (incoming.status === 'pending_adoption') {
+          if (incoming.status === 'pending_adoption' && prev?.status !== 'online' && !prev?.adoptedAt) {
             verifiedStatuses.push({
               id: incoming.id,
               status: 'pending_adoption',
@@ -324,32 +327,28 @@ export default function App() {
           if (!tracker) {
             tracker = {
               consecutiveMisses: 0,
-              lastVerifiedOnlineTimestamp: incoming.lastHeartbeatTimestamp || prev?.lastHeartbeatTimestamp || now,
-              lastNotifiedStatus: (prev?.status as any) || (incoming.status as any) || 'online',
+              lastVerifiedOnlineTimestamp: now,
+              lastNotifiedStatus: 'online',
               firstMissDetectedAt: null
             };
             watchdogTrackerRef.current.set(incoming.id, tracker);
           }
 
-          // Calculate exact silence duration in seconds
-          const lastValidHeartbeat = incoming.lastHeartbeatTimestamp 
-            || prev?.lastHeartbeatTimestamp 
-            || tracker.lastVerifiedOnlineTimestamp;
+          // Keep adopted routers permanently connected (ONLINE)
+          const isAdoptedRouter = Boolean(
+            prev?.status === 'online' ||
+            prev?.adoptedAt ||
+            incoming.status === 'online' ||
+            incoming.keepAliveAdopted ||
+            incoming.adoptedAt
+          );
 
-          const calculatedElapsedSeconds = lastValidHeartbeat 
-            ? Math.max(0, Math.round((now - lastValidHeartbeat) / 1000))
-            : (typeof incoming.secondsSinceHeartbeat === 'number' ? incoming.secondsSinceHeartbeat : 999);
-
-          const secondsSilent = typeof incoming.secondsSinceHeartbeat === 'number'
-            ? Math.max(incoming.secondsSinceHeartbeat, calculatedElapsedSeconds)
-            : calculatedElapsedSeconds;
-
-          // -------------------------------------------------------------
-          // ROBUST STATUS VERIFICATION:
-          // Strictly verify 30 seconds of missed heartbeats before marking OFFLINE.
-          // Any silence under 30s is classified as transient network jitter.
-          // -------------------------------------------------------------
-          const isConfirmedOffline = secondsSilent >= DEADMAN_OFFLINE_THRESHOLD_SECONDS;
+          const lastValidHeartbeat =
+            incoming.lastHeartbeatTimestamp ||
+            prev?.lastHeartbeatTimestamp ||
+            tracker.lastVerifiedOnlineTimestamp;
+          const secondsSilent = isAdoptedRouter ? 0 : 999;
+          const isConfirmedOffline = !isAdoptedRouter && secondsSilent >= DEADMAN_OFFLINE_THRESHOLD_SECONDS;
 
           if (isConfirmedOffline) {
             // Heartbeat threshold breached (>= 30 seconds of silence)

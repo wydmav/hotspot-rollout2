@@ -1440,9 +1440,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     setSessionElapsed(0);
     setSessionAuthMode('paid');
 
+    const rawDigits = ottPin.replace(/\D/g, '');
+    const formattedOttCode =
+      rawDigits.length === 16
+        ? `${rawDigits.slice(0, 4)}-${rawDigits.slice(4, 8)}-${rawDigits.slice(8, 12)}-${rawDigits.slice(12, 16)}`
+        : '4829-1039-8472-5610';
     storage.addActiveSession({
       id: `sess_paid_${Date.now()}`,
-      voucherCode: `PAID-${Date.now().toString(36).toUpperCase()}`,
+      voucherCode: formattedOttCode,
       clientMac: '7A:91:02:11:44:99',
       clientIp: activeRouter?.wireguardIp || '10.89.1.45',
       deviceType: deviceFrame === 'iphone' ? 'Apple iPhone (iOS 17)' : deviceFrame === 'android' ? 'Samsung Galaxy (Android 14)' : 'Windows 11 Laptop',
@@ -1726,7 +1731,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </span>
                       </div>
                       <p className="text-[10px] opacity-80 mt-1">
-                        {isVoucherModeActive ? 'Allows TC-XXXX & OTT voucher codes.' : 'Voucher tab hidden in real time.'}
+                        {isVoucherModeActive ? 'Allows 16-Digit OTT Voucher PINs.' : 'Voucher tab hidden in real time.'}
                       </p>
                     </div>
                     <button
@@ -1734,7 +1739,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       onClick={() => {
                         const next = !isVoucherModeActive;
                         handleUpdateCurrent({ allowVoucherCode: next });
-                        setSavedToast(next ? 'Voucher Login ENABLED in real time!' : 'Voucher Login TURNED OFF in real time!');
+                        setSavedToast(next ? '16-Digit OTT Voucher Login ENABLED in real time!' : '16-Digit OTT Voucher Login TURNED OFF in real time!');
                         setTimeout(() => setSavedToast(null), 3000);
                       }}
                       className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
@@ -1757,7 +1762,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </span>
                       </div>
                       <p className="text-[10px] opacity-80 mt-1">
-                        {isBuyPassModeActive ? 'EcoCash & 16-Digit OTT self-service plans.' : 'Buy Pass tab hidden in real time.'}
+                        {isBuyPassModeActive ? 'PayLesotho (M-Pesa/EcoCash) & 16-Digit OTT plans.' : 'Buy Pass tab hidden in real time.'}
                       </p>
                     </div>
                     <button
@@ -2856,13 +2861,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   );
                 })()}
 
-                {/* STEP 1B: VOUCHER LOGIN IN EMULATOR */}
+                {/* STEP 1B: 16-DIGIT OTT VOUCHER LOGIN IN EMULATOR */}
                 {previewStep === 'voucher' && isVoucherModeActive && (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (!previewVoucherCode.trim()) {
-                        setPreviewVoucherError('Please enter a voucher code.');
+                      const cleanPin = previewVoucherCode.replace(/\D/g, '');
+                      if (cleanPin.length !== 16) {
+                        setPreviewVoucherError(`Please enter all 16 digits of your OTT Voucher PIN (${cleanPin.length}/16).`);
                         return;
                       }
                       setPreviewVoucherError(null);
@@ -2874,18 +2880,27 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   >
                     <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
                     <div>
-                      <label className="text-[10px] font-mono text-slate-300 block mb-1">
-                        Voucher Code <span className="text-red-400">*</span>
-                      </label>
+                      <div className="flex items-center justify-between text-[10px] font-mono mb-1">
+                        <label className="text-slate-300">
+                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
+                        </label>
+                        <span className="text-emerald-400 font-bold">
+                          {previewVoucherCode.replace(/\D/g, '').length}/16 digits
+                        </span>
+                      </div>
                       <input
                         type="text"
+                        inputMode="numeric"
+                        maxLength={19}
                         value={previewVoucherCode}
                         onChange={(e) => {
-                          setPreviewVoucherCode(e.target.value);
+                          const raw = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = raw.match(/.{1,4}/g)?.join('-') || '';
+                          setPreviewVoucherCode(formatted);
                           setPreviewVoucherError(null);
                         }}
-                        placeholder="Enter voucher code (e.g. TC-XXXX)"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white text-xs font-mono uppercase tracking-wider focus:outline-none focus:border-emerald-400"
+                        placeholder="XXXX-XXXX-XXXX-XXXX"
+                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-emerald-400 text-xs font-mono text-center font-extrabold tracking-widest focus:outline-none focus:border-emerald-400"
                       />
                       {previewVoucherError && (
                         <span className="text-[9px] text-rose-300 font-mono block mt-1">{previewVoucherError}</span>
@@ -2895,7 +2910,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       type="submit"
                       className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-lg cursor-pointer"
                     >
-                      Activate Voucher &amp; Connect &rarr;
+                      Redeem 16-Digit OTT Voucher &amp; Connect &rarr;
                     </button>
                   </form>
                 )}
@@ -3203,20 +3218,20 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                         <label
                           className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer ${
-                            selectedGateway === 'ecocash' ? 'bg-red-600/20 border-red-500' : 'bg-[#121829] border-[#232d42]'
+                            selectedGateway === 'paylesotho' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-[#121829] border-[#232d42]'
                           }`}
                         >
                           <div className="flex items-center gap-1.5">
                             <input
                               type="radio"
                               name="gw"
-                              checked={selectedGateway === 'ecocash'}
-                              onChange={() => setSelectedGateway('ecocash')}
-                              className="accent-red-500 w-3 h-3"
+                              checked={selectedGateway === 'paylesotho'}
+                              onChange={() => setSelectedGateway('paylesotho')}
+                              className="accent-emerald-500 w-3 h-3"
                             />
-                            <ProviderLogo provider="ecocash" className="w-14 h-4" />
+                            <ProviderLogo provider="paylesotho" className="w-14 h-4" />
                           </div>
-                          <span className="text-[9px] font-mono text-red-300">EcoCash</span>
+                          <span className="text-[9px] font-mono text-emerald-300">PayLesotho</span>
                         </label>
                       </div>
 
@@ -3241,17 +3256,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             className="w-full px-2 py-1 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
                           />
                           <div className="text-[8px] text-slate-400 font-mono text-center">
-                            Verified against live OTT Lesotho API ({currency}{chosenPlan.price})
+                            Exact 1:1 denomination match ({currency}{chosenPlan.price})
                           </div>
                         </div>
                       ) : (
-                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[9px] font-mono text-amber-200 space-y-1">
+                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[9px] font-mono text-emerald-200 space-y-1">
                           <div className="flex justify-between font-bold">
-                            <span>EcoCash Lesotho STK Push</span>
+                            <span>PayLesotho (Merchant: T-Connect)</span>
                             <span className="text-emerald-400">{currency}{chosenPlan.price}</span>
                           </div>
                           <p className="text-slate-300 text-[8px] leading-tight">
-                            Prompt for <strong>{currency}{chosenPlan.price}</strong> sent to <strong>{guestCountryCode} {guestPhone}</strong>. Approve on handset to activate.
+                            M-Pesa (62915) / EcoCash (63165430) generates a <strong>{currency}{chosenPlan.price} 16-Digit OTT Voucher</strong> via PayLesotho. Copy &amp; redeem to connect.
                           </p>
                         </div>
                       )}
