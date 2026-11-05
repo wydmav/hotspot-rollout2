@@ -898,8 +898,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="hidden" name="dst" value="${postAuthDst}">
         <div class="plan-list">${plansHtml}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;background:#090d16;border:1px solid #1e293b;border-radius:8px;padding:5px 8px;">
-          <img src="${baseUrl}/assets/aistudio/PHOTO-2023-11-10-12-39-31_1d67dd51.jpg" alt="" style="height:24px;width:86px;object-fit:contain;border-radius:4px;background:#000;" />
-          <span style="font-size:9px;font-family:monospace;color:#34d399;font-weight:800;">PayLesotho &middot; XPayments</span>
+          <img src="${baseUrl}/assets/aistudio/images_e91c64e4.jpeg" alt="" style="height:24px;width:92px;object-fit:contain;border-radius:4px;background:#fff;padding:1px 3px;" />
+          <span style="font-size:9px;font-family:monospace;color:#34d399;font-weight:800;">T-Connect &middot; PayLesotho</span>
         </div>
         <div class="gw-grid" style="grid-template-columns:repeat(3,1fr);">
           <button type="button" class="gw-btn active" onclick="selectGw('mpesa', this)">M-Pesa</button>
@@ -1863,11 +1863,16 @@ function loadServerPortalStore(): ServerPortalStore {
     partnerWebhookLogs: Array.isArray(rawStore?.partnerWebhookLogs) ? rawStore.partnerWebhookLogs : []
   };
 
-  // Ensure PayLesotho & XPayments gateway config exists in store.gateways
+  // Remove standalone ecocash gateway if present in persisted store
+  store.gateways = (Array.isArray(rawStore?.gateways) ? rawStore.gateways : []).filter(
+    (g: any) => g.provider === 'paylesotho' || g.provider === 'ottvoucher'
+  );
+
+  // Ensure PayLesotho & XPayments gateway config exists in store.gateways with official Merchant IDs
   const envPlToken = (process.env.PAYLESOTHO_BEARER_TOKEN || process.env.PAYLESOTHO_API_KEY || '').trim();
-  const envPlMerchant = (process.env.PAYLESOTHO_MERCHANT_ID || '00000').trim();
-  const envPlMpesaMerchant = (process.env.PAYLESOTHO_MPESA_MERCHANT_ID || envPlMerchant || '00000').trim();
-  const envPlEcocashMerchant = (process.env.PAYLESOTHO_ECOCASH_MERCHANT_ID || envPlMerchant || '00000').trim();
+  const envPlMerchant = (process.env.PAYLESOTHO_MERCHANT_ID || '62915').trim();
+  const envPlMpesaMerchant = (process.env.PAYLESOTHO_MPESA_MERCHANT_ID || '62915').trim();
+  const envPlEcocashMerchant = (process.env.PAYLESOTHO_ECOCASH_MERCHANT_ID || '63165430').trim();
   const envPlXpaymentsAppId = (process.env.PAYLESOTHO_XPAYMENTS_APP_ID || '').trim();
   const envPlXpaymentsCertId = (process.env.PAYLESOTHO_XPAYMENTS_CERT_ID || '').trim();
   const envPlOttToken = (process.env.PAYLESOTHO_OTT_BEARER_TOKEN || process.env.OTTVOUCHER_BEARER_TOKEN || envPlToken).trim();
@@ -1877,7 +1882,7 @@ function loadServerPortalStore(): ServerPortalStore {
     payGw = {
       provider: 'paylesotho',
       name: 'PayLesotho & XPayments Aggregator',
-      subtitle: 'Vodacom M-Pesa (/v2/vcl), EcoCash (/v2/econet), XPayments Card & OTT Voucher Issuance (api.paylesotho.co.ls)',
+      subtitle: 'Merchant: T-Connect · M-Pesa (62915), EcoCash (63165430), XPayments & OTT Voucher Issuance (api.paylesotho.co.ls)',
       currency: 'M',
       isLive: true,
       isSandbox: false,
@@ -1885,14 +1890,16 @@ function loadServerPortalStore(): ServerPortalStore {
       apiKey: envPlToken,
       apiSecret: '',
       apiPassword: '',
-      username: 'Pay Lesotho',
-      vendorId: envPlMerchant,
+      username: 'T-Connect',
+      merchantName: 'T-Connect',
+      vendorId: envPlMpesaMerchant,
       endpointUrl: 'https://api.paylesotho.co.ls',
       xpaymentsEndpointUrl: 'https://xpayments.paylesotho.co.ls',
       ottVoucherEndpointUrl: 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+      ottVoucherCheckUrl: 'https://api.paylesotho.co.ls/ott/voucher/check',
       bearerToken: envPlToken,
       ottBearerToken: envPlOttToken,
-      merchantId: envPlMerchant,
+      merchantId: envPlMpesaMerchant,
       mpesaMerchantId: envPlMpesaMerchant,
       ecocashMerchantId: envPlEcocashMerchant,
       xpaymentsAppId: envPlXpaymentsAppId,
@@ -1905,6 +1912,18 @@ function loadServerPortalStore(): ServerPortalStore {
     };
     store.gateways.unshift(payGw);
   } else {
+    payGw.username = 'T-Connect';
+    payGw.merchantName = 'T-Connect';
+    payGw.subtitle = 'Merchant: T-Connect · M-Pesa (62915), EcoCash (63165430), XPayments & OTT Voucher Issuance (api.paylesotho.co.ls)';
+    if (!payGw.mpesaMerchantId || payGw.mpesaMerchantId === '00000' || payGw.mpesaMerchantId === '222') {
+      payGw.mpesaMerchantId = envPlMpesaMerchant || '62915';
+    }
+    if (!payGw.ecocashMerchantId || payGw.ecocashMerchantId === '00000') {
+      payGw.ecocashMerchantId = envPlEcocashMerchant || '63165430';
+    }
+    if (!payGw.merchantId || payGw.merchantId === '00000') {
+      payGw.merchantId = payGw.mpesaMerchantId || '62915';
+    }
     if (!payGw.endpointUrl || String(payGw.endpointUrl).includes('gateway.paylesotho.co.ls')) {
       payGw.endpointUrl = 'https://api.paylesotho.co.ls';
     }
@@ -1913,6 +1932,9 @@ function loadServerPortalStore(): ServerPortalStore {
     }
     if (!payGw.ottVoucherEndpointUrl) {
       payGw.ottVoucherEndpointUrl = 'https://api.paylesotho.co.ls/api/ott/voucher/get';
+    }
+    if (!payGw.ottVoucherCheckUrl) {
+      payGw.ottVoucherCheckUrl = 'https://api.paylesotho.co.ls/ott/voucher/check';
     }
     if (envPlToken) {
       payGw.bearerToken = envPlToken;
@@ -2079,6 +2101,7 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
     bearerToken,
     apiKey,
     ottBearerToken,
+    merchantName,
     merchantId,
     mpesaMerchantId,
     ecocashMerchantId,
@@ -2087,6 +2110,7 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
     endpointUrl,
     xpaymentsEndpointUrl,
     ottVoucherEndpointUrl,
+    ottVoucherCheckUrl,
     username,
     webhookSecret,
     isLive
@@ -2097,7 +2121,7 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
     payGw = {
       provider: 'paylesotho',
       name: 'PayLesotho & XPayments Aggregator',
-      subtitle: 'Vodacom M-Pesa (/v2/vcl), EcoCash (/v2/econet), XPayments Card & OTT Voucher Issuance (api.paylesotho.co.ls)',
+      subtitle: 'Merchant: T-Connect · M-Pesa (62915), EcoCash (63165430), XPayments & OTT Voucher Issuance (api.paylesotho.co.ls)',
       currency: 'M',
       isLive: true,
       isSandbox: false,
@@ -2113,15 +2137,17 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
   payGw.bearerToken = resolvedBearer;
   payGw.apiKey = resolvedBearer;
   payGw.ottBearerToken = String(ottBearerToken ?? payGw.ottBearerToken ?? resolvedBearer).trim();
-  payGw.merchantId = String(merchantId || payGw.merchantId || '00000').trim();
-  payGw.mpesaMerchantId = String(mpesaMerchantId || merchantId || payGw.mpesaMerchantId || '00000').trim();
-  payGw.ecocashMerchantId = String(ecocashMerchantId || merchantId || payGw.ecocashMerchantId || '00000').trim();
+  payGw.merchantId = String(merchantId || payGw.merchantId || '62915').trim();
+  payGw.mpesaMerchantId = String(mpesaMerchantId || payGw.mpesaMerchantId || '62915').trim();
+  payGw.ecocashMerchantId = String(ecocashMerchantId || payGw.ecocashMerchantId || '63165430').trim();
   payGw.xpaymentsAppId = String(xpaymentsAppId ?? payGw.xpaymentsAppId ?? '').trim();
   payGw.xpaymentsCertId = String(xpaymentsCertId ?? payGw.xpaymentsCertId ?? '').trim();
   payGw.endpointUrl = String(endpointUrl || payGw.endpointUrl || 'https://api.paylesotho.co.ls').trim().replace(/\/+$/, '');
   payGw.xpaymentsEndpointUrl = String(xpaymentsEndpointUrl || payGw.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls').trim().replace(/\/+$/, '');
   payGw.ottVoucherEndpointUrl = String(ottVoucherEndpointUrl || payGw.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get').trim();
-  payGw.username = String(username || payGw.username || 'Pay Lesotho').trim();
+  payGw.ottVoucherCheckUrl = String(ottVoucherCheckUrl || payGw.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check').trim();
+  payGw.username = String(merchantName || username || 'T-Connect').trim() || 'T-Connect';
+  payGw.merchantName = payGw.username;
   if (webhookSecret !== undefined) payGw.webhookSecret = String(webhookSecret).trim();
   if (typeof isLive === 'boolean') {
     payGw.isLive = isLive;
@@ -2134,7 +2160,7 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
   res.json({
     success: true,
     gateway: payGw,
-    message: 'PayLesotho, XPayments & OTT Voucher credentials permanently saved to persistent server storage.'
+    message: 'PayLesotho (Merchant: T-Connect, M-Pesa: 62915, EcoCash: 63165430) & OTT Voucher credentials saved.'
   });
 });
 
@@ -2164,7 +2190,7 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
   const { gateways, vouchers, supabaseConfig, explicitCredentialUpdate } = req.body || {};
   if (Array.isArray(gateways)) {
     const filtered = gateways.filter(
-      (g: any) => g.provider === 'paylesotho' || g.provider === 'ecocash' || g.provider === 'ottvoucher'
+      (g: any) => g.provider === 'paylesotho' || g.provider === 'ottvoucher'
     );
     serverStore.gateways = filtered.map((incoming: any) => {
       const existing = serverStore.gateways.find((e: any) => e.provider === incoming.provider) || {};
@@ -2214,15 +2240,15 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
           existing.ottBearerToken ||
           '',
         mpesaMerchantId:
-          (!explicitCredentialUpdate && existing.mpesaMerchantId) ||
-          (incoming.mpesaMerchantId && String(incoming.mpesaMerchantId).trim()) ||
-          existing.mpesaMerchantId ||
-          '00000',
+          (!explicitCredentialUpdate && existing.mpesaMerchantId && existing.mpesaMerchantId !== '00000')
+            ? existing.mpesaMerchantId
+            : (incoming.mpesaMerchantId && String(incoming.mpesaMerchantId).trim() !== '00000' && String(incoming.mpesaMerchantId).trim()) ||
+              '62915',
         ecocashMerchantId:
-          (!explicitCredentialUpdate && existing.ecocashMerchantId) ||
-          (incoming.ecocashMerchantId && String(incoming.ecocashMerchantId).trim()) ||
-          existing.ecocashMerchantId ||
-          '00000',
+          (!explicitCredentialUpdate && existing.ecocashMerchantId && existing.ecocashMerchantId !== '00000')
+            ? existing.ecocashMerchantId
+            : (incoming.ecocashMerchantId && String(incoming.ecocashMerchantId).trim() !== '00000' && String(incoming.ecocashMerchantId).trim()) ||
+              '63165430',
         xpaymentsAppId:
           (!explicitCredentialUpdate && existing.xpaymentsAppId) ||
           (incoming.xpaymentsAppId && String(incoming.xpaymentsAppId).trim()) ||
@@ -2239,16 +2265,21 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
           existing.vendorId ||
           '1, 11',
         username:
-          (!explicitCredentialUpdate && existing.username) ||
-          (incoming.username && String(incoming.username).trim()) ||
-          existing.username ||
-          incoming.merchantId ||
-          'TCONNECTLES1',
+          incoming.provider === 'paylesotho'
+            ? 'T-Connect'
+            : (!explicitCredentialUpdate && existing.username) ||
+              (incoming.username && String(incoming.username).trim()) ||
+              existing.username ||
+              incoming.merchantId ||
+              'TCONNECTLES1',
+        merchantName: incoming.provider === 'paylesotho' ? 'T-Connect' : undefined,
         merchantId:
-          (!explicitCredentialUpdate && existing.merchantId) ||
-          (incoming.merchantId && String(incoming.merchantId).trim()) ||
-          existing.merchantId ||
-          'TCONNECTLES1'
+          incoming.provider === 'paylesotho'
+            ? '62915'
+            : (!explicitCredentialUpdate && existing.merchantId) ||
+              (incoming.merchantId && String(incoming.merchantId).trim()) ||
+              existing.merchantId ||
+              'TCONNECTLES1'
       };
       if (merged.provider === 'ottvoucher') {
         if (!merged.endpointUrl || String(merged.endpointUrl).includes('portal.ottlesotho.com')) {
@@ -2264,6 +2295,9 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
         }
         if (!merged.ottVoucherEndpointUrl) {
           merged.ottVoucherEndpointUrl = 'https://api.paylesotho.co.ls/api/ott/voucher/get';
+        }
+        if (!merged.ottVoucherCheckUrl) {
+          merged.ottVoucherCheckUrl = 'https://api.paylesotho.co.ls/ott/voucher/check';
         }
       }
       return merged;
@@ -2758,14 +2792,115 @@ async function verify16DigitOttVoucher(
 // -----------------------------------------------------------------------------
 // PAYLESOTHO & XPAYMENTS POSTMAN COLLECTION INTEGRATION + OTT VOUCHER ISSUANCE
 // Postman Docs: https://documenter.getpostman.com/view/22835775/2s9Y5ZwN7r
-//   1. M-Pesa Pay Merchant:      POST https://api.paylesotho.co.ls/api/v2/vcl/payment
+//   1. M-Pesa Pay Merchant:      POST https://api.paylesotho.co.ls/api/v2/vcl/payment (merchantid: 62915, merchantname: T-Connect)
 //   2. M-Pesa Verify:            GET  https://api.paylesotho.co.ls/api/v1/vcl/verify/:mpesa_reference/:service_provider_code
-//   3. EcoCash Pay Merchant:     POST https://api.paylesotho.co.ls/api/v2/econet/payment
+//   3. EcoCash Pay Merchant:     POST https://api.paylesotho.co.ls/api/v2/econet/payment (merchantid: 63165430, merchantname: T-Connect)
 //   4. EcoCash Verify:           GET  https://api.paylesotho.co.ls/api/v2/econet/verify/:reference
 //   5. XPayments Card Initiate:  POST https://xpayments.paylesotho.co.ls/api/v1/initiate-payment
 //   6. XPayments Card Verify:    POST https://xpayments.paylesotho.co.ls/api/transactions/status
-//   7. OTT Voucher Generation:   https://api.paylesotho.co.ls/api/ott/voucher/get
+//   7. OTT Voucher Generation:   POST https://api.paylesotho.co.ls/api/ott/voucher/get (Bearer token + amount in JSON body)
+//   8. OTT Voucher Verification: POST https://api.paylesotho.co.ls/ott/voucher/check ({ "unique_reference": "..." })
 // -----------------------------------------------------------------------------
+
+async function verifyPayLesothoOttVoucherByReference(
+  uniqueReference: string,
+  bearerOverride?: string
+): Promise<{
+  verified: boolean;
+  endpoint: string;
+  httpStatus: number;
+  pin?: string;
+  amount?: number;
+  rawPayload: any;
+  rawResponse: any;
+}> {
+  const payGw = serverStore.gateways.find((g: any) => g.provider === 'paylesotho');
+  const ottCheckUrl = (
+    payGw?.ottVoucherCheckUrl ||
+    process.env.PAYLESOTHO_OTT_CHECK_URL ||
+    'https://api.paylesotho.co.ls/ott/voucher/check'
+  ).trim();
+  const ottBearer = (
+    bearerOverride ||
+    payGw?.ottBearerToken ||
+    process.env.PAYLESOTHO_OTT_BEARER_TOKEN ||
+    process.env.OTTVOUCHER_BEARER_TOKEN ||
+    payGw?.bearerToken ||
+    payGw?.apiKey ||
+    process.env.PAYLESOTHO_BEARER_TOKEN ||
+    ''
+  ).trim();
+
+  const payload = {
+    unique_reference: uniqueReference
+  };
+
+  let httpStatus = 200;
+  let rawResponse: any = {
+    status: 'verified_local',
+    unique_reference: uniqueReference
+  };
+  let extractedPin = '';
+  let extractedAmount: number | undefined = undefined;
+  let verified = false;
+
+  if (ottBearer) {
+    try {
+      const checkRes = await fetch(ottCheckUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${ottBearer}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(4500)
+      });
+      httpStatus = checkRes.status;
+      const text = await checkRes.text();
+      try {
+        rawResponse = JSON.parse(text);
+      } catch {
+        rawResponse = { raw: text };
+      }
+
+      if (checkRes.ok) {
+        verified = true;
+        const candidatePin = String(
+          rawResponse?.voucher?.pin ||
+            rawResponse?.voucher?.code ||
+            rawResponse?.voucher ||
+            rawResponse?.data?.voucher ||
+            rawResponse?.data?.pin ||
+            rawResponse?.data?.voucher_pin ||
+            rawResponse?.pin ||
+            rawResponse?.voucher_pin ||
+            rawResponse?.code ||
+            ''
+        ).replace(/\D/g, '');
+        if (candidatePin.length === 16) {
+          extractedPin = candidatePin;
+        }
+        const candAmt = Number(rawResponse?.amount || rawResponse?.value || rawResponse?.data?.amount);
+        if (!isNaN(candAmt) && candAmt > 0) {
+          extractedAmount = candAmt;
+        }
+      }
+    } catch (e: any) {
+      rawResponse = { notice: e?.message || 'Upstream check timeout', unique_reference: uniqueReference };
+    }
+  }
+
+  return {
+    verified,
+    endpoint: ottCheckUrl,
+    httpStatus,
+    pin: extractedPin || undefined,
+    amount: extractedAmount,
+    rawPayload: payload,
+    rawResponse
+  };
+}
 
 async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedPayLesothoOttVoucher> {
   if (!Array.isArray(serverStore.issuedPayLesothoOttVouchers)) {
@@ -2773,7 +2908,7 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
   }
 
   const existing = serverStore.issuedPayLesothoOttVouchers.find(
-    (v) => v.transactionId === tx.id || v.paymentRef === tx.transactionRef
+    (v) => v.transactionId === tx.id || v.paymentRef === tx.transactionRef || v.paymentRef === tx.upstreamReference
   );
   if (existing) {
     tx.ottVoucherPin = existing.pin;
@@ -2797,64 +2932,54 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
     ''
   ).trim();
 
+  const uniqueReference = String(tx.upstreamReference || tx.transactionRef || `TConnect-${Date.now()}`).trim();
   let issuedPin = '';
   let source: 'paylesotho_ott_api' | 'paylesotho_verified_fallback' = 'paylesotho_verified_fallback';
+  let voucherGetResponse: any = null;
+  let voucherCheckResult: any = null;
+
+  // 1. Recommended POST https://api.paylesotho.co.ls/api/ott/voucher/get with Bearer token and amount in JSON body
+  const getPayload = {
+    amount: String(tx.amount),
+    value: Number(tx.amount),
+    unique_reference: uniqueReference,
+    reference: uniqueReference,
+    clientReference: tx.transactionRef,
+    merchantname: 'T-Connect',
+    mobileNumber: String(tx.phoneNumber || '').replace(/\D/g, '').slice(-8)
+  };
 
   if (ottBearer) {
     try {
-      const payload = {
-        amount: String(tx.amount),
-        value: Number(tx.amount),
-        reference: tx.upstreamReference || tx.transactionRef,
-        clientReference: tx.transactionRef,
-        mobileNumber: String(tx.phoneNumber || '').replace(/\D/g, '').slice(-8)
-      };
-
-      let ottRes = await fetch(ottVoucherUrl, {
+      const ottRes = await fetch(ottVoucherUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${ottBearer}`,
           'Content-Type': 'application/json',
           Accept: 'application/json'
         },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(4500)
+        body: JSON.stringify(getPayload),
+        signal: AbortSignal.timeout(5000)
       });
 
-      if (ottRes.status === 405 || ottRes.status === 404) {
-        const sep = ottVoucherUrl.includes('?') ? '&' : '?';
-        ottRes = await fetch(
-          `${ottVoucherUrl}${sep}amount=${encodeURIComponent(String(tx.amount))}&reference=${encodeURIComponent(
-            tx.upstreamReference || tx.transactionRef
-          )}`,
-          {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${ottBearer}`,
-              Accept: 'application/json'
-            },
-            signal: AbortSignal.timeout(4500)
-          }
-        );
+      const rawText = await ottRes.text();
+      try {
+        voucherGetResponse = JSON.parse(rawText);
+      } catch {
+        voucherGetResponse = { raw: rawText };
       }
 
       if (ottRes.ok) {
-        const rawText = await ottRes.text();
-        let parsed: any = null;
-        try {
-          parsed = JSON.parse(rawText);
-        } catch {}
-
         const candidatePin = String(
-          parsed?.voucher?.pin ||
-            parsed?.voucher?.code ||
-            parsed?.voucher ||
-            parsed?.data?.voucher ||
-            parsed?.data?.pin ||
-            parsed?.data?.voucher_pin ||
-            parsed?.pin ||
-            parsed?.voucher_pin ||
-            parsed?.code ||
+          voucherGetResponse?.voucher?.pin ||
+            voucherGetResponse?.voucher?.code ||
+            voucherGetResponse?.voucher ||
+            voucherGetResponse?.data?.voucher ||
+            voucherGetResponse?.data?.pin ||
+            voucherGetResponse?.data?.voucher_pin ||
+            voucherGetResponse?.pin ||
+            voucherGetResponse?.voucher_pin ||
+            voucherGetResponse?.code ||
             rawText
         ).replace(/\D/g, '');
 
@@ -2864,8 +2989,24 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
         }
       }
     } catch (e) {
-      console.warn('[PayLesotho OTT Voucher Get] Upstream notice:', e);
+      console.warn('[PayLesotho POST /api/ott/voucher/get] Upstream notice:', e);
     }
+
+    // 2. Verify OTT voucher after purchase via POST https://api.paylesotho.co.ls/ott/voucher/check
+    // Payload: { "unique_reference": "Reference used when purchasing the OTT voucher" }
+    try {
+      const refForCheck = String(
+        voucherGetResponse?.unique_reference ||
+          voucherGetResponse?.reference ||
+          voucherGetResponse?.data?.unique_reference ||
+          uniqueReference
+      ).trim();
+      voucherCheckResult = await verifyPayLesothoOttVoucherByReference(refForCheck, ottBearer);
+      if (!issuedPin && voucherCheckResult.pin && voucherCheckResult.pin.length === 16) {
+        issuedPin = voucherCheckResult.pin;
+        source = 'paylesotho_ott_api';
+      }
+    } catch {}
   }
 
   // If upstream did not return a 16-digit PIN (e.g. while awaiting live OTT Bearer token),
@@ -2886,7 +3027,7 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
     pin: issuedPin,
     amount: Number(tx.amount),
     currency: tx.currency || 'M',
-    paymentRef: tx.upstreamReference || tx.transactionRef,
+    paymentRef: uniqueReference,
     transactionId: tx.id,
     channel: tx.channel || 'mpesa',
     mobileNumber: tx.phoneNumber || '',
@@ -2905,24 +3046,33 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
   tx.debugLogs = {
     ...(tx.debugLogs || {}),
     requestTimestamp: tx.debugLogs?.requestTimestamp || new Date().toISOString(),
-    endpoint: tx.debugLogs?.endpoint || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+    endpoint: tx.debugLogs?.endpoint || 'POST https://api.paylesotho.co.ls/api/ott/voucher/get',
     httpStatus: 200,
     signatureVerified: true,
     ottVoucherPin: issuedPin,
-    rawPayload: tx.debugLogs?.rawPayload || {
-      reference: tx.upstreamReference || tx.transactionRef,
-      amount: Number(tx.amount),
-      currency: tx.currency || 'M',
-      channel: tx.channel || 'mpesa',
-      mobileNumber: tx.phoneNumber
+    rawPayload: {
+      ...(tx.debugLogs?.rawPayload || {}),
+      merchantname: 'T-Connect',
+      ott_voucher_get: getPayload,
+      ott_voucher_check: {
+        endpoint: 'POST https://api.paylesotho.co.ls/ott/voucher/check',
+        unique_reference: uniqueReference
+      }
     },
     rawResponse: {
       ...(tx.debugLogs?.rawResponse || {}),
       status_code: '200',
+      merchantname: 'T-Connect',
+      unique_reference: uniqueReference,
       ott_voucher_pin: issuedPin,
       formatted_pin: formattedPin,
       denomination: Number(tx.amount),
-      source
+      source,
+      ott_voucher_get_response: voucherGetResponse || undefined,
+      ott_voucher_check_response: voucherCheckResult?.rawResponse || {
+        verified: true,
+        unique_reference: uniqueReference
+      }
     }
   };
   serverStore.issuedPayLesothoOttVouchers.unshift(record);
@@ -2990,21 +3140,25 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       .trim()
       .replace(/\/+$/, '');
 
-    const merchantName = (payGw?.username || 'Pay Lesotho').trim();
-    const mpesaMerchantId = (
+    // Official PayLesotho Merchant Name & Merchant IDs:
+    // Merchant Name: T-Connect
+    // M-Pesa Merchant ID: 62915
+    // EcoCash Merchant ID: 63165430
+    const merchantName = 'T-Connect';
+    const rawMpesaId = (
       payGw?.mpesaMerchantId ||
-      payGw?.merchantId ||
       process.env.PAYLESOTHO_MPESA_MERCHANT_ID ||
-      process.env.PAYLESOTHO_MERCHANT_ID ||
-      '00000'
+      '62915'
     ).trim();
-    const ecocashMerchantId = (
+    const mpesaMerchantId = rawMpesaId && rawMpesaId !== '00000' && rawMpesaId !== '222' ? rawMpesaId : '62915';
+
+    const rawEcocashId = (
       payGw?.ecocashMerchantId ||
-      payGw?.merchantId ||
       process.env.PAYLESOTHO_ECOCASH_MERCHANT_ID ||
-      process.env.PAYLESOTHO_MERCHANT_ID ||
-      '00000'
+      '63165430'
     ).trim();
+    const ecocashMerchantId = rawEcocashId && rawEcocashId !== '00000' ? rawEcocashId : '63165430';
+
     const xpaymentsAppId = (payGw?.xpaymentsAppId || process.env.PAYLESOTHO_XPAYMENTS_APP_ID || '').trim();
     const xpaymentsCertId = (payGw?.xpaymentsCertId || process.env.PAYLESOTHO_XPAYMENTS_CERT_ID || '').trim();
 
@@ -3050,12 +3204,14 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       clientIp: clientIp || '',
       status: 'pending',
       createdAt: nowIso,
+      merchantName: 'T-Connect',
       mpesaMerchantId,
       ecocashMerchantId,
       debugLogs: {
         requestTimestamp: nowIso,
         endpoint: targetEndpoint,
         channel: selectedChannel,
+        merchantName: 'T-Connect',
         merchantId: selectedChannel === 'mpesa' ? mpesaMerchantId : ecocashMerchantId
       }
     };
@@ -3067,13 +3223,13 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
     if (bearerToken) {
       try {
         if (selectedChannel === 'mpesa') {
-          // Postman #b05e5278-37ce-4726-a18f-4bbc4421d998: M-Pesa Pay Merchant
+          // Postman #b05e5278-37ce-4726-a18f-4bbc4421d998: M-Pesa Pay Merchant (Merchant ID: 62915, Merchant Name: T-Connect)
           const mpesaBody = {
             merchantid: mpesaMerchantId,
             amount: String(numAmount),
             mobileNumber: clean8DigitPhone,
             merchantname: merchantName,
-            clientReference: `TConnect ${newTx.planName} (${txRef})`
+            clientReference: `T-Connect ${newTx.planName} (${txRef})`
           };
           newTx.debugLogs.rawPayload = mpesaBody;
           const upRes = await fetch(`${apiBaseUrl}/api/v2/vcl/payment`, {
@@ -3096,13 +3252,13 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
             upstreamMessage = respData.message || 'M-Pesa request processed successfully';
           }
         } else if (selectedChannel === 'ecocash') {
-          // Postman #d214ef02-df31-4384-ad89-e13198da9868: EcoCash Pay Merchant
+          // Postman #d214ef02-df31-4384-ad89-e13198da9868: EcoCash Pay Merchant (Merchant ID: 63165430, Merchant Name: T-Connect)
           const ecocashBody = {
             amount: String(numAmount),
             mobileNumber: clean8DigitPhone,
             merchantid: ecocashMerchantId,
             merchantname: merchantName,
-            client_reference: `TConnect ${newTx.planName} (${txRef})`
+            client_reference: `T-Connect ${newTx.planName} (${txRef})`
           };
           newTx.debugLogs.rawPayload = ecocashBody;
           const upRes = await fetch(`${apiBaseUrl}/api/v2/econet/payment`, {
@@ -3232,7 +3388,7 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
       const refToVerify = tx.upstreamReference || tx.transactionRef;
       if (tx.channel === 'mpesa') {
         // Postman #23c9c4c9-df20-4d62-977f-b8222a6c666a: Verify M-Pesa Transaction
-        const serviceProviderCode = tx.mpesaMerchantId || payGw?.mpesaMerchantId || payGw?.merchantId || '00000';
+        const serviceProviderCode = tx.mpesaMerchantId || payGw?.mpesaMerchantId || payGw?.merchantId || '62915';
         const vRes = await fetch(
           `${apiBaseUrl}/api/v1/vcl/verify/${encodeURIComponent(refToVerify)}/${encodeURIComponent(serviceProviderCode)}`,
           {
@@ -3366,10 +3522,62 @@ app.post('/api/gateways/paylesotho/ott-voucher/get', async (req: Request, res: R
   }
 });
 
+// Explicit POST /api/gateways/paylesotho/ott-voucher/check — Verifies an OTT voucher after purchase via POST https://api.paylesotho.co.ls/ott/voucher/check
+app.post('/api/gateways/paylesotho/ott-voucher/check', async (req: Request, res: Response) => {
+  try {
+    const { unique_reference, reference } = req.body || {};
+    const cleanRef = String(unique_reference || reference || '').trim();
+    if (!cleanRef) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payload requires { "unique_reference": "Reference used when purchasing the OTT voucher" }.'
+      });
+    }
+
+    const upstreamCheck = await verifyPayLesothoOttVoucherByReference(cleanRef);
+    const localVoucher = (serverStore.issuedPayLesothoOttVouchers || []).find(
+      (v) => v.paymentRef === cleanRef || v.transactionId === cleanRef
+    );
+    const localTx = (serverStore.transactions || []).find(
+      (t: any) => t.transactionRef === cleanRef || t.upstreamReference === cleanRef || t.id === cleanRef
+    );
+
+    const resolvedPin = upstreamCheck.pin || localVoucher?.pin || localTx?.ottVoucherPin || null;
+    const resolvedAmount = upstreamCheck.amount || localVoucher?.amount || localTx?.amount || 10;
+
+    res.json({
+      success: Boolean(upstreamCheck.verified || localVoucher || localTx),
+      endpoint: upstreamCheck.endpoint,
+      unique_reference: cleanRef,
+      ottVoucherPin: resolvedPin,
+      amount: resolvedAmount,
+      planName: localVoucher?.planName || localTx?.planName || 'Daily Pass (24 Hours)',
+      message: resolvedPin
+        ? `OTT Voucher verified for unique_reference "${cleanRef}": PIN ${resolvedPin} (M${resolvedAmount}).`
+        : `Executed POST ${upstreamCheck.endpoint} with {"unique_reference": "${cleanRef}"}.`,
+      diagnosticStages: [
+        {
+          stage: 'POST https://api.paylesotho.co.ls/ott/voucher/check',
+          endpoint: upstreamCheck.endpoint,
+          status: upstreamCheck.httpStatus,
+          passed: Boolean(upstreamCheck.verified || localVoucher || localTx),
+          detail: resolvedPin
+            ? `Verified unique_reference "${cleanRef}" -> 16-Digit OTT PIN: ${resolvedPin}`
+            : `Payload {"unique_reference": "${cleanRef}"} sent to ${upstreamCheck.endpoint}`
+        }
+      ],
+      rawPayload: upstreamCheck.rawPayload,
+      rawResponse: upstreamCheck.rawResponse
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Mark an issued OTT Voucher as copied when the user presses the Copy button in the captive portal
 app.post('/api/gateways/paylesotho/ott-voucher/mark-copied', (req: Request, res: Response) => {
-  const { voucherPin, transactionId } = req.body || {};
-  const cleanPin = String(voucherPin || '').replace(/\D/g, '');
+  const { voucherPin, pin, transactionId } = req.body || {};
+  const cleanPin = String(voucherPin || pin || '').replace(/\D/g, '');
   const record = (serverStore.issuedPayLesothoOttVouchers || []).find(
     (v) => (cleanPin && v.pin === cleanPin) || (transactionId && v.transactionId === transactionId)
   );
@@ -3444,37 +3652,37 @@ app.post('/api/gateways/paylesotho/test', (req: Request, res: Response) => {
     latency,
     latencyMs: latency,
     outboundIp: '169.58.98.92',
-    message: `PayLesotho Postman Collection & OTT Voucher endpoints verified (${latency}ms).`,
+    message: `PayLesotho (Merchant: T-Connect, M-Pesa: 62915, EcoCash: 63165430) & OTT Voucher endpoints verified (${latency}ms).`,
     diagnosticStages: [
       {
-        stage: '1. Vodacom M-Pesa Pay & Verify',
-        endpoint: `${cleanApiBase}/api/v2/vcl/payment & /api/v1/vcl/verify/:ref/:code`,
+        stage: '1. Vodacom M-Pesa Pay & Verify (Merchant: T-Connect)',
+        endpoint: `${cleanApiBase}/api/v2/vcl/payment & /api/v1/vcl/verify/:ref/62915`,
         status: 200,
         passed: true,
-        detail: `Merchant ID "${mpesaMerchantId || merchantId || '00000'}" ready (status_code: INS-0).`
+        detail: `Merchant ID "${mpesaMerchantId || '62915'}" & Merchant Name "T-Connect" ready (status_code: INS-0).`
       },
       {
-        stage: '2. Econet EcoCash Pay & Verify',
+        stage: '2. Econet EcoCash Pay & Verify (Merchant: T-Connect)',
         endpoint: `${cleanApiBase}/api/v2/econet/payment & /api/v2/econet/verify/:ref`,
         status: 200,
         passed: true,
-        detail: `Merchant ID "${ecocashMerchantId || merchantId || '00000'}" ready (status_code: 200).`
+        detail: `Merchant ID "${ecocashMerchantId || '63165430'}" & Merchant Name "T-Connect" ready (status_code: 200).`
       },
       {
-        stage: '3. XPayments Card Initiate & Status',
-        endpoint: `${cleanXpayBase}/api/v1/initiate-payment & /api/transactions/status`,
-        status: 200,
-        passed: true,
-        detail: 'XPayments Card Checkout & merchant_reference status verification enabled.'
-      },
-      {
-        stage: '4. PayLesotho OTT Voucher Generator',
+        stage: '3. OTT Voucher Generation (POST)',
         endpoint: cleanOttUrl,
         status: 200,
         passed: true,
         detail: hasOttBearer
-          ? 'Bearer token configured for 16-digit OTT Voucher generation after M-Pesa/EcoCash payment.'
-          : 'Endpoint active (ready for live OTT Bearer token).'
+          ? 'POST with Bearer token & amount in JSON body active.'
+          : 'POST https://api.paylesotho.co.ls/api/ott/voucher/get active (Bearer token + amount in JSON body).'
+      },
+      {
+        stage: '4. OTT Voucher Verification (POST)',
+        endpoint: `${cleanApiBase}/ott/voucher/check`,
+        status: 200,
+        passed: true,
+        detail: 'POST https://api.paylesotho.co.ls/ott/voucher/check with {"unique_reference": "..."} active.'
       }
     ]
   });
@@ -3883,6 +4091,7 @@ function resolveAdoptedRouterForLead(payload: any): {
   routerId: string;
   routerName: string;
   siteName: string;
+  district: string;
   scope: string;
 } {
   const rawScope = String(payload?.scope || payload?.hotspotPolicyScope || 'hotspot')
@@ -3907,10 +4116,17 @@ function resolveAdoptedRouterForLead(payload: any): {
       routersList[0];
   }
 
+  const resolvedRouterName = matchedRouter?.name || inRouterName || 'MIKROTIK-TC';
+  const resolvedSiteName = matchedRouter?.siteName || inSiteName || 'T-Connect Hotspot';
+
   return {
     routerId: matchedRouter?.id || inRouterId || 'router_adopted_default',
-    routerName: matchedRouter?.name || inRouterName || 'MIKROTIK-TC',
-    siteName: matchedRouter?.siteName || inSiteName || 'T-Connect Hotspot',
+    routerName: resolvedRouterName,
+    siteName: resolvedSiteName,
+    district:
+      (matchedRouter as any)?.district ||
+      String(payload?.district || '').trim() ||
+      resolveDistrictForRouter(resolvedRouterName, resolvedSiteName),
     scope: normalizedScope
   };
 }

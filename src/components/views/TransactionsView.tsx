@@ -210,9 +210,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
           >
             <option value="all">All Gateways</option>
-            <option value="paylesotho">PayLesotho (M-Pesa / EcoCash / Card)</option>
+            <option value="paylesotho">PayLesotho (M-Pesa 62915 / EcoCash 63165430 / Card)</option>
             <option value="ottvoucher">OTT Voucher (16-Digit PIN)</option>
-            <option value="ecocash">EcoCash Direct</option>
           </select>
 
           <select

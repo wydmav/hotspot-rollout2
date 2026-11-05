@@ -38,27 +38,22 @@ export const BillingView: React.FC<BillingViewProps> = (props) => {
         <div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-extrabold text-white">Integrated FinTech Providers (Lesotho &amp; Southern Africa)</h2>
+            <h2 className="text-sm font-extrabold text-white">Integrated FinTech Providers (PayLesotho &amp; OTT Voucher)</h2>
           </div>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Official PayLesotho Aggregator (M-Pesa, EcoCash &amp; XPayments Card) &amp; 16-Digit OTT Digital Voucher channels
+            Merchant: <strong className="text-white">T-Connect</strong> &middot; PayLesotho Aggregator (M-Pesa ID: <strong className="text-emerald-400">62915</strong>, EcoCash ID: <strong className="text-emerald-400">63165430</strong>, XPayments) &amp; 16-Digit OTT Voucher
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#161d31] border border-emerald-500/40 shadow-sm">
             <ProviderLogo provider="paylesotho" className="w-28 h-8" />
-            <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded">M-Pesa &middot; EcoCash &middot; Card</span>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#161d31] border border-[#232d42]">
-            <ProviderLogo provider="ecocash" className="w-28 h-8" />
-            <span className="text-[10px] font-mono font-bold text-slate-300 bg-red-950/40 border border-red-500/30 px-1.5 py-0.5 rounded">*199# Push</span>
+            <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded">M-Pesa (62915) &middot; EcoCash (63165430)</span>
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#161d31] border border-[#232d42]">
             <ProviderLogo provider="ottvoucher" className="w-28 h-8" />
-            <span className="text-[10px] font-mono font-bold text-slate-300 bg-emerald-950/40 border border-emerald-500/30 px-1.5 py-0.5 rounded">16-Digit PIN</span>
+            <span className="text-[10px] font-mono font-bold text-slate-300 bg-emerald-950/40 border border-emerald-500/30 px-1.5 py-0.5 rounded">16-Digit OTT PIN Only</span>
           </div>
         </div>
       </div>

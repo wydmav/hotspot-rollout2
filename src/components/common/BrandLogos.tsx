@@ -99,21 +99,21 @@ export const EcoCashLogo: React.FC<{ className?: string; variant?: 'card' | 'tra
   </svg>
 );
 
-export const PAYLESOTHO_LOGO_SRC = '/assets/aistudio/PHOTO-2023-11-10-12-39-31_1d67dd51.jpg';
+export const PAYLESOTHO_LOGO_SRC = '/assets/aistudio/images_e91c64e4.jpeg';
 
 export const PayLesothoLogo: React.FC<{ className?: string; variant?: 'card' | 'transparent' }> = ({ 
   className = 'w-28 h-9',
   variant = 'card'
 }) => (
   <div
-    className={`inline-flex items-center justify-center overflow-hidden bg-black ${
-      variant === 'card' ? 'rounded-lg border border-[#1E293B]' : 'rounded'
+    className={`inline-flex items-center justify-center overflow-hidden bg-white px-1.5 py-0.5 ${
+      variant === 'card' ? 'rounded-lg border border-slate-200 shadow-xs' : 'rounded'
     } ${className}`}
   >
     <img
       src={PAYLESOTHO_LOGO_SRC}
       alt="PayLesotho"
-      className="w-full h-full object-contain scale-110 select-none"
+      className="w-full h-full object-contain select-none"
       draggable={false}
     />
   </div>
@@ -136,12 +136,11 @@ export const ProviderLogo: React.FC<{ provider: GatewayProvider; className?: str
 }) => {
   switch (provider) {
     case 'paylesotho':
-      return <PayLesothoLogo className={className} variant={variant} />;
     case 'ecocash':
-      return <EcoCashLogo className={className} variant={variant} />;
+      return <PayLesothoLogo className={className} variant={variant} />;
     case 'ottvoucher':
       return <OttVoucherLogo className={className} variant={variant} />;
     default:
-      return null;
+      return <PayLesothoLogo className={className} variant={variant} />;
   }
 };

@@ -12,6 +12,12 @@
 4. **Lesotho District:** Accurate district classification for executive telemetry and regional performance tracking.
 5. **Venue & Physical Address:** Exact site location plotted dynamically on the **Lesotho Regional Fleet Map** only after the physical MikroTik router is adopted into the controller.
 
+### Strictly 2 Payment Gateways & 100% 16-Digit OTT Voucher Architecture
+- **No Built-In Platform Vouchers:** T-Connect does **not** generate or use proprietary internal voucher codes (`TC-...`). The **16-Digit OTT Voucher (`XXXX-XXXX-XXXX-XXXX`)** is the **only** voucher used across the entire platform and subscriber journey.
+- **No Standalone EcoCash Gateway:** All Mobile Money and Card payments are consolidated into **PayLesotho** under the official merchant name **`T-Connect`**:
+  1. **PayLesotho & XPayments Aggregator:** Handles **Vodacom M-Pesa (Merchant ID: `62915`)**, **Econet EcoCash (Merchant ID: `63165430`)**, and **XPayments 3D-Secure Bank Cards**, automatically generating and verifying 16-digit OTT Vouchers via PayLesotho's OTT APIs.
+  2. **16-Digit OTT Voucher Redemption:** Validates and redeems the 16-digit OTT PIN (`XXXX-XXXX-XXXX-XXXX`) with strict 1:1 denomination matching.
+
 ---
 
 ## 2. The Official Subscriber User Journey (Step-by-Step)
@@ -28,16 +34,19 @@
   - **Email Address** & accepts the Terms of Service.
 - *Why this matters for Management & Sponsors:* Every connection builds a verified, POPIA/GDPR-compliant first-party CRM database segmented by venue, district, and sponsor campaign.
 
-### Step 3: Choose a Package & Pay via PayLesotho (M-Pesa, EcoCash, or Bank Card)
-- The subscriber selects their desired Wi-Fi package denomination (e.g., **M5 Express Pass**, **M10 Daily Unlimited**, **M35 Weekly Pass**, or **M120 Monthly Pass**).
-- Powered by **PayLesotho**, the subscriber chooses how to pay right inside the portal:
-  - **Vodacom M-Pesa (`+266 5...`):** Instant USSD/STK Push prompt pops up on their phone to enter their M-Pesa PIN.
-  - **Econet EcoCash (`+266 6...`):** Instant `*199#` USSD Push prompt pops up on their phone to authorize payment.
+### Step 3: Choose a Package & Pay via PayLesotho (`T-Connect`)
+- The subscriber selects their desired Wi-Fi package denomination (e.g., **M5 Express Pass**, **M10 Daily Unlimited**, **M25 Weekly Pass**, or **M100 Monthly Pass**).
+- Powered by **PayLesotho** (processing under Merchant Name **`T-Connect`**), the subscriber chooses how to pay right inside the portal:
+  - **Vodacom M-Pesa (`+266 5...` — Merchant ID `62915`):** Instant USSD/STK Push prompt pops up on their phone showing **`T-Connect`** to enter their M-Pesa PIN.
+  - **Econet EcoCash (`+266 6...` — Merchant ID `63165430`):** Instant `*199#` USSD Push prompt pops up on their phone showing **`T-Connect`** to authorize payment.
   - **PayLesotho XPayments Bank Card:** Secure 3D-Secure Visa / Mastercard checkout for local and international debit/credit cards.
 
 ### Step 4: Copy & Redeem the 16-Digit OTT Voucher PIN (Exact Denomination Match)
 - **What happens immediately after payment:**
-  - Once PayLesotho confirms the M-Pesa, EcoCash, or Card payment for the exact package amount, the portal generates and displays an official **16-Digit OTT Voucher PIN** (`XXXX-XXXX-XXXX-XXXX`) matching that exact value.
+  - Once PayLesotho confirms the M-Pesa (`62915`), EcoCash (`63165430`), or Card payment for the exact package amount:
+    1. T-Connect requests a 16-digit OTT Voucher via `POST https://api.paylesotho.co.ls/api/ott/voucher/get` with the Bearer Token and exact `amount` in the JSON body.
+    2. T-Connect verifies the voucher purchase via `POST https://api.paylesotho.co.ls/ott/voucher/check` using `{ "unique_reference": "..." }`.
+    3. The portal displays the official **16-Digit OTT Voucher PIN** (`XXXX-XXXX-XXXX-XXXX`) matching that exact package value.
 - **Mandatory Copy-Then-Redeem Security Flow:**
   1. The subscriber taps **"1. Copy 16-Digit OTT PIN"** on their screen.
   2. Only after copying the PIN does the **"2. Paste & Go to Redeem"** button unlock.
@@ -57,13 +66,13 @@
 ## 3. Marketing Angles & Hooks for Content Creators
 
 ### Angle A: "Pay Your Way in Seconds — M-Pesa, EcoCash, Card, or OTT Voucher"
-- **Visual Hook:** Show a student or commuter connecting to T-Connect Wi-Fi, getting the PayLesotho M-Pesa/EcoCash prompt on their phone, tapping **Copy 16-Digit OTT PIN**, hitting **Redeem**, and immediately streaming or messaging.
+- **Visual Hook:** Show a student or commuter connecting to T-Connect Wi-Fi, getting the **PayLesotho (`T-Connect`)** M-Pesa or EcoCash prompt on their phone, tapping **Copy 16-Digit OTT PIN**, hitting **Redeem**, and immediately streaming or messaging.
 - **Key Talking Point:** *"Whether you use Vodacom M-Pesa, Econet EcoCash, your bank card, or an OTT Voucher, T-Connect gets you online in under 30 seconds through PayLesotho."*
 
-### Angle B: "Copy. Paste. Connected." (Educating Users on the OTT Voucher Step)
+### Angle B: "Copy. Paste. Connected." (Educating Users on the 16-Digit OTT Voucher Step)
 - **Visual Hook:** Close-up screen recording of the green **PayLesotho OTT Voucher Issued** card inside the captive portal.
 - **3-Beat Script for Reels / TikTok:**
-  1. *"Pick your T-Connect Wi-Fi bundle and approve your M-Pesa or EcoCash prompt."*
+  1. *"Pick your T-Connect Wi-Fi bundle and approve your PayLesotho M-Pesa or EcoCash prompt."*
   2. *"Tap **Copy 16-Digit OTT PIN** right on the screen."*
   3. *"Tap **Paste & Redeem**—and boom, you're straight back to your apps with high-speed Wi-Fi!"*
 
@@ -77,5 +86,5 @@
 
 ## 4. Management Control Tower Capabilities (At a Glance)
 - **Zero-Clutter Dynamic Lesotho Map:** Hotspots appear on the regional map **only after** your engineering team provisions a router with its Scope, Partner/Group, Policy, District, and Venue.
-- **Full Developer Transaction Inspector:** Every M-Pesa, EcoCash, XPayments Card, and OTT Voucher transaction is logged with its **full unmasked 16-digit OTT Voucher PIN** (`XXXX-XXXX-XXXX-XXXX`), customer phone number, venue, and complete raw JSON request/response payload for instant customer support and financial reconciliation.
+- **Full Developer Transaction Inspector:** Every PayLesotho (M-Pesa `62915`, EcoCash `63165430`, XPayments Card) and 16-Digit OTT Voucher transaction is logged with its **full unmasked 16-digit OTT Voucher PIN** (`XXXX-XXXX-XXXX-XXXX`), customer phone number, venue, and complete raw JSON request/response payload for instant customer support and financial reconciliation.
 - **One-Click Production Reset:** Before going live or handing over a clean environment, run `npm run reset-production` (or click **Production Reset** on the Regional Fleet Map) to wipe all test transactions, test guest sessions, and test routers while keeping your gateway configurations intact.

@@ -91,6 +91,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
   // External Client Groups (Tenant Brands) Modal State
   const [showTenantModal, setShowTenantModal] = useState(false);
+  const tenantGroups = storage.getTenantGroups();
 
   // Local Vertical Filter (Allows instant switching to bus, hotspot, village/community, stadium, park)
   const [localVerticalFilter, setLocalVerticalFilter] = useState<VerticalType | 'all'>(selectedVertical);

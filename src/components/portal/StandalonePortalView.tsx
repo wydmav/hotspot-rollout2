@@ -663,12 +663,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     setIsConnecting(true);
     setStatusBanner('Activating your unlimited free Wi-Fi...');
 
-    const vCode = `FREE-${cleanPhoneDigits.slice(-4) || Math.floor(1000 + Math.random() * 9000)}`;
     await syncGuestSessionToAdmin({
       mode: 'free',
       planName: 'Free Wi-Fi (Unlimited)',
       durationSeconds: 0,
-      voucherCode: vCode,
+      voucherCode: '',
       amount: 0,
       speedLimit: '25M/10M'
     });
@@ -741,11 +740,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       const planTitle = apiData.planName || selectedPlan?.name || 'OTT Voucher Pass';
       const durationSecs = apiData.durationSeconds || selectedPlan?.durationSeconds || 86400;
 
+      const formatted16Pin = `${cleanDigits.slice(0, 4)}-${cleanDigits.slice(4, 8)}-${cleanDigits.slice(8, 12)}-${cleanDigits.slice(12, 16)}`;
+
       await syncGuestSessionToAdmin({
         mode: 'ottvoucher',
         planName: planTitle,
         durationSeconds: durationSecs,
-        voucherCode: `OTT-${cleanDigits.slice(-4)}`,
+        voucherCode: formatted16Pin,
         amount: apiData.price || selectedPlan?.price || 10,
         transactionRef: apiData.transactionRef
       });
@@ -833,11 +834,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
 
+      const formattedIssuedPin = `${cleanPinToRedeem.slice(0, 4)}-${cleanPinToRedeem.slice(4, 8)}-${cleanPinToRedeem.slice(8, 12)}-${cleanPinToRedeem.slice(12, 16)}`;
+
       await syncGuestSessionToAdmin({
         mode: 'paylesotho',
         planName: selectedPlan?.name || 'Daily Pass',
         durationSeconds: selectedPlan?.durationSeconds || 86400,
-        voucherCode: `OTT-${cleanPinToRedeem.slice(-4)}`,
+        voucherCode: formattedIssuedPin,
         amount: expectedPrice,
         transactionRef: data.transactionRef || issuedOttVoucherRef || undefined,
         speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
@@ -923,11 +926,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           return;
         }
 
+        const formatted16Pin = `${cleanPin.slice(0, 4)}-${cleanPin.slice(4, 8)}-${cleanPin.slice(8, 12)}-${cleanPin.slice(12, 16)}`;
+
         await syncGuestSessionToAdmin({
           mode: 'ottvoucher',
           planName: selectedPlan?.name || 'Daily Pass',
           durationSeconds: selectedPlan?.durationSeconds || 86400,
-          voucherCode: `OTT-${cleanPin.slice(-4)}`,
+          voucherCode: formatted16Pin,
           amount: selectedPlan?.price || 10,
           transactionRef: data.transactionRef,
           speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`

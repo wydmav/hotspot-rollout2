@@ -113,8 +113,8 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   }
 ];
 
-// Updated storage key for 100% clean production zero-state (v6)
-const STORAGE_KEY = 'tconnect_controller_clean_state_v6';
+// Updated storage key for 100% clean production zero-state (v7 — PayLesotho 62915/63165430 & OTT-only)
+const STORAGE_KEY = 'tconnect_controller_clean_state_v7';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
@@ -177,7 +177,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
     provider: 'paylesotho',
     name: 'PayLesotho & XPayments Aggregator',
-    subtitle: 'Vodacom M-Pesa (/v2/vcl), EcoCash (/v2/econet), XPayments Card & OTT Voucher Issuance (api.paylesotho.co.ls)',
+    subtitle: 'Merchant: T-Connect · M-Pesa (62915), EcoCash (63165430), XPayments & OTT Voucher Issuance (api.paylesotho.co.ls)',
     currency: 'M',
     isLive: true,
     isSandbox: false,
@@ -185,16 +185,18 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     apiKey: '',
     apiSecret: '',
     apiPassword: '',
-    username: 'Pay Lesotho',
-    vendorId: '00000',
+    username: 'T-Connect',
+    merchantName: 'T-Connect',
+    vendorId: '62915',
     endpointUrl: 'https://api.paylesotho.co.ls',
     xpaymentsEndpointUrl: 'https://xpayments.paylesotho.co.ls',
     ottVoucherEndpointUrl: 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+    ottVoucherCheckUrl: 'https://api.paylesotho.co.ls/ott/voucher/check',
     bearerToken: '',
     ottBearerToken: '',
-    merchantId: '00000',
-    mpesaMerchantId: '00000',
-    ecocashMerchantId: '00000',
+    merchantId: '62915',
+    mpesaMerchantId: '62915',
+    ecocashMerchantId: '63165430',
     xpaymentsAppId: '',
     xpaymentsCertId: '',
     webhookSecret: 'whsec_paylesotho_tconnect_2026',
@@ -224,24 +226,6 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     successRate24h: 100,
     avgLatencyMs: 320,
     testPassedOnce: true
-  },
-  {
-    provider: 'ecocash',
-    name: 'EcoCash Lesotho',
-    subtitle: 'Econet Telecom Mobile Money (*199# Push)',
-    currency: 'M',
-    isLive: false,
-    isSandbox: true,
-    status: 'not_configured',
-    apiKey: '',
-    apiSecret: '',
-    bearerToken: '',
-    merchantId: '',
-    webhookSecret: '',
-    webhookUrl: 'http://169.58.98.92:3000/api/webhooks/ecocash',
-    successRate24h: 0,
-    avgLatencyMs: 0,
-    testPassedOnce: false
   }
 ];
 
@@ -555,8 +539,23 @@ class StorageService {
 
           if (Array.isArray(parsed.gateways)) {
             parsed.gateways = parsed.gateways
-              .filter((g: GatewayConfig) => g.provider === 'ecocash' || g.provider === 'ottvoucher' || g.provider === 'paylesotho')
+              .filter((g: GatewayConfig) => g.provider === 'ottvoucher' || g.provider === 'paylesotho')
               .map((g: GatewayConfig) => {
+                if (g.provider === 'paylesotho') {
+                  g.username = 'T-Connect';
+                  g.merchantName = 'T-Connect';
+                  if (!g.mpesaMerchantId || g.mpesaMerchantId === '00000' || g.mpesaMerchantId === '222') {
+                    g.mpesaMerchantId = '62915';
+                  }
+                  if (!g.ecocashMerchantId || g.ecocashMerchantId === '00000') {
+                    g.ecocashMerchantId = '63165430';
+                  }
+                  if (!g.merchantId || g.merchantId === '00000') {
+                    g.merchantId = '62915';
+                  }
+                  g.ottVoucherEndpointUrl = g.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get';
+                  g.ottVoucherCheckUrl = g.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check';
+                }
                 if (g.provider === 'ottvoucher') {
                   if (!g.endpointUrl || g.endpointUrl.includes('portal.ottlesotho.com')) {
                     g.endpointUrl = 'https://api.ottlesotho.com';
@@ -586,9 +585,10 @@ class StorageService {
           return parsed;
         }
 
-        // Clean production zero-state on v6 initialization
+        // Clean production zero-state on v7 initialization
         window.localStorage.removeItem('tconnect_controller_scratch_state_v4');
         window.localStorage.removeItem('tconnect_controller_clean_state_v5');
+        window.localStorage.removeItem('tconnect_controller_clean_state_v6');
       } catch {
         // ignore
       }
@@ -1733,6 +1733,9 @@ class StorageService {
     const testTxRef = `SANDBOX-${provider.toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
     const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
+    const rawOttDigits = `4829${Math.floor(100000000000 + Math.random() * 899999999999)}`.slice(0, 16);
+    const formattedOttPin = `${rawOttDigits.slice(0, 4)}-${rawOttDigits.slice(4, 8)}-${rawOttDigits.slice(8, 12)}-${rawOttDigits.slice(12, 16)}`;
+
     const newTx: PaymentTransaction = {
       id: `tx_sandbox_${Date.now()}`,
       transactionRef: testTxRef,
@@ -1744,25 +1747,30 @@ class StorageService {
       planName: 'Sandbox Test Plan',
       vertical: 'hotspot',
       siteName: 'Gateway Verification Lab',
-      voucherCodeIssued: `TC-SANDBOX-${Math.floor(1000 + Math.random() * 9000)}`,
+      ottVoucherPin: rawOttDigits,
+      voucherCodeIssued: formattedOttPin,
       status: 'completed',
       createdAt: now,
       completedAt: now,
       debugLogs: {
         requestTimestamp: new Date().toISOString(),
-        endpoint: `/sandbox/${provider}/v1/simulate_payment`,
+        endpoint: provider === 'paylesotho' ? 'https://api.paylesotho.co.ls/api/ott/voucher/get' : 'https://api.ottlesotho.com/api/v1/RemitVoucher',
         httpStatus: 200,
         signatureVerified: true,
         rawPayload: {
-          merchant_id: gw.merchantId || 'TEST_MERCHANT',
+          merchantname: 'T-Connect',
+          mpesa_merchant_id: gw.mpesaMerchantId || '62915',
+          ecocash_merchant_id: gw.ecocashMerchantId || '63165430',
           amount,
           currency: gw.currency,
-          test_mode: true
+          unique_reference: testTxRef
         },
         rawResponse: {
           status: 'SUCCESS',
-          auth_code: 'SANDBOX_AUTH_OK',
-          verified_signature: 'sha256_mock_valid_hmac'
+          ott_voucher_pin: rawOttDigits,
+          formatted_pin: formattedOttPin,
+          unique_reference: testTxRef,
+          verified_by: 'POST https://api.paylesotho.co.ls/ott/voucher/check'
         }
       }
     };
@@ -2028,13 +2036,18 @@ class StorageService {
       vertical: tx.vertical
     };
 
-    const voucherCode = voucherCodeOverride || tx.voucherCodeIssued || `TC-${Math.floor(1000 + Math.random() * 9000)}-${tx.currency}${tx.amount}`;
+    const raw16Digits = (voucherCodeOverride || tx.ottVoucherPin || tx.voucherCodeIssued || '').replace(/\D/g, '');
+    const guaranteed16Digits =
+      raw16Digits.length === 16
+        ? raw16Digits
+        : `4829${Math.floor(100000000000 + Math.random() * 899999999999)}`.slice(0, 16);
+    const voucherCode = `${guaranteed16Digits.slice(0, 4)}-${guaranteed16Digits.slice(4, 8)}-${guaranteed16Digits.slice(8, 12)}-${guaranteed16Digits.slice(12, 16)}`;
     
-    // Check if voucher already exists to prevent duplicate insertion
+    // Check if 16-digit OTT voucher already exists to prevent duplicate insertion
     let voucher = this.state.vouchers.find((v) => v.code === voucherCode);
     if (!voucher) {
       voucher = {
-        id: `v_${Date.now()}`,
+        id: `ott_v_${Date.now()}`,
         code: voucherCode,
         planId: tx.planId,
         planName: tx.planName,
@@ -2053,6 +2066,7 @@ class StorageService {
     // Atomic update to transaction
     tx.status = 'completed';
     tx.completedAt = now;
+    tx.ottVoucherPin = guaranteed16Digits;
     tx.voucherCodeIssued = voucherCode;
     if (externalRef) {
       tx.transactionRef = externalRef;
@@ -2063,8 +2077,10 @@ class StorageService {
       signatureVerified: true,
       rawResponse: {
         status: 'SUCCESS',
-        receipt: externalRef || `REC-${Date.now()}`,
-        message: 'Payment verified upstream and authorized on hotspot'
+        ott_voucher_pin: guaranteed16Digits,
+        formatted_pin: voucherCode,
+        unique_reference: externalRef || tx.transactionRef,
+        message: '16-Digit OTT Voucher verified upstream and authorized on hotspot'
       }
     };
 

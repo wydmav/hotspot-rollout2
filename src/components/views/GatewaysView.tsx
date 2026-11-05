@@ -74,9 +74,10 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [bearerToken, setBearerToken] = useState(selectedGateway?.bearerToken || '');
   const [ottBearerToken, setOttBearerToken] = useState(selectedGateway?.ottBearerToken || '');
-  const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-  const [mpesaMerchantId, setMpesaMerchantId] = useState(selectedGateway?.mpesaMerchantId || '');
-  const [ecocashMerchantId, setEcocashMerchantId] = useState(selectedGateway?.ecocashMerchantId || '');
+  const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
+  const [merchantName, setMerchantName] = useState(selectedGateway?.merchantName || selectedGateway?.username || 'T-Connect');
+  const [mpesaMerchantId, setMpesaMerchantId] = useState(selectedGateway?.mpesaMerchantId || '62915');
+  const [ecocashMerchantId, setEcocashMerchantId] = useState(selectedGateway?.ecocashMerchantId || '63165430');
   const [xpaymentsAppId, setXpaymentsAppId] = useState(selectedGateway?.xpaymentsAppId || '');
   const [xpaymentsCertId, setXpaymentsCertId] = useState(selectedGateway?.xpaymentsCertId || '');
   const [vendorId, setVendorId] = useState(selectedGateway?.vendorId || '11, 1, TCONNECTLES1');
@@ -92,6 +93,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   );
   const [ottVoucherEndpointUrl, setOttVoucherEndpointUrl] = useState(
     selectedGateway?.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get'
+  );
+  const [ottVoucherCheckUrl, setOttVoucherCheckUrl] = useState(
+    selectedGateway?.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check'
   );
   const [webhookSecret, setWebhookSecret] = useState(selectedGateway?.webhookSecret || '');
 
@@ -134,14 +138,17 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               apiSecret: srvPl.apiSecret || '',
               bearerToken: srvPl.bearerToken || '',
               ottBearerToken: srvPl.ottBearerToken || '',
-              merchantId: srvPl.merchantId || '',
-              mpesaMerchantId: srvPl.mpesaMerchantId || '',
-              ecocashMerchantId: srvPl.ecocashMerchantId || '',
+              username: 'T-Connect',
+              merchantName: 'T-Connect',
+              merchantId: srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915',
+              mpesaMerchantId: srvPl.mpesaMerchantId && srvPl.mpesaMerchantId !== '00000' ? srvPl.mpesaMerchantId : '62915',
+              ecocashMerchantId: srvPl.ecocashMerchantId && srvPl.ecocashMerchantId !== '00000' ? srvPl.ecocashMerchantId : '63165430',
               xpaymentsAppId: srvPl.xpaymentsAppId || '',
               xpaymentsCertId: srvPl.xpaymentsCertId || '',
               endpointUrl: srvPl.endpointUrl || 'https://api.paylesotho.co.ls',
               xpaymentsEndpointUrl: srvPl.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls',
               ottVoucherEndpointUrl: srvPl.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+              ottVoucherCheckUrl: srvPl.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check',
               status: 'operational',
               isLive: Boolean(srvPl.isLive ?? true)
             });
@@ -150,14 +157,16 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               if (srvPl.apiSecret) setApiSecret(srvPl.apiSecret);
               if (srvPl.bearerToken) setBearerToken(srvPl.bearerToken);
               if (srvPl.ottBearerToken) setOttBearerToken(srvPl.ottBearerToken);
-              if (srvPl.merchantId) setMerchantId(srvPl.merchantId);
-              if (srvPl.mpesaMerchantId) setMpesaMerchantId(srvPl.mpesaMerchantId);
-              if (srvPl.ecocashMerchantId) setEcocashMerchantId(srvPl.ecocashMerchantId);
+              setMerchantName('T-Connect');
+              setMerchantId(srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915');
+              setMpesaMerchantId(srvPl.mpesaMerchantId && srvPl.mpesaMerchantId !== '00000' ? srvPl.mpesaMerchantId : '62915');
+              setEcocashMerchantId(srvPl.ecocashMerchantId && srvPl.ecocashMerchantId !== '00000' ? srvPl.ecocashMerchantId : '63165430');
               if (srvPl.xpaymentsAppId) setXpaymentsAppId(srvPl.xpaymentsAppId);
               if (srvPl.xpaymentsCertId) setXpaymentsCertId(srvPl.xpaymentsCertId);
               if (srvPl.endpointUrl) setEndpointUrl(srvPl.endpointUrl);
               if (srvPl.xpaymentsEndpointUrl) setXpaymentsEndpointUrl(srvPl.xpaymentsEndpointUrl);
               if (srvPl.ottVoucherEndpointUrl) setOttVoucherEndpointUrl(srvPl.ottVoucherEndpointUrl);
+              if (srvPl.ottVoucherCheckUrl) setOttVoucherCheckUrl(srvPl.ottVoucherCheckUrl);
             }
           }
         }
@@ -172,9 +181,10 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setApiPassword(gw.apiPassword || '');
     setBearerToken(gw.bearerToken || '');
     setOttBearerToken(gw.ottBearerToken || '');
-    setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : ''));
-    setMpesaMerchantId(gw.mpesaMerchantId || '');
-    setEcocashMerchantId(gw.ecocashMerchantId || '');
+    setMerchantName(gw.merchantName || gw.username || 'T-Connect');
+    setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
+    setMpesaMerchantId(gw.mpesaMerchantId || '62915');
+    setEcocashMerchantId(gw.ecocashMerchantId || '63165430');
     setXpaymentsAppId(gw.xpaymentsAppId || '');
     setXpaymentsCertId(gw.xpaymentsCertId || '');
     setVendorId(gw.vendorId || '1, 11');
@@ -187,6 +197,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     );
     setXpaymentsEndpointUrl(gw.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls');
     setOttVoucherEndpointUrl(gw.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get');
+    setOttVoucherCheckUrl(gw.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check');
     setWebhookSecret(gw.webhookSecret || '');
     setTestResult(null);
     setRedeemTestResult(null);
@@ -204,7 +215,8 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     if (!selectedGateway) return;
     const cleanKey = apiKey.trim();
     const cleanPass = apiPassword.trim();
-    const cleanUser = (merchantId || (selectedGateway.provider === 'ottvoucher' ? 'TCONNECTLES1' : '')).trim();
+    const cleanUser = (merchantId || (selectedGateway.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915')).trim();
+    const cleanMerchantName = (merchantName || 'T-Connect').trim() || 'T-Connect';
     const cleanVendor = (vendorId || '1, 11').trim();
     const cleanEndpoint = (
       endpointUrl ||
@@ -215,16 +227,18 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       apiKey: cleanKey,
       apiSecret: apiSecret.trim(),
       apiPassword: cleanPass,
-      username: cleanUser,
+      username: selectedGateway.provider === 'paylesotho' ? cleanMerchantName : cleanUser,
+      merchantName: cleanMerchantName,
       vendorId: cleanVendor,
       endpointUrl: cleanEndpoint,
       xpaymentsEndpointUrl: xpaymentsEndpointUrl.trim() || 'https://xpayments.paylesotho.co.ls',
       ottVoucherEndpointUrl: ottVoucherEndpointUrl.trim() || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+      ottVoucherCheckUrl: ottVoucherCheckUrl.trim() || 'https://api.paylesotho.co.ls/ott/voucher/check',
       bearerToken: bearerToken.trim(),
       ottBearerToken: ottBearerToken.trim(),
       merchantId: cleanUser,
-      mpesaMerchantId: mpesaMerchantId.trim(),
-      ecocashMerchantId: ecocashMerchantId.trim(),
+      mpesaMerchantId: (mpesaMerchantId || '62915').trim(),
+      ecocashMerchantId: (ecocashMerchantId || '63165430').trim(),
       xpaymentsAppId: xpaymentsAppId.trim(),
       xpaymentsCertId: xpaymentsCertId.trim(),
       webhookSecret: webhookSecret.trim(),
@@ -243,14 +257,16 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
             apiSecret: apiSecret.trim(),
             bearerToken: bearerToken.trim(),
             ottBearerToken: ottBearerToken.trim(),
+            merchantName: cleanMerchantName,
             merchantId: cleanUser,
-            mpesaMerchantId: mpesaMerchantId.trim(),
-            ecocashMerchantId: ecocashMerchantId.trim(),
+            mpesaMerchantId: (mpesaMerchantId || '62915').trim(),
+            ecocashMerchantId: (ecocashMerchantId || '63165430').trim(),
             xpaymentsAppId: xpaymentsAppId.trim(),
             xpaymentsCertId: xpaymentsCertId.trim(),
             endpointUrl: cleanEndpoint,
             xpaymentsEndpointUrl: xpaymentsEndpointUrl.trim() || 'https://xpayments.paylesotho.co.ls',
             ottVoucherEndpointUrl: ottVoucherEndpointUrl.trim() || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
+            ottVoucherCheckUrl: ottVoucherCheckUrl.trim() || 'https://api.paylesotho.co.ls/ott/voucher/check',
             webhookSecret: webhookSecret.trim(),
             isLive: true
           })
@@ -483,7 +499,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   };
 
   const supportedGateways = gateways.filter(
-    (g) => g.provider === 'paylesotho' || g.provider === 'ecocash' || g.provider === 'ottvoucher'
+    (g) => g.provider === 'paylesotho' || g.provider === 'ottvoucher'
   );
 
   return (
@@ -491,9 +507,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (PayLesotho, EcoCash &amp; OTT)</h1>
+          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (PayLesotho &amp; 16-Digit OTT Voucher)</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            PayLesotho Aggregator (EcoCash, M-Pesa, Cards), Official 16-Digit OTT Voucher API &amp; EcoCash Direct
+            Merchant Name: <strong className="text-white">T-Connect</strong> &middot; PayLesotho Aggregator (M-Pesa ID: <strong className="text-emerald-400">62915</strong>, EcoCash ID: <strong className="text-emerald-400">63165430</strong>, XPayments) &amp; Official 16-Digit OTT Voucher
           </p>
         </div>
 
@@ -516,7 +532,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       </div>
 
       {/* Gateway Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {supportedGateways.map((gw) => {
           const isSelected = selectedGateway?.provider === gw.provider;
           return (
@@ -820,18 +836,18 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </button>
                   </div>
                 </div>
-              ) : selectedGateway.provider === 'paylesotho' ? (
-                /* Specialized PayLesotho Postman API + XPayments + OTT Voucher Generation Form */
+              ) : (
+                /* Specialized PayLesotho Postman API + XPayments + OTT Voucher Generation & Check Form */
                 <div className="space-y-4 bg-[#121829] p-4 rounded-xl border border-[#1f283d]">
                   <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span className="text-slate-300 font-bold">PAYLESOTHO API + OTT VOUCHER:</span>
                       <code className="bg-black/60 px-2.5 py-0.5 rounded text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
-                        {endpointUrl || 'https://api.paylesotho.co.ls'}
+                        Merchant: T-Connect
                       </code>
                       <span className="text-[10px] text-slate-400 font-mono">
-                        M-Pesa (/api/v2/vcl/payment) · EcoCash (/api/v2/econet/payment) · OTT (/api/ott/voucher/get)
+                        M-Pesa ID: <strong className="text-emerald-300">62915</strong> &middot; EcoCash ID: <strong className="text-emerald-300">63165430</strong> &middot; POST /api/ott/voucher/get &middot; POST /ott/voucher/check
                       </span>
                     </div>
                     <a
@@ -845,8 +861,8 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </a>
                   </div>
 
-                  {/* Row 1: PayLesotho Base URL, XPayments URL, OTT Voucher Generation URL */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Row 1: PayLesotho Base URL, XPayments URL, OTT Voucher Generation URL, OTT Voucher Check URL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
                       <label className="text-slate-300 font-bold block mb-1">1. PAYLESOTHO API BASE URL</label>
                       <input
@@ -868,7 +884,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">3. OTT VOUCHER GENERATE URL</label>
+                      <label className="text-slate-300 font-bold block mb-1">3. OTT GENERATE URL (POST)</label>
                       <input
                         type="text"
                         value={ottVoucherEndpointUrl}
@@ -877,13 +893,23 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">4. OTT CHECK URL (POST)</label>
+                      <input
+                        type="text"
+                        value={ottVoucherCheckUrl}
+                        onChange={(e) => setOttVoucherCheckUrl(e.target.value)}
+                        placeholder="https://api.paylesotho.co.ls/ott/voucher/check"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-cyan-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
                   </div>
 
                   {/* Row 2: PayLesotho Bearer Token & OTT Voucher Bearer Token / API Key */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-slate-300 font-bold block mb-1">
-                        4. PAYLESOTHO BEARER TOKEN <span className="text-slate-400 font-normal">(M-Pesa &amp; EcoCash Auth)</span>
+                        5. PAYLESOTHO BEARER TOKEN <span className="text-slate-400 font-normal">(M-Pesa 62915 &amp; EcoCash 63165430 Auth)</span>
                       </label>
                       <input
                         type="password"
@@ -895,42 +921,52 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </div>
                     <div>
                       <label className="text-slate-300 font-bold block mb-1">
-                        5. OTT VOUCHER API KEY / BEARER TOKEN <span className="text-emerald-400 font-normal">(/api/ott/voucher/get)</span>
+                        6. OTT VOUCHER BEARER TOKEN <span className="text-emerald-400 font-normal">(POST /api/ott/voucher/get &amp; /ott/voucher/check)</span>
                       </label>
                       <input
                         type="password"
                         value={ottBearerToken}
                         onChange={(e) => setOttBearerToken(e.target.value)}
-                        placeholder="Paste OTT Bearer Token / API Key when shared..."
+                        placeholder="Bearer token for POST /api/ott/voucher/get (uses PayLesotho Bearer if blank)"
                         className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
                   </div>
 
-                  {/* Row 3: M-Pesa Merchant ID, EcoCash Merchant ID, XPayments AppID & CertID */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  {/* Row 3: Merchant Name (T-Connect), M-Pesa ID (62915), EcoCash ID (63165430), XPayments AppID & CertID */}
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">6. M-PESA MERCHANT ID</label>
+                      <label className="text-slate-300 font-bold block mb-1">7. MERCHANT NAME</label>
+                      <input
+                        type="text"
+                        value={merchantName}
+                        onChange={(e) => setMerchantName(e.target.value)}
+                        placeholder="T-Connect"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-emerald-500/40 rounded-lg text-emerald-300 font-mono font-bold text-xs focus:outline-none focus:border-[#f05e17]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">8. M-PESA MERCHANT ID</label>
                       <input
                         type="text"
                         value={mpesaMerchantId}
                         onChange={(e) => setMpesaMerchantId(e.target.value)}
-                        placeholder="service_provider_code"
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        placeholder="62915"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-emerald-500/40 rounded-lg text-emerald-300 font-mono font-bold text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">7. ECOCASH MERCHANT ID</label>
+                      <label className="text-slate-300 font-bold block mb-1">9. ECOCASH MERCHANT ID</label>
                       <input
                         type="text"
                         value={ecocashMerchantId}
                         onChange={(e) => setEcocashMerchantId(e.target.value)}
-                        placeholder="merchantid"
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        placeholder="63165430"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-emerald-500/40 rounded-lg text-emerald-300 font-mono font-bold text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">8. XPAYMENTS APP ID</label>
+                      <label className="text-slate-300 font-bold block mb-1">10. XPAYMENTS APP ID</label>
                       <input
                         type="text"
                         value={xpaymentsAppId}
@@ -940,7 +976,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">9. XPAYMENTS CERT ID</label>
+                      <label className="text-slate-300 font-bold block mb-1">11. XPAYMENTS CERT ID</label>
                       <input
                         type="text"
                         value={xpaymentsCertId}
@@ -957,78 +993,10 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                       className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-2 cursor-pointer"
                     >
                       <Check className="w-4 h-4" />
-                      <span>Save PayLesotho &amp; OTT Voucher Credentials &rarr;</span>
+                      <span>Save PayLesotho (T-Connect) &amp; OTT Voucher Credentials &rarr;</span>
                     </button>
                   </div>
                 </div>
-              ) : (
-                /* Standard Credentials Fields for other gateways */
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-slate-400 block mb-1">API Key / Client ID</label>
-                      <input
-                        type="text"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="e.g. eco_live_key_9941..."
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate-400 block mb-1">Merchant Shortcode / ID</label>
-                      <input
-                        type="text"
-                        value={merchantId}
-                        onChange={(e) => setMerchantId(e.target.value)}
-                        placeholder="e.g. 10492 or TEL-ECO-01"
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-slate-400 block mb-1">
-                      Bearer Token <span className="text-slate-500 font-normal">(Cassava / EcoCash / Vodacom OAuth Access Token)</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={bearerToken}
-                      onChange={(e) => setBearerToken(e.target.value)}
-                      placeholder="Paste your live bearer token here (e.g. eyJhbGciOi...)"
-                      className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-[11px] focus:outline-none focus:border-[#f05e17]"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-slate-400 block mb-1">API Secret Key (Optional)</label>
-                      <input
-                        type="password"
-                        value={apiSecret}
-                        onChange={(e) => setApiSecret(e.target.value)}
-                        placeholder="e.g. sec_90x21..."
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate-400 block mb-1">Webhook HMAC Signing Secret</label>
-                      <input
-                        type="text"
-                        value={webhookSecret}
-                        onChange={(e) => setWebhookSecret(e.target.value)}
-                        placeholder="e.g. whsec_tconnect_..."
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleSaveCredentials}
-                    className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
-                  >
-                    Save &amp; Continue to Connection Test &rarr;
-                  </button>
-                </>
               )}
             </div>
           )}

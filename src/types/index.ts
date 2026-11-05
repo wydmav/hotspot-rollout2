@@ -229,12 +229,14 @@ export interface GatewayConfig {
   endpointUrl?: string;
   bearerToken?: string;
   merchantId: string;
+  merchantName?: string;
   mpesaMerchantId?: string;
   ecocashMerchantId?: string;
   xpaymentsAppId?: string;
   xpaymentsCertId?: string;
   xpaymentsEndpointUrl?: string;
   ottVoucherEndpointUrl?: string;
+  ottVoucherCheckUrl?: string;
   ottBearerToken?: string;
   webhookSecret: string;
   webhookUrl: string;

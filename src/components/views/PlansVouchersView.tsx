@@ -39,30 +39,13 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   plans,
   vouchers,
   onCreatePlan,
-  onGenerateBatch,
-  onRedeemVoucher,
   selectedVertical,
   currency,
-  voucherThreshold = 5,
-  onUpdateVoucherThreshold,
-  onTriggerVoucherCheck,
 }) => {
-  const [selectedPlanForBatch, setSelectedPlanForBatch] = useState<string>(plans[0]?.id || '');
-  const [batchCount, setBatchCount] = useState<number>(5);
   const [voucherSearch, setVoucherSearch] = useState('');
   const [copiedVoucherId, setCopiedVoucherId] = useState<string | null>(null);
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
-  const [localThreshold, setLocalThreshold] = useState<number>(voucherThreshold);
-  const [isAuditing, setIsAuditing] = useState(false);
-
-  useEffect(() => {
-    setLocalThreshold(voucherThreshold);
-  }, [voucherThreshold]);
-
-  // Concurrency tester state
-  const [testCode, setTestCode] = useState('');
-  const [testResults, setTestResults] = useState<Array<{ device: string; mac: string; success: boolean; message: string; slot?: string }>>([]);
-  const [isTestingConcurrency, setIsTestingConcurrency] = useState(false);
+  const [uniqueRefInput, setUniqueRefInput] = useState('');
 
   // New Plan form state
   const [planName, setPlanName] = useState('');
@@ -101,38 +84,58 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
 
   const handleVerifyOttPin = async () => {
     const clean = ottPin.replace(/\D/g, '');
-    if (clean.length !== 16) {
+    const cleanRef = uniqueRefInput.trim();
+    if (clean.length !== 16 && !cleanRef) {
       setOttResult({
         success: false,
-        message: 'Please enter all 16 digits of the OTT Voucher PIN.'
+        message: 'Enter a 16-digit OTT Voucher PIN or a PayLesotho unique_reference to verify.'
       });
       return;
     }
     setIsVerifyingOtt(true);
     setOttResult(null);
     try {
-      const res = await fetch('/api/gateways/ottvoucher/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pin: clean,
-          mobile: ottMobile,
-          amount: 10
-        })
-      });
-      const data = await res.json();
-      setOttResult({
-        success: Boolean(data.success),
-        message: data.message || (data.success ? '16-Digit PIN validated with OTT Lesotho API' : 'Verification failed'),
-        receipt: `REC-${Date.now().toString().slice(-6)}`,
-        planName: 'Daily Pass (24 Hours)',
-        amount: 10,
-        stages: data.diagnosticStages
-      });
+      if (cleanRef) {
+        const res = await fetch('/api/gateways/paylesotho/ott-voucher/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            unique_reference: cleanRef
+          })
+        });
+        const data = await res.json();
+        setOttResult({
+          success: Boolean(data.success),
+          message: data.message || 'Checked via POST https://api.paylesotho.co.ls/ott/voucher/check',
+          receipt: cleanRef,
+          planName: data.planName || 'Daily Pass (24 Hours)',
+          amount: data.amount || 10,
+          stages: data.diagnosticStages
+        });
+      } else {
+        const res = await fetch('/api/gateways/ottvoucher/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: clean,
+            mobile: ottMobile,
+            amount: 10
+          })
+        });
+        const data = await res.json();
+        setOttResult({
+          success: Boolean(data.success),
+          message: data.message || (data.success ? '16-Digit PIN validated with OTT Lesotho API' : 'Verification failed'),
+          receipt: `OTT-${clean.slice(-4)}`,
+          planName: 'Daily Pass (24 Hours)',
+          amount: 10,
+          stages: data.diagnosticStages
+        });
+      }
     } catch (err: any) {
       setOttResult({
         success: false,
-        message: err.message || 'Failed to reach OTT Lesotho API gateway'
+        message: err.message || 'Failed to reach OTT verification gateway'
       });
     } finally {
       setIsVerifyingOtt(false);
@@ -262,19 +265,19 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
           <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-            <div className="text-[11px] text-slate-400 mb-1">1. PayLesotho Payment</div>
-            <div className="text-sm font-bold text-emerald-400">M-Pesa &middot; EcoCash &middot; Card</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">Verified via api.paylesotho.co.ls</div>
+            <div className="text-[11px] text-slate-400 mb-1">1. PayLesotho (T-Connect)</div>
+            <div className="text-sm font-bold text-emerald-400">M-Pesa (62915) &middot; EcoCash (63165430)</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Merchant Name: T-Connect</div>
           </div>
           <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-            <div className="text-[11px] text-slate-400 mb-1">2. Copy 16-Digit OTT PIN</div>
-            <div className="text-sm font-bold text-amber-300">/api/ott/voucher/get</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">User must tap Copy PIN before redeeming</div>
+            <div className="text-[11px] text-slate-400 mb-1">2. Generate &amp; Check OTT PIN</div>
+            <div className="text-sm font-bold text-amber-300">POST /api/ott/voucher/get</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Verified via POST /ott/voucher/check</div>
           </div>
           <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
             <div className="text-[11px] text-slate-400 mb-1">3. Exact Value Redemption</div>
             <div className="text-sm font-bold text-cyan-400">{vouchers.length} OTT Redemptions</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">Enforces exact voucher-to-package amount</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">16-digit OTT Voucher only (zero internal vouchers)</div>
           </div>
         </div>
       </div>
@@ -287,16 +290,16 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
             <div className="flex items-center gap-2">
               <Ticket className="w-4 h-4 text-[#f05e17]" />
               <h2 className="text-sm font-extrabold text-white uppercase tracking-wider font-mono">
-                16-DIGIT OTT VOUCHER INSPECTOR
+                16-DIGIT OTT VOUCHER &amp; PAYLESOTHO CHECK
               </h2>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-              api.ottlesotho.com Live
+              POST /ott/voucher/check
             </span>
           </div>
 
           <p className="text-xs text-slate-400">
-            Verify official 16-digit OTT Voucher PINs in real time against the OTT Lesotho API gateway before redeeming.
+            Verify an official 16-digit OTT Voucher PIN or check a purchased OTT voucher via <code className="text-emerald-300">POST https://api.paylesotho.co.ls/ott/voucher/check</code> using <code className="text-cyan-300">unique_reference</code>.
           </p>
 
           <div className="space-y-3 font-mono text-xs">
@@ -312,25 +315,43 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               />
             </div>
 
-            <div>
-              <label className="text-slate-400 block mb-1">Subscriber Mobile Number (MSISDN)</label>
-              <input
-                type="text"
-                value={ottMobile}
-                onChange={(e) => setOttMobile(e.target.value)}
-                placeholder="26658000000"
-                className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-slate-400 block mb-1">unique_reference (PayLesotho Check)</label>
+                <input
+                  type="text"
+                  value={uniqueRefInput}
+                  onChange={(e) => setUniqueRefInput(e.target.value)}
+                  placeholder="e.g. PayRefMP123456"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-cyan-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Subscriber Mobile Number (MSISDN)</label>
+                <input
+                  type="text"
+                  value={ottMobile}
+                  onChange={(e) => setOttMobile(e.target.value)}
+                  placeholder="26658000000"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
             </div>
           </div>
 
           <button
             onClick={handleVerifyOttPin}
-            disabled={isVerifyingOtt || ottPin.length !== 16}
+            disabled={isVerifyingOtt || (ottPin.length !== 16 && !uniqueRefInput.trim())}
             className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white font-mono text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
           >
             {isVerifyingOtt ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-            <span>{isVerifyingOtt ? 'Querying api.ottlesotho.com...' : 'Verify 16-Digit OTT PIN'}</span>
+            <span>
+              {isVerifyingOtt
+                ? 'Verifying OTT Voucher...'
+                : uniqueRefInput.trim()
+                  ? 'Check OTT Voucher via POST /ott/voucher/check'
+                  : 'Verify 16-Digit OTT PIN'}
+            </span>
           </button>
 
           {ottResult && (
