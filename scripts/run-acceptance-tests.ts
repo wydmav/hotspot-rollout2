@@ -23,7 +23,9 @@ function loadRawEnv(envPath: string): Record<string, string> {
   return envMap;
 }
 
-const rawEnv = loadRawEnv(path.resolve(process.cwd(), '.env'));
+const rawEnv = fs.existsSync(path.resolve(process.cwd(), '.env'))
+  ? loadRawEnv(path.resolve(process.cwd(), '.env'))
+  : loadRawEnv(path.resolve(process.cwd(), '.env.example'));
 
 interface TestResult {
   id: string;

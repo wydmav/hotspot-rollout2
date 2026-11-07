@@ -90,13 +90,18 @@ try { require("dotenv").config(); } catch (e) {}
 const mode = process.env.RESET_MODE || "keep-routers";
 const wipeRouters = mode === "wipe-all-manual";
 const storeFile = path.join(process.cwd(), "data", "server-store.json");
+const portalStoreFile = path.join(process.cwd(), "data", "server-portal-store.json");
+const guestStoreFile = path.join(process.cwd(), "data", "portal-guest-store.json");
 
 let current = {};
-if (fs.existsSync(storeFile)) {
-  try {
-    current = JSON.parse(fs.readFileSync(storeFile, "utf-8"));
-  } catch (e) {
-    current = {};
+for (const candidate of [portalStoreFile, storeFile]) {
+  if (fs.existsSync(candidate)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      if (parsed && typeof parsed === "object") {
+        current = { ...current, ...parsed };
+      }
+    } catch (e) {}
   }
 }
 
@@ -189,7 +194,11 @@ const cleanStore = {
 };
 
 fs.writeFileSync(storeFile, JSON.stringify(cleanStore, null, 2), "utf-8");
-console.log("✅ data/server-store.json reset completed.");
+fs.writeFileSync(portalStoreFile, JSON.stringify(cleanStore, null, 2), "utf-8");
+try {
+  fs.writeFileSync(guestStoreFile, JSON.stringify({ guestEvents: [], vouchers: [], transactions: [] }, null, 2), "utf-8");
+} catch (e) {}
+console.log("✅ data/server-store.json & data/server-portal-store.json reset completed.");
 console.log("   • Payment Gateways preserved:", cleanStore.gateways.map(g => g.provider).join(", "));
 console.log("   • Adopted Routers preserved:", cleanStore.routers.length);
 console.log("   • Leads, Transactions, Vouchers & Custom Partner Groups wiped to 0.");
