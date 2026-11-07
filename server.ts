@@ -2155,24 +2155,205 @@ app.post('/api/portal/video-ads', (req: Request, res: Response) => {
   }
 });
 
+const DEFAULT_SUPABASE_URL = 'https://uxglqtcuedelmyhvgghw.supabase.co';
+const DEFAULT_OPERATOR_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_PARTNER_GROUP_NAMES = [
+  'Alliance Insurance Lesotho',
+  'Vodacom Lesotho Foundation',
+  'Econet Telecom Lesotho',
+  'Standard Lesotho Bank',
+  'Maluti Mountain Brewery',
+  'First National Bank Lesotho',
+  'Metropolitan Lesotho',
+  'LNDC Lesotho',
+  'T-Connect Internal Fleet',
+  'Lab / Test (MIKROTIK-TC)',
+  'Quarantine (Holding Group)'
+];
+
 function getSupabaseCredentials(): { url: string; key: string } {
   const url = (
     serverStore.supabaseConfig?.url ||
-    process.env.VITE_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
-    ''
+    process.env.VITE_SUPABASE_URL ||
+    DEFAULT_SUPABASE_URL
   ).trim().replace(/\/+$/, '');
   const key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     serverStore.supabaseConfig?.anonKey ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
     ''
   ).trim();
   if (!url || !key || url.includes('your-project')) {
-    return { url: '', key: '' };
+    return { url: url || DEFAULT_SUPABASE_URL, key: '' };
   }
   return { url, key };
 }
+
+// Universal Server-Side Supabase REST Upsert Helper (Syncs leads, routers, partners, OTT vouchers & transactions)
+async function syncRecordToSupabaseTable(table: string, payload: any, onConflictCol = 'id'): Promise<boolean> {
+  const { url, key } = getSupabaseCredentials();
+  if (!url || !key) return false;
+  try {
+    const res = await fetch(`${url}/rest/v1/${encodeURIComponent(table)}?on_conflict=${encodeURIComponent(onConflictCol)}`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4500)
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+app.get('/api/supabase/status', (_req: Request, res: Response) => {
+  const { url, key } = getSupabaseCredentials();
+  res.json({
+    success: true,
+    url: url || DEFAULT_SUPABASE_URL,
+    anonKey: serverStore.supabaseConfig?.anonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+    isConfigured: Boolean(url && key),
+    projectRef: 'uxglqtcuedelmyhvgghw'
+  });
+});
+
+app.post('/api/supabase/config', (req: Request, res: Response) => {
+  const { url, anonKey } = req.body || {};
+  const cleanUrl = String(url || DEFAULT_SUPABASE_URL).trim().replace(/\/+$/, '');
+  const cleanKey = String(anonKey || '').trim();
+  if (cleanUrl && cleanKey) {
+    serverStore.supabaseConfig = { url: cleanUrl, anonKey: cleanKey };
+    saveServerPortalStore(serverStore);
+  }
+  res.json({
+    success: true,
+    url: cleanUrl,
+    isConfigured: Boolean(cleanUrl && cleanKey)
+  });
+});
+
+app.post('/api/supabase/sync-all', async (req: Request, res: Response) => {
+  const { url, anonKey } = req.body || {};
+  if (url && anonKey) {
+    serverStore.supabaseConfig = {
+      url: String(url).trim().replace(/\/+$/, ''),
+      anonKey: String(anonKey).trim()
+    };
+    saveServerPortalStore(serverStore);
+  }
+  const creds = getSupabaseCredentials();
+  if (!creds.url || !creds.key) {
+    return res.status(400).json({
+      success: false,
+      message: 'Supabase URL or API Key not configured yet.'
+    });
+  }
+
+  // Sync server-captured guest leads
+  const leadRows = (serverStore.guestEvents || []).slice(0, 200).map((ev: any) => ({
+    id: `lead_${ev.id}`,
+    operator_id: DEFAULT_OPERATOR_ID,
+    first_name: ev.firstName || String(ev.guestName || 'Guest').split(' ')[0] || 'Guest',
+    last_name: ev.lastName || String(ev.guestName || '').split(' ').slice(1).join(' ') || '',
+    full_name: ev.guestName || `${ev.firstName || 'Guest'} ${ev.lastName || ''}`.trim(),
+    country_code: ev.countryCode === '+27' ? '+27' : '+266',
+    phone: ev.phone || ev.guestPhone || '',
+    full_phone: ev.guestPhone || ev.phone || '',
+    email: ev.email || '',
+    router_name: ev.routerName || 'MIKROTIK-TC',
+    site_name: ev.siteName || 'T-Connect Hotspot',
+    vertical: ev.scope || ev.vertical || 'hotspot',
+    client_mac: ev.mac || ev.clientMac || 'AUTO',
+    client_ip: ev.ip || ev.clientIp || '10.10.0.1',
+    device_type: ev.deviceType || 'Mobile',
+    duration_minutes: ev.mode === 'free' ? 0 : Math.round((Number(ev.durationSeconds) || 86400) / 60),
+    status: 'active',
+    captured_at: ev.capturedAt || new Date().toISOString()
+  }));
+  if (leadRows.length > 0) {
+    await syncRecordToSupabaseTable('guest_leads', leadRows, 'id');
+  }
+
+  // Sync issued PayLesotho 16-digit OTT vouchers
+  const ottRows = (serverStore.issuedPayLesothoOttVouchers || []).slice(0, 200).map((v: any) => ({
+    pin: v.pin,
+    operator_id: DEFAULT_OPERATOR_ID,
+    amount: Number(v.amount || 10),
+    currency: v.currency || 'LSL',
+    transaction_ref: v.paymentRef || v.transactionId || `OTT-${Date.now()}`,
+    plan_id: v.planId || 'hs_1d',
+    plan_name: v.planName || 'Daily Pass',
+    msisdn: v.mobileNumber || '',
+    payment_method: v.channel || 'ecocash',
+    status: v.status === 'redeemed' ? 'redeemed' : 'unused',
+    issued_at: v.issuedAt || new Date().toISOString(),
+    redeemed_at: v.redeemedAt || null
+  }));
+  if (ottRows.length > 0) {
+    await syncRecordToSupabaseTable('ott_vouchers_issued', ottRows, 'pin');
+  }
+
+  res.json({
+    success: true,
+    syncedLeads: leadRows.length,
+    syncedOttVouchers: ottRows.length,
+    url: creds.url
+  });
+});
+
+// Partner / Sponsor Groups Registry Endpoints
+app.get('/api/partner-groups', (_req: Request, res: Response) => {
+  const customList: string[] = Array.isArray((serverStore as any).partnerGroups)
+    ? (serverStore as any).partnerGroups
+    : [];
+  const merged = Array.from(new Set([...customList, ...DEFAULT_PARTNER_GROUP_NAMES]));
+  res.json({
+    success: true,
+    partnerGroups: merged
+  });
+});
+
+app.post('/api/partner-groups', async (req: Request, res: Response) => {
+  const { name, group } = req.body || {};
+  const groupName = String(name || group?.name || '').trim();
+  if (!groupName) {
+    return res.status(400).json({ success: false, message: 'Partner / Sponsor Group name is required.' });
+  }
+  const current: string[] = Array.isArray((serverStore as any).partnerGroups)
+    ? (serverStore as any).partnerGroups
+    : [...DEFAULT_PARTNER_GROUP_NAMES];
+  if (!current.some((n) => n.toLowerCase() === groupName.toLowerCase())) {
+    current.unshift(groupName);
+  }
+  (serverStore as any).partnerGroups = current;
+  saveServerPortalStore(serverStore);
+
+  const groupRow = {
+    id: group?.id || `grp_${groupName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+    operator_id: DEFAULT_OPERATOR_ID,
+    name: groupName,
+    tag: group?.tag || `group:${groupName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    custom_bg_url: group?.customBgUrl || '',
+    client_contact: group?.clientContact || 'admin@tconnect.africa',
+    accent_color: group?.accentColor || '#f05e17',
+    description: group?.description || `Sponsored partner group: ${groupName}`,
+    router_count: Number(group?.routerCount || 0)
+  };
+  void syncRecordToSupabaseTable('partner_groups', groupRow, 'id');
+
+  res.json({
+    success: true,
+    name: groupName,
+    partnerGroups: Array.from(new Set([...current, ...DEFAULT_PARTNER_GROUP_NAMES]))
+  });
+});
 
 // Authoritative GET /api/gateways endpoint — masks secrets to last-4 chars by default (E1 Control 3)
 app.get('/api/gateways', (_req: Request, res: Response) => {
@@ -3248,6 +3429,23 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
 
   const formattedPin = `${issuedPin.slice(0, 4)}-${issuedPin.slice(4, 8)}-${issuedPin.slice(8, 12)}-${issuedPin.slice(12, 16)}`;
   tx.ottVoucherPin = issuedPin;
+  void syncRecordToSupabaseTable(
+    'ott_vouchers_issued',
+    {
+      pin: record.pin,
+      operator_id: DEFAULT_OPERATOR_ID,
+      amount: record.amount,
+      currency: record.currency || 'LSL',
+      transaction_ref: record.paymentRef,
+      plan_id: record.planId,
+      plan_name: record.planName,
+      msisdn: record.mobileNumber,
+      payment_method: record.channel,
+      status: 'unused',
+      issued_at: record.issuedAt
+    },
+    'pin'
+  );
   tx.voucherCodeIssued = formattedPin;
   tx.ottVoucherSource = source;
   tx.debugLogs = {
@@ -3957,7 +4155,8 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
   }
 
   const targetAmount = Number(expectedAmount || amount || 0);
-  const strictExact = targetAmount > 0;
+  const flexibleAmount = Boolean(req.body?.flexibleAmount);
+  const strictExact = !flexibleAmount && targetAmount > 0;
   const subscriberMobile = guestPhone || (phone ? `${countryCode || '+266'}${phone}` : '26658000000');
 
   const ottCheck = await verify16DigitOttVoucher(digitsOnly, targetAmount || 10, 'M', subscriberMobile, {
@@ -4074,6 +4273,48 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     serverStore.guestEvents.unshift(entry);
     saveServerPortalStore(serverStore);
     dispatchPartnerWebhooksForLead(entry).catch(() => {});
+    void syncRecordToSupabaseTable(
+      'guest_leads',
+      {
+        id: `lead_${entry.id}`,
+        operator_id: DEFAULT_OPERATOR_ID,
+        first_name: entry.firstName || 'Guest',
+        last_name: entry.lastName || '',
+        full_name: entry.guestName || 'OTT Customer',
+        country_code: entry.countryCode || '+266',
+        phone: entry.phone || entry.guestPhone || '',
+        full_phone: entry.guestPhone || '',
+        email: entry.email || '',
+        router_name: entry.routerName || 'MIKROTIK-TC',
+        site_name: entry.siteName || 'T-Connect Hotspot',
+        vertical: entry.scope || 'hotspot',
+        client_mac: entry.mac || 'AUTO',
+        client_ip: entry.ip || '10.10.0.1',
+        device_type: 'Mobile',
+        duration_minutes: Math.round((Number(entry.durationSeconds) || 86400) / 60),
+        status: 'active',
+        captured_at: nowIso
+      },
+      'id'
+    );
+    void syncRecordToSupabaseTable(
+      'transactions',
+      {
+        id: txRecord.id,
+        operator_id: DEFAULT_OPERATOR_ID,
+        transaction_ref: txRecord.transactionRef,
+        provider: 'ottvoucher',
+        msisdn: txRecord.phoneNumber || '+266',
+        plan_name: txRecord.planName,
+        site_name: txRecord.siteName,
+        amount: txRecord.amount,
+        currency: 'M',
+        status: 'completed',
+        voucher_code: txRecord.voucherCodeIssued,
+        ott_voucher_pin: digitsOnly
+      },
+      'id'
+    );
 
     return res.json({
       success: true,
@@ -4195,6 +4436,30 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   if (serverStore.guestEvents.length > 250) serverStore.guestEvents.pop();
   saveServerPortalStore(serverStore);
   dispatchPartnerWebhooksForLead(entry).catch(() => {});
+  void syncRecordToSupabaseTable(
+    'guest_leads',
+    {
+      id: `lead_${entry.id}`,
+      operator_id: DEFAULT_OPERATOR_ID,
+      first_name: entry.firstName || String(entry.guestName || 'Guest').split(' ')[0] || 'Guest',
+      last_name: entry.lastName || String(entry.guestName || '').split(' ').slice(1).join(' ') || '',
+      full_name: entry.guestName || `${entry.firstName || 'Guest'} ${entry.lastName || ''}`.trim(),
+      country_code: entry.countryCode === '+27' ? '+27' : '+266',
+      phone: entry.phone || entry.guestPhone || '',
+      full_phone: entry.guestPhone || entry.phone || '',
+      email: entry.email || '',
+      router_name: entry.routerName || 'MIKROTIK-TC',
+      site_name: entry.siteName || 'T-Connect Hotspot',
+      vertical: entry.scope || 'hotspot',
+      client_mac: entry.mac || 'AUTO',
+      client_ip: entry.ip || '10.10.0.1',
+      device_type: entry.deviceType || 'Mobile',
+      duration_minutes: entry.mode === 'free' ? 0 : Math.round((Number(entry.durationSeconds) || 86400) / 60),
+      status: 'active',
+      captured_at: nowIso
+    },
+    'id'
+  );
   res.json({ success: true, isRoaming: false, entry });
 });
 
@@ -6455,10 +6720,32 @@ app.get('/api/devices/:routerId/access-policy', (req: Request, res: Response) =>
 
 app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) => {
   const routerId = req.params.routerId;
-  const { accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb } = req.body;
-  const router = monitoredRouters.get(routerId);
-  const routerName = router?.name || `MikroTik-${routerId.slice(-6)}`;
-  const host = req.get('host') || '127.0.0.1:3000';
+  const { accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb, router: clientRouter } = req.body || {};
+  let router = monitoredRouters.get(routerId);
+  if (!router && clientRouter && typeof clientRouter === 'object') {
+    router = {
+      id: routerId,
+      name: clientRouter.name || `MikroTik-${routerId.slice(-6)}`,
+      siteName: clientRouter.siteName || 'Hotspot Site',
+      vertical: clientRouter.vertical || 'hotspot',
+      status: clientRouter.status || 'online',
+      publicWanIp: clientRouter.publicWanIp || '127.0.0.1',
+      wireguardIp: clientRouter.wireguardIp || '10.99.1.50',
+      lastHeartbeat: clientRouter.lastHeartbeat || 'Just now',
+      lastHeartbeatTimestamp: Date.now(),
+      uptime: clientRouter.uptime || '1h',
+      cpuLoad: clientRouter.cpuLoad || 3,
+      memoryUsage: clientRouter.memoryUsage || 20,
+      activeSessions: clientRouter.activeSessions || 0,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291,
+      accessMode: 'PAID_ONLY'
+    };
+    monitoredRouters.set(routerId, router);
+  }
+  const routerName = router?.name || clientRouter?.name || `MikroTik-${routerId.slice(-6)}`;
+  const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const portalBaseUrl = `${protocol}://${host}`;
 
@@ -6467,9 +6754,11 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
   const rateLimit = freeRateLimit || '10M/30M';
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
+  const allowFree = validMode !== 'PAID_ONLY';
 
   if (router) {
     router.accessMode = validMode;
+    (router as any).freeModeEnabled = allowFree;
     router.freeDurationMinutes = duration;
     router.freeRateLimit = rateLimit;
     router.freeDailyQuotaMb = quota;
@@ -6504,20 +6793,22 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     portalBaseUrl
   });
 
+  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+
   // Extract commands for immediate remote execution or queueing on next heartbeat
-  const commands = script
+  const commands = `${script}\n${splashSyncScript}`
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'));
 
   if (router) {
     router.pendingCommands = commands;
+    persistMonitoredRoutersToStore();
   }
 
   // Also synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
   try {
     const existingConfigs = loadSavedPortalConfigs();
-    const allowFree = validMode !== 'PAID_ONLY';
     Object.keys(existingConfigs).forEach((k) => {
       if (existingConfigs[k] && typeof existingConfigs[k] === 'object') {
         existingConfigs[k].allowFreeAccess = allowFree;
@@ -6535,31 +6826,108 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     target: routerName,
     routerId,
     routerName,
-    details: `Access policy updated to ${validMode} (${validMode === 'PAID_ONLY' ? 'Vouchers/Paid Only' : `${duration}m free trial @ ${rateLimit}`}). Pushed to router.`,
+    details: `Real-time access policy updated to ${validMode} (${validMode === 'PAID_ONLY' ? 'Strictly Paid / Vouchers Only' : validMode === 'COMPLETELY_FREE' ? '100% Free Mode ON' : `${duration}m Free Trial + Paid`}). Queued ${commands.length} RouterOS commands.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       accessMode: validMode,
+      allowFreeAccess: allowFree,
       freeDurationMinutes: duration,
       freeRateLimit: rateLimit,
       commandCount: commands.length
     }
   });
 
-  console.log(`[Access Policy] Router ${routerId} (${routerName}) set to ${validMode}. Generated ${commands.length} commands.`);
-
   res.json({
     success: true,
     routerId,
     routerName,
     accessMode: validMode,
+    allowFreeAccess: allowFree,
     freeDurationMinutes: duration,
     freeRateLimit: rateLimit,
     freeDailyQuotaMb: quota,
     appliedAt: now,
-    script,
+    script: `${script}\n\n# --- FULL SPLASH & AD REAL-TIME SYNC ---\n${splashSyncScript}`,
     commandCount: commands.length,
-    message: `Access policy '${validMode}' successfully applied and queued for remote router sync.`
+    message: `Real-time policy '${validMode}' applied to ${routerName} and queued for immediate RouterOS execution.`
+  });
+});
+
+// Per-Router Real-Time Full Sync Endpoint (pushes current Free/Paid policy, splash branding, ads, plans & walled garden to a specific adopted router)
+app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const { router: clientRouter, accessMode: overrideMode } = req.body || {};
+  let router = monitoredRouters.get(routerId);
+  if (!router && clientRouter && typeof clientRouter === 'object') {
+    router = {
+      id: routerId,
+      name: clientRouter.name || `MikroTik-${routerId.slice(-6)}`,
+      siteName: clientRouter.siteName || 'Hotspot Site',
+      vertical: clientRouter.vertical || 'hotspot',
+      status: clientRouter.status || 'online',
+      publicWanIp: clientRouter.publicWanIp || '127.0.0.1',
+      wireguardIp: clientRouter.wireguardIp || '10.99.1.50',
+      lastHeartbeat: clientRouter.lastHeartbeat || 'Just now',
+      lastHeartbeatTimestamp: Date.now(),
+      uptime: clientRouter.uptime || '1h',
+      cpuLoad: clientRouter.cpuLoad || 3,
+      memoryUsage: clientRouter.memoryUsage || 20,
+      activeSessions: clientRouter.activeSessions || 0,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291,
+      accessMode: clientRouter.accessMode || 'PAID_ONLY'
+    };
+    monitoredRouters.set(routerId, router);
+  }
+
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = `${protocol}://${host}`;
+  const nowIso = new Date().toISOString();
+
+  const resolvedMode = overrideMode || router?.accessMode || clientRouter?.accessMode || 'PAID_ONLY';
+  const allowFree = resolvedMode !== 'PAID_ONLY';
+  if (router) {
+    router.accessMode = resolvedMode;
+    (router as any).freeModeEnabled = allowFree;
+  }
+
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const syncCommands = fullSyncScript
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+
+  if (router) {
+    router.pendingCommands = syncCommands;
+    router.policyLastSyncedAt = nowIso;
+    persistMonitoredRoutersToStore();
+  }
+
+  const routerName = router?.name || clientRouter?.name || `MikroTik-${routerId.slice(-6)}`;
+  recordServerAudit({
+    category: 'router_config',
+    action: 'router.sync_realtime',
+    target: routerName,
+    routerId,
+    routerName,
+    details: `Real-time router sync triggered for ${routerName} (Mode: ${resolvedMode}, Free Access: ${allowFree ? 'ON' : 'OFF'}, ${syncCommands.length} commands queued).`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    routerId,
+    routerName,
+    accessMode: resolvedMode,
+    allowFreeAccess: allowFree,
+    commandCount: syncCommands.length,
+    cliScript: fullSyncScript,
+    syncedAt: nowIso,
+    message: `Real-time sync queued for ${routerName} (${syncCommands.length} RouterOS commands, Free Mode: ${allowFree ? 'ON' : 'OFF'}).`
   });
 });
 
@@ -7799,7 +8167,7 @@ app.post('/api/webhooks/:provider', (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
-// PRODUCTION ZERO-STATE RESET ENDPOINT (Wipes test transactions & leads, preserves routers by default)
+// PRODUCTION ZERO-STATE RESET ENDPOINT (Wipes manual leads, partners, transactions & vouchers; ALWAYS preserves Payment Gateways)
 // -----------------------------------------------------------------------------
 app.post('/api/admin/reset-production', (req: Request, res: Response) => {
   const wipeRouters = Boolean(req.body?.wipeRouters);
@@ -7808,6 +8176,8 @@ app.post('/api/admin/reset-production', (req: Request, res: Response) => {
   serverStore.vouchers = [];
   serverStore.redeemedOttPins = [];
   serverStore.issuedPayLesothoOttVouchers = [];
+  (serverStore as any).partnerGroups = [...DEFAULT_PARTNER_GROUP_NAMES];
+  (serverStore as any).partnerApiKeys = [];
   if (wipeRouters) {
     monitoredRouters.clear();
     serverStore.routers = [];
@@ -7820,9 +8190,10 @@ app.post('/api/admin/reset-production', (req: Request, res: Response) => {
     success: true,
     resetAt: new Date().toISOString(),
     preservedRoutersCount: monitoredRouters.size,
+    preservedGateways: serverStore.gateways.map((g: any) => g.provider),
     message: wipeRouters
-      ? 'Production zero-state reset complete: 0 hotspots, 0 transactions, 0 active sessions, 0 guest leads.'
-      : `Production reset complete: test transactions & guest sessions cleared (${monitoredRouters.size} router(s) preserved and connected).`
+      ? 'Production zero-state reset complete: 0 routers, 0 leads, 0 custom partners, 0 transactions, 0 vouchers. Payment Gateways preserved.'
+      : `Production reset complete: leads, custom partner groups, transactions & vouchers cleared (${monitoredRouters.size} router(s) and Payment Gateways preserved).`
   });
 });
 

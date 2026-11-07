@@ -366,8 +366,107 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
   }
 ];
 
-// Seeded E10 Default Groups: Lab / Test (SSID: MIKROTIK-TC) and Quarantine (Default for new routers)
+// Seeded Default & Well-Known Partner / Sponsor Groups
 export const STARTER_TENANT_GROUPS: TenantGroup[] = [
+  {
+    id: 'grp_alliance',
+    name: 'Alliance Insurance Lesotho',
+    tag: 'group:alliance-insurance',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'marketing@alliance.co.ls',
+    accentColor: '#f05e17',
+    description: 'Sponsored motor, business & life cover hotspot network across Lesotho.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_vodacom_fdn',
+    name: 'Vodacom Lesotho Foundation',
+    tag: 'group:vodacom-foundation',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
+    clientContact: 'foundation@vodacom.co.ls',
+    accentColor: '#ef4444',
+    description: 'Community connectivity, education & M-Pesa digital inclusion hotspots.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_econet',
+    name: 'Econet Telecom Lesotho',
+    tag: 'group:econet-lesotho',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'partners@etl.co.ls',
+    accentColor: '#3b82f6',
+    description: 'EcoCash & transit corridor Wi-Fi sponsorship across Lesotho districts.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_standard_bank',
+    name: 'Standard Lesotho Bank',
+    tag: 'group:standard-bank',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
+    clientContact: 'digital@stanbic.com',
+    accentColor: '#2563eb',
+    description: 'Commercial plaza, ATM & enterprise branch hotspot sponsor group.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_mmb',
+    name: 'Maluti Mountain Brewery',
+    tag: 'group:maluti-brewery',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'brands@mmb.co.ls',
+    accentColor: '#eab308',
+    description: 'Hospitality, cafes, stadiums & entertainment venue Wi-Fi sponsor.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_fnb',
+    name: 'First National Bank Lesotho',
+    tag: 'group:fnb-lesotho',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
+    clientContact: 'info@fnb.co.ls',
+    accentColor: '#14b8a6',
+    description: 'Retail mall & SME hub sponsored Wi-Fi zones.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_metropolitan',
+    name: 'Metropolitan Lesotho',
+    tag: 'group:metropolitan-lesotho',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'care@metropolitan.co.ls',
+    accentColor: '#ec4899',
+    description: 'Financial wellness & community hub hotspot sponsorship.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_lndc',
+    name: 'LNDC Lesotho',
+    tag: 'group:lndc-lesotho',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
+    clientContact: 'info@lndc.org.ls',
+    accentColor: '#10b981',
+    description: 'Industrial estate & commercial trade center connectivity.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_internal',
+    name: 'T-Connect Internal Fleet',
+    tag: 'group:tconnect-internal',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'rphooko@tconnect.africa',
+    accentColor: '#f05e17',
+    description: 'Sovereign T-Connect operated Starlink & MikroTik hotspot fleet.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
   {
     id: 'grp_lab_test',
     name: 'Lab / Test (MIKROTIK-TC)',
@@ -1039,6 +1138,8 @@ class StorageService {
     vouchers?: Voucher[];
     transactions?: PaymentTransaction[];
     plans?: HotspotPlan[];
+    captiveLeads?: CaptivePortalLead[];
+    tenantGroups?: TenantGroup[];
   }) {
     if (data.routers !== undefined) {
       this.state.routers = data.routers;
@@ -1051,6 +1152,18 @@ class StorageService {
     }
     if (data.plans !== undefined && data.plans.length > 0) {
       this.state.plans = data.plans;
+    }
+    if (data.captiveLeads !== undefined && data.captiveLeads.length > 0) {
+      this.state.captiveLeads = data.captiveLeads;
+    }
+    if (data.tenantGroups !== undefined && data.tenantGroups.length > 0) {
+      const mergedGroups = [...STARTER_TENANT_GROUPS];
+      data.tenantGroups.forEach((g) => {
+        if (!mergedGroups.some((mg) => mg.name.toLowerCase() === g.name.toLowerCase())) {
+          mergedGroups.unshift(g);
+        }
+      });
+      this.state.tenantGroups = mergedGroups;
     }
     this.saveState();
     this.checkVoucherStock();
@@ -1456,22 +1569,38 @@ class StorageService {
   // External Client Groups (Tenant Brands) Management
   // ---------------------------------------------------------------------------
   getTenantGroups(): TenantGroup[] {
-    const groups = this.state.tenantGroups || STARTER_TENANT_GROUPS;
-    return groups.map(g => ({
+    const stored = Array.isArray(this.state.tenantGroups) ? this.state.tenantGroups : [];
+    const merged: TenantGroup[] = [...stored];
+    STARTER_TENANT_GROUPS.forEach((starter) => {
+      if (!merged.some((g) => g.name.toLowerCase() === starter.name.toLowerCase())) {
+        merged.push(starter);
+      }
+    });
+    return merged.map(g => ({
       ...g,
-      routerCount: this.state.routers.filter(r => r.tenantGroupId === g.id || (r.tags && r.tags.includes(g.tag))).length
+      routerCount: this.state.routers.filter(r => r.tenantGroupId === g.id || r.partnerName === g.name || (r.tags && r.tags.includes(g.tag))).length
     }));
   }
 
   createTenantGroup(group: Omit<TenantGroup, 'id' | 'createdAt'>): TenantGroup {
+    const cleanName = group.name.trim();
+    const existing = this.getTenantGroups().find(
+      (g) => g.name.toLowerCase() === cleanName.toLowerCase()
+    );
+    if (existing) {
+      return existing;
+    }
     const id = `grp_${Date.now()}`;
     const newGroup: TenantGroup = {
       ...group,
+      name: cleanName,
       id,
       createdAt: new Date().toISOString().slice(0, 10),
       routerCount: 0
     };
-    if (!this.state.tenantGroups) this.state.tenantGroups = [];
+    if (!this.state.tenantGroups || this.state.tenantGroups.length === 0) {
+      this.state.tenantGroups = [...STARTER_TENANT_GROUPS];
+    }
     this.state.tenantGroups.unshift(newGroup);
     this.logAudit({
       actor: 'Admin',
@@ -1479,9 +1608,16 @@ class StorageService {
       category: 'security',
       action: 'tenant.create',
       target: newGroup.name,
-      details: `Registered external client group '${newGroup.name}' with policy tag '${newGroup.tag}'.`
+      details: `Registered external client / sponsor group '${newGroup.name}' with policy tag '${newGroup.tag}'.`
     });
     this.saveState();
+    if (typeof window !== 'undefined') {
+      fetch('/api/partner-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group: newGroup })
+      }).catch(() => {});
+    }
     return newGroup;
   }
 

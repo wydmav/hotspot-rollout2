@@ -154,11 +154,15 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
 
-  // Plan & Payment State (PayLesotho Aggregator & Official 16-Digit OTT Voucher)
+  // Plan & Payment State (PayLesotho XPayments OTT Voucher & Official 16-Digit OTT Voucher)
   const enabledPlans = currentConfig.plans.filter((p) => p.enabled !== false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     () => enabledPlans[0]?.id || currentConfig.plans[0]?.id || 'hs_1d'
   );
+  const [voucherAmountLsl, setVoucherAmountLsl] = useState<number>(
+    () => enabledPlans[0]?.price || currentConfig.plans[0]?.price || 10
+  );
+  const [customAmountInput, setCustomAmountInput] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<'paylesotho' | 'ottvoucher'>('paylesotho');
   const [payLesothoChannel, setPayLesothoChannel] = useState<'ecocash' | 'mpesa' | 'card'>('ecocash');
   const [ottPin, setOttPin] = useState('');
@@ -798,11 +802,25 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
 
     const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
-    const expectedPrice = selectedPlan?.price || issuedOttVoucherAmount || 10;
+    const expectedPrice = issuedOttVoucherAmount || voucherAmountLsl || selectedPlan?.price || 10;
+    const resolvedDurationSec =
+      expectedPrice >= 250
+        ? 2592000
+        : expectedPrice >= 50
+          ? 604800
+          : expectedPrice >= 10
+            ? 86400
+            : expectedPrice >= 5
+              ? 43200
+              : 14400;
+    const resolvedPlanTitle =
+      selectedPlan && selectedPlan.price === expectedPrice
+        ? selectedPlan.name
+        : `OTT Voucher Pass (LSL ${expectedPrice})`;
 
     isConnectingRef.current = true;
     setIsConnecting(true);
-    setStatusBanner(`Redeeming OTT Voucher (M${expectedPrice}) & activating connectivity...`);
+    setStatusBanner(`Redeeming 16-digit OTT Voucher (LSL ${expectedPrice}) & activating connectivity...`);
 
     try {
       const response = await fetch('/api/vouchers/redeem', {
@@ -811,7 +829,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         body: JSON.stringify({
           code: cleanPinToRedeem,
           expectedAmount: expectedPrice,
+          flexibleAmount: true,
           requireCopiedFirst: true,
+          planId: selectedPlan?.id || 'hs_1d',
+          planName: resolvedPlanTitle,
+          durationSeconds: resolvedDurationSec,
           mac: clientMac,
           ip: clientIp,
           scope: activeScope,
@@ -838,8 +860,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       await syncGuestSessionToAdmin({
         mode: 'paylesotho',
-        planName: selectedPlan?.name || 'Daily Pass',
-        durationSeconds: selectedPlan?.durationSeconds || 86400,
+        planName: resolvedPlanTitle,
+        durationSeconds: resolvedDurationSec,
         voucherCode: formattedIssuedPin,
         amount: expectedPrice,
         transactionRef: data.transactionRef || issuedOttVoucherRef || undefined,
@@ -952,13 +974,19 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       return;
     }
 
-    // PayLesotho Aggregator Flow (EcoCash, Vodacom M-Pesa, Card/EFT via XPayments)
+    // PayLesotho XPayments OTT Voucher Purchase Flow (EcoCash 63165430, Vodacom M-Pesa 62915, Card)
+    const purchaseAmount = Math.max(1, Number(voucherAmountLsl || selectedPlan?.price || 10));
+    const purchasePlanName =
+      selectedPlan && selectedPlan.price === purchaseAmount
+        ? selectedPlan.name
+        : `OTT Voucher (LSL ${purchaseAmount})`;
+
     setStatusBanner(
       payLesothoChannel === 'card'
         ? 'Connecting to PayLesotho XPayments secure checkout...'
         : payLesothoChannel === 'mpesa'
-          ? `Initiating Vodacom M-Pesa (*111#) payment prompt (M${selectedPlan?.price || 10}) for ${guestCountryCode} ${guestPhone}...`
-          : `Initiating Econet EcoCash (*199#) payment prompt (M${selectedPlan?.price || 10}) for ${guestCountryCode} ${guestPhone}...`
+          ? `Initiating Vodacom M-Pesa (*111#) payment (LSL ${purchaseAmount}) for ${guestCountryCode} ${guestPhone} -> Generating 16-digit OTT Voucher...`
+          : `Initiating Econet EcoCash (*199#) payment (LSL ${purchaseAmount}) for ${guestCountryCode} ${guestPhone} -> Generating 16-digit OTT Voucher...`
     );
 
     try {
@@ -966,13 +994,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount: selectedPlan?.price || 10,
+          amount: purchaseAmount,
           channel: payLesothoChannel,
           phoneNumber: `${guestCountryCode} ${guestPhone.trim()}`,
           customerName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'T-Connect Guest',
           customerEmail: guestEmail.trim() || 'guest@tconnect.co.ls',
           planId: selectedPlan?.id || 'hs_1d',
-          planName: selectedPlan?.name || 'Daily Pass',
+          planName: purchasePlanName,
           clientMac,
           clientIp,
           vertical: activeScope,
@@ -991,7 +1019,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       if (data.status === 'completed' && data.ottVoucherPin) {
         const generatedPin = String(data.ottVoucherPin || '').replace(/\D/g, '');
-        const voucherAmt = Number(data.amount) || selectedPlan?.price || 10;
+        const voucherAmt = Number(data.amount) || purchaseAmount;
         setIssuedOttVoucherPin(generatedPin);
         setIssuedOttVoucherAmount(voucherAmt);
         setIssuedOttVoucherRef(data.reference || data.transactionId);
@@ -1672,7 +1700,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                         return (
                           <label
                             key={plan.id}
-                            onClick={() => setSelectedPlanId(plan.id)}
+                            onClick={() => {
+                              setSelectedPlanId(plan.id);
+                              setVoucherAmountLsl(plan.price);
+                              setCustomAmountInput('');
+                            }}
                             className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
                               isSelected
                                 ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
@@ -1683,7 +1715,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                               <input
                                 type="radio"
                                 checked={isSelected}
-                                onChange={() => setSelectedPlanId(plan.id)}
+                                onChange={() => {
+                                  setSelectedPlanId(plan.id);
+                                  setVoucherAmountLsl(plan.price);
+                                  setCustomAmountInput('');
+                                }}
                                 className="accent-[#f05e17]"
                               />
                               <div>
@@ -1701,7 +1737,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                               </div>
                             </div>
                             <div className="text-xs font-black font-mono tabular-nums text-amber-400">
-                              {currencySymbol}{plan.price}
+                              LSL {plan.price}
                             </div>
                           </label>
                         );
@@ -1714,14 +1750,16 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       type="button"
                       disabled={!isTermsSatisfied || !isGuestFormValid}
                       onClick={() => {
+                        const selPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+                        if (selPlan) setVoucherAmountLsl(selPlan.price);
                         setPaymentError(null);
                         setIssuedOttVoucherPin(null);
                         setHasCopiedIssuedOttVoucher(false);
                         setPortalStep('payment');
                       }}
-                      className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      <span>Continue to PayLesotho Payment</span>
+                      <span>⚡ Buy OTT Voucher (PayLesotho EcoCash / M-Pesa)</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -1763,67 +1801,94 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
               {issuedOttVoucherPin ? (
                 /* ============================================================= */
-                /* STEP 4b & 5: COPY ISSUED OTT VOUCHER -> REDEEM IN PORTAL      */
+                /* STEP 4b & 5: COPY ISSUED OTT VOUCHER -> PASTE & REDEEM        */
                 /* ============================================================= */
                 <div className="space-y-2.5 pt-1">
-                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 space-y-1.5">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold text-emerald-300 uppercase font-mono">
-                        Payment Verified ({currencySymbol}{issuedOttVoucherAmount})
+                        ✓ OTT Voucher Generated (LSL {issuedOttVoucherAmount})
                       </span>
-                      <span className="text-[9px] font-mono text-slate-300">
-                        16-Digit OTT Voucher Issued
+                      <span className="text-[9px] font-mono text-emerald-200 bg-emerald-500/20 px-1.5 py-0.5 rounded">
+                        16-Digit PIN Ready
                       </span>
                     </div>
-                    <div className="p-2 rounded-lg bg-black/70 border border-emerald-400/40 text-center font-mono text-sm font-black tracking-widest text-emerald-400 select-all">
+
+                    <div className="p-2.5 rounded-lg bg-black/80 border border-emerald-400/50 text-center font-mono text-sm font-black tracking-widest text-emerald-400 select-all">
                       {issuedOttVoucherPin.replace(/\D/g, '').match(/.{1,4}/g)?.join(' ') || issuedOttVoucherPin}
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyIssuedOttVoucher}
-                      className={`w-full py-1.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        hasCopiedIssuedOttVoucher
-                          ? 'bg-emerald-500/25 border border-emerald-400 text-emerald-200'
-                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow'
-                      }`}
-                    >
-                      {hasCopiedIssuedOttVoucher ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-300" />
-                          <span>Step 1 Complete: OTT Voucher Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Step 1: Copy OTT Voucher PIN</span>
-                        </>
-                      )}
-                    </button>
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleCopyIssuedOttVoucher}
+                        className={`py-1.5 px-2.5 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          hasCopiedIssuedOttVoucher
+                            ? 'bg-emerald-500/25 border border-emerald-400 text-emerald-200'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow'
+                        }`}
+                      >
+                        {hasCopiedIssuedOttVoucher ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-300" />
+                            <span>PIN Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>1. Copy Voucher PIN</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!hasCopiedIssuedOttVoucher) {
+                            await handleCopyIssuedOttVoucher();
+                          }
+                          const formatted =
+                            issuedOttVoucherPin.replace(/\D/g, '').slice(0, 16).match(/.{1,4}/g)?.join(' ') ||
+                            issuedOttVoucherPin;
+                          setRedeemIssuedPinInput(formatted);
+                        }}
+                        className="py-1.5 px-2.5 rounded-lg font-bold text-[11px] bg-[#161d31] hover:bg-[#1f2942] border border-emerald-500/40 text-emerald-300 flex items-center justify-center gap-1 transition-all cursor-pointer"
+                      >
+                        <span>2. Paste to Redeem</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-0.5">
                       <label className="text-[10px] font-medium text-slate-300">
-                        Step 2: Paste &amp; Redeem OTT Voucher ({currencySymbol}{issuedOttVoucherAmount})
+                        Paste 16-Digit OTT Voucher PIN to Connect (LSL {issuedOttVoucherAmount})
                       </label>
                       <span className="text-[9px] font-mono text-emerald-400">
-                        {hasCopiedIssuedOttVoucher ? 'Ready to redeem' : 'Copy PIN above first'}
+                        {redeemIssuedPinInput.replace(/\D/g, '').length}/16 digits
                       </span>
                     </div>
                     <input
                       type="text"
                       inputMode="numeric"
                       maxLength={19}
-                      disabled={!hasCopiedIssuedOttVoucher}
                       value={redeemIssuedPinInput}
                       onChange={(e) => {
                         const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
                         const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
                         setRedeemIssuedPinInput(formatted);
+                        if (onlyDigits.length === 16 && !hasCopiedIssuedOttVoucher) {
+                          setHasCopiedIssuedOttVoucher(true);
+                          fetch('/api/gateways/paylesotho/ott-voucher/mark-copied', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ pin: issuedOttVoucherPin })
+                          }).catch(() => {});
+                        }
                         setPaymentError(null);
                       }}
-                      placeholder={hasCopiedIssuedOttVoucher ? '1234 5678 9012 3456' : 'Click "Copy OTT Voucher PIN" above first'}
-                      className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 disabled:opacity-50 rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
+                      placeholder="Paste 16-digit OTT PIN here (e.g. 1234 5678 9012 3456)"
+                      className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
                     />
                   </div>
 
@@ -1841,12 +1906,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isConnecting ? 'Redeeming OTT Voucher...' : 'Step 2: Redeem OTT Voucher & Connect \u2192'}</span>
+                    <span>{isConnecting ? 'Redeeming OTT Voucher...' : 'Redeem OTT Voucher & Connect \u2192'}</span>
                   </button>
                 </div>
               ) : (
                 <>
-                  {/* 2-Option Payment Selector: PayLesotho Aggregator & Official 16-Digit OTT Voucher */}
+                  {/* Mode Switcher: Buy Your OTT Voucher (xpayments.paylesotho.co.ls) vs Have OTT Voucher */}
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       key="paylesotho"
@@ -1857,12 +1922,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       }}
                       className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         selectedGateway === 'paylesotho'
-                          ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
                           : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
                       }`}
                     >
-                      <ProviderLogo provider="paylesotho" className="w-12 h-5 shrink-0" />
-                      <span className="text-[10px] font-bold truncate">PayLesotho (M-Pesa / EcoCash)</span>
+                      <ProviderLogo provider="paylesotho" className="w-12 h-4 shrink-0" />
+                      <span className="text-[10px] font-bold truncate">Buy OTT Voucher</span>
                     </button>
 
                     <button
@@ -1878,81 +1943,156 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                           : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
                       }`}
                     >
-                      <ProviderLogo provider="ottvoucher" className="w-5 h-5 shrink-0" />
-                      <span className="text-[10px] font-bold truncate">Have OTT Voucher</span>
+                      <ProviderLogo provider="ottvoucher" className="w-5 h-4 shrink-0" />
+                      <span className="text-[10px] font-bold truncate">Redeem 16-Digit PIN</span>
                     </button>
                   </div>
 
                   {selectedGateway === 'paylesotho' ? (
                     <div className="space-y-2">
-                      {/* Channel Sub-Selector: EcoCash, M-Pesa, Card */}
+                      {/* Lesotho Only Notice & Compact 4-Step Guide (matches xpayments.paylesotho.co.ls) */}
+                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[9px] text-amber-200 flex items-center justify-between gap-2">
+                        <span>
+                          <strong>Lesotho Only:</strong> M-Pesa (5xxxxxxx) &amp; EcoCash (6xxxxxxx) generate an instant 16-digit OTT Voucher.
+                        </span>
+                        <span className="text-emerald-300 font-mono font-bold shrink-0">LSL {voucherAmountLsl}</span>
+                      </div>
+
+                      {/* 1. Voucher Amount (LSL) Selector Pills + Custom Amount Input */}
                       <div>
-                        <label className="text-[9px] font-medium text-slate-400 block mb-1">
-                          Select Payment Method (via PayLesotho / XPayments):
+                        <label className="text-[10px] font-bold text-slate-200 block mb-1">
+                          1. Voucher Amount (LSL)
                         </label>
-                        <div className="grid grid-cols-3 gap-1">
-                          {(
-                            [
-                              { id: 'ecocash', label: 'EcoCash', sub: 'Econet *199#' },
-                              { id: 'mpesa', label: 'M-Pesa', sub: 'Vodacom *111#' },
-                              { id: 'card', label: 'Card / EFT', sub: 'XPayments' }
-                            ] as const
-                          ).map((ch) => (
-                            <button
-                              key={ch.id}
-                              type="button"
-                              onClick={() => {
-                                setPayLesothoChannel(ch.id);
-                                setPaymentError(null);
-                              }}
-                              className={`py-1 px-1.5 rounded-lg border text-center transition-all cursor-pointer ${
-                                payLesothoChannel === ch.id
-                                  ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
-                                  : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                              }`}
-                            >
-                              <div className="text-[10px] font-bold leading-tight">{ch.label}</div>
-                              <div className="text-[8px] text-slate-400 truncate">{ch.sub}</div>
-                            </button>
-                          ))}
+                        <div className="grid grid-cols-6 gap-1 mb-1.5">
+                          {[2, 5, 10, 20, 50, 100].map((amt) => {
+                            const isPicked = voucherAmountLsl === amt && !customAmountInput;
+                            return (
+                              <button
+                                key={amt}
+                                type="button"
+                                onClick={() => {
+                                  setVoucherAmountLsl(amt);
+                                  setCustomAmountInput('');
+                                  const matchingPlan = enabledPlans.find((p) => p.price === amt);
+                                  if (matchingPlan) setSelectedPlanId(matchingPlan.id);
+                                }}
+                                className={`py-1 px-1 rounded border text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                                  isPicked
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
+                                    : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-emerald-500/50'
+                                }`}
+                              >
+                                LSL {amt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center rounded-lg bg-[#121829] border border-[#232d42] overflow-hidden">
+                          <span className="px-2.5 py-1 bg-[#161d31] text-[10px] font-mono font-bold text-slate-300 border-r border-[#232d42]">
+                            LSL
+                          </span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={5000}
+                            value={customAmountInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomAmountInput(val);
+                              const num = Number(val);
+                              if (!isNaN(num) && num > 0) {
+                                setVoucherAmountLsl(num);
+                              }
+                            }}
+                            placeholder={`Or enter custom amount (Selected: LSL ${voucherAmountLsl})`}
+                            className="w-full px-2.5 py-1 bg-transparent text-white text-[11px] font-mono focus:outline-none"
+                          />
                         </div>
                       </div>
 
-                      {payLesothoChannel === 'card' ? (
-                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-300">
-                          <div className="font-bold text-white mb-0.5">PayLesotho XPayments Card Checkout</div>
-                          <div className="text-[9px] text-slate-400">
-                            Generates an OTT Voucher for your selected package denomination upon payment approval.
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <label className="text-[10px] font-medium text-slate-300">
-                              {payLesothoChannel === 'mpesa' ? 'Vodacom M-Pesa' : 'EcoCash'} Number (+266) <span className="text-red-400">*</span>
-                            </label>
-                            <span className="text-[9px] font-mono text-slate-400">
-                              {cleanPhoneDigits.length}/8 digits (5/6)
-                            </span>
-                          </div>
-                          <input
-                            type="tel"
-                            inputMode="numeric"
-                            maxLength={8}
-                            required
-                            value={guestPhone}
-                            onChange={(e) => {
-                              handleGuestPhoneChange(e.target.value, '+266');
+                      {/* 2. Payment Method Selector (EcoCash & Vodacom M-Pesa) */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-200 block mb-1">
+                          2. Payment Method
+                        </label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayLesothoChannel('ecocash');
                               setPaymentError(null);
                             }}
-                            placeholder="5xxxxxxx / 6xxxxxxx (8 digits)"
-                            className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
-                          />
-                          {phoneFormatError && (
-                            <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
-                          )}
+                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2 ${
+                              payLesothoChannel === 'ecocash'
+                                ? 'bg-emerald-500/15 border-emerald-500 text-white shadow'
+                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              checked={payLesothoChannel === 'ecocash'}
+                              onChange={() => setPayLesothoChannel('ecocash')}
+                              className="accent-emerald-500 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-extrabold text-blue-400 leading-tight">EcoCash</div>
+                              <div className="text-[8.5px] text-slate-400 truncate">Pay with EcoCash Mobile Money</div>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPayLesothoChannel('mpesa');
+                              setPaymentError(null);
+                            }}
+                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2 ${
+                              payLesothoChannel === 'mpesa'
+                                ? 'bg-emerald-500/15 border-emerald-500 text-white shadow'
+                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              checked={payLesothoChannel === 'mpesa'}
+                              onChange={() => setPayLesothoChannel('mpesa')}
+                              className="accent-emerald-500 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-extrabold text-rose-400 leading-tight">Vodacom M-Pesa</div>
+                              <div className="text-[8.5px] text-slate-400 truncate">Pay with M-Pesa</div>
+                            </div>
+                          </button>
                         </div>
-                      )}
+                      </div>
+
+                      {/* 3. Mobile Number Input */}
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <label className="text-[10px] font-bold text-slate-200">
+                            3. {payLesothoChannel === 'mpesa' ? 'M-Pesa' : 'EcoCash'} Mobile Number <span className="text-red-400">*</span>
+                          </label>
+                          <span className="text-[9px] font-mono text-slate-400">
+                            {payLesothoChannel === 'mpesa' ? 'Must start with 5 (e.g. 5XXXXXXX)' : 'Must start with 6 (e.g. 6XXXXXXX)'}
+                          </span>
+                        </div>
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          maxLength={8}
+                          required
+                          value={guestPhone}
+                          onChange={(e) => {
+                            handleGuestPhoneChange(e.target.value, '+266');
+                            setPaymentError(null);
+                          }}
+                          placeholder={payLesothoChannel === 'mpesa' ? 'e.g., 5XXXXXXX' : 'e.g., 6XXXXXXX'}
+                          className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
+                        />
+                        {phoneFormatError && (
+                          <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div>
@@ -1980,7 +2120,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                         className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
                       />
                       <p className="text-[9px] text-slate-400 font-mono mt-0.5">
-                        Voucher value must match your selected package price.
+                        Paste your 16-digit OTT Voucher PIN to redeem and unlock Wi-Fi.
                       </p>
                     </div>
                   )}
@@ -2005,15 +2145,15 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                         payLesothoChannel !== 'card' &&
                         !/^[56]\d{7}$/.test(cleanPhoneDigits))
                     }
-                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <Zap className="w-3.5 h-3.5 fill-current" />
                     <span>
                       {isConnecting
-                        ? 'Processing with PayLesotho...'
+                        ? 'Generating OTT Voucher via PayLesotho...'
                         : selectedGateway === 'ottvoucher'
-                        ? 'Redeem OTT Voucher & Connect \u2192'
-                        : 'Pay & Generate OTT Voucher \u2192'}
+                        ? 'Redeem 16-Digit OTT Voucher & Connect \u2192'
+                        : `Buy Voucher (LSL ${voucherAmountLsl})`}
                     </span>
                   </button>
                 </>

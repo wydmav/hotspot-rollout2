@@ -1,520 +1,825 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { RouterDevice, HotspotPlan, Voucher, PaymentTransaction, AuditLogEntry } from '../types';
+import {
+  RouterDevice,
+  Voucher,
+  PaymentTransaction,
+  HotspotPlan,
+  AuditLogEntry,
+  CaptivePortalLead,
+  TenantGroup
+} from '../types';
 
-const SUPABASE_CONFIG_KEY = 'tconnect_supabase_config_v2';
+export const DEFAULT_SUPABASE_PROJECT_URL = 'https://uxglqtcuedelmyhvgghw.supabase.co';
+
+/**
+ * COMPLETE MULTI-TENANT POSTGRESQL SCHEMA & RLS POLICIES FOR SUPABASE (uxglqtcuedelmyhvgghw)
+ * Copy and paste this entire script into the Supabase SQL Editor.
+ * Covers:
+ * - Tenant Operators & RBAC (`operators`, `operator_members`)
+ * - Bandwidth Plans (`plans`)
+ * - MikroTik Routers & Real-Time Free/Paid Access Policy (`routers`)
+ * - Vouchers & Multi-Device MAC Locking (`vouchers`, `voucher_devices`)
+ * - PayLesotho XPayments 16-Digit OTT Vouchers (`ott_vouchers_issued`)
+ * - Financial Ledger (`transactions`)
+ * - Captive Portal Guest Leads (`guest_leads`)
+ * - Partner / Sponsor Groups (`partner_groups`)
+ * - Partner API Keys (`partner_api_keys`)
+ * - Captive Portal & Ad Configs (`portal_configs`)
+ * - Immutable Audit Logs (`audit_logs`)
+ */
+export const SUPABASE_SQL_MIGRATIONS = `-- ============================================================================
+-- T-CONNECT WI-FI CONTROLLER: PRODUCTION MULTI-TENANT SCHEMA (uxglqtcuedelmyhvgghw)
+-- Includes: Routers, Plans, Vouchers, PayLesotho OTT Pins, Transactions,
+--           Captive Portal Guest Leads, Partner/Sponsor Groups, Portal Configs & Audit Logs
+-- ============================================================================
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ----------------------------------------------------------------------------
+-- 1. TENANTS (OPERATORS) & TEAM MEMBERS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.operators (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  country_code TEXT NOT NULL DEFAULT 'LS',
+  currency TEXT NOT NULL DEFAULT 'M',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.operators (id, name, slug, country_code, currency)
+VALUES ('00000000-0000-0000-0000-000000000001', 'T-Connect Lesotho Sovereign Fleet', 'tconnect-lesotho', 'LS', 'M')
+ON CONFLICT (slug) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS public.operator_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  operator_id UUID NOT NULL REFERENCES public.operators(id) ON DELETE CASCADE,
+  user_id UUID,
+  email TEXT NOT NULL,
+  full_name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('Owner', 'Super Admin', 'Collaborator', 'Finance', 'Tech', 'Management', 'Network Engineer', 'Billing Operator', 'Site Manager', 'Viewer')),
+  scoped_sites TEXT[] NOT NULL DEFAULT '{}',
+  mfa_enabled BOOLEAN NOT NULL DEFAULT false,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invited', 'suspended')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(operator_id, email)
+);
+
+-- ----------------------------------------------------------------------------
+-- 2. BANDWIDTH & MONETIZATION PLANS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.plans (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'village', 'bus', 'stadium', 'park')),
+  price NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
+  currency TEXT NOT NULL DEFAULT 'M',
+  duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
+  duration_label TEXT NOT NULL,
+  data_cap_mb INTEGER,
+  download_speed_mbps NUMERIC(6, 2) NOT NULL,
+  upload_speed_mbps NUMERIC(6, 2) NOT NULL,
+  burst_download_mbps NUMERIC(6, 2) NOT NULL,
+  burst_upload_mbps NUMERIC(6, 2) NOT NULL,
+  fair_use_threshold_mb INTEGER,
+  fair_use_download_mbps NUMERIC(6, 2),
+  device_limit INTEGER NOT NULL DEFAULT 1 CHECK (device_limit BETWEEN 1 AND 20),
+  is_popular BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 3. MIKROTIK ROUTER FLEET & REAL-TIME FREE/PAID ACCESS POLICY
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.routers (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'village', 'bus', 'stadium', 'park')),
+  site_name TEXT NOT NULL,
+  district TEXT NOT NULL DEFAULT 'Maseru',
+  physical_address TEXT,
+  partner_name TEXT DEFAULT 'T-Connect Internal Fleet',
+  policy_name TEXT DEFAULT 'PayLesotho + 16-Digit OTT Policy',
+  model TEXT NOT NULL,
+  board_name TEXT NOT NULL,
+  ros_version TEXT NOT NULL CHECK (ros_version IN ('v6', 'v7')),
+  mac_address TEXT NOT NULL,
+  wireguard_ip TEXT NOT NULL,
+  public_wan_ip TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending_adoption' CHECK (status IN ('online', 'offline', 'pending_adoption')),
+  access_mode TEXT NOT NULL DEFAULT 'PAID_ONLY' CHECK (access_mode IN ('PAID_ONLY', 'FREE_TRIAL_AND_PAID', 'COMPLETELY_FREE')),
+  free_mode_enabled BOOLEAN NOT NULL DEFAULT false,
+  free_duration_minutes INTEGER NOT NULL DEFAULT 30,
+  free_rate_limit TEXT NOT NULL DEFAULT '10M/30M',
+  free_daily_quota_mb INTEGER NOT NULL DEFAULT 500,
+  uptime TEXT NOT NULL DEFAULT '0m',
+  cpu_load INTEGER NOT NULL DEFAULT 0,
+  memory_usage INTEGER NOT NULL DEFAULT 0,
+  active_sessions INTEGER NOT NULL DEFAULT 0,
+  firmware TEXT NOT NULL DEFAULT '7.15.2',
+  adoption_token TEXT UNIQUE,
+  token_expires_at TIMESTAMPTZ,
+  adopted_at TIMESTAMPTZ,
+  last_heartbeat TIMESTAMPTZ DEFAULT now(),
+  gps_telemetry JSONB,
+  solar_telemetry JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 4. CAPTIVE PORTAL GUEST LEADS (FREE & PAID SUBSCRIBERS)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.guest_leads (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  first_name TEXT NOT NULL DEFAULT 'Guest',
+  last_name TEXT NOT NULL DEFAULT '',
+  full_name TEXT NOT NULL,
+  country_code TEXT NOT NULL DEFAULT '+266',
+  phone TEXT NOT NULL,
+  full_phone TEXT NOT NULL,
+  email TEXT DEFAULT '',
+  router_name TEXT NOT NULL DEFAULT 'MIKROTIK-TC',
+  site_name TEXT NOT NULL DEFAULT 'T-Connect Hotspot',
+  vertical TEXT NOT NULL DEFAULT 'hotspot',
+  client_mac TEXT NOT NULL DEFAULT 'AUTO',
+  client_ip TEXT NOT NULL DEFAULT '10.10.0.1',
+  device_type TEXT NOT NULL DEFAULT 'Mobile',
+  duration_minutes INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_guest_leads_phone ON public.guest_leads(full_phone);
+CREATE INDEX IF NOT EXISTS idx_guest_leads_mac ON public.guest_leads(client_mac);
+CREATE INDEX IF NOT EXISTS idx_guest_leads_captured_at ON public.guest_leads(captured_at DESC);
+
+-- ----------------------------------------------------------------------------
+-- 5. PARTNER / SPONSOR GROUPS & API KEYS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.partner_groups (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  name TEXT NOT NULL UNIQUE,
+  tag TEXT NOT NULL,
+  custom_bg_url TEXT,
+  client_contact TEXT DEFAULT 'admin@tconnect.africa',
+  accent_color TEXT DEFAULT '#f05e17',
+  description TEXT DEFAULT '',
+  router_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.partner_api_keys (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  partner_name TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  scopes TEXT[] NOT NULL DEFAULT '{portal:read,leads:read}',
+  rate_limit_per_min INTEGER NOT NULL DEFAULT 120,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 6. PAYLESOTHO XPAYMENTS ISSUED 16-DIGIT OTT VOUCHERS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.ott_vouchers_issued (
+  pin TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  serial_number TEXT,
+  amount NUMERIC(10, 2) NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'LSL',
+  transaction_ref TEXT NOT NULL,
+  plan_id TEXT,
+  plan_name TEXT,
+  msisdn TEXT,
+  payment_method TEXT DEFAULT 'ecocash',
+  status TEXT NOT NULL DEFAULT 'unused' CHECK (status IN ('unused', 'redeemed', 'expired')),
+  issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  redeemed_at TIMESTAMPTZ,
+  redeemed_by_mac TEXT
+);
+
+-- ----------------------------------------------------------------------------
+-- 7. VOUCHERS & ATOMIC MULTI-DEVICE LOCKING
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.vouchers (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  plan_id TEXT REFERENCES public.plans(id) ON DELETE SET NULL,
+  plan_name TEXT NOT NULL,
+  vertical TEXT NOT NULL,
+  price NUMERIC(10, 2) NOT NULL,
+  duration_label TEXT NOT NULL,
+  duration_seconds INTEGER NOT NULL DEFAULT 86400,
+  status TEXT NOT NULL DEFAULT 'unused' CHECK (status IN ('unused', 'active', 'expired', 'revoked')),
+  max_devices INTEGER NOT NULL DEFAULT 1 CHECK (max_devices BETWEEN 1 AND 20),
+  batch_id TEXT NOT NULL,
+  site_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  activated_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  UNIQUE(operator_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS public.voucher_devices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  voucher_id TEXT NOT NULL REFERENCES public.vouchers(id) ON DELETE CASCADE,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  mac_address TEXT NOT NULL,
+  client_ip TEXT,
+  device_type TEXT,
+  bound_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(voucher_id, mac_address)
+);
+
+-- ----------------------------------------------------------------------------
+-- 8. FINANCIAL DOUBLE-ENTRY LEDGER (TRANSACTIONS)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  transaction_ref TEXT NOT NULL,
+  provider TEXT NOT NULL CHECK (provider IN ('paylesotho', 'ottvoucher', 'ecocash', 'mpesa')),
+  msisdn TEXT NOT NULL,
+  plan_id TEXT,
+  plan_name TEXT NOT NULL,
+  site_name TEXT NOT NULL,
+  amount NUMERIC(10, 2) NOT NULL CHECK (amount >= 0),
+  fee_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  net_amount NUMERIC(10, 2) GENERATED ALWAYS AS (amount - fee_amount) STORED,
+  currency TEXT NOT NULL DEFAULT 'M',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+  voucher_code TEXT,
+  ott_voucher_pin TEXT,
+  webhook_payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  UNIQUE(operator_id, transaction_ref)
+);
+
+-- ----------------------------------------------------------------------------
+-- 9. CAPTIVE PORTAL & SPONSOR AD CONFIGURATIONS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.portal_configs (
+  scope TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 10. IMMUTABLE AUDIT LOGS
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+  id TEXT PRIMARY KEY,
+  operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001' REFERENCES public.operators(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  role TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL,
+  details TEXT NOT NULL,
+  ip_address TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ----------------------------------------------------------------------------
+-- 11. ROW LEVEL SECURITY POLICIES (SUPABASE CLIENT & SERVER API COMPATIBLE)
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.operators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.routers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.guest_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.partner_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.partner_api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ott_vouchers_issued ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vouchers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.voucher_devices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.portal_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  tbl TEXT;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'operators', 'plans', 'routers', 'guest_leads', 'partner_groups',
+    'partner_api_keys', 'ott_vouchers_issued', 'vouchers', 'voucher_devices',
+    'transactions', 'portal_configs', 'audit_logs'
+  ]
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS tconnect_rw_%I ON public.%I;', tbl, tbl);
+    EXECUTE format('CREATE POLICY tconnect_rw_%I ON public.%I FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);', tbl, tbl);
+  END LOOP;
+END $$;
+`;
 
 export interface SupabaseConfig {
   url: string;
   anonKey: string;
   isConnected: boolean;
-  lastConnectedAt?: string;
+  operatorId?: string;
 }
 
-export const SUPABASE_SQL_MIGRATIONS = `-- ==============================================================================
--- T-CONNECT CONTROL TOWER — PRODUCTION SUPABASE POSTGRESQL SCHEMA
--- Multi-Tenant Hotspot Management, Financial Ledger, Atomic Vouchers & Audit Log
--- ==============================================================================
-
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- 1. MULTI-TENANCY & RBAC
-CREATE TABLE IF NOT EXISTS public.operators (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    default_currency TEXT NOT NULL DEFAULT 'M',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Seed default primary operator tenant
-INSERT INTO public.operators (id, name, slug, default_currency)
-VALUES ('00000000-0000-0000-0000-000000000001', 'T-Connect Primary Network', 't-connect-main', 'M')
-ON CONFLICT (id) DO NOTHING;
-
-CREATE TABLE IF NOT EXISTS public.operator_members (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'technical', 'collaborator', 'viewer')),
-    scoped_sites UUID[] DEFAULT NULL,
-    status TEXT NOT NULL CHECK (status IN ('active', 'invited', 'suspended')) DEFAULT 'active',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (operator_id, user_id)
-);
-
-CREATE OR REPLACE FUNCTION public.get_current_user_operator_ids()
-RETURNS SETOF UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-    SELECT operator_id FROM public.operator_members WHERE user_id = auth.uid() AND status = 'active';
-$$;
-
-CREATE OR REPLACE FUNCTION public.user_has_operator_role(p_operator_id UUID, p_required_roles TEXT[])
-RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM public.operator_members 
-        WHERE operator_id = p_operator_id AND user_id = auth.uid() AND status = 'active' AND role = ANY(p_required_roles)
-    );
-$$;
-
--- 2. SITES & HARDWARE FLEET
-CREATE TABLE IF NOT EXISTS public.sites (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'bus', 'stadium', 'park')),
-    ssid TEXT NOT NULL DEFAULT 'T-Connect',
-    location_address TEXT,
-    max_bandwidth_down_mbps NUMERIC(8,2) DEFAULT 50.0,
-    max_bandwidth_up_mbps NUMERIC(8,2) DEFAULT 20.0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (operator_id, name)
-);
-
-CREATE TABLE IF NOT EXISTS public.routers (
-    id TEXT PRIMARY KEY,
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    site_id UUID REFERENCES public.sites(id) ON DELETE SET NULL,
-    name TEXT NOT NULL,
-    vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'bus', 'stadium', 'park')),
-    site_name TEXT NOT NULL,
-    model TEXT NOT NULL,
-    board_name TEXT,
-    ros_version TEXT NOT NULL CHECK (ros_version IN ('v6', 'v7')) DEFAULT 'v7',
-    mac_address TEXT NOT NULL,
-    wireguard_ip TEXT NOT NULL,
-    wireguard_public_key TEXT,
-    public_wan_ip TEXT,
-    status TEXT NOT NULL CHECK (status IN ('online', 'offline', 'pending_adoption')) DEFAULT 'pending_adoption',
-    uptime TEXT DEFAULT '0m',
-    cpu_load INTEGER DEFAULT 0,
-    memory_usage INTEGER DEFAULT 0,
-    last_heartbeat TIMESTAMPTZ,
-    firmware TEXT,
-    active_sessions INTEGER DEFAULT 0,
-    token TEXT,
-    token_expires_at TIMESTAMPTZ,
-    adopted_at TIMESTAMPTZ,
-    solar_telemetry JSONB,
-    gps_telemetry JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (operator_id, mac_address)
-);
-
--- 3. PLANS & ATOMIC VOUCHERS
-CREATE TABLE IF NOT EXISTS public.plans (
-    id TEXT PRIMARY KEY,
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'bus', 'stadium', 'park')),
-    price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
-    currency TEXT NOT NULL DEFAULT 'M',
-    duration_seconds INTEGER NOT NULL CHECK (duration_seconds > 0),
-    duration_label TEXT NOT NULL,
-    data_cap_mb INTEGER,
-    download_speed_mbps NUMERIC(6,2) NOT NULL DEFAULT 4.0,
-    upload_speed_mbps NUMERIC(6,2) NOT NULL DEFAULT 2.0,
-    device_limit INTEGER NOT NULL DEFAULT 2 CHECK (device_limit >= 1),
-    burst_download_mbps NUMERIC(6,2),
-    burst_upload_mbps NUMERIC(6,2),
-    fair_use_threshold_mb INTEGER,
-    fair_use_download_mbps NUMERIC(6,2),
-    is_popular BOOLEAN DEFAULT FALSE,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.vouchers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    code TEXT NOT NULL,
-    code_hash TEXT NOT NULL,
-    plan_id TEXT NOT NULL REFERENCES public.plans(id) ON DELETE CASCADE,
-    plan_name TEXT NOT NULL,
-    price NUMERIC(10,2) NOT NULL,
-    currency TEXT NOT NULL DEFAULT 'M',
-    duration_seconds INTEGER NOT NULL,
-    device_limit INTEGER NOT NULL DEFAULT 2,
-    speed_limit_down_kbps INTEGER DEFAULT 4096,
-    speed_limit_up_kbps INTEGER DEFAULT 2048,
-    status TEXT NOT NULL CHECK (status IN ('active', 'used', 'expired', 'revoked')) DEFAULT 'active',
-    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    first_used_at TIMESTAMPTZ,
-    active_device_count INTEGER NOT NULL DEFAULT 0,
-    batch_id TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (operator_id, code)
-);
-
-CREATE TABLE IF NOT EXISTS public.voucher_devices (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    voucher_id UUID NOT NULL REFERENCES public.vouchers(id) ON DELETE CASCADE,
-    mac_address TEXT NOT NULL,
-    hostname TEXT DEFAULT 'Generic-Client',
-    ip_address TEXT,
-    site_id UUID REFERENCES public.sites(id) ON DELETE SET NULL,
-    site_name TEXT,
-    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    bytes_in BIGINT NOT NULL DEFAULT 0,
-    bytes_out BIGINT NOT NULL DEFAULT 0,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    UNIQUE (voucher_id, mac_address)
-);
-
--- 4. FINANCIAL TRANSACTIONS LEDGER (DOUBLE-ENTRY)
-CREATE TABLE IF NOT EXISTS public.transactions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    site_id UUID REFERENCES public.sites(id) ON DELETE SET NULL,
-    transaction_ref TEXT NOT NULL,
-    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash')),
-    amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
-    fee_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
-    net_amount NUMERIC(10,2) GENERATED ALWAYS AS (amount - fee_amount) STORED,
-    currency TEXT NOT NULL DEFAULT 'M',
-    phone_number TEXT,
-    plan_id TEXT REFERENCES public.plans(id) ON DELETE SET NULL,
-    plan_name TEXT NOT NULL,
-    vertical TEXT NOT NULL CHECK (vertical IN ('hotspot', 'community', 'bus', 'stadium', 'park')),
-    site_name TEXT NOT NULL,
-    voucher_id UUID REFERENCES public.vouchers(id) ON DELETE SET NULL,
-    voucher_code_issued TEXT,
-    status TEXT NOT NULL CHECK (status IN ('completed', 'pending', 'failed', 'refunded')) DEFAULT 'completed',
-    error_code TEXT,
-    error_message TEXT,
-    idempotency_key TEXT,
-    debug_logs JSONB NOT NULL DEFAULT '{}'::jsonb,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ,
-    UNIQUE (operator_id, transaction_ref)
-);
-
-CREATE TABLE IF NOT EXISTS public.gateway_configs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL CHECK (provider IN ('ottvoucher', 'ecocash')),
-    name TEXT NOT NULL,
-    currency TEXT NOT NULL DEFAULT 'M',
-    is_live BOOLEAN NOT NULL DEFAULT FALSE,
-    is_sandbox BOOLEAN NOT NULL DEFAULT TRUE,
-    status TEXT NOT NULL CHECK (status IN ('operational', 'degraded', 'not_configured', 'testing')) DEFAULT 'not_configured',
-    api_key_encrypted TEXT,
-    api_secret_encrypted TEXT,
-    merchant_id TEXT,
-    webhook_secret_encrypted TEXT,
-    webhook_url TEXT NOT NULL,
-    last_test_at TIMESTAMPTZ,
-    last_test_status TEXT,
-    last_test_message TEXT,
-    test_passed_once BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (operator_id, provider)
-);
-
--- 5. IMMUTABLE SECURITY AUDIT TRAIL
-CREATE TABLE IF NOT EXISTS public.audit_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    operator_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'::uuid REFERENCES public.operators(id) ON DELETE CASCADE,
-    actor_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    actor_email TEXT NOT NULL,
-    actor_role TEXT NOT NULL,
-    action TEXT NOT NULL,
-    target_type TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    details TEXT,
-    payload JSONB,
-    ip_address TEXT,
-    user_agent TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE OR REPLACE FUNCTION public.prevent_audit_log_mutation()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-    RAISE EXCEPTION 'Audit logs are immutable. Updates and deletes are prohibited.';
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON public.audit_logs;
-CREATE TRIGGER trg_audit_logs_immutable
-BEFORE UPDATE OR DELETE ON public.audit_logs
-FOR EACH ROW EXECUTE FUNCTION public.prevent_audit_log_mutation();
-
--- 6. ATOMIC CONCURRENCY FUNCTION (ELIMINATES DOUBLE-SPEND)
-CREATE OR REPLACE FUNCTION public.redeem_voucher_atomic(
-    p_operator_id UUID,
-    p_code TEXT,
-    p_mac TEXT,
-    p_hostname TEXT DEFAULT 'Client-Device',
-    p_site_name TEXT DEFAULT 'Hotspot'
-)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-    v_voucher RECORD;
-    v_device RECORD;
-    v_now TIMESTAMPTZ := NOW();
-    v_exp TIMESTAMPTZ;
-BEGIN
-    SELECT * INTO v_voucher FROM public.vouchers
-    WHERE operator_id = p_operator_id AND UPPER(code) = UPPER(TRIM(p_code)) FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('success', false, 'reason', 'INVALID_CODE', 'message', 'Voucher code not found.');
-    END IF;
-
-    IF v_voucher.status = 'revoked' THEN
-        RETURN jsonb_build_object('success', false, 'reason', 'REVOKED', 'message', 'Voucher is revoked.');
-    END IF;
-
-    IF v_voucher.status = 'expired' OR (v_voucher.expires_at < v_now) THEN
-        UPDATE public.vouchers SET status = 'expired' WHERE id = v_voucher.id;
-        RETURN jsonb_build_object('success', false, 'reason', 'EXPIRED', 'message', 'Voucher has expired.');
-    END IF;
-
-    SELECT * INTO v_device FROM public.voucher_devices
-    WHERE voucher_id = v_voucher.id AND UPPER(mac_address) = UPPER(TRIM(p_mac));
-
-    IF FOUND THEN
-        UPDATE public.voucher_devices SET last_seen_at = v_now, site_name = p_site_name WHERE id = v_device.id;
-        RETURN jsonb_build_object('success', true, 'is_roaming', true, 'plan_name', v_voucher.plan_name, 'duration_seconds', v_voucher.duration_seconds, 'device_slot', 'Active', 'message', 'Device reconnected via roaming.');
-    END IF;
-
-    IF v_voucher.active_device_count >= v_voucher.device_limit THEN
-        RETURN jsonb_build_object('success', false, 'reason', 'DEVICE_LIMIT_REACHED', 'message', format('Device limit reached (%s/%s).', v_voucher.active_device_count, v_voucher.device_limit));
-    END IF;
-
-    IF v_voucher.first_used_at IS NULL THEN
-        v_exp := v_now + (v_voucher.duration_seconds || ' seconds')::INTERVAL;
-        UPDATE public.vouchers SET first_used_at = v_now, expires_at = v_exp, status = 'used', active_device_count = active_device_count + 1 WHERE id = v_voucher.id;
-    ELSE
-        UPDATE public.vouchers SET active_device_count = active_device_count + 1, status = 'used' WHERE id = v_voucher.id;
-    END IF;
-
-    INSERT INTO public.voucher_devices (operator_id, voucher_id, mac_address, hostname, site_name, first_seen_at, last_seen_at)
-    VALUES (p_operator_id, v_voucher.id, UPPER(TRIM(p_mac)), p_hostname, p_site_name, v_now, v_now);
-
-    RETURN jsonb_build_object('success', true, 'is_roaming', false, 'plan_name', v_voucher.plan_name, 'duration_seconds', v_voucher.duration_seconds, 'device_slot', format('%s/%s', v_voucher.active_device_count + 1, v_voucher.device_limit), 'message', 'Access entitlement granted.');
-END;
-$$;
-
--- 7. ROW LEVEL SECURITY (RLS) POLICIES
-ALTER TABLE public.operators ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.operator_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sites ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.routers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.plans ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.vouchers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.voucher_devices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.gateway_configs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
-
--- Operator isolation policies for authenticated managers
-CREATE POLICY "Operators viewable by members" ON public.operators FOR SELECT USING (id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Operators modifiable by owners" ON public.operators FOR UPDATE USING (public.user_has_operator_role(id, ARRAY['owner']));
-
-CREATE POLICY "Members viewable within operator" ON public.operator_members FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Members manageable by admin/owner" ON public.operator_members FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin']));
-
-CREATE POLICY "Sites viewable by members" ON public.sites FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Sites manageable by technical+" ON public.sites FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'technical']));
-
-CREATE POLICY "Routers viewable by members" ON public.routers FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Routers manageable by technical+" ON public.routers FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'technical']));
-
-CREATE POLICY "Plans viewable by members" ON public.plans FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Plans manageable by admin+" ON public.plans FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'collaborator']));
-
-CREATE POLICY "Vouchers viewable by members" ON public.vouchers FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Vouchers manageable by members" ON public.vouchers FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'collaborator']));
-
-CREATE POLICY "Voucher devices viewable by members" ON public.voucher_devices FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()));
-CREATE POLICY "Voucher devices manageable by members" ON public.voucher_devices FOR ALL USING (public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'collaborator', 'technical']));
-
-CREATE POLICY "Transactions viewable by billing roles" ON public.transactions FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()) AND public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'collaborator']));
-CREATE POLICY "Transactions insertable by billing roles" ON public.transactions FOR INSERT WITH CHECK (operator_id IN (SELECT public.get_current_user_operator_ids()) AND public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'collaborator']));
-
-CREATE POLICY "Gateway configs viewable by admin" ON public.gateway_configs FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()) AND public.user_has_operator_role(operator_id, ARRAY['owner', 'admin']));
-CREATE POLICY "Gateway configs manageable by admin" ON public.gateway_configs FOR ALL USING (operator_id IN (SELECT public.get_current_user_operator_ids()) AND public.user_has_operator_role(operator_id, ARRAY['owner', 'admin']));
-
-CREATE POLICY "Audit logs viewable by privileged" ON public.audit_logs FOR SELECT USING (operator_id IN (SELECT public.get_current_user_operator_ids()) AND public.user_has_operator_role(operator_id, ARRAY['owner', 'admin', 'technical']));
-CREATE POLICY "Audit logs append-only" ON public.audit_logs FOR INSERT WITH CHECK (operator_id IN (SELECT public.get_current_user_operator_ids()));
-
--- Public / Captive Portal Endpoints (Unauthenticated WiFi Guests & Webhook Ingestion)
-CREATE POLICY "Public guest read active plans" ON public.plans FOR SELECT TO anon, authenticated USING (is_active = true);
-CREATE POLICY "Public guest verify active voucher" ON public.vouchers FOR SELECT TO anon, authenticated USING (status = 'active');
-CREATE POLICY "Public guest insert checkout transaction" ON public.transactions FOR INSERT TO anon, authenticated WITH CHECK (true);
-CREATE POLICY "Public guest read own transaction status" ON public.transactions FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public guest register voucher device" ON public.voucher_devices FOR INSERT TO anon, authenticated WITH CHECK (true);
-CREATE POLICY "Public guest check device roaming" ON public.voucher_devices FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public guest update device heartbeat" ON public.voucher_devices FOR UPDATE TO anon, authenticated USING (true);
-CREATE POLICY "Routers heartbeat allow" ON public.routers FOR ALL TO anon, authenticated USING (true);
-
--- 8. PERFORMANCE INDEXES
-CREATE INDEX IF NOT EXISTS idx_routers_operator ON public.routers(operator_id, status);
-CREATE INDEX IF NOT EXISTS idx_vouchers_lookup ON public.vouchers(operator_id, code);
-CREATE INDEX IF NOT EXISTS idx_voucher_devices_mac ON public.voucher_devices(voucher_id, mac_address);
-CREATE INDEX IF NOT EXISTS idx_transactions_operator ON public.transactions(operator_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_transactions_ref ON public.transactions(transaction_ref);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_operator ON public.audit_logs(operator_id, created_at DESC);
-
--- 9. SUPABASE REALTIME REPLICATION (INSTANT WEBSOCKET SYNCHRONIZATION)
--- Broadcasts all inserts, updates, and deletes to every connected browser & router
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-    CREATE PUBLICATION supabase_realtime;
-  END IF;
-END $$;
-
-ALTER PUBLICATION supabase_realtime ADD TABLE public.routers, public.vouchers, public.voucher_devices, public.transactions, public.plans, public.sites, public.audit_logs;
-`;
+const SUPABASE_CONFIG_KEY = 'tconnect_supabase_config_v2';
+const DEFAULT_OPERATOR_ID = '00000000-0000-0000-0000-000000000001';
 
 class SupabaseService {
   private client: SupabaseClient | null = null;
-  private config: SupabaseConfig;
+  private config: SupabaseConfig = {
+    url: DEFAULT_SUPABASE_PROJECT_URL,
+    anonKey: '',
+    isConnected: false,
+    operatorId: DEFAULT_OPERATOR_ID
+  };
 
   constructor() {
-    this.config = this.loadConfig();
-    this.initClient();
+    this.loadConfig();
+    if (typeof window !== 'undefined') {
+      void this.hydrateConfigFromServer();
+    }
   }
 
-  private loadConfig(): SupabaseConfig {
+  private loadConfig() {
+    const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_PROJECT_URL;
+    const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
-        const stored = window.localStorage.getItem(SUPABASE_CONFIG_KEY);
-        if (stored) return JSON.parse(stored);
-      } catch {}
+        const saved = window.localStorage.getItem(SUPABASE_CONFIG_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          this.config = {
+            url: parsed.url || envUrl || DEFAULT_SUPABASE_PROJECT_URL,
+            anonKey: parsed.anonKey || envKey || '',
+            isConnected: Boolean(parsed.isConnected || (parsed.url && parsed.anonKey)),
+            operatorId: parsed.operatorId || DEFAULT_OPERATOR_ID
+          };
+          if (this.config.url && this.config.anonKey) {
+            this.initClient(this.config.url, this.config.anonKey);
+          }
+          return;
+        }
+      } catch {
+        // fallback to env
+      }
     }
 
-    return {
-      url: (import.meta as any).env?.VITE_SUPABASE_URL || '',
-      anonKey: (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '',
-      isConnected: false
+    this.config = {
+      url: envUrl || DEFAULT_SUPABASE_PROJECT_URL,
+      anonKey: envKey || '',
+      isConnected: Boolean(envUrl && envKey),
+      operatorId: DEFAULT_OPERATOR_ID
     };
+
+    if (this.config.url && this.config.anonKey) {
+      this.initClient(this.config.url, this.config.anonKey);
+    }
   }
 
-  private initClient() {
-    if (this.config.url && this.config.anonKey) {
-      try {
-        this.client = createClient(this.config.url, this.config.anonKey);
-      } catch (err) {
-        console.error('Failed to initialize Supabase client:', err);
-        this.client = null;
+  async hydrateConfigFromServer(): Promise<void> {
+    if (typeof window === 'undefined') return;
+    try {
+      const res = await fetch('/api/supabase/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && data.url) {
+        const nextUrl = data.url || this.config.url || DEFAULT_SUPABASE_PROJECT_URL;
+        const nextKey = data.anonKey || this.config.anonKey || '';
+        if (nextKey && (!this.config.anonKey || !this.client)) {
+          this.config = {
+            url: nextUrl,
+            anonKey: nextKey,
+            isConnected: Boolean(data.isConfigured),
+            operatorId: DEFAULT_OPERATOR_ID
+          };
+          this.initClient(nextUrl, nextKey);
+          window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+        }
       }
-    } else {
+    } catch {}
+  }
+
+  private initClient(url: string, anonKey: string) {
+    try {
+      this.client = createClient(url, anonKey, {
+        auth: { persistSession: true }
+      });
+    } catch {
       this.client = null;
     }
   }
 
   getConfig(): SupabaseConfig {
-    return { ...this.config };
-  }
-
-  saveConfig(url: string, anonKey: string) {
-    this.config = {
-      url: url.trim(),
-      anonKey: anonKey.trim(),
-      isConnected: false
+    return {
+      ...this.config,
+      url: this.config.url || DEFAULT_SUPABASE_PROJECT_URL
     };
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-      try {
-        window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
-        fetch('/api/gateways/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ supabaseConfig: this.config })
-        }).catch(() => {});
-      } catch {}
-    }
-    this.initClient();
-  }
-
-  disconnect() {
-    this.config.isConnected = false;
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-      try {
-        window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
-      } catch {}
-    }
   }
 
   isConfigured(): boolean {
-    return !!(this.client && this.config.url && this.config.anonKey);
+    return Boolean(this.config.url && this.config.anonKey && this.client);
+  }
+
+  saveConfig(url: string, anonKey: string, operatorId = DEFAULT_OPERATOR_ID): boolean {
+    const cleanUrl = (url || DEFAULT_SUPABASE_PROJECT_URL).trim().replace(/\/$/, '');
+    const cleanKey = anonKey.trim();
+
+    this.config = {
+      url: cleanUrl,
+      anonKey: cleanKey,
+      isConnected: Boolean(cleanUrl && cleanKey),
+      operatorId
+    };
+
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
+      // Also synchronize to backend server so server-side lead/voucher/router API library writes to Supabase
+      fetch('/api/supabase/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: cleanUrl,
+          anonKey: cleanKey,
+          operatorId
+        })
+      }).catch(() => {});
+    }
+
+    if (cleanUrl && cleanKey) {
+      this.initClient(cleanUrl, cleanKey);
+      return true;
+    } else {
+      this.client = null;
+      return false;
+    }
+  }
+
+  disconnect() {
+    this.config = { url: DEFAULT_SUPABASE_PROJECT_URL, anonKey: '', isConnected: false, operatorId: DEFAULT_OPERATOR_ID };
+    this.client = null;
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.removeItem(SUPABASE_CONFIG_KEY);
+    }
   }
 
   async testConnection(): Promise<{ success: boolean; message: string; latencyMs?: number }> {
     if (!this.client) {
-      return { success: false, message: 'Please provide both your Supabase Project URL and Anon Public Key.' };
+      return { success: false, message: 'Supabase Project URL or Anon Key is missing.' };
     }
 
     const start = performance.now();
     try {
-      const { error } = await this.client
-        .from('routers')
-        .select('id')
-        .limit(1);
-
+      const { error } = await this.client.from('routers').select('id').limit(1);
       const latencyMs = Math.round(performance.now() - start);
 
-      if (error && error.code !== 'PGRST116') {
-        if (error.code === '42P01') {
+      if (error) {
+        if (error.code === '42P01' || error.message.includes('does not exist') || error.message.includes('schema cache')) {
           this.config.isConnected = true;
-          this.config.lastConnectedAt = new Date().toISOString();
-          if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+          if (typeof window !== 'undefined') {
             window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
           }
           return {
             success: true,
             latencyMs,
-            message: `Connected to Supabase project in ${latencyMs}ms! Tables not detected yet — please execute the SQL schema in your Supabase SQL Editor.`
+            message: `Connected to Supabase (${latencyMs}ms)! Run the SQL Schema in Tab 1 to create your tables (routers, guest_leads, partner_groups, transactions).`
           };
         }
-        return { success: false, message: `Supabase Error (${error.code}): ${error.message}` };
+        return {
+          success: false,
+          latencyMs,
+          message: `Supabase Error: ${error.message}`
+        };
       }
 
       this.config.isConnected = true;
-      this.config.lastConnectedAt = new Date().toISOString();
-      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      if (typeof window !== 'undefined') {
         window.localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(this.config));
       }
 
       return {
         success: true,
         latencyMs,
-        message: `Successfully connected to Supabase PostgreSQL database in ${latencyMs}ms! Live synchronization active.`
+        message: `Connected to Supabase PostgreSQL (${this.config.url}) in ${latencyMs}ms. All tables verified.`
       };
     } catch (err: any) {
-      return { success: false, message: err.message || 'Failed to connect to Supabase.' };
+      return {
+        success: false,
+        message: `Network failure reaching Supabase: ${err?.message || 'Unknown error'}`
+      };
     }
   }
 
-  /**
-   * Pull existing records from Supabase tables to populate local state from actual database
-   */
+  // ---------------------------------------------------------------------------
+  // UNIVERSAL PLATFORM API LIBRARY — LEADS, PARTNERS, ROUTERS, VOUCHERS, LEDGER
+  // ---------------------------------------------------------------------------
+
+  async syncRoutersToSupabase(routers: RouterDevice[]): Promise<{ synced: number; error?: string }> {
+    if (!this.client || !this.config.isConnected) return { synced: 0, error: 'Not connected' };
+    if (routers.length === 0) return { synced: 0 };
+
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    const rows = routers.map(r => ({
+      id: r.id,
+      operator_id: opId,
+      name: r.name,
+      vertical: r.vertical,
+      site_name: r.siteName,
+      district: r.district || 'Maseru',
+      physical_address: r.physicalAddress || r.siteName,
+      partner_name: r.partnerName || 'T-Connect Internal Fleet',
+      policy_name: r.policyName || 'PayLesotho + 16-Digit OTT Policy',
+      model: r.model,
+      board_name: r.boardName,
+      ros_version: r.rosVersion,
+      mac_address: r.macAddress,
+      wireguard_ip: r.wireguardIp,
+      public_wan_ip: r.publicWanIp,
+      status: r.status,
+      access_mode: r.accessMode || 'PAID_ONLY',
+      free_mode_enabled: Boolean(r.accessMode && r.accessMode !== 'PAID_ONLY'),
+      free_duration_minutes: r.freeDurationMinutes ?? 30,
+      free_rate_limit: r.freeRateLimit || '10M/30M',
+      free_daily_quota_mb: r.freeDailyQuotaMb ?? 500,
+      uptime: r.uptime,
+      cpu_load: r.cpuLoad,
+      memory_usage: r.memoryUsage,
+      active_sessions: r.activeSessions,
+      firmware: r.firmware,
+      adoption_token: r.token || null,
+      gps_telemetry: r.gpsTelemetry || null,
+      solar_telemetry: r.solarTelemetry || null
+    }));
+
+    const { error } = await this.client.from('routers').upsert(rows, { onConflict: 'id' });
+    if (error) return { synced: 0, error: error.message };
+    return { synced: rows.length };
+  }
+
+  async deleteRouterFromSupabase(routerId: string): Promise<void> {
+    if (!this.client || !this.config.isConnected) return;
+    await this.client.from('routers').delete().eq('id', routerId);
+  }
+
+  async syncPlanToSupabase(plan: HotspotPlan): Promise<void> {
+    await this.syncPlansToSupabase([plan]);
+  }
+
+  async syncPlansToSupabase(plans: HotspotPlan[]): Promise<void> {
+    if (!this.client || !this.config.isConnected || plans.length === 0) return;
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    const rows = plans.map(p => ({
+      id: p.id,
+      operator_id: opId,
+      name: p.name,
+      vertical: p.vertical,
+      price: p.price,
+      currency: p.currency,
+      duration_seconds: p.durationSeconds,
+      duration_label: p.durationLabel,
+      data_cap_mb: p.dataCapMb,
+      download_speed_mbps: p.downloadSpeedMbps,
+      upload_speed_mbps: p.uploadSpeedMbps,
+      burst_download_mbps: p.burstDownloadMbps,
+      burst_upload_mbps: p.burstUploadMbps,
+      fair_use_threshold_mb: p.fairUseThresholdMb,
+      fair_use_download_mbps: p.fairUseDownloadMbps ?? null,
+      device_limit: p.deviceLimit,
+      is_popular: Boolean(p.isPopular)
+    }));
+    await this.client.from('plans').upsert(rows, { onConflict: 'id' });
+  }
+
+  async syncLeadToSupabase(lead: CaptivePortalLead): Promise<{ synced: boolean; error?: string }> {
+    if (!this.client || !this.config.isConnected) return { synced: false, error: 'Not connected' };
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    const { error } = await this.client.from('guest_leads').upsert({
+      id: lead.id,
+      operator_id: opId,
+      first_name: lead.firstName || 'Guest',
+      last_name: lead.lastName || '',
+      full_name: lead.fullName || `${lead.firstName} ${lead.lastName}`.trim(),
+      country_code: lead.countryCode || '+266',
+      phone: lead.phone || '',
+      full_phone: lead.fullPhone || lead.phone || '',
+      email: lead.email || '',
+      router_name: lead.routerName || 'MIKROTIK-TC',
+      site_name: lead.siteName || 'T-Connect Hotspot',
+      vertical: lead.vertical || 'hotspot',
+      client_mac: lead.clientMac || 'AUTO',
+      client_ip: lead.clientIp || '10.10.0.1',
+      device_type: lead.deviceType || 'Mobile',
+      duration_minutes: lead.durationMinutes ?? 30,
+      status: lead.status || 'active',
+      captured_at: lead.capturedAt || new Date().toISOString()
+    }, { onConflict: 'id' });
+    if (error) return { synced: false, error: error.message };
+    return { synced: true };
+  }
+
+  async syncLeadsToSupabase(leads: CaptivePortalLead[]): Promise<{ synced: number; error?: string }> {
+    if (!this.client || !this.config.isConnected) return { synced: 0, error: 'Not connected' };
+    if (!Array.isArray(leads) || leads.length === 0) return { synced: 0 };
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    const rows = leads.map((lead) => ({
+      id: lead.id,
+      operator_id: opId,
+      first_name: lead.firstName || 'Guest',
+      last_name: lead.lastName || '',
+      full_name: lead.fullName || `${lead.firstName} ${lead.lastName}`.trim(),
+      country_code: lead.countryCode || '+266',
+      phone: lead.phone || '',
+      full_phone: lead.fullPhone || lead.phone || '',
+      email: lead.email || '',
+      router_name: lead.routerName || 'MIKROTIK-TC',
+      site_name: lead.siteName || 'T-Connect Hotspot',
+      vertical: lead.vertical || 'hotspot',
+      client_mac: lead.clientMac || 'AUTO',
+      client_ip: lead.clientIp || '10.10.0.1',
+      device_type: lead.deviceType || 'Mobile',
+      duration_minutes: lead.durationMinutes ?? 30,
+      status: lead.status || 'active',
+      captured_at: lead.capturedAt || new Date().toISOString()
+    }));
+    const { error } = await this.client.from('guest_leads').upsert(rows, { onConflict: 'id' });
+    if (error) return { synced: 0, error: error.message };
+    return { synced: rows.length };
+  }
+
+  async syncPartnerGroupsToSupabase(groups: TenantGroup[]): Promise<{ synced: number; error?: string }> {
+    if (!this.client || !this.config.isConnected) return { synced: 0, error: 'Not connected' };
+    if (!Array.isArray(groups) || groups.length === 0) return { synced: 0 };
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    const rows = groups.map((g) => ({
+      id: g.id,
+      operator_id: opId,
+      name: g.name,
+      tag: g.tag || `group:${g.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+      custom_bg_url: g.customBgUrl || '',
+      client_contact: g.clientContact || 'admin@tconnect.africa',
+      accent_color: g.accentColor || '#f05e17',
+      description: g.description || '',
+      router_count: g.routerCount || 0
+    }));
+    const { error } = await this.client.from('partner_groups').upsert(rows, { onConflict: 'id' });
+    if (error) return { synced: 0, error: error.message };
+    return { synced: rows.length };
+  }
+
+  async syncVoucherToSupabase(voucher: Voucher): Promise<void> {
+    if (!this.client || !this.config.isConnected) return;
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    await this.client.from('vouchers').upsert({
+      id: voucher.id,
+      operator_id: opId,
+      code: voucher.code,
+      plan_id: voucher.planId,
+      plan_name: voucher.planName,
+      vertical: 'hotspot',
+      price: voucher.price,
+      duration_label: `${Math.round((voucher.durationSeconds || 86400) / 3600)}h`,
+      duration_seconds: voucher.durationSeconds || 86400,
+      status: voucher.status === 'used' ? 'active' : voucher.status,
+      max_devices: voucher.deviceLimit || 1,
+      batch_id: voucher.batchId || 'BATCH-AUTO',
+      site_name: 'T-Connect Hotspot'
+    }, { onConflict: 'id' });
+  }
+
+  async syncTransactionToSupabase(tx: PaymentTransaction): Promise<void> {
+    if (!this.client || !this.config.isConnected) return;
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    await this.client.from('transactions').upsert({
+      id: tx.id,
+      operator_id: opId,
+      transaction_ref: tx.transactionRef,
+      provider: tx.provider,
+      msisdn: tx.phoneNumber || 'N/A',
+      plan_id: tx.planId,
+      plan_name: tx.planName,
+      site_name: tx.siteName,
+      amount: tx.amount,
+      currency: tx.currency,
+      status: tx.status,
+      voucher_code: tx.voucherCodeIssued || null,
+      ott_voucher_pin: tx.ottVoucherPin || null
+    }, { onConflict: 'id' });
+  }
+
+  async syncAuditLogToSupabase(entry: AuditLogEntry): Promise<void> {
+    if (!this.client || !this.config.isConnected) return;
+    const opId = this.config.operatorId || DEFAULT_OPERATOR_ID;
+    await this.client.from('audit_logs').insert({
+      id: entry.id,
+      operator_id: opId,
+      actor: entry.actor,
+      role: entry.role,
+      action: entry.action,
+      target: entry.target,
+      details: entry.details,
+      ip_address: entry.ipAddress
+    });
+  }
+
+  subscribeToAllRealtime(callbacks: {
+    onRouterChange?: () => void;
+    onVoucherChange?: () => void;
+    onTransactionChange?: () => void;
+    onPlanChange?: () => void;
+    onLeadChange?: () => void;
+  }): () => void {
+    if (!this.client || !this.config.isConnected) {
+      return () => {};
+    }
+    try {
+      const channel = this.client
+        .channel('tconnect-realtime-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'routers' }, () => callbacks.onRouterChange?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, () => callbacks.onVoucherChange?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => callbacks.onTransactionChange?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'plans' }, () => callbacks.onPlanChange?.())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'guest_leads' }, () => callbacks.onLeadChange?.())
+        .subscribe();
+
+      return () => {
+        try {
+          this.client?.removeChannel(channel);
+        } catch {}
+      };
+    } catch {
+      return () => {};
+    }
+  }
+
+  async syncAllPlatformState(state: {
+    plans: HotspotPlan[];
+    routers: RouterDevice[];
+    vouchers: Voucher[];
+    transactions: PaymentTransaction[];
+    captiveLeads?: CaptivePortalLead[];
+    tenantGroups?: TenantGroup[];
+  }): Promise<{
+    success: boolean;
+    summary: string;
+  }> {
+    // Also trigger server-side full Supabase sync so server-captured leads & OTT pins are pushed
+    try {
+      await fetch('/api/supabase/sync-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: this.config.url,
+          anonKey: this.config.anonKey
+        })
+      });
+    } catch {}
+
+    if (!this.client || !this.config.isConnected) {
+      return { success: false, summary: 'Supabase client is not connected.' };
+    }
+
+    await this.syncPlansToSupabase(state.plans || []);
+    const rRes = await this.syncRoutersToSupabase(state.routers || []);
+    const lRes = await this.syncLeadsToSupabase(state.captiveLeads || []);
+    const pRes = await this.syncPartnerGroupsToSupabase(state.tenantGroups || []);
+
+    for (const v of (state.vouchers || []).slice(0, 100)) {
+      await this.syncVoucherToSupabase(v);
+    }
+    for (const t of (state.transactions || []).slice(0, 100)) {
+      await this.syncTransactionToSupabase(t);
+    }
+
+    return {
+      success: true,
+      summary: `Synchronized ${rRes.synced} routers, ${lRes.synced} guest leads, ${pRes.synced} partner groups, ${(state.vouchers || []).length} vouchers, and ${(state.transactions || []).length} transactions to Supabase (${this.config.url}).`
+    };
+  }
+
   async pullFromSupabase(): Promise<{
     routers: RouterDevice[];
     vouchers: Voucher[];
     transactions: PaymentTransaction[];
     plans: HotspotPlan[];
+    captiveLeads: CaptivePortalLead[];
+    tenantGroups: TenantGroup[];
   } | null> {
     if (!this.client || !this.config.isConnected) return null;
+
     try {
-      const [routersRes, vouchersRes, txsRes, plansRes] = await Promise.all([
-        this.client.from('routers').select('*'),
-        this.client.from('vouchers').select('*'),
-        this.client.from('transactions').select('*').order('created_at', { ascending: false }),
-        this.client.from('plans').select('*')
+      const [routersRes, vouchersRes, txRes, plansRes, leadsRes, groupsRes] = await Promise.all([
+        this.client.from('routers').select('*').order('created_at', { ascending: false }),
+        this.client.from('vouchers').select('*, voucher_devices(mac_address)').order('created_at', { ascending: false }).limit(200),
+        this.client.from('transactions').select('*').order('created_at', { ascending: false }).limit(200),
+        this.client.from('plans').select('*').order('price', { ascending: true }),
+        this.client.from('guest_leads').select('*').order('captured_at', { ascending: false }).limit(500),
+        this.client.from('partner_groups').select('*').order('created_at', { ascending: false })
       ]);
 
       const routers: RouterDevice[] = (routersRes.data || []).map((r: any) => ({
@@ -522,6 +827,10 @@ class SupabaseService {
         name: r.name,
         vertical: r.vertical,
         siteName: r.site_name,
+        district: r.district || 'Maseru',
+        physicalAddress: r.physical_address || r.site_name,
+        partnerName: r.partner_name || 'T-Connect Internal Fleet',
+        policyName: r.policy_name || 'PayLesotho + 16-Digit OTT Policy',
         model: r.model,
         boardName: r.board_name,
         rosVersion: r.ros_version,
@@ -529,53 +838,72 @@ class SupabaseService {
         wireguardIp: r.wireguard_ip,
         publicWanIp: r.public_wan_ip,
         status: r.status,
+        accessMode: r.access_mode || 'PAID_ONLY',
+        freeModeEnabled: Boolean(r.free_mode_enabled || (r.access_mode && r.access_mode !== 'PAID_ONLY')),
+        freeDurationMinutes: Number(r.free_duration_minutes || 30),
+        freeRateLimit: r.free_rate_limit || '10M/30M',
+        freeDailyQuotaMb: Number(r.free_daily_quota_mb || 500),
         uptime: r.uptime || '0m',
         cpuLoad: r.cpu_load || 0,
         memoryUsage: r.memory_usage || 0,
-        lastHeartbeat: r.last_heartbeat || 'Recently',
+        lastHeartbeat: r.last_heartbeat ? new Date(r.last_heartbeat).toLocaleTimeString() : 'Just now',
         firmware: r.firmware || '7.15.2',
         activeSessions: r.active_sessions || 0,
-        token: r.token,
-        tokenExpiresAt: r.token_expires_at,
-        adoptedAt: r.adopted_at,
-        solarTelemetry: r.solar_telemetry,
-        gpsTelemetry: r.gps_telemetry
+        token: r.adoption_token || undefined,
+        gpsTelemetry: r.gps_telemetry || undefined,
+        solarTelemetry: r.solar_telemetry || undefined
       }));
 
       const vouchers: Voucher[] = (vouchersRes.data || []).map((v: any) => ({
         id: v.id,
         code: v.code,
-        planId: v.plan_id,
+        planId: v.plan_id || '',
         planName: v.plan_name,
         price: Number(v.price),
-        currency: v.currency || 'M',
-        durationSeconds: v.duration_seconds,
-        deviceLimit: v.device_limit || 2,
-        status: v.status,
-        generatedAt: v.generated_at,
-        expiresAt: v.expires_at,
-        firstUsedAt: v.first_used_at,
-        associatedDevices: [],
+        currency: 'M',
+        durationSeconds: Number(v.duration_seconds || 86400),
+        deviceLimit: Number(v.max_devices || 1),
+        status: v.status === 'unused' ? 'active' : (v.status as Voucher['status']),
+        generatedAt: v.created_at ? new Date(v.created_at).toISOString() : new Date().toISOString(),
+        expiresAt: v.expires_at ? new Date(v.expires_at).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+        firstUsedAt: v.activated_at || undefined,
+        associatedDevices: Array.isArray(v.voucher_devices)
+          ? v.voucher_devices.map((d: any) => ({
+              mac: d.mac_address,
+              ip: d.client_ip || '10.10.0.10',
+              hostname: d.device_type || 'Device',
+              boundAt: d.bound_at || new Date().toISOString(),
+              bytesDown: 0,
+              bytesUp: 0
+            }))
+          : [],
         batchId: v.batch_id
       }));
 
-      const transactions: PaymentTransaction[] = (txsRes.data || []).map((t: any) => ({
+      const transactions: PaymentTransaction[] = (txRes.data || []).map((t: any) => ({
         id: t.id,
         transactionRef: t.transaction_ref,
-        provider: t.provider,
+        provider: (t.provider === 'ottvoucher' ? 'ottvoucher' : 'paylesotho') as 'paylesotho' | 'ottvoucher',
         amount: Number(t.amount),
         currency: t.currency || 'M',
-        phoneNumber: t.phone_number,
-        planId: t.plan_id,
+        phoneNumber: t.msisdn,
+        planId: t.plan_id || 'plan-custom',
         planName: t.plan_name,
-        vertical: t.vertical,
+        vertical: 'hotspot',
         siteName: t.site_name,
-        voucherCodeIssued: t.voucher_code_issued,
-        status: t.status,
-        errorMessage: t.error_message,
-        debugLogs: t.debug_logs || {},
-        createdAt: t.created_at,
-        completedAt: t.completed_at
+        voucherCodeIssued: t.voucher_code || undefined,
+        ottVoucherPin: t.ott_voucher_pin || undefined,
+        status: (['pending', 'completed', 'failed', 'refunded'].includes(t.status) ? t.status : 'completed') as PaymentTransaction['status'],
+        createdAt: t.created_at ? new Date(t.created_at).toISOString().slice(0, 19).replace('T', ' ') : '',
+        completedAt: t.completed_at || undefined,
+        debugLogs: {
+          requestTimestamp: t.created_at || new Date().toISOString(),
+          endpoint: '/api/payments/verify',
+          httpStatus: 200,
+          signatureVerified: true,
+          rawPayload: t.webhook_payload || {},
+          rawResponse: { status: t.status }
+        }
       }));
 
       const plans: HotspotPlan[] = (plansRes.data || []).map((p: any) => ({
@@ -589,250 +917,52 @@ class SupabaseService {
         dataCapMb: p.data_cap_mb,
         downloadSpeedMbps: Number(p.download_speed_mbps),
         uploadSpeedMbps: Number(p.upload_speed_mbps),
-        deviceLimit: p.device_limit,
-        burstDownloadMbps: p.burst_download_mbps ? Number(p.burst_download_mbps) : undefined,
-        burstUploadMbps: p.burst_upload_mbps ? Number(p.burst_upload_mbps) : undefined,
+        burstDownloadMbps: Number(p.burst_download_mbps),
+        burstUploadMbps: Number(p.burst_upload_mbps),
         fairUseThresholdMb: p.fair_use_threshold_mb,
         fairUseDownloadMbps: p.fair_use_download_mbps ? Number(p.fair_use_download_mbps) : undefined,
-        isPopular: p.is_popular
+        deviceLimit: p.device_limit || 1,
+        isPopular: Boolean(p.is_popular)
       }));
 
-      return { routers, vouchers, transactions, plans };
-    } catch (err) {
-      console.warn('Failed to pull from Supabase:', err);
+      const captiveLeads: CaptivePortalLead[] = (leadsRes.data || []).map((l: any) => ({
+        id: l.id,
+        firstName: l.first_name || 'Guest',
+        lastName: l.last_name || '',
+        fullName: l.full_name || `${l.first_name || 'Guest'} ${l.last_name || ''}`.trim(),
+        countryCode: (l.country_code === '+27' ? '+27' : '+266') as '+266' | '+27',
+        phone: l.phone || '',
+        fullPhone: l.full_phone || l.phone || '',
+        email: l.email || '',
+        capturedAt: l.captured_at || new Date().toISOString(),
+        routerName: l.router_name || 'MIKROTIK-TC',
+        siteName: l.site_name || 'T-Connect Hotspot',
+        vertical: l.vertical || 'hotspot',
+        clientMac: l.client_mac || 'AUTO',
+        clientIp: l.client_ip || '10.10.0.1',
+        deviceType: (l.device_type || 'Mobile') as 'Mobile' | 'Laptop' | 'Tablet',
+        durationMinutes: Number(l.duration_minutes ?? 30),
+        status: (l.status === 'expired' ? 'expired' : 'active') as 'active' | 'expired'
+      }));
+
+      const tenantGroups: TenantGroup[] = (groupsRes.data || []).map((g: any) => ({
+        id: g.id,
+        name: g.name,
+        tag: g.tag || `group:${String(g.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        customBgUrl: g.custom_bg_url || '',
+        clientContact: g.client_contact || 'admin@tconnect.africa',
+        accentColor: g.accent_color || '#f05e17',
+        description: g.description || '',
+        createdAt: g.created_at ? new Date(g.created_at).toISOString().slice(0, 10) : '2026-10-01',
+        routerCount: Number(g.router_count || 0)
+      }));
+
+      return { routers, vouchers, transactions, plans, captiveLeads, tenantGroups };
+    } catch {
       return null;
-    }
-  }
-
-  async syncRoutersToSupabase(routers: RouterDevice[]): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      const records = routers.map(r => ({
-        id: r.id,
-        name: r.name,
-        vertical: r.vertical,
-        site_name: r.siteName,
-        model: r.model,
-        board_name: r.boardName,
-        ros_version: r.rosVersion,
-        mac_address: r.macAddress,
-        wireguard_ip: r.wireguardIp,
-        public_wan_ip: r.publicWanIp,
-        status: r.status,
-        uptime: r.uptime,
-        cpu_load: r.cpuLoad,
-        memory_usage: r.memoryUsage,
-        last_heartbeat: r.lastHeartbeat,
-        firmware: r.firmware,
-        active_sessions: r.activeSessions,
-        solar_telemetry: r.solarTelemetry || null,
-        gps_telemetry: r.gpsTelemetry || null
-      }));
-
-      await this.client.from('routers').upsert(records, { onConflict: 'id' });
-      return true;
-    } catch (e) {
-      console.warn('Supabase sync router error:', e);
-      return false;
-    }
-  }
-
-  async syncVoucherToSupabase(voucher: Voucher): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      await this.client.from('vouchers').upsert({
-        id: voucher.id,
-        code: voucher.code,
-        code_hash: voucher.code,
-        plan_id: voucher.planId,
-        plan_name: voucher.planName,
-        price: voucher.price,
-        currency: voucher.currency,
-        duration_seconds: voucher.durationSeconds,
-        device_limit: voucher.deviceLimit,
-        status: voucher.status,
-        generated_at: voucher.generatedAt,
-        expires_at: voucher.expiresAt,
-        first_used_at: voucher.firstUsedAt || null,
-        batch_id: voucher.batchId || null
-      }, { onConflict: 'id' });
-      return true;
-    } catch (e) {
-      console.warn('Supabase sync voucher error:', e);
-      return false;
-    }
-  }
-
-  async syncTransactionToSupabase(tx: PaymentTransaction): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      await this.client.from('transactions').upsert({
-        id: tx.id,
-        transaction_ref: tx.transactionRef,
-        provider: tx.provider,
-        amount: tx.amount,
-        currency: tx.currency,
-        phone_number: tx.phoneNumber || null,
-        plan_id: tx.planId,
-        plan_name: tx.planName,
-        vertical: tx.vertical,
-        site_name: tx.siteName,
-        voucher_code_issued: tx.voucherCodeIssued || null,
-        status: tx.status,
-        error_message: tx.errorMessage || null,
-        debug_logs: tx.debugLogs,
-        created_at: tx.createdAt,
-        completed_at: tx.completedAt || null
-      }, { onConflict: 'id' });
-      return true;
-    } catch (e) {
-      console.warn('Supabase sync transaction error:', e);
-      return false;
-    }
-  }
-
-  async syncPlanToSupabase(plan: HotspotPlan): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      await this.client.from('plans').upsert({
-        id: plan.id,
-        name: plan.name,
-        vertical: plan.vertical,
-        price: plan.price,
-        currency: plan.currency || 'M',
-        duration_seconds: plan.durationSeconds,
-        duration_label: plan.durationLabel,
-        data_cap_mb: plan.dataCapMb || null,
-        download_speed_mbps: plan.downloadSpeedMbps,
-        upload_speed_mbps: plan.uploadSpeedMbps,
-        device_limit: plan.deviceLimit,
-        burst_download_mbps: plan.burstDownloadMbps || null,
-        burst_upload_mbps: plan.burstUploadMbps || null,
-        fair_use_threshold_mb: plan.fairUseThresholdMb || null,
-        fair_use_download_mbps: plan.fairUseDownloadMbps || null,
-        is_popular: plan.isPopular || false
-      }, { onConflict: 'id' });
-      return true;
-    } catch (e) {
-      console.warn('Supabase sync plan error:', e);
-      return false;
-    }
-  }
-
-  async syncPlansToSupabase(plans: HotspotPlan[]): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      const records = plans.map(p => ({
-        id: p.id,
-        name: p.name,
-        vertical: p.vertical,
-        price: p.price,
-        currency: p.currency || 'M',
-        duration_seconds: p.durationSeconds,
-        duration_label: p.durationLabel,
-        data_cap_mb: p.dataCapMb || null,
-        download_speed_mbps: p.downloadSpeedMbps,
-        upload_speed_mbps: p.uploadSpeedMbps,
-        device_limit: p.deviceLimit,
-        burst_download_mbps: p.burstDownloadMbps || null,
-        burst_upload_mbps: p.burstUploadMbps || null,
-        fair_use_threshold_mb: p.fairUseThresholdMb || null,
-        fair_use_download_mbps: p.fairUseDownloadMbps || null,
-        is_popular: p.isPopular || false
-      }));
-      await this.client.from('plans').upsert(records, { onConflict: 'id' });
-      return true;
-    } catch (e) {
-      console.warn('Supabase sync plans error:', e);
-      return false;
-    }
-  }
-
-  async deleteRouterFromSupabase(routerId: string): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      await this.client.from('routers').delete().eq('id', routerId);
-      return true;
-    } catch (e) {
-      console.warn('Supabase delete router error:', e);
-      return false;
-    }
-  }
-
-  async deletePlanFromSupabase(planId: string): Promise<boolean> {
-    if (!this.client || !this.config.isConnected) return false;
-    try {
-      await this.client.from('plans').delete().eq('id', planId);
-      return true;
-    } catch (e) {
-      console.warn('Supabase delete plan error:', e);
-      return false;
-    }
-  }
-
-  /**
-   * Subscribes to Supabase Realtime WebSocket changes across ALL tables
-   * Ensures routers, vouchers, transactions, and plans update instantly everywhere!
-   */
-  subscribeToAllRealtime(callbacks: {
-    onRouterChange?: (payload: any) => void;
-    onVoucherChange?: (payload: any) => void;
-    onTransactionChange?: (payload: any) => void;
-    onPlanChange?: (payload: any) => void;
-  }) {
-    if (!this.client || !this.config.isConnected) {
-      return () => {};
-    }
-
-    try {
-      const channel = this.client
-        .channel('tconnect-realtime-global')
-        .on(
-          'postgres_changes' as any,
-          { event: '*', schema: 'public', table: 'routers' },
-          (payload: any) => {
-            console.log('[Supabase Realtime] Router modified:', payload);
-            callbacks.onRouterChange?.(payload);
-          }
-        )
-        .on(
-          'postgres_changes' as any,
-          { event: '*', schema: 'public', table: 'vouchers' },
-          (payload: any) => {
-            console.log('[Supabase Realtime] Voucher modified:', payload);
-            callbacks.onVoucherChange?.(payload);
-          }
-        )
-        .on(
-          'postgres_changes' as any,
-          { event: '*', schema: 'public', table: 'transactions' },
-          (payload: any) => {
-            console.log('[Supabase Realtime] Transaction created/updated:', payload);
-            callbacks.onTransactionChange?.(payload);
-          }
-        )
-        .on(
-          'postgres_changes' as any,
-          { event: '*', schema: 'public', table: 'plans' },
-          (payload: any) => {
-            console.log('[Supabase Realtime] Plan modified:', payload);
-            callbacks.onPlanChange?.(payload);
-          }
-        )
-        .subscribe((status) => {
-          console.log('[Supabase Realtime Channel Status]:', status);
-        });
-
-      return () => {
-        if (this.client) {
-          this.client.removeChannel(channel);
-        }
-      };
-    } catch (err) {
-      console.warn('Failed to establish Realtime subscription:', err);
-      return () => {};
     }
   }
 }
 
 export const supabaseService = new SupabaseService();
+

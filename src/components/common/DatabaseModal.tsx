@@ -67,30 +67,21 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
     setConnectionStatus(res);
     onConnectedStatusChange(res.success);
 
-    // If connected, sync fleet immediately
+    // If connected, sync all platform state (routers, leads, partner groups, plans, vouchers, transactions) immediately
     if (res.success) {
       const state = storage.getState();
-      if (state.routers.length > 0) {
-        await supabaseService.syncRoutersToSupabase(state.routers);
-      }
+      await supabaseService.syncAllPlatformState(state);
     }
   };
 
   const handleSyncAll = async () => {
     setIsSyncing(true);
     const state = storage.getState();
-    await supabaseService.syncPlansToSupabase(state.plans);
-    await supabaseService.syncRoutersToSupabase(state.routers);
-    for (const v of state.vouchers.slice(0, 50)) {
-      await supabaseService.syncVoucherToSupabase(v);
-    }
-    for (const t of state.transactions.slice(0, 50)) {
-      await supabaseService.syncTransactionToSupabase(t);
-    }
+    const res = await supabaseService.syncAllPlatformState(state);
     setIsSyncing(false);
     setConnectionStatus({
-      success: true,
-      message: 'All plans, routers, vouchers, and transactions synchronized to Supabase PostgreSQL tables.'
+      success: res.success,
+      message: res.summary
     });
   };
 
@@ -102,12 +93,12 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
       onDataPulled(data);
       setConnectionStatus({
         success: true,
-        message: `Successfully pulled ${data.routers.length} routers, ${data.vouchers.length} vouchers, and ${data.transactions.length} ledger transactions from Supabase.`
+        message: `Successfully pulled ${data.routers.length} routers, ${data.captiveLeads?.length || 0} guest leads, ${data.tenantGroups?.length || 0} partner groups, ${data.vouchers.length} vouchers, and ${data.transactions.length} ledger transactions from Supabase.`
       });
     } else {
       setConnectionStatus({
         success: false,
-        message: 'Could not pull records. Please ensure your Supabase tables exist and RLS policies allow reading.'
+        message: 'Could not pull records. Please ensure your Supabase tables exist (run the SQL Schema in Tab 1) and RLS policies allow reading.'
       });
     }
   };
