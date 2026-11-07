@@ -346,8 +346,14 @@ class SupabaseService {
     }
   }
 
+  private normalizeUrl(rawUrl: string): string {
+    const trimmed = (rawUrl || DEFAULT_SUPABASE_PROJECT_URL).trim();
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    return withProtocol.replace(/\/rest\/v1\/?.*$/i, '').replace(/\/+$/, '');
+  }
+
   private loadConfig() {
-    const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_PROJECT_URL;
+    const envUrl = this.normalizeUrl((import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_PROJECT_URL);
     const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
@@ -356,8 +362,8 @@ class SupabaseService {
         if (saved) {
           const parsed = JSON.parse(saved);
           this.config = {
-            url: parsed.url || envUrl || DEFAULT_SUPABASE_PROJECT_URL,
-            anonKey: parsed.anonKey || envKey || '',
+            url: this.normalizeUrl(parsed.url || envUrl || DEFAULT_SUPABASE_PROJECT_URL),
+            anonKey: (parsed.anonKey || envKey || '').trim(),
             isConnected: Boolean(parsed.isConnected || (parsed.url && parsed.anonKey)),
             operatorId: parsed.operatorId || DEFAULT_OPERATOR_ID
           };
@@ -390,8 +396,8 @@ class SupabaseService {
       if (!res.ok) return;
       const data = await res.json();
       if (data?.success && data.url) {
-        const nextUrl = data.url || this.config.url || DEFAULT_SUPABASE_PROJECT_URL;
-        const nextKey = data.anonKey || this.config.anonKey || '';
+        const nextUrl = this.normalizeUrl(data.url || this.config.url || DEFAULT_SUPABASE_PROJECT_URL);
+        const nextKey = (data.anonKey || this.config.anonKey || '').trim();
         if (nextKey && (!this.config.anonKey || !this.client)) {
           this.config = {
             url: nextUrl,
@@ -408,7 +414,7 @@ class SupabaseService {
 
   private initClient(url: string, anonKey: string) {
     try {
-      this.client = createClient(url, anonKey, {
+      this.client = createClient(this.normalizeUrl(url), anonKey.trim(), {
         auth: { persistSession: true }
       });
     } catch {
@@ -419,7 +425,7 @@ class SupabaseService {
   getConfig(): SupabaseConfig {
     return {
       ...this.config,
-      url: this.config.url || DEFAULT_SUPABASE_PROJECT_URL
+      url: this.normalizeUrl(this.config.url || DEFAULT_SUPABASE_PROJECT_URL)
     };
   }
 
@@ -428,7 +434,7 @@ class SupabaseService {
   }
 
   saveConfig(url: string, anonKey: string, operatorId = DEFAULT_OPERATOR_ID): boolean {
-    const cleanUrl = (url || DEFAULT_SUPABASE_PROJECT_URL).trim().replace(/\/$/, '');
+    const cleanUrl = this.normalizeUrl(url || DEFAULT_SUPABASE_PROJECT_URL);
     const cleanKey = anonKey.trim();
 
     this.config = {

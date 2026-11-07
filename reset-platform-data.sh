@@ -39,21 +39,53 @@ echo "🧹 T-Connect Platform Reset (Mode: ${MODE})"
 echo "🔒 Payment Gateways (PayLesotho & OTT Lesotho) will be PRESERVED."
 echo "=================================================================="
 
-# Load .env safely if present
-if [ -f ".env" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
+WIPE_ROUTERS_BOOL="false"
+if [ "$MODE" = "wipe-all-manual" ]; then
+  WIPE_ROUTERS_BOOL="true"
 fi
 
-mkdir -p data
+# ------------------------------------------------------------------------------
+# STEP 1: API-First Reset (via running Node / Docker container on port 3000)
+# The running server process owns data/server-store.json inside the container
+# and resets both in-memory state and disk state atomically.
+# ------------------------------------------------------------------------------
+API_RESET_OK="false"
+if command -v curl >/dev/null 2>&1; then
+  HTTP_RESP="$(curl -sS -X POST "http://127.0.0.1:${PORT:-3000}/api/admin/reset-production" \
+    -H "Content-Type: application/json" \
+    -d "{\"wipeRouters\": ${WIPE_ROUTERS_BOOL}, \"wipeLeads\": true, \"wipePartners\": true}" 2>/dev/null || true)"
+  if echo "$HTTP_RESP" | grep -q '"success":true'; then
+    API_RESET_OK="true"
+    echo "✅ Live server API (127.0.0.1:${PORT:-3000}) reset in-memory & disk state."
+  fi
+fi
+
+# ------------------------------------------------------------------------------
+# STEP 2: Fix Docker root-owned data/ permissions & synchronize disk store
+# When Docker Compose runs as root, data/server-store.json may be owned by root:root.
+# Automatically restore ownership to current user (e.g. wydmav) before writing.
+# ------------------------------------------------------------------------------
+mkdir -p data 2>/dev/null || sudo mkdir -p data
+
+if [ ! -w "data" ] || { [ -f "data/server-store.json" ] && [ ! -w "data/server-store.json" ]; }; then
+  echo "🔧 Fixing Docker root-owned permissions on ./data for user $(whoami)..."
+  if command -v sudo >/dev/null 2>&1; then
+    sudo chown -R "$(id -u):$(id -g)" data 2>/dev/null || true
+    sudo chmod -R u+rwX data 2>/dev/null || true
+  fi
+fi
 
 export RESET_MODE="$MODE"
 
-node -e '
+NODE_CMD=(node)
+if [ -f "data/server-store.json" ] && [ ! -w "data/server-store.json" ] && command -v sudo >/dev/null 2>&1; then
+  NODE_CMD=(sudo -E node)
+fi
+
+"${NODE_CMD[@]}" -e '
 const fs = require("fs");
 const path = require("path");
+try { require("dotenv").config(); } catch (e) {}
 
 const mode = process.env.RESET_MODE || "keep-routers";
 const wipeRouters = mode === "wipe-all-manual";
@@ -163,12 +195,8 @@ console.log("   • Adopted Routers preserved:", cleanStore.routers.length);
 console.log("   • Leads, Transactions, Vouchers & Custom Partner Groups wiped to 0.");
 '
 
-# Also notify the live running server on port 3000 if active
-if command -v curl >/dev/null 2>&1; then
-  WIPE_ROUTERS_BOOL="false"
-  if [ "$MODE" = "wipe-all-manual" ]; then
-    WIPE_ROUTERS_BOOL="true"
-  fi
+# Re-notify the live server if it started or was running so in-memory matches disk
+if [ "$API_RESET_OK" = "false" ] && command -v curl >/dev/null 2>&1; then
   curl -sS -X POST "http://127.0.0.1:${PORT:-3000}/api/admin/reset-production" \
     -H "Content-Type: application/json" \
     -d "{\"wipeRouters\": ${WIPE_ROUTERS_BOOL}, \"wipeLeads\": true, \"wipePartners\": true}" >/dev/null 2>&1 || true

@@ -2171,13 +2171,19 @@ const DEFAULT_PARTNER_GROUP_NAMES = [
   'Quarantine (Holding Group)'
 ];
 
+function normalizeServerSupabaseUrl(rawUrl?: string): string {
+  const trimmed = String(rawUrl || DEFAULT_SUPABASE_URL).trim();
+  const withProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withProto.replace(/\/rest\/v1\/?.*$/i, '').replace(/\/+$/, '');
+}
+
 function getSupabaseCredentials(): { url: string; key: string } {
-  const url = (
+  const url = normalizeServerSupabaseUrl(
     serverStore.supabaseConfig?.url ||
     process.env.SUPABASE_URL ||
     process.env.VITE_SUPABASE_URL ||
     DEFAULT_SUPABASE_URL
-  ).trim().replace(/\/+$/, '');
+  );
   const key = (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     serverStore.supabaseConfig?.anonKey ||
@@ -2226,7 +2232,7 @@ app.get('/api/supabase/status', (_req: Request, res: Response) => {
 
 app.post('/api/supabase/config', (req: Request, res: Response) => {
   const { url, anonKey } = req.body || {};
-  const cleanUrl = String(url || DEFAULT_SUPABASE_URL).trim().replace(/\/+$/, '');
+  const cleanUrl = normalizeServerSupabaseUrl(url || DEFAULT_SUPABASE_URL);
   const cleanKey = String(anonKey || '').trim();
   if (cleanUrl && cleanKey) {
     serverStore.supabaseConfig = { url: cleanUrl, anonKey: cleanKey };
@@ -2243,7 +2249,7 @@ app.post('/api/supabase/sync-all', async (req: Request, res: Response) => {
   const { url, anonKey } = req.body || {};
   if (url && anonKey) {
     serverStore.supabaseConfig = {
-      url: String(url).trim().replace(/\/+$/, ''),
+      url: normalizeServerSupabaseUrl(url),
       anonKey: String(anonKey).trim()
     };
     saveServerPortalStore(serverStore);

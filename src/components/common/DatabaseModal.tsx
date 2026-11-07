@@ -51,16 +51,25 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
   } | null>(currentConfig.isConnected ? { success: true, message: 'Connected to Supabase PostgreSQL.' } : null);
   const [copiedSql, setCopiedSql] = useState(false);
   const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [isResettingPlatform, setIsResettingPlatform] = useState(false);
 
   if (!isOpen) return null;
 
   const handleTestAndSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim() || !anonKey.trim()) return;
+    const normalizedUrl = (url || 'https://uxglqtcuedelmyhvgghw.supabase.co')
+      .trim()
+      .replace(/^https?:\/\//i, 'https://')
+      .replace(/\/rest\/v1\/?.*$/i, '')
+      .replace(/\/+$/, '');
+    const cleanUrl = /^https?:\/\//i.test(normalizedUrl) ? normalizedUrl : `https://${normalizedUrl}`;
+    setUrl(cleanUrl);
+
+    if (!cleanUrl || !anonKey.trim()) return;
 
     setIsConnecting(true);
     setConnectionStatus(null);
-    supabaseService.saveConfig(url, anonKey);
+    supabaseService.saveConfig(cleanUrl, anonKey.trim());
 
     const res = await supabaseService.testConnection();
     setIsConnecting(false);
@@ -72,6 +81,40 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
       const state = storage.getState();
       await supabaseService.syncAllPlatformState(state);
     }
+  };
+
+  const handleServerAndLocalReset = async (wipeRouters: boolean) => {
+    setIsResettingPlatform(true);
+    try {
+      await fetch('/api/admin/reset-production', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wipeRouters,
+          wipeLeads: true,
+          wipePartners: true
+        })
+      });
+    } catch {}
+    if (wipeRouters && onResetToScratch) {
+      onResetToScratch();
+    } else {
+      const current = storage.getState();
+      storage.loadFromSupabase({
+        routers: wipeRouters ? [] : current.routers,
+        vouchers: [],
+        transactions: [],
+        captiveLeads: []
+      });
+    }
+    setIsResettingPlatform(false);
+    setShowWipeConfirm(false);
+    setConnectionStatus({
+      success: true,
+      message: wipeRouters
+        ? 'Platform reset complete: All manual data (routers, leads, custom partner groups, vouchers, transactions) wiped. Payment Gateways (PayLesotho & OTT Lesotho) preserved.'
+        : 'Platform reset complete: Leads, custom partner groups, vouchers, and transactions wiped. Adopted routers & Payment Gateways (PayLesotho & OTT Lesotho) preserved.'
+    });
   };
 
   const handleSyncAll = async () => {
@@ -110,10 +153,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
   };
 
   const executeWipeToScratch = () => {
-    if (onResetToScratch) {
-      onResetToScratch();
-      setShowWipeConfirm(false);
-    }
+    void handleServerAndLocalReset(true);
   };
 
   return (
@@ -214,27 +254,45 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
         {/* Tab 2: Connection Configuration */}
         {modalTab === 'connect' && (
           <div className="space-y-4">
+            <div className="p-3 rounded-lg bg-[#121829] border border-[#232d42] text-[11px] text-slate-300 space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-emerald-400">How to get your Supabase API Key for uxglqtcuedelmyhvgghw:</span>
+                <a
+                  href="https://supabase.com/dashboard/project/uxglqtcuedelmyhvgghw/settings/api"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#f05e17] hover:underline font-bold flex items-center gap-1"
+                >
+                  <span>Open Project API Keys (uxglqtcuedelmyhvgghw)</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <p className="text-slate-400 leading-relaxed">
+                Visiting <code className="text-cyan-300">uxglqtcuedelmyhvgghw.supabase.co/rest/v1/</code> directly in a browser tab returns <code className="text-amber-300">&quot;No API key found in request&quot;</code> because browsers do not send the <code className="text-emerald-300">apikey</code> header. Copy your <strong>anon public</strong> key (starts with <code className="text-emerald-300">eyJ...</code> or <code className="text-emerald-300">sb_publishable_...</code>) from <strong>Project Settings &rarr; API</strong> and paste it below (or in <code className="text-cyan-300">.env</code> as <code className="text-cyan-300">VITE_SUPABASE_ANON_KEY</code>).
+              </p>
+            </div>
+
             <form onSubmit={handleTestAndSave} className="space-y-3.5">
               <div>
-                <label className="text-slate-400 block mb-1">Supabase Project URL</label>
+                <label className="text-slate-400 block mb-1">Supabase Project URL (auto-strips /rest/v1/ if pasted)</label>
                 <input
-                  type="url"
+                  type="text"
                   required
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://xyzcompany.supabase.co"
+                  placeholder="https://uxglqtcuedelmyhvgghw.supabase.co"
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Supabase Anon Public API Key</label>
+                <label className="text-slate-400 block mb-1">Supabase Anon Public API Key (`anon` / `public`)</label>
                 <input
                   type="password"
                   required
                   value={anonKey}
                   onChange={(e) => setAnonKey(e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... or sb_publishable_..."
                   className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -257,7 +315,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
                         onClick={handlePullData}
                         disabled={isPulling}
                         className="px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-cyan-300 rounded-lg flex items-center gap-1.5"
-                        title="Pull existing routers, vouchers, and transactions from Supabase into app"
+                        title="Pull existing routers, leads, partner groups, vouchers, and transactions from Supabase"
                       >
                         <DownloadCloud className={`w-3.5 h-3.5 ${isPulling ? 'animate-bounce' : ''}`} />
                         <span>{isPulling ? 'Pulling...' : 'Pull From DB'}</span>
@@ -268,7 +326,7 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
                         onClick={handleSyncAll}
                         disabled={isSyncing}
                         className="px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 rounded-lg flex items-center gap-1.5"
-                        title="Push current local state to Supabase PostgreSQL tables"
+                        title="Push current routers, guest leads, partner groups, vouchers, and transactions to Supabase"
                       >
                         <UploadCloud className={`w-3.5 h-3.5 ${isSyncing ? 'animate-bounce text-emerald-400' : ''}`} />
                         <span>{isSyncing ? 'Pushing...' : 'Push to DB'}</span>
@@ -278,12 +336,12 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
                 </div>
 
                 <a
-                  href="https://supabase.com/dashboard"
+                  href="https://supabase.com/dashboard/project/uxglqtcuedelmyhvgghw/sql/new"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] text-[#f05e17] hover:underline flex items-center gap-1"
                 >
-                  <span>Open Supabase Console</span>
+                  <span>Open SQL Editor (uxglqtcuedelmyhvgghw)</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
@@ -307,30 +365,45 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({
               </div>
             )}
 
-            {/* Clean Slate & Reset Section */}
-            <div className="pt-4 border-t border-[#232d42] flex items-center justify-between">
+            {/* Clean Slate & Reset Section (Preserves Payment Gateways) */}
+            <div className="pt-4 border-t border-[#232d42] flex flex-wrap items-center justify-between gap-3">
               <div>
-                <span className="text-white font-bold block">Start From Scratch</span>
-                <span className="text-[11px] text-slate-400">Clear any local session cache so you begin with 0 routers and 0 vouchers</span>
+                <span className="text-white font-bold block">Reset Manual Data (Preserves Payment Gateways)</span>
+                <span className="text-[11px] text-slate-400">
+                  Wipes leads, custom partner groups, vouchers &amp; transactions while strictly preserving PayLesotho &amp; OTT Lesotho gateways
+                </span>
               </div>
               
               {!showWipeConfirm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowWipeConfirm(true)}
-                  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Wipe to Scratch</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isResettingPlatform}
+                    onClick={() => void handleServerAndLocalReset(false)}
+                    className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isResettingPlatform ? 'animate-spin' : ''}`} />
+                    <span>Reset Manual (Keep Routers)</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isResettingPlatform}
+                    onClick={() => setShowWipeConfirm(true)}
+                    className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Wipe All Manual (Incl. Routers)</span>
+                  </button>
+                </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-rose-400 text-[11px]">Confirm wipe?</span>
+                  <span className="text-rose-400 text-[11px]">Wipe routers + manual data (keep gateways)?</span>
                   <button
                     onClick={executeWipeToScratch}
+                    disabled={isResettingPlatform}
                     className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold text-xs"
                   >
-                    Yes, Reset
+                    Yes, Wipe All Manual
                   </button>
                   <button
                     onClick={() => setShowWipeConfirm(false)}
