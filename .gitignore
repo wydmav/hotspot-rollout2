@@ -9,3 +9,6 @@ coverage/
 !.env.production.example
 .aistudio/
 *.tar.gz
+data/
+public/server-portal-store.json
+public/portal-configs.json

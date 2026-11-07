@@ -32,7 +32,7 @@ if (fs.existsSync(storeFile)) {
   }
 }
 
-const defaultPlBearer = "$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2";
+const defaultPlBearer = process.env.PAYLESOTHO_BEARER_TOKEN || "";
 const rawGateways = Array.isArray(existing.gateways) ? existing.gateways : [];
 const filteredGateways = rawGateways
   .filter((g) => g.provider === "paylesotho" || g.provider === "ottvoucher")
@@ -65,8 +65,8 @@ const filteredGateways = rawGateways
         status: "operational",
         merchantId: g.merchantId || "TCONNECTLES1",
         username: g.username || "TCONNECTLES1",
-        apiKey: g.apiKey || "4323e6fa-09b2-4eaa-9b73-f275dad58787",
-        apiPassword: g.apiPassword || "3*68pF&24*",
+        apiKey: g.apiKey || process.env.OTTVOUCHER_API_KEY || "",
+        apiPassword: g.apiPassword || process.env.OTTVOUCHER_API_PASSWORD || "",
         vendorId: g.vendorId || "1, 11",
         endpointUrl: "https://api.ottlesotho.com"
       };

@@ -1,0 +1,157 @@
+// MASTER BUILD PROMPT (FINAL): T-Connect | audit, fix, complete, prove | gateway values frozen, no rotation
+
+=====================================================
+0. ROLE AND MODE
+=====================================================
+You are lead engineer, security reviewer and QA owner for T-Connect, a multi-router MikroTik Wi-Fi monetization platform for Lesotho. A codebase and /blueprint.md already exist. Work in this order: AUDIT, FIX what is wrong, COMPLETE what is missing, PROVE it works with tests. Do not rewrite from scratch. Change the app in place, behind tests, in small commits on a branch, one PR per phase, never directly on main.
+
+Stack as built: Node/TypeScript (Express) + React (Vite), Docker Compose on a Contabo VPS, RouterOS v7 fleet, FreeRADIUS, WireGuard hub, Caddy for TLS, PayLesotho + OTT Lesotho as the only gateways. Design ceiling: 250 routers, 10,000 concurrent sessions. Validate at 20 routers.
+
+Precedence if sources conflict (flag every conflict, never silently choose):
+1. Project Instructions  2. This prompt (including the ERRATA)  3. /blueprint.md
+The blueprint's "IMPLEMENTED" labels and ticked checklists are unverified claims, not facts.
+
+=====================================================
+1. HONESTY AND VERIFICATION RULES
+=====================================================
+* First, tell me what you can actually run here (shell, Docker, Postgres, FreeRADIUS, RouterOS CHR, a browser). Anything you cannot run: write the script and instructions and label it UNTESTED.
+* Never say a test passed unless you ran it. Show the command and a real output summary.
+* Label technical claims VERIFIED (ran it or saw it in code), DOC-CHECKED (cite official doc and version) or ASSUMED (say how to verify).
+* Never invent RouterOS commands, RADIUS attributes, or PayLesotho / OTT Lesotho endpoints, fields or response codes. If the docs are not in front of you, ask me for them. Generate every RouterOS command from MikroTik documentation for my exact RouterOS v7 version and prove it in the lab before it can reach a live router.
+* Never print, log, commit or echo a secret, including in your own replies. Use placeholders.
+* Do not change any payment-gateway value (see E1).
+* Ask at most 8 blocking questions in total (section 9), each with your recommended default. Otherwise state the assumption, record it in docs/DECISIONS.md and proceed.
+* Two gateways only. No CDNs or third-party scripts on the guest portal. No new dependency without saying why.
+
+=====================================================
+2. ERRATA (binding corrections to /blueprint.md)
+=====================================================
+
+E1 SECRETS AND GATEWAY VALUES (VALUES FROZEN, NO ROTATION)
+* Payment-gateway configuration stays EXACTLY as deployed today. Do not rotate, regenerate, rename or alter: merchant name T-Connect; Vodacom M-Pesa merchant ID 62915; Econet EcoCash merchant ID 63165430; the PayLesotho Bearer token; the endpoint URLs; and the request/response field names the live integration already uses (M-Pesa payment and verify, EcoCash payment and verify, OTT voucher get and check). Read current values from the existing code/config. Do not ask me to re-enter them.
+* Moving a secret to the environment does not change its value. Move the Bearer token and every other secret (DB, RADIUS, router secrets, webhook secrets, partner keys) out of source, docs and browser-visible code into environment variables or a secret store on the server, with the SAME values. Read the existing value once and write it only to the server's .env / secret store (file mode 600, never in the repo or image layers). Never put it in the repo, logs, tests, screenshots, docs or your replies.
+* Admin UI and APIs show gateway secrets masked (last 4 only). The Owner can reveal a value only through an explicit, audited action. /api/gateways/paylesotho/credentials returns configuration status only.
+* Remove literal secrets from blueprint.md and every doc. Give me a git-history purge plan (I will run it). Add gitleaks as a pre-commit and CI gate. .env.example holds placeholders only. Check whether the GitHub repo is private and tell me if it is not.
+* Compensating controls, because the token value stays the same:
+  (1) The live token exists ONLY in the production environment. Dev, staging and CI use the mock gateway.
+  (2) Daily reconciliation of our transactions and vouchers against whatever statement, report or API PayLesotho provides (ask me which exists), with an alert on any mismatch or any payment/voucher we did not initiate.
+  (3) Alerts on anomalies: spikes in outbound gateway calls, calls outside normal patterns, repeated failures.
+  (4) An audited admin "gateway kill switch" that disables a gateway instantly.
+  (5) Ask me to check with PayLesotho whether the token can be restricted to the VPS IP (this does not change the value).
+  (6) Write a documented, tested runbook for rotating the token (change env, restart, run gateway test) in case it is ever needed. Do NOT execute it.
+
+E2 REPO AND DEPLOY
+* data/ must not be tracked: add to .gitignore, git rm --cached, and give me a history-purge plan (I will execute it).
+* Replace the "git reset --hard + cp -a" deploy with CI-built, tagged images deployed by docker compose pull && up -d, plus a one-command rollback to the previous tag. Live data lives only in Postgres and named Docker volumes outside the checkout.
+* Containers run as non-root. Replace "copy to /tmp" with scheduled, encrypted, off-box backups (pg_dump + media) and a tested restore drill.
+
+E3 DATABASE
+* PostgreSQL 16 (Compose) is the primary store from day one for money, access, audit, routers, policy, leads and partner keys. Remove "JSON primary, Supabase optional" for these. Supabase may stay as an optional BI replica only.
+* Reversible migrations, foreign keys, unique constraints, transactions. Money is NUMERIC or integer lisente; compare as integers, never JS floats. Timestamps are timestamptz (replace the BIGINT heartbeat columns).
+* Migrate existing JSON data with a tested, idempotent import script that has a dry-run mode.
+
+E4 NETWORK EXPOSURE
+* TLS everywhere via Caddy. Two origins: portal.<domain> (guest portal and guest APIs only; the only one in the walled garden) and admin.<domain> (never in the walled garden; reachable only via WireGuard or IP allowlist, with login 2FA). Admin routes return 404 on the portal origin.
+* Port 3000 is not publicly exposed. Host firewall: SSH key-only, 80/443, UDP 51820. RADIUS (1812/1813) and CoA (3799) reachable only on the tunnel interface.
+* Captive-portal discovery URLs (RFC 8908 API, DHCP option 114 if used) use HTTPS. Confirm router-side setup per RouterOS docs and test HTTPS reachability from an unauthenticated client (walled-garden vs walled-garden ip behaviour).
+
+E5 ROUTER TRUST AND SCRIPTING
+* Router-to-server calls use HTTPS with certificate checking, or the tunnel address 10.99.0.1 after adoption. Each call carries a per-router secret header, compared in constant time, and must originate from that router's tunnel IP.
+* The server generates RouterOS scripts only from fixed templates. Every interpolated value (names, comments, domains) is validated and escaped. Golden-file tests with hostile inputs. Prefer heartbeat responses limited to a closed command vocabulary over importing arbitrary scripts.
+* The 15-second heartbeat must not wear flash: write fetched files to RAM storage if RouterOS v7 supports it on the target models (verify), apply changes only when the command queue is non-empty, make the interval configurable.
+* Adoption token: single-use, 1-hour expiry, consumed atomically. Generate the WireGuard private key ON the router; the router sends its public key; the server adds the hub peer.
+
+E6 WIREGUARD AND IPAM
+* Each router gets a unique tunnel IP allocated by the server (UNIQUE constraint; hub peers are /32). Remove the default 10.99.1.50.
+* Router management services (WinBox, API-SSL, WebFig-SSL) accept connections from 10.99.0.1/32 only, not the whole /16. The hub does not forward between peers, so router A can never reach router B. Use api-ssl, not plain 8728. Disable unused services and MAC/neighbour discovery on every interface.
+* Remote WinBox/WebFig access is time-limited, audited and opened through an authenticated proxy, never by opening ports.
+
+E7 ACCESS PLANE = RADIUS ONLY
+* FreeRADIUS owns authentication, limits, accounting and CoA/Disconnect. Recommend rlm_sql on the same Postgres so logins keep working if the app is down; record in an ADR.
+* Remove the local hotspot-user fallback, .rsc session kicks, and any code that creates hotspot users or grants access outside RADIUS. Only exception: an API kick if CoA fails.
+* Credentials posted to $(link-login-only) are server-generated, random, single-use and short-lived, never the OTT PIN. Bind the entitlement to the real MAC seen by RADIUS (Calling-Station-Id) at first authentication. mac, ip and other browser query parameters are untrusted hints and never grounds for granting or revealing anything.
+* Device limits (1/2/3 per plan) are enforced through an entitlement with device slots.
+* Free/Paid mode is policy read by the portal and RADIUS. It takes effect immediately with no router round trip. Only walled-garden, profile, queue and hotspot changes go to routers. A mode switch never drops active paid sessions.
+* If RADIUS or the app is down: existing sessions continue, new logins show a friendly "temporarily unavailable, retry shortly" state, and an alert fires.
+
+E8 PAYMENTS AND VOUCHERS
+* Gateway parity rule: do not change what is sent to PayLesotho (URLs, headers, merchant IDs, merchantname, body fields, unique_reference usage) except for the specific fixes listed here. Keep the 35 s upstream timeout, but run the upstream call server-side in the background. Keep the OTT get and check paths exactly as the live integration uses them today; if docs I give you disagree, report the difference and wait, do not change them.
+* Transaction state machine with append-only events: pending -> provider_confirmed -> verified -> fulfilling -> fulfilled, plus fulfilment_failed (retrying), failed, expired, refunded.
+* A payment is successful only when the documented provider success code AND a server-side verify call AND amount, reference and merchant all match. Remove the loose status === "SUCCESS" rule.
+* initiate returns immediately (202 + transaction id). Completion happens server-side whether or not the guest's browser stays open (captive sheets are killed when guests switch to the USSD prompt). The portal polls (or SSE) status.
+* One voucher per payment: UNIQUE on payment reference / transaction, per-transaction lock, idempotent provider call using unique_reference.
+* Redemption is one atomic UPDATE ... WHERE status='issued' RETURNING. The client sends only planId; the price comes from the server-side plan for that router's policy. Strict 1:1 matching stays, compared as integers. A mismatch never burns the voucher.
+* Remove paylesotho_verified_fallback and any internally generated voucher or PIN. If issuance fails after a verified payment: keep fulfilment_failed, retry with backoff, alert the admin, never lose the payment, never charge twice.
+* Reconciliation job every minute for pending, stale and unfulfilled transactions. Rate limits per phone, MAC and IP (STK-push spam, PIN guessing). The guest chooses M-Pesa or EcoCash explicitly; do not infer the operator from the number prefix, validate format only.
+* Policy flag autoRedeemAfterPayment, default ON [CONFIRM]: after a verified payment the server redeems the issued PIN for the chosen plan and logs the guest in; the PIN is still shown with a Copy button as a receipt. The manual Copy -> Redeem tab remains for retail PINs and when the flag is OFF.
+* Retail OTT PIN redemption is BLOCKED until I supply OTT Lesotho's documented verify AND redeem/consume contract. Keep it feature-flagged OFF.
+* Admin "Live USSD test": capped at M5, Owner/Admin only, explicit confirmation, audited. Build a mock PayLesotho server for dev and tests.
+
+E9 ADS
+* Self-hosted only. Remove the arbitrary-URL /api/portal/media-proxy. Serve only admin-uploaded media from the portal origin. Uploads: type sniffing, no SVG uploads, images <=150 KB after optimisation, video <=3 MB H.264 MP4 (5-15 s), random file names, X-Content-Type-Options: nosniff, per-tenant disk quota. Any external image import happens at admin time with a host allowlist, loopback/private/link-local/metadata ranges blocked after DNS resolution, no redirects into them, size and type limits. The generated fallback poster must escape or ignore user text.
+* Gate: ad/start issues a server token; ad/complete validates elapsed time >= minimum and progress beacons, rejects reuse, then creates the entitlement. Client timers are cosmetic.
+* Re-trigger applies to FREE sessions only: RADIUS Session-Timeout 3 h and a 2 GiB total-data limit (verify attribute names and units); afterwards the guest returns to the splash page and must watch a new ad. No advertise-url popups. Paid sessions are never interrupted by ads.
+* Tracking: server-side ad_views rows, deduplicated per session, bot-filtered; counters are derived. Post-auth ad-network tags only on the connected page, behind a provider adapter, flag OFF by default, never on the payment page.
+* Free-mode abuse limits (daily quota, simultaneous sessions) key on verified phone where available, otherwise MAC. Document the MAC-randomisation weakness.
+
+E10 POLICY
+* One pure function resolvePolicy(routerId) (router override > group > scope default) used by the portal, RADIUS attribute builder, script compiler, admin UI and mode toggle. Cached with explicit invalidation. It resolves EVERY policy field: mode, free limits, plans, gateways, ads, walled garden, partner, SSID, guest subnet prefix, DHCP lease time, uplink roles, failover thresholds and backup-uplink policy, backhaul capacity.
+* routers.tenant_group_id is NOT NULL, ON DELETE RESTRICT. Admin-initiated adoption (an admin creates the router record with a chosen group and generates the token) goes straight to ACTIVE under that group's policy once the provisioning verification passes; no second approval step. The "Quarantine" group (no free, no paid, visible only in the adoption queue) applies only to unrecognised or self-registered routers and to routers whose group was removed. Seed a "Lab / Test" group (SSID MIKROTIK-TC, the blueprint's default free-mode limits, all plans enabled).
+* A router's vertical derives from its group. Remove the duplicate free_mode_enabled (keep access_mode). Overrides are visible in the UI and audited. Group moves show a preview, define what happens to active sessions, and can be rolled back.
+
+E11 ADMIN AUTH AND RBAC
+* Specify and build admin auth: argon2id, mandatory WebAuthn/TOTP at login, HttpOnly SameSite cookies, CSRF protection, login rate limit and lockout, invite and reset flows, session expiry and revocation. The owner account is bootstrapped from an env var, not hard-coded. The WebAuthn "lock screen" is an extra, not the login.
+* Add tables for admins, roles, scopes and admin sessions. Scope is enforced server-side on every endpoint, including search, exports and lookups by ID.
+* The Role Simulator is UI-only and must never change server-side authorization. Viewer and Support see phone/email masked; unmasking is audited.
+
+E12 PARTNER API AND WEBHOOKS
+* Keys stored hashed and shown once. No ?api_key= query-string keys. Default allowed scopes/routers/sites are none, never "*". Rate limits and request audit.
+* Webhooks: HMAC-SHA256 over timestamp + body, replay window, exponential-backoff retries, dead-letter queue with admin redelivery, delivery log, SSRF-safe URL validation, secrets encrypted at rest.
+
+E13 LEADS, CONSENT, COMPLIANCE
+* The lead form is required only on the free/sponsored path. The paid path asks for phone only (receipt and recovery). Sharing with sponsors needs a separate, unticked consent naming the sponsor or category; store consent records (text version, timestamp).
+* Terms and privacy notice in Sesotho and English. I will supply approved legal text; do not invent it. Add retention rules and an admin data-deletion tool. Optional SMS OTP verification flag (provider TBD). Do not label leads "verified" unless OTP is on.
+* List the Lesotho licensing and data-protection obligations you are assuming so I can confirm them with a local lawyer.
+
+E14 WATCHDOG, ALERTS, CAPACITY
+* The backend is the only authority on online/offline. Derive status from the last real heartbeat (now - last <= 60 s, configurable per group for Starlink jitter), not from a timer that mutates stored state. The frontend only renders it.
+* Alerts go to a human channel (email plus WhatsApp/Telegram/SMS, I will choose) with flap suppression and recovery notices.
+* Add backhaul capacity (per uplink) to policy and a parent queue/PCQ per router so per-user caps cannot oversubscribe the link.
+
+E15 ROUTER BASELINE PROVISIONING (zero-touch: one pasted command configures everything)
+GOAL: after the admin pastes ONE command into a router's terminal, the router configures itself end to end: uplinks with hot failover, one guest bridge containing every non-uplink port plus the Wi-Fi radios, a large guest subnet with DHCP/DNS, the open test SSID MIKROTIK-TC, hotspot + RADIUS, firewall, queues, tunnel and heartbeat. No further manual router configuration, ever. If a human is needed (for example no uplink cable detected), the admin UI says exactly what and why.
+
+PRINCIPLES
+* Adoption is a pipeline of stages. Each stage: precheck -> backup -> apply -> verify -> report to the server. Any failure stops the pipeline and rolls back.
+* Every object we create has a fixed name prefix and the comment "tconnect:managed". Reruns, cleanup and drift detection touch only our objects.
+* Safety net: before any change, save a binary backup and an export off the router, and arm a revert timer that restores the pre-adoption state unless the server confirms (commit) over the tunnel within N minutes. Verify the mechanism per RouterOS docs and prove it in AT-28.
+* Detached execution: the adoption script runs as a detached job, so it completes even when the admin's session on the old LAN address drops after the subnet change.
+* No permanent local management on the guest bridge. Break-glass local WinBox/SSH is enabled only by an audited admin action, time-limited (default 15 min). The reset button is the last resort.
+* GREENFIELD (factory-fresh or reset) is the default and is built and tested first. BROWNFIELD (router already in service) is read-only discovery, exact diff, admin approval, managed objects only; it refuses by default on conflicts until built and tested.
+* Re-adoption: factory reset + the one-liner restores the same router identity and tunnel IP.
+* The script inspector shows the full generated script and stores it as a config_snapshot. Viewing is always available; mandatory approval applies to brownfield only.
+
+STAGES
+0 Bootstrap: set the clock (the server embeds the current time when it generates the one-liner), start NTP, and make controller TLS verifiable (import or pin the needed CA per RouterOS docs; never disable certificate checking in production, and handle the wrong-clock case of a factory-fresh router). Bring up a minimal tunnel and send a discovery report: RouterOS version (v7 required; refuse v6 or unsupported), model, installed packages including the Wi-Fi package type, interfaces and link state, radios, any existing config, WAN address/subnets/gateway/DNS, LTE/USB modems.
+1 Plan (server side): generate a model-specific plan from the report: port map, uplink roles, guest subnet, Wi-Fi branch. Default: ether1 = WAN1; WAN2 = the site's second-uplink setting or a detected LTE/USB modem; EVERY other ethernet and SFP port goes into the guest bridge. The UI shows the port map and a link-state check, and the admin confirms it (or ticks "use defaults") before apply.
+2 Safety: backup, export, arm revert timer, detach.
+3 System: identity, timezone, NTP, replace the default admin account (strong random credential stored encrypted server-side), disable unused services and neighbour/MAC discovery, bounded logging.
+4 Uplinks and hot failover: per E16.
+5 Guest bridge and subnet:
+  * ONE bridge holding every non-uplink ethernet/SFP port and all Wi-Fi interfaces. Loop protection via RSTP (verify) so an accidental loop between two bridged ports or APs cannot cause a broadcast storm. Hardware offload where the model supports it.
+  * Gateway address, DHCP server (pool = whole subnet minus gateway/reserved; lease time from policy, default 60 min), router as DNS resolver for the LAN, DHCP option 114 if RFC 8908 is used. Raise the neighbour/ARP table limit if the default is too low for the subnet (verify the setting name and default for the version).
+  * GUEST SUBNET: default /16 (65,534 addresses), auto-selected from reserved candidates (for example 10.128.0.0/16 first, then other /16 blocks in 10.0.0.0/8 and 172.16.0.0/12). Skip any overlap with the tunnel range 10.99.0.0/16, every detected WAN subnet and route, 192.168.0.0/16 as a whole (Starlink dish 192.168.100.1 and LTE modems live there) and 100.64.0.0/10 (carrier-grade NAT). Policy field guest_subnet_prefix allows /16 to /22. Real capacity is bounded by router CPU/RAM, Wi-Fi radio client limits and the hotspot/ARP tables, not by address space: measure the ceiling per model, show a capacity advisory in the admin UI, and alert at 80% of it.
+  * Guest-to-guest isolation on Wi-Fi (client isolation) and on wired ports (bridge port isolation or firewall; verify).
+6 Wi-Fi (branch on the model's Wi-Fi package type; verify): every radio and band broadcasts SSID MIKROTIK-TC, open (the portal is the gate), the same SSID on all bands, WPS off, client isolation on. Country/regulatory setting = Lesotho if available, otherwise the closest valid setting, documented. Model-appropriate channel width and power defaults. SSID and band settings come from policy (default MIKROTIK-TC), so production branding changes without re-adoption. Gateway-only models (no radios) support external access points on the guest bridge.
+7 Hotspot and RADIUS: hotspot profile (RADIUS authentication + accounting with interim updates), hotspot server on the guest bridge, default user profile, walled garden plus IP entries so HTTPS works, login/status pages redirecting to the portal on the portal origin, RADIUS client (per-router secret, source = tunnel IP, reachable via the tunnel), incoming CoA on 3799 accepted from the hub only. Login method decided in an ADR; recommended: one-time credential for first login plus RADIUS MAC-authentication for returning entitled devices (seamless reconnect), with the MAC-cloning risk and mitigations (one active session per device slot, duplicate-session CoA kick) documented. Local static offline fallback page per E16.
+8 Firewall: input chain (established/related, drop invalid, guests reach only DNS/DHCP/hotspot, management only from hub 10.99.0.1, everything from WAN dropped, RADIUS/CoA only via the tunnel). Forward chain (guest isolation, block guests from the router, upstream-device management addresses such as the Starlink dish, and configurable outbound abuse blocks such as SMTP). FastTrack must not bypass the hotspot or queues (verify).
+9 IPv6: the hotspot captures IPv4 only (verify). Disable IPv6 on the guest bridge or drop its forwarding so guests cannot bypass the portal. Record the decision in an ADR.
+10 Queues: parent queue/PCQ from per-uplink capacity (switches with the active uplink, see E16); per-user limits come from RADIUS attributes.
+11 Tunnel and heartbeat: finalize per E5 and E6; heartbeat goes over the tunnel.
+12 Verify and commit: server-side proofs (WireGuard handshake, RADIUS exchange from the router's tunnel IP, hotspot active, walled-garden resolution, SSID up, each uplink healthy). Commit disarms the revert timer. "Ready" also requires the live on-site test in the admin UI: a phone joins MIKROTIK-TC -> DHCP lease seen -> portal request seen from that router -> free path works -> paid path works (mock in lab, one approved live M5 at canary).
+
+E16 UPLINKS AND HOT FAILOVER (configured automatically by stage 4)
+* Scope: automatic active/standby failover between two uplinks on the same router, with failback. Router pairs (VRRP) and load balancing/bonding are out of scope; record this in an ADR (hotspot sessions are not synchronised between routers). Load balancing may exist only as a design note, flag OFF.
+* Uplink model: each uplink has a role (primary/backup), type (Ethernet DHCP, PPPoE, static, LTE/USB modem), interface, expected capacity (Mbps) and a metered flag. Single-uplink sites skip failover but still get health monitoring.
+* Health checks: probe each uplink independently through itself, against several targets (the uplink gateway plus 2-3 public IPs). Declare an uplink down only when all targets fail across the window. Defaults (tune in the lab): probe every 2 s, down after about 10 s, healthy again only after 60 s of continuous success (hysteresis), so a brief Starlink obstruction does not flap. Per-group configurable.
+* Mechanism: RouterOS v7 recursive routing with check-gateway, or netwatch-driven route toggling. Choose in an ADR after reading MikroTik docs. It must work with DHCP-assigned (changing) gateways, use per-uplink default-route distances, and be lab-

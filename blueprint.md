@@ -24,6 +24,7 @@
 12. [Phase 9: Production Deployment, Zero-Data-Loss Git Workflow & 30-Minute Runbook](#12-phase-9-production-deployment-zero-data-loss-git-workflow--30-minute-runbook)
 13. [Phase 10: Senior Developer Optimization Pass (Performance, Reliability, Cost & Conversion)](#13-phase-10-senior-developer-optimization-pass-performance-reliability-cost--conversion)
 14. [Phase-by-Phase Sign-Off Checklist & Definition of Done](#14-phase-by-phase-sign-off-checklist--definition-of-done)
+15. [Master Errata & Hardening Specification (`E1`–`E16` & `AT-01`–`AT-25`)](#15-master-errata--hardening-specification-e1e16--at-01at-25)
 
 ---
 
@@ -35,8 +36,8 @@ T-Connect is a multi-tenant, multi-router Wi-Fi monetization, sponsor advertisin
 Every engineer working on this codebase must enforce these five invariants without exception:
 
 1. **Strictly Two Payment Gateways (`paylesotho` & `ottvoucher`)**:
-   - **PayLesotho & XPayments Aggregator (`paylesotho`)**: Processes Vodacom M-Pesa (Merchant ID: `62915`), Econet EcoCash (Merchant ID: `63165430`), and XPayments Card transactions under the explicit merchant name **`T-Connect`**, authenticated with live Bearer token:
-     `Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2`
+   - **PayLesotho & XPayments Aggregator (`paylesotho`)**: Processes Vodacom M-Pesa (Merchant ID: `62915`), Econet EcoCash (Merchant ID: `63165430`), and XPayments Card transactions under the explicit merchant name **`T-Connect`**, authenticated with the frozen live Bearer token loaded exclusively from server environment (`PAYLESOTHO_BEARER_TOKEN` in `/app/applet/.env`, mode `0600`):
+     `Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>`
    - **16-Digit OTT Voucher (`ottvoucher`)**: Handles retail and digital 16-digit OTT PINs (`XXXX-XXXX-XXXX-XXXX`).
    - **Zero Legacy Gateways or Internal Vouchers**: Standalone EcoCash gateways and internal platform-generated alphanumeric vouchers (`TC-...`, `PAID-...`) are permanently banned and stripped at boot time.
 2. **Mandatory Copy $\rightarrow$ Redeem Paid Hotspot Flow with 1:1 Price Matching**:
@@ -518,7 +519,7 @@ Admin clicks "+ Add Router to Fleet"
 | Parameter | Production Value |
 | :--- | :--- |
 | **Merchant Name** | `T-Connect` (`merchantname: "T-Connect"`) |
-| **Live Authorization Header** | `Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2` |
+| **Live Authorization Header** | `Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>` (loaded from `.env` mode `0600`) |
 | **Vodacom M-Pesa Merchant ID** | `62915` |
 | **Vodacom M-Pesa Payment Endpoint** | `POST https://api.paylesotho.co.ls/api/v2/vcl/payment` |
 | **Vodacom M-Pesa Verify Endpoint** | `GET https://api.paylesotho.co.ls/api/v1/vcl/verify/{client_reference}/62915` |
@@ -536,7 +537,7 @@ Admin clicks "+ Add Router to Fleet"
    - Calls PayLesotho `/api/v2/vcl/payment` (`merchantid: "62915"`) or `/api/v2/econet/payment` (`merchantid: "63165430"`) with `merchantname: "T-Connect"` and a **35-second timeout** (`AbortSignal.timeout(35000)`) because PayLesotho holds the HTTP request open while the subscriber enters their M-Pesa/EcoCash PIN on their handset.
 2. **Synchronous `INS-0` Completion & Immediate OTT Voucher Issuance**:
    - If the upstream response contains `output_ResponseCode === "INS-0"`, `status_code === 0`, or `status === "SUCCESS"`, `server.ts` immediately marks the transaction `completed` and invokes `issuePayLesothoOttVoucherForTransaction()`.
-   - `issuePayLesothoOttVoucherForTransaction()` sends `POST https://api.paylesotho.co.ls/api/ott/voucher/get` with `Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2` and `{ "amount": tx.amount, "unique_reference": tx.reference, "merchantname": "T-Connect" }`.
+   - `issuePayLesothoOttVoucherForTransaction()` sends `POST https://api.paylesotho.co.ls/api/ott/voucher/get` with `Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>` and `{ "amount": tx.amount, "unique_reference": tx.reference, "merchantname": "T-Connect" }`.
    - It also supports verifying the voucher via `POST https://api.paylesotho.co.ls/ott/voucher/check` with `{ "unique_reference": tx.reference }`.
    - The 16-digit OTT PIN (`XXXX-XXXX-XXXX-XXXX`) is saved in `serverStore.issuedPayLesothoOttVouchers` (`status: 'issued'`) and returned immediately to the captive portal UI.
 3. **Asynchronous Polling Fallback (`GET /api/gateways/paylesotho/status/:transactionId`)**:
@@ -599,7 +600,7 @@ The Admin Panel (`src/App.tsx`) is organized into **4 Core Operational Pillars**
   - Test/verify any 16-digit OTT Voucher PIN or PayLesotho `unique_reference` (`POST /api/gateways/paylesotho/ott/check`).
   - Inspect all PayLesotho-issued 16-digit OTT vouchers (`issued` vs `redeemed`, mobile number, plan, and timestamps).
 * **Payment Gateways Configuration (`GatewaysView.tsx`)**:
-  - **PayLesotho & XPayments Aggregator**: Pre-configured with Merchant Name `T-Connect`, M-Pesa Merchant ID `62915`, EcoCash Merchant ID `63165430`, and Live Bearer Token `$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2`. Includes one-click **Test API Connection** and **Live USSD STK Push Test**.
+  - **PayLesotho & XPayments Aggregator**: Pre-configured with Merchant Name `T-Connect`, M-Pesa Merchant ID `62915`, EcoCash Merchant ID `63165430`, and Live Bearer Token loaded from `PAYLESOTHO_BEARER_TOKEN` (masked in UI as `••••5tl2` with audited reveal). Includes one-click **Test API Connection**, **Live USSD STK Push Test**, and **Gateway Kill Switch**.
   - **OTT Voucher Lesotho**: Pre-configured for 16-digit retail & digital PIN verification.
 * **Transactions Ledger (`TransactionsView.tsx`)**:
   - Real-time table of all M-Pesa, EcoCash, and OTT Voucher transactions with status filters, search, manual **Re-Verify Status** button, and CSV export.
@@ -695,3 +696,34 @@ Every feature across Phases 0–10 satisfies the strict **Definition of Done**:
 - [x] **Validation & Safe Defaults**: New routers default to `pending_adoption` (`0/1 UP` in `WG Swarm`) and `PAID_ONLY` until explicitly changed or adopted.
 - [x] **Audit Logging**: Administrative mutations, policy pushes, gateway updates, and voucher redemptions are recorded in the audit ledger.
 - [x] **Living Documentation Updated**: `/blueprint.md`, `/push to local.md`, `docs/ARCHITECTURE.md`, `docs/DECISIONS.md`, `docs/DATA_MODEL.md`, `docs/API.md`, `docs/ROUTER_SETUP.md`, `docs/RUNBOOK.md`, and `docs/ROADMAP.md` are synchronized and committed.
+
+---
+
+## 15. Master Errata & Hardening Specification (`E1`–`E16` & `AT-01`–`AT-25`)
+
+This section documents the complete production hardening specification (`E1`–`E16`) and automated acceptance test matrix (`AT-01`–`AT-25`).
+
+### 15.1 Errata Summary (`E1`–`E16`)
+
+| Errata ID | Subsystem | Technical & Commercial Implementation |
+| :--- | :--- | :--- |
+| **`E1`** | **Frozen Payment & Voucher Contract** | Preserves exact PayLesotho (`T-Connect`, `62915`, `63165430`) and OTT Lesotho values unchanged in `/app/applet/.env` (`0600` permissions, SHA-256 parity `6f9a26a474a9515cc2f8b7762a010b5fea7de0a89fea7db48568c55c2e037fba`). Zero literal secrets exist in source files or documentation. Adds Gateway Kill Switch (`POST /api/gateways/:provider/kill-switch`), Daily Reconciliation (`POST /api/gateways/paylesotho/reconcile`), and Last-4 UI Masking with audited Reveal (`POST /api/gateways/:provider/reveal-secret`). |
+| **`E2`** | **PostgreSQL 16 + Redis 7 Architecture** | Defines full transactional DDL in `/supabase/migrations/001_master_errata_schema.sql` (`routers`, `ip_allocations`, `packages`, `transactions`, `vouchers`, `entitlements`, `device_slots`, `sessions`, `radcheck`, `radreply`, `radacct`, `nas`, `ad_view_tokens`, `consents`, `reconciliation_runs`) and idempotent data migration tool `/scripts/migrate-json-to-pg.ts`. |
+| **`E3`** | **Integer Lisente & Timezone Discipline** | All monetary values are validated in integer **lisente** (`1 LSL = 100 lisente`; `M5 = 500`, `M10 = 1000`, `M60 = 6000`, `M280 = 28000`) to prevent floating-point drift. Timestamps use `TIMESTAMPTZ` in UTC with `Africa/Maseru` (`UTC+02:00`) boundary evaluation. |
+| **`E4`** | **Single Effective Policy Engine** | Deterministic resolution order: `Router Override` $\rightarrow$ `Group Policy` (`hotspot`, `community`, `park`, `bus`, `stadium`) $\rightarrow$ `Global Default`. |
+| **`E5`** | **Per-Router WireGuard IP & RouterOS Hardening** | `allocateRouterWireGuardIp()` assigns a unique `/32` address from `10.99.0.2`–`10.99.255.254` per router. `RouterOSRenderer.escapeRouterOSString()` neutralizes `"`, `\`, `$`, `?`, `;`, `[`, `]`, `{`, `}`, and control characters before `.rsc` generation. Heartbeats authenticate via constant-time `X-Router-Token` comparison and use `output=user` to prevent NAND flash wear. |
+| **`E6`** | **FreeRADIUS CoA + RouterOS REST Hybrid** | Disconnects and rate updates execute via UDP `3799` CoA/Disconnect-Request with RouterOS v7 REST API fallback (`https://<wireguard_ip>/rest/ip/hotspot/active/remove`) over the WireGuard tunnel. |
+| **`E7`** | **Guest Portal vs Admin Control Tower Isolation** | Captive portal routes (`/portal/*`, `/api/portal/*`) are isolated from Admin Control Tower endpoints, with strict SSRF protection on `/api/portal/media-proxy` blocking private/RFC1918/loopback/metadata/WireGuard subnets. |
+| **`E8`** | **Idempotent Payments & Atomic PIN Redemption** | Per-transaction mutex lock (`activeVoucherIssuanceLocks`) ensures `POST /api/ott/voucher/get` is called at most once per settled transaction (`AT-01`). Per-PIN atomic lock (`activePinRedemptionLocks`) prevents parallel double-redemption (`AT-02`). Manual Copy & Redeem remains default (`autoRedeemAfterPayment: false`). |
+| **`E9`** | **Server-Signed Ad View Token** | `POST /api/portal/ad/start` issues an HMAC-signed `ad_view_token` with server `started_at`; `POST /api/portal/ad/complete` verifies `completed_at - started_at >= required_seconds - 1s` before granting ad-gated free access (`AT-09`). |
+| **`E10`** | **6 RBAC Roles + Partner API Key Scope** | Supports `super_admin` (`Owner`), `ops_admin` (`Admin`), `network_engineer`, `finance_admin` (`Billing Manager`), `ReadOnlyAuditor` (`Viewer`), and `SponsorPartner`. Partner API keys (`tc_pk_*`) are rejected in URL query strings (`401`) and restricted strictly to `/api/v1/partner/*` (`403` elsewhere). Includes seeded groups `Lab / Test (MIKROTIK-TC)` and `Quarantine (Holding Group)`. |
+| **`E11`–`E14`** | **Lesotho Data Protection, Backups & Alerts** | Captures explicit consent version + SHA-256 of the Sesotho Terms & Conditions, provides `/scripts/backup-restore.sh` and `/scripts/purge-git-history.sh`, and dispatches Email + Telegram/WhatsApp webhook alerts on router offline or reconciliation mismatch events. |
+| **`E15`** | **Dual-Uplink Hot Failover (Starlink + LTE/Fiber)** | `RouterOSRenderer.renderWanFailoverScript()` provisions `ether1` (`WAN1_PRIMARY`, distance `1`) and `ether2` (`WAN2_BACKUP`, distance `2`), probes `1.1.1.1` & `8.8.8.8` every `2s`, triggers failover in `<=10s` (`5` consecutive misses), holds failback for `60s` (`30` consecutive successes), and flushes stale UDP/WireGuard conntrack entries on switchover. |
+| **`E16`** | **Zero-Touch Provisioning (`MIKROTIK-TC`)** | `RouterOSRenderer.renderProvisioningScript()` outputs a 13-stage idempotent RouterOS v7.15+ script (`Stages 0–12`) with `tconnect-pre-adopt` backup, 5-minute `tconnect:revert-timer` dead-man rollback, open SSID `MIKROTIK-TC` on 2.4GHz and 5GHz (`wifi1`/`wifi2` and `wlan1`/`wlan2`), IPv6 disabled on guest bridge, dynamic `backhaulMbps` Simple Queue, and management services locked to `10.99.0.1/32`. |
+
+### 15.2 Acceptance Test Suite (`AT-01`–`AT-25`)
+Run the automated verification suite at any time via:
+```bash
+npx tsx scripts/run-acceptance-tests.ts
+```
+

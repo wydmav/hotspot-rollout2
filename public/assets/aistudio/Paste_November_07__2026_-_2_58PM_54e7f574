@@ -1,0 +1,206 @@
+// MASTER BUILD PROMPT: T-Connect (audit, fix, complete, prove) | gateway values frozen, no rotation
+
+=====================================================
+0. ROLE AND MODE
+=====================================================
+You are lead engineer, security reviewer and QA owner for T-Connect, a multi-router MikroTik Wi-Fi monetization platform for Lesotho. A codebase and /blueprint.md already exist. Work in this order: AUDIT, FIX what is wrong, COMPLETE what is missing, PROVE it works with tests. Do not rewrite from scratch. Change the app in place, behind tests, in small commits on a branch, one PR per phase, never directly on main.
+
+Stack as built: Node/TypeScript (Express) + React (Vite), Docker Compose on a Contabo VPS, RouterOS v7 fleet, FreeRADIUS, WireGuard hub, Caddy for TLS, PayLesotho + OTT Lesotho as the only gateways. Design ceiling: 250 routers, 10,000 concurrent sessions. Validate at 20 routers.
+
+Precedence if sources conflict (flag every conflict, never silently choose):
+1. Project Instructions  2. This prompt (including the ERRATA)  3. /blueprint.md
+The blueprint's "IMPLEMENTED" labels and ticked checklists are unverified claims, not facts.
+
+=====================================================
+1. HONESTY AND VERIFICATION RULES
+=====================================================
+* First, tell me what you can actually run here (shell, Docker, Postgres, FreeRADIUS, RouterOS CHR, a browser). Anything you cannot run: write the script and instructions and label it UNTESTED.
+* Never say a test passed unless you ran it. Show the command and a real output summary.
+* Label technical claims VERIFIED (ran it or saw it in code), DOC-CHECKED (cite official doc and version) or ASSUMED (say how to verify).
+* Never invent RouterOS commands, RADIUS attributes, or PayLesotho / OTT Lesotho endpoints, fields or response codes. If the docs are not in front of you, ask me for them. Verify every RouterOS command and RADIUS attribute against MikroTik documentation for my exact RouterOS v7 version.
+* Never print, log, commit or echo a secret, including in your own replies. Use placeholders.
+* Do not change any payment-gateway value (see E1).
+* Ask at most 8 blocking questions in total (section 9), each with your recommended default. Otherwise state the assumption, record it in docs/DECISIONS.md and proceed.
+* Two gateways only. No CDNs or third-party scripts on the guest portal. No new dependency without saying why.
+
+=====================================================
+2. ERRATA (binding corrections to /blueprint.md)
+=====================================================
+
+E1 SECRETS AND GATEWAY VALUES (VALUES FROZEN, NO ROTATION)
+* Payment-gateway configuration stays EXACTLY as deployed today. Do not rotate, regenerate, rename or alter: merchant name T-Connect; Vodacom M-Pesa merchant ID 62915; Econet EcoCash merchant ID 63165430; the PayLesotho Bearer token; the endpoint URLs; and the request/response field names the live integration already uses (M-Pesa payment and verify, EcoCash payment and verify, OTT voucher get and check). Read current values from the existing code/config. Do not ask me to re-enter them.
+* Moving a secret to the environment does not change its value. Move the Bearer token and every other secret (DB, RADIUS, router secrets, webhook secrets, partner keys) out of source, docs and browser-visible code into environment variables or a secret store on the server, with the SAME values. Read the existing value once and write it only to the server's .env / secret store (file mode 600, never in the repo or image layers). Never put it in the repo, logs, tests, screenshots, docs or your replies.
+* Admin UI and APIs show gateway secrets masked (last 4 only). The Owner can reveal a value only through an explicit, audited action. /api/gateways/paylesotho/credentials returns configuration status only.
+* Remove literal secrets from blueprint.md and every doc. Give me a git-history purge plan (I will run it). Add gitleaks as a pre-commit and CI gate. .env.example holds placeholders only. Check whether the GitHub repo is private and tell me if it is not.
+* Compensating controls, because the token value stays the same:
+  (1) The live token exists ONLY in the production environment. Dev, staging and CI use the mock gateway.
+  (2) Daily reconciliation of our transactions and vouchers against whatever statement, report or API PayLesotho provides (ask me which exists), with an alert on any mismatch or any payment/voucher we did not initiate.
+  (3) Alerts on anomalies: spikes in outbound gateway calls, calls outside normal patterns, repeated failures.
+  (4) An audited admin "gateway kill switch" that disables a gateway instantly.
+  (5) Ask me to check with PayLesotho whether the token can be restricted to the VPS IP (this does not change the value).
+  (6) Write a documented, tested runbook for rotating the token (change env, restart, run gateway test) in case it is ever needed. Do NOT execute it.
+
+E2 REPO AND DEPLOY
+* data/ must not be tracked: add to .gitignore, git rm --cached, and give me a history-purge plan (I will execute it).
+* Replace the "git reset --hard + cp -a" deploy with CI-built, tagged images deployed by docker compose pull && up -d, plus a one-command rollback to the previous tag. Live data lives only in Postgres and named Docker volumes outside the checkout.
+* Containers run as non-root. Replace "copy to /tmp" with scheduled, encrypted, off-box backups (pg_dump + media) and a tested restore drill.
+
+E3 DATABASE
+* PostgreSQL 16 (Compose) is the primary store from day one for money, access, audit, routers, policy, leads and partner keys. Remove "JSON primary, Supabase optional" for these. Supabase may stay as an optional BI replica only.
+* Reversible migrations, foreign keys, unique constraints, transactions. Money is NUMERIC or integer lisente; compare as integers, never JS floats. Timestamps are timestamptz (replace the BIGINT heartbeat columns).
+* Migrate existing JSON data with a tested, idempotent import script that has a dry-run mode.
+
+E4 NETWORK EXPOSURE
+* TLS everywhere via Caddy. Two origins: portal.<domain> (guest portal and guest APIs only; the only one in the walled garden) and admin.<domain> (never in the walled garden; reachable only via WireGuard or IP allowlist, with login 2FA). Admin routes return 404 on the portal origin.
+* Port 3000 is not publicly exposed. Host firewall: SSH key-only, 80/443, UDP 51820. RADIUS (1812/1813) and CoA (3799) reachable only on the tunnel interface.
+* Captive-portal discovery URLs (RFC 8908 API, DHCP option 114 if used) use HTTPS. Confirm router-side setup per RouterOS docs and test HTTPS reachability from an unauthenticated client (walled-garden vs walled-garden ip behaviour).
+
+E5 ROUTER TRUST AND SCRIPTING
+* Router-to-server calls use HTTPS with certificate checking, or the tunnel address 10.99.0.1 after adoption. Each call carries a per-router secret header, compared in constant time, and must originate from that router's tunnel IP.
+* The server generates RouterOS scripts only from fixed templates. Every interpolated value (names, comments, domains) is validated and escaped. Golden-file tests with hostile inputs. Prefer heartbeat responses limited to a closed command vocabulary over importing arbitrary scripts.
+* The 15-second heartbeat must not wear flash: write fetched files to RAM storage if RouterOS v7 supports it on the target models (verify), apply changes only when the command queue is non-empty, make the interval configurable.
+* Adoption token: single-use, 1-hour expiry, consumed atomically. Generate the WireGuard private key ON the router; the router sends its public key; the server adds the hub peer.
+
+E6 WIREGUARD AND IPAM
+* Each router gets a unique tunnel IP allocated by the server (UNIQUE constraint; hub peers are /32). Remove the default 10.99.1.50.
+* Router management services (WinBox, API-SSL, WebFig-SSL) accept connections from 10.99.0.1/32 only, not the whole /16. The hub does not forward between peers, so router A can never reach router B. Use api-ssl, not plain 8728. Disable unused services and MAC/neighbour discovery on WAN.
+* Remote WinBox/WebFig access is time-limited, audited and opened through an authenticated proxy, never by opening ports.
+
+E7 ACCESS PLANE = RADIUS ONLY
+* FreeRADIUS owns authentication, limits, accounting and CoA/Disconnect. Recommend rlm_sql on the same Postgres so logins keep working if the app is down; record in an ADR.
+* Remove the local hotspot-user fallback, .rsc session kicks, and any code that creates hotspot users or grants access outside RADIUS. Only exception: an API kick if CoA fails.
+* Credentials posted to $(link-login-only) are server-generated, random, single-use and short-lived, never the OTT PIN. Bind the entitlement to the real MAC seen by RADIUS (Calling-Station-Id) at first authentication. mac, ip and other browser query parameters are untrusted hints and never grounds for granting or revealing anything.
+* Device limits (1/2/3 per plan) are enforced through an entitlement with device slots.
+* Free/Paid mode is policy read by the portal and RADIUS. It takes effect immediately with no router round trip. Only walled-garden, profile, queue and hotspot changes go to routers. A mode switch never drops active paid sessions.
+* If RADIUS or the app is down: existing sessions continue, new logins show a friendly "temporarily unavailable, retry shortly" state, and an alert fires.
+
+E8 PAYMENTS AND VOUCHERS
+* Gateway parity rule: do not change what is sent to PayLesotho (URLs, headers, merchant IDs, merchantname, body fields, unique_reference usage) except for the specific fixes listed here. Keep the 35 s upstream timeout, but run the upstream call server-side in the background. Keep the OTT get and check paths exactly as the live integration uses them today; if docs I give you disagree, report the difference and wait, do not change them.
+* Transaction state machine with append-only events: pending -> provider_confirmed -> verified -> fulfilling -> fulfilled, plus fulfilment_failed (retrying), failed, expired, refunded.
+* A payment is successful only when the documented provider success code AND a server-side verify call AND amount, reference and merchant all match. Remove the loose status === "SUCCESS" rule.
+* initiate returns immediately (202 + transaction id). Completion happens server-side whether or not the guest's browser stays open (captive sheets are killed when guests switch to the USSD prompt). The portal polls (or SSE) status.
+* One voucher per payment: UNIQUE on payment reference / transaction, per-transaction lock, idempotent provider call using unique_reference.
+* Redemption is one atomic UPDATE ... WHERE status='issued' RETURNING. The client sends only planId; the price comes from the server-side plan for that router's policy. Strict 1:1 matching stays, compared as integers. A mismatch never burns the voucher.
+* Remove paylesotho_verified_fallback and any internally generated voucher or PIN. If issuance fails after a verified payment: keep fulfilment_failed, retry with backoff, alert the admin, never lose the payment, never charge twice.
+* Reconciliation job every minute for pending, stale and unfulfilled transactions. Rate limits per phone, MAC and IP (STK-push spam, PIN guessing). The guest chooses M-Pesa or EcoCash explicitly; do not infer the operator from the number prefix, validate format only.
+* Policy flag autoRedeemAfterPayment, default ON [CONFIRM]: after a verified payment the server redeems the issued PIN for the chosen plan and logs the guest in; the PIN is still shown with a Copy button as a receipt. The manual Copy -> Redeem tab remains for retail PINs and when the flag is OFF.
+* Retail OTT PIN redemption is BLOCKED until I supply OTT Lesotho's documented verify AND redeem/consume contract. Keep it feature-flagged OFF.
+* Admin "Live USSD test": capped at M5, Owner/Admin only, explicit confirmation, audited. Build a mock PayLesotho server for dev and tests.
+
+E9 ADS
+* Self-hosted only. Remove the arbitrary-URL /api/portal/media-proxy. Serve only admin-uploaded media from the portal origin. Uploads: type sniffing, no SVG uploads, images <=150 KB after optimisation, video <=3 MB H.264 MP4 (5-15 s), random file names, X-Content-Type-Options: nosniff, per-tenant disk quota. Any external image import happens at admin time with a host allowlist, loopback/private/link-local/metadata ranges blocked after DNS resolution, no redirects into them, size and type limits. The generated fallback poster must escape or ignore user text.
+* Gate: ad/start issues a server token; ad/complete validates elapsed time >= minimum and progress beacons, rejects reuse, then creates the entitlement. Client timers are cosmetic.
+* Re-trigger applies to FREE sessions only: RADIUS Session-Timeout 3 h and a 2 GiB total-data limit (verify attribute names and units); afterwards the guest returns to the splash page and must watch a new ad. No advertise-url popups. Paid sessions are never interrupted by ads.
+* Tracking: server-side ad_views rows, deduplicated per session, bot-filtered; counters are derived. Post-auth ad-network tags only on the connected page, behind a provider adapter, flag OFF by default, never on the payment page.
+* Free-mode abuse limits (daily quota, simultaneous sessions) key on verified phone where available, otherwise MAC. Document the MAC-randomisation weakness.
+
+E10 POLICY
+* One pure function resolvePolicy(routerId) (router override > group > scope default) used by the portal, RADIUS attribute builder, script compiler, admin UI and mode toggle. Cached with explicit invalidation. It resolves EVERY policy field (mode, free limits, plans, gateways, ads, walled garden, partner), not just five.
+* routers.tenant_group_id is NOT NULL, ON DELETE RESTRICT. New routers land in a "Quarantine" group (no free, no paid, visible only in the adoption queue) until approved and assigned. A router's vertical derives from its group. Remove the duplicate free_mode_enabled (keep access_mode). Overrides are visible in the UI and audited. Group moves show a preview, define what happens to active sessions, and can be rolled back.
+
+E11 ADMIN AUTH AND RBAC
+* Specify and build admin auth: argon2id, mandatory WebAuthn/TOTP at login, HttpOnly SameSite cookies, CSRF protection, login rate limit and lockout, invite and reset flows, session expiry and revocation. The owner account is bootstrapped from an env var, not hard-coded. The WebAuthn "lock screen" is an extra, not the login.
+* Add tables for admins, roles, scopes and admin sessions. Scope is enforced server-side on every endpoint, including search, exports and lookups by ID.
+* The Role Simulator is UI-only and must never change server-side authorization. Viewer and Support see phone/email masked; unmasking is audited.
+
+E12 PARTNER API AND WEBHOOKS
+* Keys stored hashed and shown once. No ?api_key= query-string keys. Default allowed scopes/routers/sites are none, never "*". Rate limits and request audit.
+* Webhooks: HMAC-SHA256 over timestamp + body, replay window, exponential-backoff retries, dead-letter queue with admin redelivery, delivery log, SSRF-safe URL validation, secrets encrypted at rest.
+
+E13 LEADS, CONSENT, COMPLIANCE
+* The lead form is required only on the free/sponsored path. The paid path asks for phone only (receipt and recovery). Sharing with sponsors needs a separate, unticked consent naming the sponsor or category; store consent records (text version, timestamp).
+* Terms and privacy notice in Sesotho and English. I will supply approved legal text; do not invent it. Add retention rules and an admin data-deletion tool. Optional SMS OTP verification flag (provider TBD). Do not label leads "verified" unless OTP is on.
+* List the Lesotho licensing and data-protection obligations you are assuming so I can confirm them with a local lawyer.
+
+E14 WATCHDOG, ALERTS, CAPACITY
+* The backend is the only authority on online/offline. Derive status from the last real heartbeat (now - last <= 60 s, configurable per group for Starlink jitter), not from a timer that mutates stored state. The frontend only renders it.
+* Alerts go to a human channel (email plus WhatsApp/Telegram/SMS, I will choose) with flap suppression and recovery notices.
+* Add backhaul_mbps to policy and a parent queue/PCQ per router so per-user caps cannot oversubscribe the link.
+
+=====================================================
+3. DATA MODEL ADDITIONS (beyond the blueprint schema)
+=====================================================
+admins, roles, admin_scopes, admin_sessions; ip_allocations (tunnel IPs, UNIQUE); router_secrets (hashed); entitlements + device_slots; sessions (fed by RADIUS accounting); FreeRADIUS SQL tables (radcheck, radreply, radacct, radpostauth, nas); payment_events (append-only); idempotency_keys; ad_view_tokens, ad_views; consents; webhook_deliveries; config_snapshots; alert_events; reconciliation_runs. Required constraints include UNIQUE(payment reference), UNIQUE(tunnel IP), one entitlement per voucher, NOT NULL group per router. Output the full schema with indexes before writing code against it.
+
+=====================================================
+4. EXPERIENCE CONTRACT (design everything to this)
+=====================================================
+GUEST
+* Portal opens in <=2.5 s on throttled 3G: initial payload <=100 KB gzipped, zero third-party requests, media lazy-loaded.
+* Free path: consent + ad -> internet in <=3 taps after choosing Free. Paid path: <=5 taps. After verified payment: internet within 5 s, automatically.
+* Every state is designed, in Sesotho and English, with plain-language text and a next step (no raw codes): loading, portal unreachable, payment pending (with reassurance and a "check status" button), payment failed, paid but login failed, expired, device limit reached, already connected, ad failed (policy fallback), RADIUS/app degraded.
+* After login: status page with time/data left, an expiry warning 10 minutes before the end, one-tap renew, and "recover my access" using phone + reference/PIN. A paid user can add a device within the plan's device limit without paying again.
+* Recovery of an interrupted payment is server-side (by an unguessable per-session token), never browser storage, because captive sheets wipe it.
+
+ADMIN
+* Add router: live adoption progress (token issued, handshake, tunnel up, RADIUS ok, hotspot ok, walled garden ok) with per-step failure hints and a copy-paste one-liner. Target: first router online in under 10 minutes.
+* Every policy or mode change shows an impact preview ("affects N routers, M active sessions; effective immediately / next session"), asks for confirmation, is audited, and can be undone.
+* Conflict warnings: Free mode with no ad or limits, gateway enabled but its domain missing from the walled garden, router in drift, router offline.
+* Support lookup: one search box (phone, MAC, PIN, transaction reference) shows a single timeline of payment, voucher, entitlement, RADIUS auth/accounting and router status, with audited actions (re-verify, retry fulfilment, manual grant, kick).
+* Dashboards: live sessions, revenue per router/group/partner, conversion funnel (splash -> select -> pay -> success), ad performance, router health, reconciliation status, alerts. CSV/PDF exports respect scope. Per-partner revenue-share statements.
+
+=====================================================
+5. WORK PLAN AND GATES
+=====================================================
+Run phases in order. Continue without asking between gates. At the end of every phase run the full test suite; if anything is red, stop and fix before moving on.
+
+PHASE 0 Triage (no features): E1 (secrets to env with the SAME values, no rotation, controls 1-6), E2, TLS, close port 3000, split origins, secret scanning. Give me the manual steps (history purge, DNS, repo visibility, PayLesotho IP-restriction question).
+PHASE 1 Audit: build a matrix "blueprint requirement -> file:line -> VERIFIED / PARTIAL / MISSING / WRONG / CONTRADICTS-ERRATA -> test". Capture a BASELINE of every outbound PayLesotho/OTT request (URL, headers with secrets redacted, body fields, timeouts) for the parity test. Run lint, build and existing tests. Produce the JSON->Postgres migration plan, ADRs for open decisions and a risk list. >>> GATE G1: stop for my approval.
+PHASE 2 Data, policy, auth: E3, E10, E11.
+PHASE 3 Router plane: E5, E6, E14.
+PHASE 4 Access plane: E7, lab-tested on a RouterOS v7 CHR (or tell me exactly what lab I must set up). >>> GATE G2: nothing touches a physical router or real money until I approve.
+PHASE 5 Payments and vouchers: E8 against the mock gateway first, then the parity test.
+PHASE 6 Portal and ads: E9, E13, guest experience contract.
+PHASE 7 Admin and partner API: E11, E12, admin experience contract, reconciliation dashboard, gateway kill switch.
+PHASE 8 Hardening and test: run every acceptance test, dependency audit, OWASP pass, load and failure drills.
+PHASE 9 Deployment: separate staging (mock gateway, CHR, no live token), CI (lint, typecheck, tests, image build, vulnerability scan), tagged release, backup + restore drill, canary on ONE router with one approved live M5 payment, 30-minute monitoring plan, rollback in <5 minutes. >>> GATE G3: stop for my approval before production.
+PHASE 10 Optimisation report (impact, effort, risk, recommendation), then implement approved items.
+
+=====================================================
+6. ACCEPTANCE TESTS (a phase is done only when its tests pass in CI and you show the output)
+=====================================================
+AT-01 20 parallel confirm/poll calls for one payment -> exactly 1 voucher issued.
+AT-02 20 parallel redemptions of one PIN -> exactly 1 success, 1 entitlement.
+AT-03 M5 PIN on an M10 plan -> rejected, PIN still redeemable; tampered price/planId ignored.
+AT-04 Kill the app between provider_confirmed and fulfilled -> restart completes fulfilment once; nothing lost or doubled.
+AT-05 Provider timeout, 5xx and duplicate callbacks -> correct state, no second STK push, guest sees a recovery state.
+AT-06 Forged /portal?mac=... cannot grant access or reveal another guest's PIN or transaction.
+AT-07 No code path creates hotspot users outside RADIUS; RADIUS reply attributes match resolvePolicy for free and paid in every group (radclient + CHR).
+AT-08 CoA disconnect works on expiry, refund and admin kick (CHR lab).
+AT-09 Ad gate: early completion and replayed/expired tokens rejected; free session ends at 3 h / 2 GiB and needs a new ad; paid sessions are never prompted.
+AT-10 Paid -> Free -> Paid mode switch keeps active paid sessions connected; guests see the change in <=2 s.
+AT-11 Heartbeat: missing/wrong secret -> 401, no state change; valid -> online; silence >60 s -> offline; resume -> online; app restart does not flip states.
+AT-12 Router/site names with quotes, ;, $ and newlines produce inert, correctly escaped RouterOS (golden files).
+AT-13 Two routers get distinct tunnel IPs; the hub blocks router-to-router traffic; management ports reject everything except 10.99.0.1.
+AT-14 Adoption token: second use and expired use rejected.
+AT-15 No endpoint fetches guest-supplied URLs; admin import blocks loopback, private, link-local, metadata, 10.99.x, IPv6 equivalents, DNS rebinding and redirects.
+AT-16 Guest origin cannot reach admin pages or APIs; admin origin is not in the walled garden and is unreachable from guest networks.
+AT-17 A scoped admin gets 403/404 for every out-of-scope router, group, transaction, voucher, lead, export and search result (IDOR sweep); Role Simulator changes nothing server-side.
+AT-18 Partner key works only on /v1/partner, stored hashed, query-string key rejected; webhook signature, replay window and retries verified; private-IP webhook URL rejected.
+AT-19 gitleaks clean on repo and history; no secret in logs, UI or API responses; credentials endpoint returns status only.
+AT-20 Throttled-3G budgets met (section 4); manual checklist with screenshots on real iOS and Android captive sheets.
+AT-21 Failure drills (gateway down, DB down, RADIUS down, router offline, ad media missing) each end in a defined user outcome and an admin alert, with no stuck screens.
+AT-22 Backup restore drill succeeds on staging; rollback to the previous image tag takes <5 minutes.
+AT-23 Load on staging: 20 routers heartbeating, 500 concurrent portal sessions, 50 concurrent payments; portal API p95 <500 ms excluding provider calls (adjust numbers with me).
+AT-24 Gateway parity: after secrets move to env, outbound PayLesotho/OTT request captures match the Phase 1 baseline (URL, headers except the token, body fields, merchant IDs, timeouts); the token's hash is identical before and after (compare hashes, never print the value); "Test API Connection" succeeds; one approved live M5 transaction passes at G3.
+AT-25 Reconciliation: a payment or voucher injected on the provider side without a matching local record raises an alert; the gateway kill switch blocks new payments instantly and is audited.
+
+=====================================================
+7. OUTPUT FORMAT AFTER EVERY PHASE
+=====================================================
+(a) what changed (b) files changed (c) tests run with real output summaries (d) manual steps for me (e) risks and assumptions with VERIFIED/DOC-CHECKED/ASSUMED labels (f) rollback steps (g) what the next phase needs from me. Update README, docs/ARCHITECTURE.md, DECISIONS.md, DATA_MODEL.md, API.md, ROUTER_SETUP.md, RUNBOOK.md, ROADMAP.md and .env.example whenever behaviour or config changes. Update blueprint.md so it matches reality, with no secrets in it.
+
+=====================================================
+8. DEFINITION OF DONE (every feature)
+=====================================================
+Admin control, server-side enforcement, validation, audit entry, safe default, a defined guest outcome in every state, tests passing in CI, docs updated, feature flag if risky, nothing hard-coded that belongs in policy, no gateway value changed.
+
+=====================================================
+9. INPUTS I WILL SUPPLY / BLOCKING QUESTIONS
+=====================================================
+I will provide on request: PayLesotho API docs (and whether a sandbox exists), which statement/report/API PayLesotho offers for reconciliation, whether the token can be IP-restricted, OTT Lesotho API docs (verify + redeem/consume), exact RouterOS v7 version and router models/count, DNS for portal and admin subdomains, alert channel choice, SMS provider choice (optional), approved Sesotho + English Terms and privacy text, and a decision on autoRedeemAfterPayment (your default: ON). Ask for anything else you truly cannot proceed without, up to the limit in section 1.
+
+=====================================================
+10. BEGIN
+=====================================================
+Start now: (1) state what you can run, (2) list your blueprint-vs-code blocking questions with defaults, (3) do Phase 0 and Phase 1, then STOP at Gate G1 with the audit matrix.

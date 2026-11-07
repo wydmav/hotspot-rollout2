@@ -4,9 +4,9 @@ The **T-Connect Cloud Controller & Captive Portal** is now **100% configured and
 
 ### ✅ Configured & Active in T-Connect Production Codebase
 1. **Live Production Authorization Header (`Authorization: Bearer ...`):**
-   - Configured globally across all PayLesotho and OTT Voucher endpoints:
+   - Loaded at runtime from server `.env` (`PAYLESOTHO_BEARER_TOKEN`) across all PayLesotho and OTT Voucher endpoints:
      ```
-     Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2
+     Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>
      ```
 2. **Merchant Name (`merchantname`):**
    - Configured globally as **`T-Connect`** across all M-Pesa, EcoCash, XPayments, and OTT Voucher requests for reconciliation.
@@ -14,9 +14,9 @@ The **T-Connect Cloud Controller & Captive Portal** is now **100% configured and
    - **Vodacom M-Pesa Merchant ID:** `62915` (`POST https://api.paylesotho.co.ls/api/v2/vcl/payment` & `GET https://api.paylesotho.co.ls/api/v1/vcl/verify/{ref}/62915`)
    - **Econet EcoCash Merchant ID:** `63165430` (`POST https://api.paylesotho.co.ls/api/v2/econet/payment` & `GET https://api.paylesotho.co.ls/api/v2/econet/verify/{ref}`)
 4. **OTT Voucher Issuance After Payment (`POST https://api.paylesotho.co.ls/api/ott/voucher/get`):**
-   - Configured as `POST` with `Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2` and `amount` in the JSON body (`{ "amount": "10", "unique_reference": "...", "merchantname": "T-Connect" }`).
+   - Configured as `POST` with `Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>` and `amount` in the JSON body (`{ "amount": "10", "unique_reference": "...", "merchantname": "T-Connect" }`).
 5. **OTT Voucher Verification After Purchase (`POST https://api.paylesotho.co.ls/ott/voucher/check`):**
-   - Configured as `POST https://api.paylesotho.co.ls/ott/voucher/check` with `Authorization: Bearer $10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2` and JSON payload:
+   - Configured as `POST https://api.paylesotho.co.ls/ott/voucher/check` with `Authorization: Bearer <PAYLESOTHO_BEARER_TOKEN_IN_SERVER_ENV>` and JSON payload:
      ```json
      {
        "unique_reference": "Reference used when purchasing the OTT voucher"

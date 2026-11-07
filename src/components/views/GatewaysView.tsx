@@ -67,7 +67,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     }
   }, [gateways]);
 
-  const DEFAULT_PL_BEARER = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
+  const DEFAULT_PL_BEARER = '';
   // Edit fields for selected gateway
   const [apiKey, setApiKey] = useState(
     selectedGateway?.apiKey || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')

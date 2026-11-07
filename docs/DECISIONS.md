@@ -20,4 +20,4 @@
 
 ## ADR-004: Payment Gateways & Single Voucher Standard (16-Digit OTT Only)
 * **Context**: Platform reconciliation requires a single unified payment and voucher pipeline under merchant name `T-Connect`.
-* **Decision**: Only two gateways exist: **PayLesotho Aggregator** (M-Pesa `62915`, EcoCash `63165430`, Bearer `$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2`) and **16-Digit OTT Voucher**. Mobile money payments issue a 16-digit OTT Voucher (`POST https://api.paylesotho.co.ls/api/ott/voucher/get`) verified via `POST https://api.paylesotho.co.ls/ott/voucher/check` and redeemed with strict 1:1 denomination matching.
+* **Decision**: Only two gateways exist: **PayLesotho Aggregator** (M-Pesa `62915`, EcoCash `63165430`, Bearer token loaded from server `.env` `PAYLESOTHO_BEARER_TOKEN`) and **16-Digit OTT Voucher**. Mobile money payments issue a 16-digit OTT Voucher (`POST https://api.paylesotho.co.ls/api/ott/voucher/get`) verified via `POST https://api.paylesotho.co.ls/ott/voucher/check` and redeemed with strict 1:1 denomination matching.

@@ -173,7 +173,7 @@ export const STARTER_PLANS: HotspotPlan[] = [
   }
 ];
 
-export const DEFAULT_PAYLESOTHO_BEARER_TOKEN = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
+export const DEFAULT_PAYLESOTHO_BEARER_TOKEN = '';
 
 export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   {
@@ -184,7 +184,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     isLive: true,
     isSandbox: false,
     status: 'operational',
-    apiKey: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
+    apiKey: '',
     apiSecret: '',
     apiPassword: '',
     username: 'T-Connect',
@@ -194,8 +194,8 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     xpaymentsEndpointUrl: 'https://xpayments.paylesotho.co.ls',
     ottVoucherEndpointUrl: 'https://api.paylesotho.co.ls/api/ott/voucher/get',
     ottVoucherCheckUrl: 'https://api.paylesotho.co.ls/ott/voucher/check',
-    bearerToken: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
-    ottBearerToken: DEFAULT_PAYLESOTHO_BEARER_TOKEN,
+    bearerToken: '',
+    ottBearerToken: '',
     merchantId: '62915',
     mpesaMerchantId: '62915',
     ecocashMerchantId: '63165430',
@@ -215,9 +215,9 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     isLive: true,
     isSandbox: false,
     status: 'operational',
-    apiKey: '4323e6fa-09b2-4eaa-9b73-f275dad58787',
+    apiKey: '',
     apiSecret: '',
-    apiPassword: '3*68pF&24*',
+    apiPassword: '',
     username: 'TCONNECTLES1',
     vendorId: '1, 11',
     endpointUrl: 'https://api.ottlesotho.com',
@@ -366,8 +366,31 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
   }
 ];
 
-// Clean empty arrays: only user-created records exist
-export const STARTER_TENANT_GROUPS: TenantGroup[] = [];
+// Seeded E10 Default Groups: Lab / Test (SSID: MIKROTIK-TC) and Quarantine (Default for new routers)
+export const STARTER_TENANT_GROUPS: TenantGroup[] = [
+  {
+    id: 'grp_lab_test',
+    name: 'Lab / Test (MIKROTIK-TC)',
+    tag: 'group:lab-test',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
+    clientContact: 'technical@tconnect.africa',
+    accentColor: '#f05e17',
+    description: 'Pre-configured Lab & Test group: SSID MIKROTIK-TC, FREE + PAID enabled, M10/M60/M280 packages, 3-slide sponsor carousel, PayLesotho + OTT gateways enabled.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  },
+  {
+    id: 'grp_quarantine',
+    name: 'Quarantine (Holding Group)',
+    tag: 'group:quarantine',
+    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
+    clientContact: 'admin@tconnect.africa',
+    accentColor: '#64748b',
+    description: 'Safe holding group for newly adopted or unassigned routers: FREE OFF, PAID OFF, splash page displays "Hotspot being configured" until promoted.',
+    createdAt: '2026-10-01',
+    routerCount: 0
+  }
+];
 
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers (EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)

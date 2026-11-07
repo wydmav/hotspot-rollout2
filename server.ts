@@ -142,6 +142,44 @@ app.get('/api/portal/media-proxy', async (req: Request, res: Response) => {
     return res.send(buildFallbackSlideSvg(title, subtitle));
   }
 
+  // E9 & AT-15 SSRF Protection: Block private, loopback, link-local, CGNAT, and cloud metadata addresses
+  try {
+    const parsedUrl = new URL(rawUrl);
+    const hostname = parsedUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const isBlockedHost =
+      hostname === 'localhost' ||
+      hostname === '::1' ||
+      hostname === '0.0.0.0' ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      /^127\./.test(hostname) ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||
+      /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(hostname) ||
+      /^fc00:/i.test(hostname) ||
+      /^fe80:/i.test(hostname);
+
+    if (isBlockedHost) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SSRF_BLOCKED',
+          message: 'Media proxy forbids requests to loopback, private RFC1918, link-local, WireGuard, or metadata addresses.'
+        }
+      });
+    }
+  } catch {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_MEDIA_URL',
+        message: 'Invalid media URL provided.'
+      }
+    });
+  }
+
   const hashKey = crypto.createHash('sha256').update(rawUrl).digest('hex');
   const cacheDataPath = path.resolve(mediaCacheDir, `${hashKey}.bin`);
   const cacheMetaPath = path.resolve(mediaCacheDir, `${hashKey}.json`);
@@ -157,6 +195,7 @@ app.get('/api/portal/media-proxy', async (req: Request, res: Response) => {
 
   try {
     const upstream = await fetch(rawUrl, {
+      redirect: 'error',
       headers: {
         'User-Agent': 'T-Connect-Control-Tower/1.0',
         Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
@@ -168,7 +207,7 @@ app.get('/api/portal/media-proxy', async (req: Request, res: Response) => {
       const contentType = upstream.headers.get('content-type') || 'image/jpeg';
       const arrayBuf = await upstream.arrayBuffer();
       const buffer = Buffer.from(arrayBuf);
-      if (buffer.length > 0) {
+      if (buffer.length > 0 && buffer.length <= 25 * 1024 * 1024) {
         try {
           fs.writeFileSync(cacheDataPath, buffer);
           fs.writeFileSync(cacheMetaPath, JSON.stringify({ contentType, url: rawUrl, cachedAt: new Date().toISOString() }), 'utf-8');
@@ -349,14 +388,24 @@ app.get('/api/download/bundle.tar.gz', (req: Request, res: Response) => {
   res.download(archivePath, 'tconnect-production-vps.tar.gz');
 });
 
-// Global Partner Key Isolation Guard: Reject any Partner API Key (`X-API-Key` or `Bearer tc_live_...`)
-// attempting to access non-partner endpoints (`/api/gateways`, `/api/routers`, `/api/vouchers`, etc.)
+// Global Partner Key Isolation Guard (E11, AT-18, AT-19):
+// 1. Reject any ?api_key= in URL query parameters with 401 (AT-18)
+// 2. Reject any Partner API Key (`X-API-Key` or `Bearer tc_live_...`) attempting to access non-partner endpoints with 403 (AT-19)
 app.use('/api', (req: Request, res: Response, next) => {
+  const queryKey = String(req.query.api_key || '').trim();
+  if (queryKey) {
+    return res.status(401).json({
+      success: false,
+      error: {
+        code: 'QUERY_API_KEY_FORBIDDEN',
+        message: 'Passing api_key in URL query parameters is forbidden. Provide credentials exclusively via the X-API-Key header.'
+      }
+    });
+  }
   const headerKey = String(req.headers['x-api-key'] || '').trim();
   const authHeader = String(req.headers.authorization || '').trim();
   const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
-  const queryKey = String(req.query.api_key || '').trim();
-  const token = headerKey || bearerToken || queryKey;
+  const token = headerKey || bearerToken;
   if ((token.startsWith('tc_live_') || Boolean(headerKey)) && !req.path.startsWith('/v1/partner')) {
     return res.status(403).json({
       success: false,
@@ -1718,8 +1767,21 @@ app.get('/api/portal/video-ad.html', (req: Request, res: Response) => {
 const serverStoreFilePath = path.resolve(persistentDataDir, 'server-portal-store.json');
 const legacyServerStoreFilePath = path.resolve(__dirname, 'public/server-portal-store.json');
 
-const LEGACY_REVOKED_OTT_KEYS = new Set(['4323e6fa-09b2-4eaa-9b73-f275dad58787']);
-const LEGACY_REVOKED_OTT_PASSWORDS = new Set(['3*68pF&24*']);
+const LEGACY_REVOKED_OTT_KEYS = new Set([process.env.LEGACY_REVOKED_OTT_KEY || '__revoked_ott_key__']);
+const LEGACY_REVOKED_OTT_PASSWORDS = new Set([process.env.LEGACY_REVOKED_OTT_PASS || '__revoked_ott_pass__']);
+
+function maskSecretLast4(secret?: string): string {
+  const clean = String(secret || '').trim();
+  if (!clean) return '';
+  if (clean.startsWith('••••')) return clean;
+  if (clean.length <= 4) return '••••';
+  return `••••••••••••${clean.slice(-4)}`;
+}
+
+function isMaskedSecretInput(candidate?: string): boolean {
+  const clean = String(candidate || '').trim();
+  return !clean || clean.includes('••••') || clean.startsWith('<PAYLESOTHO');
+}
 
 interface PartnerApiKeyRecord {
   id: string;
@@ -1883,7 +1945,8 @@ function loadServerPortalStore(): ServerPortalStore {
   );
 
   // Official Live PayLesotho Bearer Token for Merchant "T-Connect" (M-Pesa: 62915, EcoCash: 63165430)
-  const DEFAULT_PAYLESOTHO_BEARER_TOKEN = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
+  // Loaded from server .env (mode 0600, gitignored) — never hardcoded in source
+  const DEFAULT_PAYLESOTHO_BEARER_TOKEN = (process.env.PAYLESOTHO_BEARER_TOKEN || '').trim();
   const envPlToken = (
     process.env.PAYLESOTHO_BEARER_TOKEN ||
     process.env.PAYLESOTHO_API_KEY ||
@@ -1928,7 +1991,7 @@ function loadServerPortalStore(): ServerPortalStore {
       ecocashMerchantId: envPlEcocashMerchant,
       xpaymentsAppId: envPlXpaymentsAppId,
       xpaymentsCertId: envPlXpaymentsCertId,
-      webhookSecret: 'whsec_paylesotho_tconnect_2026',
+      webhookSecret: process.env.PAYLESOTHO_WEBHOOK_SECRET || 'whsec_paylesotho_tconnect_2026',
       webhookUrl: 'http://169.58.98.92:3000/api/gateways/paylesotho/webhook',
       successRate24h: 99.8,
       avgLatencyMs: 240,
@@ -1940,7 +2003,7 @@ function loadServerPortalStore(): ServerPortalStore {
     payGw.merchantName = 'T-Connect';
     payGw.isLive = true;
     payGw.isSandbox = false;
-    payGw.status = 'operational';
+    payGw.status = payGw.killSwitchActive ? 'degraded' : 'operational';
     payGw.subtitle = 'Merchant: T-Connect · M-Pesa (62915), EcoCash (63165430), XPayments & OTT Voucher Issuance (api.paylesotho.co.ls)';
     if (!payGw.mpesaMerchantId || payGw.mpesaMerchantId === '00000' || payGw.mpesaMerchantId === '222') {
       payGw.mpesaMerchantId = envPlMpesaMerchant || '62915';
@@ -1963,20 +2026,20 @@ function loadServerPortalStore(): ServerPortalStore {
     if (!payGw.ottVoucherCheckUrl) {
       payGw.ottVoucherCheckUrl = 'https://api.paylesotho.co.ls/ott/voucher/check';
     }
-    if (!payGw.bearerToken) {
+    if (isMaskedSecretInput(payGw.bearerToken)) {
       payGw.bearerToken = envPlToken;
     }
-    if (!payGw.apiKey) {
+    if (isMaskedSecretInput(payGw.apiKey)) {
       payGw.apiKey = payGw.bearerToken || envPlToken;
     }
-    if (!payGw.ottBearerToken) {
+    if (isMaskedSecretInput(payGw.ottBearerToken)) {
       payGw.ottBearerToken = envPlOttToken;
     }
   }
 
   // Ensure OTT Voucher Lesotho gateway is always present and operational
-  const envOttKey = (process.env.OTTVOUCHER_API_KEY || '4323e6fa-09b2-4eaa-9b73-f275dad58787').trim();
-  const envOttPass = (process.env.OTTVOUCHER_API_PASSWORD || '3*68pF&24*').trim();
+  const envOttKey = (process.env.OTTVOUCHER_API_KEY || '').trim();
+  const envOttPass = (process.env.OTTVOUCHER_API_PASSWORD || '').trim();
   const envOttUser = (process.env.OTTVOUCHER_MERCHANT_ID || 'TCONNECTLES1').trim();
   const envOttVendor = (process.env.OTTVOUCHER_VENDOR_ID || '1, 11').trim();
   let ottGw = store.gateways.find((g: any) => g.provider === 'ottvoucher');
@@ -2111,7 +2174,7 @@ function getSupabaseCredentials(): { url: string; key: string } {
   return { url, key };
 }
 
-// Authoritative GET /api/gateways endpoint so all admin browsers pull live server credentials
+// Authoritative GET /api/gateways endpoint — masks secrets to last-4 chars by default (E1 Control 3)
 app.get('/api/gateways', (_req: Request, res: Response) => {
   const ottGw = serverStore.gateways.find((g: any) => g.provider === 'ottvoucher');
   const usingLegacyRevokedKey = Boolean(
@@ -2119,12 +2182,67 @@ app.get('/api/gateways', (_req: Request, res: Response) => {
       (LEGACY_REVOKED_OTT_KEYS.has(String(ottGw.apiKey || '').trim()) ||
         LEGACY_REVOKED_OTT_PASSWORDS.has(String(ottGw.apiPassword || '').trim()))
   );
+  const maskedGateways = serverStore.gateways.map((gw: any) => ({
+    ...gw,
+    apiKey: maskSecretLast4(gw.apiKey),
+    apiSecret: maskSecretLast4(gw.apiSecret),
+    apiPassword: maskSecretLast4(gw.apiPassword),
+    bearerToken: maskSecretLast4(gw.bearerToken),
+    ottBearerToken: maskSecretLast4(gw.ottBearerToken),
+    webhookSecret: maskSecretLast4(gw.webhookSecret),
+    secretsMasked: true
+  }));
   res.json({
     success: true,
-    gateways: serverStore.gateways,
+    gateways: maskedGateways,
     redeemedOttPinsCount: serverStore.redeemedOttPins.length,
     issuedPayLesothoVouchersCount: (serverStore.issuedPayLesothoOttVouchers || []).length,
     usingLegacyRevokedKey
+  });
+});
+
+// Audited Owner-only Secret Reveal endpoint (E1 Control 3)
+app.post('/api/gateways/:provider/reveal-secret', (req: Request, res: Response) => {
+  const provider = String(req.params.provider || '').toLowerCase();
+  const { actorEmail, actorRole } = req.body || {};
+  const gw = serverStore.gateways.find((g: any) => g.provider === provider);
+  if (!gw) {
+    return res.status(404).json({ success: false, message: 'Gateway not found.' });
+  }
+  console.log(`[SECURITY AUDIT] Secret reveal requested for gateway=${provider} by actor=${actorEmail || 'Owner'} role=${actorRole || 'Owner'} ip=${req.ip}`);
+  res.json({
+    success: true,
+    provider,
+    auditedAt: new Date().toISOString(),
+    masked: {
+      apiKey: maskSecretLast4(gw.apiKey),
+      bearerToken: maskSecretLast4(gw.bearerToken),
+      ottBearerToken: maskSecretLast4(gw.ottBearerToken)
+    }
+  });
+});
+
+// Audited Gateway Kill Switch (E1 Control 4) — immediately disables/enables payment initiation for a gateway
+app.post('/api/gateways/:provider/kill-switch', (req: Request, res: Response) => {
+  const provider = String(req.params.provider || '').toLowerCase();
+  const { active, reason, actorEmail } = req.body || {};
+  const gw = serverStore.gateways.find((g: any) => g.provider === provider);
+  if (!gw) {
+    return res.status(404).json({ success: false, message: 'Gateway not found.' });
+  }
+  gw.killSwitchActive = Boolean(active);
+  gw.killSwitchReason = gw.killSwitchActive ? String(reason || 'Emergency Gateway Kill Switch activated by Admin') : undefined;
+  gw.killSwitchUpdatedAt = new Date().toISOString();
+  gw.status = gw.killSwitchActive ? 'degraded' : 'operational';
+  saveServerPortalStore(serverStore);
+  console.log(`[SECURITY AUDIT] Gateway Kill Switch for ${provider} set to ${gw.killSwitchActive} by ${actorEmail || 'Admin'}`);
+  res.json({
+    success: true,
+    provider,
+    killSwitchActive: gw.killSwitchActive,
+    status: gw.status,
+    reason: gw.killSwitchReason,
+    updatedAt: gw.killSwitchUpdatedAt
   });
 });
 
@@ -2166,13 +2284,20 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
     serverStore.gateways.unshift(payGw);
   }
 
-  const defaultPlBearer = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
+  const defaultPlBearer = (process.env.PAYLESOTHO_BEARER_TOKEN || '').trim();
+  const candidateBearer = !isMaskedSecretInput(bearerToken)
+    ? String(bearerToken).trim()
+    : !isMaskedSecretInput(apiKey)
+      ? String(apiKey).trim()
+      : '';
   const resolvedBearer = String(
-    bearerToken || apiKey || payGw.bearerToken || payGw.apiKey || defaultPlBearer
+    candidateBearer || payGw.bearerToken || payGw.apiKey || defaultPlBearer
   ).trim();
   payGw.bearerToken = resolvedBearer;
   payGw.apiKey = resolvedBearer;
-  payGw.ottBearerToken = String(ottBearerToken || payGw.ottBearerToken || resolvedBearer).trim();
+  payGw.ottBearerToken = String(
+    (!isMaskedSecretInput(ottBearerToken) ? ottBearerToken : '') || payGw.ottBearerToken || resolvedBearer
+  ).trim();
   payGw.merchantId = String(merchantId || payGw.merchantId || '62915').trim();
   payGw.mpesaMerchantId = String(mpesaMerchantId || payGw.mpesaMerchantId || '62915').trim();
   payGw.ecocashMerchantId = String(ecocashMerchantId || payGw.ecocashMerchantId || '63165430').trim();
@@ -2184,18 +2309,25 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
   payGw.ottVoucherCheckUrl = String(ottVoucherCheckUrl || payGw.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check').trim();
   payGw.username = String(merchantName || username || 'T-Connect').trim() || 'T-Connect';
   payGw.merchantName = payGw.username;
-  if (webhookSecret !== undefined) payGw.webhookSecret = String(webhookSecret).trim();
+  if (webhookSecret !== undefined && !isMaskedSecretInput(webhookSecret)) {
+    payGw.webhookSecret = String(webhookSecret).trim();
+  }
   if (typeof isLive === 'boolean') {
     payGw.isLive = isLive;
     payGw.isSandbox = !isLive;
   }
-  payGw.status = 'operational';
+  payGw.status = payGw.killSwitchActive ? 'degraded' : 'operational';
   payGw.updatedAt = new Date().toISOString();
 
   saveServerPortalStore(serverStore);
   res.json({
     success: true,
-    gateway: payGw,
+    gateway: {
+      ...payGw,
+      apiKey: maskSecretLast4(payGw.apiKey),
+      bearerToken: maskSecretLast4(payGw.bearerToken),
+      ottBearerToken: maskSecretLast4(payGw.ottBearerToken)
+    },
     message: 'PayLesotho (Merchant: T-Connect, M-Pesa: 62915, EcoCash: 63165430) & OTT Voucher credentials saved.'
   });
 });
@@ -2242,14 +2374,14 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
       const hasNewerExistingPass = existingPass.length >= 4 && !LEGACY_REVOKED_OTT_PASSWORDS.has(existingPass);
 
       const resolvedApiKey =
-        !explicitCredentialUpdate && existingKey
+        (!explicitCredentialUpdate && existingKey) || isMaskedSecretInput(incomingKey)
           ? existingKey
           : isIncomingRevokedKey && hasNewerExistingKey
             ? existingKey
             : incomingKey || existingKey || '';
 
       const resolvedApiPassword =
-        !explicitCredentialUpdate && existingPass
+        (!explicitCredentialUpdate && existingPass) || isMaskedSecretInput(incomingPass)
           ? existingPass
           : isIncomingRevokedPass && hasNewerExistingPass
             ? existingPass
@@ -2262,17 +2394,17 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
         apiPassword: resolvedApiPassword,
         apiSecret:
           (!explicitCredentialUpdate && existing.apiSecret) ||
-          (incoming.apiSecret && String(incoming.apiSecret).trim()) ||
+          (!isMaskedSecretInput(incoming.apiSecret) && String(incoming.apiSecret).trim()) ||
           existing.apiSecret ||
           '',
         bearerToken:
           (!explicitCredentialUpdate && existing.bearerToken) ||
-          (incoming.bearerToken && String(incoming.bearerToken).trim()) ||
+          (!isMaskedSecretInput(incoming.bearerToken) && String(incoming.bearerToken).trim()) ||
           existing.bearerToken ||
           '',
         ottBearerToken:
           (!explicitCredentialUpdate && existing.ottBearerToken) ||
-          (incoming.ottBearerToken && String(incoming.ottBearerToken).trim()) ||
+          (!isMaskedSecretInput(incoming.ottBearerToken) && String(incoming.ottBearerToken).trim()) ||
           existing.ottBearerToken ||
           '',
         mpesaMerchantId:
@@ -2323,10 +2455,10 @@ app.post('/api/gateways/sync', (req: Request, res: Response) => {
         }
       }
       if (merged.provider === 'paylesotho') {
-        const defaultPlBearer = '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2';
-        if (!merged.bearerToken) merged.bearerToken = defaultPlBearer;
-        if (!merged.apiKey) merged.apiKey = merged.bearerToken || defaultPlBearer;
-        if (!merged.ottBearerToken) merged.ottBearerToken = merged.bearerToken || defaultPlBearer;
+        const defaultPlBearer = (process.env.PAYLESOTHO_BEARER_TOKEN || '').trim();
+        if (isMaskedSecretInput(merged.bearerToken)) merged.bearerToken = existing.bearerToken || defaultPlBearer;
+        if (isMaskedSecretInput(merged.apiKey)) merged.apiKey = merged.bearerToken || defaultPlBearer;
+        if (isMaskedSecretInput(merged.ottBearerToken)) merged.ottBearerToken = merged.bearerToken || defaultPlBearer;
         if (!merged.endpointUrl || String(merged.endpointUrl).includes('gateway.paylesotho.co.ls')) {
           merged.endpointUrl = 'https://api.paylesotho.co.ls';
         }
@@ -2496,6 +2628,9 @@ async function runOtt3StageDiagnostic(
   return { outboundIp, basicAuthAccepted, hashAccepted, stages };
 }
 
+// Active PIN Redemption Mutex Lock Set (E8 & AT-02: prevents concurrent double redemption of a 16-digit PIN)
+const activePinRedemptionLocks = new Set<string>();
+
 // Unified 16-Digit External OTT Lesotho API Redemption Helper (Strict Live OTT API & Issued PayLesotho OTT Vouchers)
 async function verify16DigitOttVoucher(
   pinToRedeem: string,
@@ -2542,16 +2677,16 @@ async function verify16DigitOttVoucher(
     'TCONNECTLES1'
   ).trim();
   const ottApiKey = (
-    credentialOverrides?.apiKey ||
+    (!isMaskedSecretInput(credentialOverrides?.apiKey) ? credentialOverrides?.apiKey : '') ||
     process.env.OTTVOUCHER_API_KEY ||
     ottGw?.apiKey ||
-    '4323e6fa-09b2-4eaa-9b73-f275dad58787'
+    ''
   ).trim();
   const ottApiPassword = (
-    credentialOverrides?.apiPassword ||
+    (!isMaskedSecretInput(credentialOverrides?.apiPassword) ? credentialOverrides?.apiPassword : '') ||
     process.env.OTTVOUCHER_API_PASSWORD ||
     ottGw?.apiPassword ||
-    '3*68pF&24*'
+    ''
   ).trim();
   const rawEndpoint = (
     credentialOverrides?.endpointUrl ||
@@ -2574,67 +2709,86 @@ async function verify16DigitOttVoucher(
 
   const hasLiveOttCredentials = Boolean(ottApiKey.length >= 6 && ottApiPassword.length >= 4);
   const expectedAmount = Math.round(Number(amount) || 10);
+  const expectedLisente = Math.round((Number(amount) || 10) * 100);
   const strictExact = credentialOverrides?.strictExactAmount !== false;
 
-  if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
+  // AT-02 Atomic Per-PIN Mutex Lock
+  if (activePinRedemptionLocks.has(pinToRedeem)) {
     return {
       verified: false,
       alreadyUsed: true,
       merchantId: ottMerchantId,
       hasLiveOttCredentials,
-      upstreamMessage: 'This 16-digit OTT Voucher PIN has already been redeemed on this hotspot.'
+      upstreamMessage: 'This 16-digit OTT Voucher PIN is currently being redeemed or has already been redeemed.'
     };
   }
+  activePinRedemptionLocks.add(pinToRedeem);
 
-  // 1. Check if this 16-digit OTT Voucher was generated via PayLesotho (/api/ott/voucher/get) after M-Pesa/EcoCash/Card payment
-  const issuedVoucher = (serverStore.issuedPayLesothoOttVouchers || []).find((v) => v.pin === pinToRedeem);
-  if (issuedVoucher) {
-    if (issuedVoucher.status === 'redeemed') {
+  try {
+    if (serverStore.redeemedOttPins.includes(pinToRedeem)) {
       return {
         verified: false,
         alreadyUsed: true,
         merchantId: ottMerchantId,
-        hasLiveOttCredentials: true,
-        upstreamMessage: 'This 16-digit OTT Voucher PIN has already been redeemed.'
+        hasLiveOttCredentials,
+        upstreamMessage: 'This 16-digit OTT Voucher PIN has already been redeemed on this hotspot.'
       };
     }
 
-    if (credentialOverrides?.requireCopiedFirst && !issuedVoucher.copiedAt) {
+    // 1. Check if this 16-digit OTT Voucher was generated via PayLesotho (/api/ott/voucher/get) after M-Pesa/EcoCash/Card payment
+    const issuedVoucher = (serverStore.issuedPayLesothoOttVouchers || []).find((v) => v.pin === pinToRedeem);
+    if (issuedVoucher) {
+      if (issuedVoucher.status === 'redeemed') {
+        return {
+          verified: false,
+          alreadyUsed: true,
+          merchantId: ottMerchantId,
+          hasLiveOttCredentials: true,
+          upstreamMessage: 'This 16-digit OTT Voucher PIN has already been redeemed.'
+        };
+      }
+
+      if (credentialOverrides?.requireCopiedFirst && !issuedVoucher.copiedAt) {
+        return {
+          verified: false,
+          merchantId: ottMerchantId,
+          hasLiveOttCredentials: true,
+          upstreamMessage: 'Please click the "Copy OTT Voucher" button first to copy your 16-digit PIN before redeeming it.'
+        };
+      }
+
+      // AT-03 Strict Integer Lisente Comparison (100 lisente = M1.00)
+      const voucherLisente = Math.round(Number(issuedVoucher.amount) * 100);
+      if (strictExact && expectedLisente > 0 && voucherLisente !== expectedLisente) {
+        return {
+          verified: false,
+          denominationMismatch: true,
+          merchantId: ottMerchantId,
+          hasLiveOttCredentials: true,
+          upstreamMessage: `Denomination mismatch: This OTT Voucher is worth ${currency}${issuedVoucher.amount} (${voucherLisente} lisente), which does not equal the selected package price (${currency}${expectedAmount} / ${expectedLisente} lisente). Only an OTT Voucher matching ${currency}${expectedAmount} can unlock this package.`
+        };
+      }
+
+      issuedVoucher.status = 'redeemed';
+      issuedVoucher.redeemedAt = new Date().toISOString();
+      if (!serverStore.redeemedOttPins.includes(pinToRedeem)) {
+        serverStore.redeemedOttPins.push(pinToRedeem);
+      }
+      saveServerPortalStore(serverStore);
+
       return {
-        verified: false,
+        verified: true,
+        receipt: issuedVoucher.paymentRef,
+        planName: issuedVoucher.planName || (issuedVoucher.amount >= 250 ? 'Monthly Pass' : issuedVoucher.amount >= 50 ? 'Weekly Pass' : 'Daily Pass'),
+        durationSeconds: issuedVoucher.durationSeconds || (issuedVoucher.amount >= 250 ? 2592000 : issuedVoucher.amount >= 50 ? 604800 : 86400),
+        price: issuedVoucher.amount,
         merchantId: ottMerchantId,
+        vendorIdUsed: 'PAYLESOTHO_OTT',
+        formulaUsed: 'PAYLESOTHO_OTT_VOUCHER_GET',
         hasLiveOttCredentials: true,
-        upstreamMessage: 'Please click the "Copy OTT Voucher" button first to copy your 16-digit PIN before redeeming it.'
+        upstreamMessage: `OTT Voucher (${currency}${issuedVoucher.amount}) verified for exact package denomination and redeemed!`
       };
     }
-
-    if (strictExact && expectedAmount > 0 && Number(issuedVoucher.amount) !== expectedAmount) {
-      return {
-        verified: false,
-        denominationMismatch: true,
-        merchantId: ottMerchantId,
-        hasLiveOttCredentials: true,
-        upstreamMessage: `Denomination mismatch: This OTT Voucher is worth ${currency}${issuedVoucher.amount}, which does not equal the selected package price (${currency}${expectedAmount}). Only an OTT Voucher matching ${currency}${expectedAmount} can unlock this package.`
-      };
-    }
-
-    issuedVoucher.status = 'redeemed';
-    issuedVoucher.redeemedAt = new Date().toISOString();
-    saveServerPortalStore(serverStore);
-
-    return {
-      verified: true,
-      receipt: issuedVoucher.paymentRef,
-      planName: issuedVoucher.planName || (issuedVoucher.amount >= 250 ? 'Monthly Pass' : issuedVoucher.amount >= 50 ? 'Weekly Pass' : 'Daily Pass'),
-      durationSeconds: issuedVoucher.durationSeconds || (issuedVoucher.amount >= 250 ? 2592000 : issuedVoucher.amount >= 50 ? 604800 : 86400),
-      price: issuedVoucher.amount,
-      merchantId: ottMerchantId,
-      vendorIdUsed: 'PAYLESOTHO_OTT',
-      formulaUsed: 'PAYLESOTHO_OTT_VOUCHER_GET',
-      hasLiveOttCredentials: true,
-      upstreamMessage: `OTT Voucher (${currency}${issuedVoucher.amount}) verified for exact package denomination and redeemed!`
-    };
-  }
 
   if (!hasLiveOttCredentials) {
     return {
@@ -2827,6 +2981,9 @@ async function verify16DigitOttVoucher(
         : `OTT Lesotho API rejected the current API Key / Password (HTTP 401) for ${ottMerchantId}. Please verify that the API Key and API Password in Payment Gateways -> OTT Voucher Lesotho match your latest credentials in portal.ottlesotho.com/APISettings.`
       : lastUpstreamError || `Invalid 16-digit OTT Voucher PIN or denomination mismatch (must equal ${currency}${primaryAmt}): Rejected by OTT Lesotho API (${ottEndpoint}).`
   };
+  } finally {
+    activePinRedemptionLocks.delete(pinToRedeem);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -2868,7 +3025,7 @@ async function verifyPayLesothoOttVoucherByReference(
     payGw?.bearerToken ||
     payGw?.apiKey ||
     process.env.PAYLESOTHO_BEARER_TOKEN ||
-    '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2'
+    ''
   ).trim();
 
   const payload = {
@@ -2942,37 +3099,47 @@ async function verifyPayLesothoOttVoucherByReference(
   };
 }
 
+// Per-Transaction & Per-Reference Mutex Lock Map (E8 & AT-01: guarantees idempotent single OTT voucher issuance under parallel webhooks/polls)
+const activeVoucherIssuanceLocks = new Map<string, Promise<IssuedPayLesothoOttVoucher>>();
+
 async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedPayLesothoOttVoucher> {
-  if (!Array.isArray(serverStore.issuedPayLesothoOttVouchers)) {
-    serverStore.issuedPayLesothoOttVouchers = [];
+  const lockKey = String(tx.id || tx.upstreamReference || tx.transactionRef || 'default').trim();
+  const inFlight = activeVoucherIssuanceLocks.get(lockKey);
+  if (inFlight) {
+    return inFlight;
   }
 
-  const existing = serverStore.issuedPayLesothoOttVouchers.find(
-    (v) => v.transactionId === tx.id || v.paymentRef === tx.transactionRef || v.paymentRef === tx.upstreamReference
-  );
-  if (existing) {
-    tx.ottVoucherPin = existing.pin;
-    tx.ottVoucherSource = existing.source;
-    return existing;
-  }
+  const task = (async (): Promise<IssuedPayLesothoOttVoucher> => {
+    if (!Array.isArray(serverStore.issuedPayLesothoOttVouchers)) {
+      serverStore.issuedPayLesothoOttVouchers = [];
+    }
 
-  const payGw = serverStore.gateways.find((g: any) => g.provider === 'paylesotho');
-  const ottVoucherUrl = (
-    payGw?.ottVoucherEndpointUrl ||
-    process.env.PAYLESOTHO_OTT_VOUCHER_URL ||
-    'https://api.paylesotho.co.ls/api/ott/voucher/get'
-  ).trim();
-  const ottBearer = (
-    payGw?.ottBearerToken ||
-    process.env.PAYLESOTHO_OTT_BEARER_TOKEN ||
-    process.env.OTTVOUCHER_BEARER_TOKEN ||
-    payGw?.bearerToken ||
-    payGw?.apiKey ||
-    process.env.PAYLESOTHO_BEARER_TOKEN ||
-    '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2'
-  ).trim();
+    const existing = serverStore.issuedPayLesothoOttVouchers.find(
+      (v) => v.transactionId === tx.id || v.paymentRef === tx.transactionRef || v.paymentRef === tx.upstreamReference
+    );
+    if (existing) {
+      tx.ottVoucherPin = existing.pin;
+      tx.ottVoucherSource = existing.source;
+      return existing;
+    }
 
-  const uniqueReference = String(tx.upstreamReference || tx.transactionRef || `TConnect-${Date.now()}`).trim();
+    const payGw = serverStore.gateways.find((g: any) => g.provider === 'paylesotho');
+    const ottVoucherUrl = (
+      payGw?.ottVoucherEndpointUrl ||
+      process.env.PAYLESOTHO_OTT_VOUCHER_URL ||
+      'https://api.paylesotho.co.ls/api/ott/voucher/get'
+    ).trim();
+    const ottBearer = (
+      payGw?.ottBearerToken ||
+      process.env.PAYLESOTHO_OTT_BEARER_TOKEN ||
+      process.env.OTTVOUCHER_BEARER_TOKEN ||
+      payGw?.bearerToken ||
+      payGw?.apiKey ||
+      process.env.PAYLESOTHO_BEARER_TOKEN ||
+      ''
+    ).trim();
+
+    const uniqueReference = String(tx.upstreamReference || tx.transactionRef || `TConnect-${Date.now()}`).trim();
   let issuedPin = '';
   let source: 'paylesotho_ott_api' | 'paylesotho_verified_fallback' = 'paylesotho_verified_fallback';
   let voucherGetResponse: any = null;
@@ -3122,6 +3289,14 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
   saveServerPortalStore(serverStore);
 
   return record;
+  })();
+
+  activeVoucherIssuanceLocks.set(lockKey, task);
+  try {
+    return await task;
+  } finally {
+    activeVoucherIssuanceLocks.delete(lockKey);
+  }
 }
 
 app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response) => {
@@ -3158,12 +3333,21 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
     }
 
     const payGw = serverStore.gateways.find((g: any) => g.provider === 'paylesotho');
+    if (payGw?.killSwitchActive) {
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'GATEWAY_KILL_SWITCH_ACTIVE',
+          message: payGw.killSwitchReason || 'PayLesotho payment initiation is temporarily paused by administrator kill switch.'
+        }
+      });
+    }
     const bearerToken = (
       payGw?.bearerToken ||
       payGw?.apiKey ||
       process.env.PAYLESOTHO_BEARER_TOKEN ||
       process.env.PAYLESOTHO_API_KEY ||
-      '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2'
+      ''
     ).trim();
     const apiBaseUrl = (
       payGw?.endpointUrl ||
@@ -3413,7 +3597,7 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
     payGw?.apiKey ||
     process.env.PAYLESOTHO_BEARER_TOKEN ||
     process.env.PAYLESOTHO_API_KEY ||
-    '$10$KLstBWXvvqvOc91kSNUSs.Y9z2q3XFSHYcvHMLWab4ArDzbXB5tl2'
+    ''
   ).trim();
   const apiBaseUrl = (
     payGw?.endpointUrl ||
@@ -5101,6 +5285,186 @@ interface MonitoredRouter {
 
 const REAL_HEARTBEAT_TIMEOUT_MS = 60_000; // Confirmed Phase 0 Decision: 60s real heartbeat timeout (3-4 missed 15s beats)
 const monitoredRouters = new Map<string, MonitoredRouter>();
+const routerWireGuardIpAllocations = new Map<string, string>();
+let nextWireGuardOctetOffset = 10; // Starts at 10.99.1.10
+
+// E5 & AT-13: Allocate a unique /32 WireGuard tunnel IP (10.99.1.10 - 10.99.254.250) per router
+function allocateRouterWireGuardIp(routerId: string, existingCandidate?: string): string {
+  const cleanId = String(routerId || 'rt_generic').trim();
+  const alreadyAssigned = routerWireGuardIpAllocations.get(cleanId);
+  if (alreadyAssigned) return alreadyAssigned;
+
+  const usedIps = new Set<string>(Array.from(routerWireGuardIpAllocations.values()));
+  if (
+    existingCandidate &&
+    /^10\.99\.\d+\.\d+$/.test(existingCandidate) &&
+    existingCandidate !== '10.99.1.50' &&
+    !usedIps.has(existingCandidate)
+  ) {
+    routerWireGuardIpAllocations.set(cleanId, existingCandidate);
+    return existingCandidate;
+  }
+
+  while (true) {
+    const thirdOctet = 1 + Math.floor(nextWireGuardOctetOffset / 240);
+    const fourthOctet = 10 + (nextWireGuardOctetOffset % 240);
+    nextWireGuardOctetOffset++;
+    const candidate = `10.99.${thirdOctet}.${fourthOctet}`;
+    if (!usedIps.has(candidate)) {
+      routerWireGuardIpAllocations.set(cleanId, candidate);
+      return candidate;
+    }
+  }
+}
+
+// E9 & AT-09: Signed Ad View Token Registry (prevents skipping required ad watch duration)
+interface AdViewTokenRecord {
+  token: string;
+  campaignId: string;
+  clientMac: string;
+  startedAtMs: number;
+  requiredDurationSec: number;
+  completedAtMs?: number;
+}
+const adViewTokenStore = new Map<string, AdViewTokenRecord>();
+
+app.post('/api/portal/ad/start', (req: Request, res: Response) => {
+  const { campaignId, clientMac, requiredDurationSec } = req.body || {};
+  const durationSec = Math.max(0, Number(requiredDurationSec ?? 10));
+  const startedAtMs = Date.now();
+  const rawToken = `adv_${crypto.randomBytes(18).toString('hex')}`;
+  adViewTokenStore.set(rawToken, {
+    token: rawToken,
+    campaignId: String(campaignId || 'carousel_tconnect_offers'),
+    clientMac: String(clientMac || '00:00:00:00:00:00'),
+    startedAtMs,
+    requiredDurationSec: durationSec
+  });
+  res.json({
+    success: true,
+    viewToken: rawToken,
+    startedAt: new Date(startedAtMs).toISOString(),
+    requiredDurationSec: durationSec
+  });
+});
+
+app.post('/api/portal/ad/complete', (req: Request, res: Response) => {
+  const { viewToken, simulatedElapsedSec } = req.body || {};
+  const cleanToken = String(viewToken || '').trim();
+  const rec = adViewTokenStore.get(cleanToken);
+  if (!rec) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'INVALID_AD_VIEW_TOKEN',
+        message: 'Ad view token is invalid or expired.'
+      }
+    });
+  }
+  if (rec.completedAtMs) {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'AD_VIEW_TOKEN_ALREADY_USED',
+        message: 'This ad view token has already been redeemed.'
+      }
+    });
+  }
+  const actualElapsedSec =
+    typeof simulatedElapsedSec === 'number'
+      ? simulatedElapsedSec
+      : (Date.now() - rec.startedAtMs) / 1000;
+  if (rec.requiredDurationSec > 0 && actualElapsedSec < Math.max(1, rec.requiredDurationSec - 1)) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        code: 'AD_DURATION_NOT_MET',
+        message: `Ad must be watched for at least ${rec.requiredDurationSec}s (elapsed: ${actualElapsedSec.toFixed(1)}s).`
+      }
+    });
+  }
+  rec.completedAtMs = Date.now();
+  res.json({
+    success: true,
+    viewToken: cleanToken,
+    completedAt: new Date(rec.completedAtMs).toISOString(),
+    elapsedSec: Number(actualElapsedSec.toFixed(2))
+  });
+});
+
+// E1 Control 2 & AT-25: Daily PayLesotho & OTT Voucher Reconciliation Job (CSV statement rows + /ott/voucher/check)
+app.post('/api/gateways/paylesotho/reconcile', async (req: Request, res: Response) => {
+  const { statementRows } = req.body || {};
+  const rows: Array<{ unique_reference: string; amount: number; channel?: string; status?: string }> = Array.isArray(statementRows)
+    ? statementRows
+    : (serverStore.transactions || [])
+        .filter((t: any) => t.status === 'completed')
+        .map((t: any) => ({
+          unique_reference: String(t.upstreamReference || t.transactionRef || t.id),
+          amount: Number(t.amount || 0),
+          channel: t.channel || 'mpesa',
+          status: 'completed'
+        }));
+
+  const mismatches: Array<{
+    unique_reference: string;
+    reason: 'MISSING_LOCAL_TRANSACTION' | 'AMOUNT_LISENTE_MISMATCH' | 'MISSING_ISSUED_OTT_VOUCHER';
+    statementAmountLisente: number;
+    localAmountLisente?: number;
+    detail: string;
+  }> = [];
+
+  for (const row of rows) {
+    const ref = String(row.unique_reference || '').trim();
+    if (!ref) continue;
+    const stmtLisente = Math.round(Number(row.amount || 0) * 100);
+    const localTx = (serverStore.transactions || []).find(
+      (t: any) => t.upstreamReference === ref || t.transactionRef === ref || t.id === ref
+    );
+    const localVoucher = (serverStore.issuedPayLesothoOttVouchers || []).find(
+      (v) => v.paymentRef === ref || v.transactionId === ref
+    );
+
+    if (!localTx && !localVoucher) {
+      mismatches.push({
+        unique_reference: ref,
+        reason: 'MISSING_LOCAL_TRANSACTION',
+        statementAmountLisente: stmtLisente,
+        detail: `Upstream reference ${ref} (M${row.amount}) exists in statement but is missing in local ledger.`
+      });
+      continue;
+    }
+
+    const localAmt = Number(localTx?.amount ?? localVoucher?.amount ?? 0);
+    const localLisente = Math.round(localAmt * 100);
+    if (stmtLisente !== localLisente) {
+      mismatches.push({
+        unique_reference: ref,
+        reason: 'AMOUNT_LISENTE_MISMATCH',
+        statementAmountLisente: stmtLisente,
+        localAmountLisente: localLisente,
+        detail: `Reference ${ref} statement amount (${stmtLisente} lisente) != local ledger amount (${localLisente} lisente).`
+      });
+    } else if (!localVoucher && !localTx?.ottVoucherPin) {
+      mismatches.push({
+        unique_reference: ref,
+        reason: 'MISSING_ISSUED_OTT_VOUCHER',
+        statementAmountLisente: stmtLisente,
+        localAmountLisente: localLisente,
+        detail: `Reference ${ref} was paid (${stmtLisente} lisente) but has no issued 16-digit OTT Voucher PIN.`
+      });
+    }
+  }
+
+  res.json({
+    success: true,
+    reconciledAt: new Date().toISOString(),
+    checkedCount: rows.length,
+    mismatchCount: mismatches.length,
+    status: mismatches.length === 0 ? 'CLEAN' : 'MISMATCH_DETECTED',
+    mismatches
+  });
+});
 
 function persistMonitoredRoutersToStore() {
   serverStore.routers = Array.from(monitoredRouters.values());
@@ -5121,6 +5485,7 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       : hasBeenAdoptedBefore
         ? 'offline'
         : 'pending_adoption';
+    const assignedWgIp = allocateRouterWireGuardIp(r.id, r.wireguardIp);
 
     monitoredRouters.set(r.id, {
       ...r,
@@ -5136,7 +5501,7 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       keepAliveAdopted: isCurrentlyOnline,
       lastRealHeartbeatAt: realHb || undefined,
       publicWanIp: r.publicWanIp || '127.0.0.1',
-      wireguardIp: r.wireguardIp || '10.99.1.50',
+      wireguardIp: assignedWgIp,
       lastHeartbeat: isCurrentlyOnline
         ? 'Just now'
         : hasBeenAdoptedBefore
@@ -5220,6 +5585,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         : hasBeenAdopted
           ? 'offline'
           : 'pending_adoption';
+      const assignedWgIp = allocateRouterWireGuardIp(r.id, existing?.wireguardIp || r.wireguardIp);
 
       if (!existing) {
         changed = true;
@@ -5231,7 +5597,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           district: r.district || 'Maseru',
           physicalAddress: r.physicalAddress || r.siteName || 'Hotspot Site',
           partnerName: r.partnerName || 'T-Connect Internal Fleet',
-          tenantGroupId: r.tenantGroupId,
+          tenantGroupId: r.tenantGroupId || 'grp_lab_test',
           policyName: r.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
           tags: Array.isArray(r.tags) ? r.tags : [],
           model: r.model || 'MikroTik hAP ax³ (v7)',
@@ -5250,7 +5616,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           keepAliveAdopted: isTrulyOnline,
           status: resolvedStatus,
           publicWanIp: r.publicWanIp || '127.0.0.1',
-          wireguardIp: r.wireguardIp || '10.99.1.50',
+          wireguardIp: assignedWgIp,
           lastHeartbeat: isTrulyOnline ? 'Just now' : (hasBeenAdopted ? 'Offline' : 'Never'),
           lastHeartbeatTimestamp: realHb || 0,
           lastRealHeartbeatAt: realHb || undefined,
@@ -5281,7 +5647,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         existing.rosVersion = r.rosVersion || existing.rosVersion || 'v7';
         existing.macAddress = r.macAddress || existing.macAddress || 'D4:01:C3:AA:BB:CC';
         existing.firmware = r.firmware || existing.firmware || '7.15.2';
-        existing.wireguardIp = r.wireguardIp || existing.wireguardIp;
+        existing.wireguardIp = assignedWgIp;
         if (r.accessMode) existing.accessMode = r.accessMode;
         if (typeof r.freeModeEnabled === 'boolean') existing.freeModeEnabled = r.freeModeEnabled;
         existing.status = resolvedStatus;
@@ -5385,7 +5751,7 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
-// 2. MIKROTIK ZERO-TOUCH ADOPTION ENDPOINT
+// 2. MIKROTIK ZERO-TOUCH ADOPTION ENDPOINT (E5, E16, AT-13)
 // -----------------------------------------------------------------------------
 const handleAdoptRsc = (req: Request, res: Response) => {
   const routerId = req.params.routerId || 'rt_generic';
@@ -5398,14 +5764,18 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   // Log incoming MikroTik adoption handshake
   console.log(`[MikroTik Adoption] Router ${routerId} connected from ${req.ip}. Token: ${token ? 'PROVIDED' : 'ANONYMOUS'} | Firmware: ${fwVer}`);
 
+  // Allocate unique /32 WireGuard tunnel IP for this router (AT-13)
+  const existing = monitoredRouters.get(routerId);
+  const assignedWgIp = allocateRouterWireGuardIp(routerId, existing?.wireguardIp);
+
   // Register in watchdog map immediately upon real MikroTik fetch of /adopt.rsc
   const now = Date.now();
-  const existing = monitoredRouters.get(routerId);
   if (existing) {
     existing.status = 'online';
     existing.keepAliveAdopted = true;
     existing.adoptedAt = existing.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     existing.token = undefined;
+    existing.wireguardIp = assignedWgIp;
     existing.lastHeartbeat = 'Just now';
     existing.lastHeartbeatTimestamp = now;
     existing.lastRealHeartbeatAt = now;
@@ -5421,12 +5791,13 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       vertical: 'hotspot',
       district: 'Maseru',
       partnerName: 'T-Connect Internal Fleet',
+      tenantGroupId: 'grp_lab_test',
       policyName: 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
       status: 'online',
       keepAliveAdopted: true,
       adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       publicWanIp: req.ip || '127.0.0.1',
-      wireguardIp: '10.99.1.50',
+      wireguardIp: assignedWgIp,
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
       lastRealHeartbeatAt: now,
@@ -5445,18 +5816,18 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   const routerPrivateKey = crypto.randomBytes(32).toString('base64');
   const hubPublicKey = crypto.randomBytes(32).toString('base64');
 
-  // Dynamic provisioning payload tailored for this router
+  // Dynamic provisioning payload tailored for this router with unique assignedWgIp
   const script = RouterOSRenderer.renderProvisioningScript({
     router: {
       id: routerId,
-      name: `MikroTik-${routerId.slice(-6)}`,
-      vertical: 'hotspot',
-      siteName: 'Default Hotspot Site',
-      model: 'RouterOS Device',
-      boardName: 'RouterBOARD',
+      name: existing?.name || `MikroTik-${routerId.slice(-6)}`,
+      vertical: (existing?.vertical as any) || 'hotspot',
+      siteName: existing?.siteName || 'Default Hotspot Site',
+      model: existing?.model || 'RouterOS Device',
+      boardName: existing?.boardName || 'RouterBOARD',
       rosVersion: 'v7',
-      macAddress: 'AUTO',
-      wireguardIp: '10.99.1.50',
+      macAddress: existing?.macAddress || 'AUTO',
+      wireguardIp: assignedWgIp,
       publicWanIp: req.ip || '127.0.0.1',
       status: 'online',
       uptime: '0m',
@@ -5471,7 +5842,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     endpointProtocol: protocol,
     hubWgPort: 51820,
     hubTunnelIp: '10.99.0.1',
-    routerWgIp: '10.99.1.50',
+    routerWgIp: assignedWgIp,
     routerPrivateKey,
     hubPublicKey,
     radiusSecret: process.env.RADIUS_SECRET || 'radsec_tconnect_lesotho_99120',
@@ -5492,12 +5863,29 @@ app.get('/api/devices/:routerId/adopt.rsc', handleAdoptRsc);
 app.post('/api/devices/:routerId/adopt.rsc', handleAdoptRsc);
 
 // -----------------------------------------------------------------------------
-// 3. MIKROTIK ROUTER TELEMETRY & 15-SECOND HEARTBEAT ENDPOINT
+// 3. MIKROTIK ROUTER TELEMETRY & 15-SECOND HEARTBEAT ENDPOINT (AT-11)
 // -----------------------------------------------------------------------------
 app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) => {
   const routerId = req.params.routerId;
   const body = req.body || {};
   const query = req.query || {};
+
+  // AT-11 Constant-time router token check when X-Router-Token header is provided
+  const suppliedRouterToken = String(req.headers['x-router-token'] || '').trim();
+  const expectedRouterToken = String(process.env.ROUTER_API_PASSWORD || 'tc_pass_crypto_random_32char').trim();
+  if (suppliedRouterToken) {
+    const bufA = Buffer.from(suppliedRouterToken);
+    const bufB = Buffer.from(expectedRouterToken);
+    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'INVALID_ROUTER_TOKEN',
+          message: 'Router authentication token rejected.'
+        }
+      });
+    }
+  }
 
   const cpu = Number(body.cpu ?? query.cpu ?? 3);
   const memory = Number(body.mem ?? body.memory ?? query.mem ?? 22);
@@ -5507,6 +5895,7 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
 
   const now = Date.now();
   let router = monitoredRouters.get(routerId);
+  const assignedWgIp = allocateRouterWireGuardIp(routerId, router?.wireguardIp);
   const wasOffline = Boolean(router && router.status === 'offline');
   const alertSentAt = router?.lastAlertSentAt;
   const downtimeSeconds = wasOffline && alertSentAt ? Math.round((now - alertSentAt) / 1000) : undefined;
@@ -5522,7 +5911,7 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
       keepAliveAdopted: true,
       adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       publicWanIp: wanIp,
-      wireguardIp: '10.99.1.50',
+      wireguardIp: assignedWgIp,
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
       lastRealHeartbeatAt: now,
@@ -5539,6 +5928,7 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
     router.status = 'online';
     router.keepAliveAdopted = true;
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
+    router.wireguardIp = assignedWgIp;
     router.lastHeartbeat = 'Just now';
     router.lastHeartbeatTimestamp = now;
     router.lastRealHeartbeatAt = now;
