@@ -266,10 +266,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* WireGuard Fleet Pulse */}
         <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-2.5 text-[10px] text-slate-400 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Zap className="w-3 h-3 text-[#f05e17]" />
+            <Zap className={`w-3 h-3 ${onlineRouterCount > 0 ? 'text-emerald-400' : 'text-[#f05e17]'}`} />
             <span>WG Swarm</span>
           </div>
-          <span className="text-emerald-400 font-bold">{onlineRouterCount}/{totalRouterCount} UP</span>
+          <span
+            className={`font-bold ${
+              onlineRouterCount > 0
+                ? 'text-emerald-400'
+                : totalRouterCount > 0
+                  ? 'text-amber-400'
+                  : 'text-slate-500'
+            }`}
+          >
+            {onlineRouterCount}/{totalRouterCount} UP
+          </span>
         </div>
       </div>
     </aside>

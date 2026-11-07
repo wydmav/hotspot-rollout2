@@ -5080,6 +5080,7 @@ interface MonitoredRouter {
   wireguardIp: string;
   lastHeartbeat: string;
   lastHeartbeatTimestamp: number;
+  lastRealHeartbeatAt?: number;
   uptime: string;
   cpuLoad: number;
   memoryUsage: number;
@@ -5098,6 +5099,7 @@ interface MonitoredRouter {
   policyLastSyncedAt?: string;
 }
 
+const REAL_HEARTBEAT_TIMEOUT_MS = 60_000; // Confirmed Phase 0 Decision: 60s real heartbeat timeout (3-4 missed 15s beats)
 const monitoredRouters = new Map<string, MonitoredRouter>();
 
 function persistMonitoredRoutersToStore() {
@@ -5105,12 +5107,21 @@ function persistMonitoredRoutersToStore() {
   saveServerPortalStore(serverStore);
 }
 
-// Hydrate persisted routers from disk on server startup so routers never disappear across restarts
+// Hydrate persisted routers from disk on server startup.
+// Routers start as pending_adoption (if never adopted) or offline until a live 15s heartbeat arrives within 60s.
 if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   const bootNow = Date.now();
   serverStore.routers.forEach((r: any) => {
     if (!r || !r.id) return;
-    const isAdoptedOnline = Boolean(r.status === 'online' || r.adoptedAt || r.keepAliveAdopted);
+    const realHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
+    const isCurrentlyOnline = realHb > 0 && (bootNow - realHb <= REAL_HEARTBEAT_TIMEOUT_MS);
+    const hasBeenAdoptedBefore = Boolean(r.adoptedAt || realHb > 0);
+    const initialStatus: 'online' | 'offline' | 'pending_adoption' = isCurrentlyOnline
+      ? 'online'
+      : hasBeenAdoptedBefore
+        ? 'offline'
+        : 'pending_adoption';
+
     monitoredRouters.set(r.id, {
       ...r,
       id: r.id,
@@ -5121,39 +5132,74 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       physicalAddress: r.physicalAddress || r.siteName || 'Hotspot Site',
       partnerName: r.partnerName || 'T-Connect Internal Fleet',
       policyName: r.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
-      status: isAdoptedOnline ? 'online' : (r.status || 'pending_adoption'),
-      keepAliveAdopted: isAdoptedOnline,
+      status: initialStatus,
+      keepAliveAdopted: isCurrentlyOnline,
+      lastRealHeartbeatAt: realHb || undefined,
       publicWanIp: r.publicWanIp || '127.0.0.1',
       wireguardIp: r.wireguardIp || '10.99.1.50',
-      lastHeartbeat: isAdoptedOnline ? 'Just now' : (r.lastHeartbeat || 'Never'),
-      lastHeartbeatTimestamp: isAdoptedOnline ? bootNow : (r.lastHeartbeatTimestamp || bootNow - 60000),
-      uptime: r.uptime || (isAdoptedOnline ? '1h' : '0m'),
-      cpuLoad: r.cpuLoad || 2,
-      memoryUsage: r.memoryUsage || 18,
-      activeSessions: r.activeSessions || 0,
-      missedBeats: 0,
-      offlineSince: undefined,
-      offlineReason: undefined,
+      lastHeartbeat: isCurrentlyOnline
+        ? 'Just now'
+        : hasBeenAdoptedBefore
+          ? 'Offline (>60s ago)'
+          : 'Never',
+      lastHeartbeatTimestamp: realHb || r.lastHeartbeatTimestamp || 0,
+      uptime: isCurrentlyOnline ? (r.uptime || '1h') : '0m',
+      cpuLoad: isCurrentlyOnline ? (r.cpuLoad || 2) : 0,
+      memoryUsage: isCurrentlyOnline ? (r.memoryUsage || 18) : 0,
+      activeSessions: isCurrentlyOnline ? (r.activeSessions || 0) : 0,
+      missedBeats: isCurrentlyOnline ? 0 : (hasBeenAdoptedBefore ? 4 : 0),
+      offlineSince: initialStatus === 'offline' ? (r.offlineSince || new Date(bootNow).toISOString()) : undefined,
+      offlineReason: initialStatus === 'offline'
+        ? (r.offlineReason || 'Deadman Watchdog: Waiting for live RouterOS v7 WireGuard/HTTP heartbeat (60s timeout)')
+        : undefined,
       webfigPort: r.webfigPort || 80,
       winboxPort: r.winboxPort || 8291
     });
   });
 }
 
-// Background Keep-Alive & Watchdog Sentinel: runs every 5 seconds
-// Ensures adopted routers stay connected (ONLINE) continuously without dropping offline after 30s
+// Background Watchdog Sentinel: runs every 5 seconds
+// Enforces strict 60-second real heartbeat timeout (3-4 missed 15s beats) so WG Swarm never shows 1/1 when no router is online.
 setInterval(async () => {
   const now = Date.now();
+  let mutated = false;
   for (const [, router] of monitoredRouters.entries()) {
-    if (router.status === 'online' || router.keepAliveAdopted || router.adoptedAt) {
+    const realHb = router.lastRealHeartbeatAt || 0;
+    const elapsedMs = realHb > 0 ? now - realHb : Infinity;
+
+    if (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS) {
+      const elapsedSec = Math.max(0, Math.round(elapsedMs / 1000));
       router.status = 'online';
       router.keepAliveAdopted = true;
-      router.lastHeartbeat = 'Just now';
-      router.lastHeartbeatTimestamp = now;
-      router.missedBeats = 0;
+      router.lastHeartbeat = elapsedSec <= 5 ? 'Just now' : `${elapsedSec}s ago`;
+      router.missedBeats = Math.floor(elapsedSec / 15);
       router.offlineSince = undefined;
       router.offlineReason = undefined;
+    } else if (router.adoptedAt || realHb > 0) {
+      // Router was previously adopted but has not sent a heartbeat within 60 seconds
+      if (router.status !== 'offline') {
+        mutated = true;
+        router.status = 'offline';
+        router.keepAliveAdopted = false;
+        router.activeSessions = 0;
+        router.offlineSince = router.offlineSince || new Date(now).toISOString();
+        router.offlineReason = 'Deadman Watchdog: Missed 3+ consecutive 15s heartbeats (>60s timeout)';
+      }
+      const elapsedSec = realHb > 0 ? Math.round(elapsedMs / 1000) : 65;
+      router.missedBeats = Math.max(3, Math.floor(elapsedSec / 15));
+      router.lastHeartbeat = 'Offline';
+    } else {
+      // Never adopted yet
+      if (router.status !== 'pending_adoption') {
+        mutated = true;
+        router.status = 'pending_adoption';
+      }
+      router.keepAliveAdopted = false;
+      router.missedBeats = 0;
     }
+  }
+  if (mutated) {
+    persistMonitoredRoutersToStore();
   }
 }, 5000);
 
@@ -5166,14 +5212,15 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
     routers.forEach((r: any) => {
       if (!r || !r.id) return;
       const existing = monitoredRouters.get(r.id);
-      const isAdoptedOnline = Boolean(
-        r.status === 'online' ||
-        r.adoptedAt ||
-        r.keepAliveAdopted ||
-        existing?.status === 'online' ||
-        existing?.keepAliveAdopted ||
-        existing?.adoptedAt
-      );
+      const realHb = existing?.lastRealHeartbeatAt || (typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0);
+      const isTrulyOnline = realHb > 0 && (now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS);
+      const hasBeenAdopted = Boolean(existing?.adoptedAt || r.adoptedAt || realHb > 0);
+      const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isTrulyOnline
+        ? 'online'
+        : hasBeenAdopted
+          ? 'offline'
+          : 'pending_adoption';
+
       if (!existing) {
         changed = true;
         monitoredRouters.set(r.id, {
@@ -5192,27 +5239,30 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           rosVersion: r.rosVersion || 'v7',
           macAddress: r.macAddress || 'D4:01:C3:AA:BB:CC',
           firmware: r.firmware || '7.15.2',
-          token: isAdoptedOnline ? undefined : r.token,
+          token: hasBeenAdopted ? undefined : r.token,
           tokenExpiresAt: r.tokenExpiresAt,
-          adoptedAt: r.adoptedAt || (isAdoptedOnline ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
+          adoptedAt: r.adoptedAt || undefined,
           accessMode: r.accessMode || 'PAID_ONLY',
           freeModeEnabled: Boolean(r.freeModeEnabled),
           freeDurationMinutes: r.freeDurationMinutes ?? 30,
           freeRateLimit: r.freeRateLimit || '10M/30M',
           freeDailyQuotaMb: r.freeDailyQuotaMb ?? 500,
-          keepAliveAdopted: isAdoptedOnline,
-          status: isAdoptedOnline ? 'online' : (r.status || 'pending_adoption'),
+          keepAliveAdopted: isTrulyOnline,
+          status: resolvedStatus,
           publicWanIp: r.publicWanIp || '127.0.0.1',
           wireguardIp: r.wireguardIp || '10.99.1.50',
-          lastHeartbeat: isAdoptedOnline ? 'Just now' : (r.lastHeartbeat || 'Never'),
-          lastHeartbeatTimestamp: isAdoptedOnline ? now : (r.lastHeartbeatTimestamp || now - 60000),
-          uptime: r.uptime || (isAdoptedOnline ? '1h' : '0m'),
-          cpuLoad: r.cpuLoad || 2,
-          memoryUsage: r.memoryUsage || 18,
-          activeSessions: r.activeSessions || 0,
-          missedBeats: 0,
-          offlineSince: undefined,
-          offlineReason: undefined,
+          lastHeartbeat: isTrulyOnline ? 'Just now' : (hasBeenAdopted ? 'Offline' : 'Never'),
+          lastHeartbeatTimestamp: realHb || 0,
+          lastRealHeartbeatAt: realHb || undefined,
+          uptime: isTrulyOnline ? (r.uptime || '1h') : '0m',
+          cpuLoad: isTrulyOnline ? (r.cpuLoad || 2) : 0,
+          memoryUsage: isTrulyOnline ? (r.memoryUsage || 18) : 0,
+          activeSessions: isTrulyOnline ? (r.activeSessions || 0) : 0,
+          missedBeats: isTrulyOnline ? 0 : (hasBeenAdopted ? 4 : 0),
+          offlineSince: resolvedStatus === 'offline' ? (r.offlineSince || new Date(now).toISOString()) : undefined,
+          offlineReason: resolvedStatus === 'offline'
+            ? (r.offlineReason || 'Deadman Watchdog: No live heartbeat within 60s')
+            : undefined,
           webfigPort: r.webfigPort || 80,
           winboxPort: r.winboxPort || 8291
         });
@@ -5234,18 +5284,8 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         existing.wireguardIp = r.wireguardIp || existing.wireguardIp;
         if (r.accessMode) existing.accessMode = r.accessMode;
         if (typeof r.freeModeEnabled === 'boolean') existing.freeModeEnabled = r.freeModeEnabled;
-        if (isAdoptedOnline) {
-          if (existing.status !== 'online') changed = true;
-          existing.status = 'online';
-          existing.keepAliveAdopted = true;
-          existing.adoptedAt = existing.adoptedAt || r.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
-          existing.token = undefined;
-          existing.lastHeartbeat = 'Just now';
-          existing.lastHeartbeatTimestamp = now;
-          existing.missedBeats = 0;
-          existing.offlineSince = undefined;
-          existing.offlineReason = undefined;
-        }
+        existing.status = resolvedStatus;
+        existing.keepAliveAdopted = isTrulyOnline;
         changed = true;
       }
     });
@@ -5267,21 +5307,34 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   const list: Array<any> = [];
 
   for (const router of monitoredRouters.values()) {
-    const isAdoptedOnline = Boolean(router.status === 'online' || router.keepAliveAdopted || router.adoptedAt);
-    if (isAdoptedOnline) {
+    const realHb = router.lastRealHeartbeatAt || 0;
+    const elapsedMs = realHb > 0 ? now - realHb : Infinity;
+    const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
+    const hasBeenAdopted = Boolean(router.adoptedAt || realHb > 0);
+
+    if (isTrulyOnline) {
+      const sec = Math.max(0, Math.round(elapsedMs / 1000));
       router.status = 'online';
       router.keepAliveAdopted = true;
-      router.lastHeartbeat = 'Just now';
-      router.lastHeartbeatTimestamp = now;
-      router.missedBeats = 0;
+      router.lastHeartbeat = sec <= 5 ? 'Just now' : `${sec}s ago`;
+      router.missedBeats = Math.floor(sec / 15);
       router.offlineSince = undefined;
       router.offlineReason = undefined;
+    } else if (hasBeenAdopted) {
+      router.status = 'offline';
+      router.keepAliveAdopted = false;
+      router.lastHeartbeat = 'Offline';
+      router.activeSessions = 0;
+      router.missedBeats = Math.max(3, realHb > 0 ? Math.floor(elapsedMs / 15000) : 4);
+      router.offlineSince = router.offlineSince || new Date(now).toISOString();
+      router.offlineReason = router.offlineReason || 'Deadman Watchdog: Missed 3+ consecutive 15s heartbeats (>60s timeout)';
+    } else {
+      router.status = 'pending_adoption';
+      router.keepAliveAdopted = false;
+      router.missedBeats = 0;
     }
-    const elapsedSeconds = isAdoptedOnline
-      ? 0
-      : router.lastHeartbeatTimestamp
-        ? Math.round((now - router.lastHeartbeatTimestamp) / 1000)
-        : 999;
+
+    const elapsedSeconds = realHb > 0 ? Math.round(elapsedMs / 1000) : 999;
     list.push({
       ...router,
       id: router.id,
@@ -5304,7 +5357,9 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
       wireguardIp: router.wireguardIp,
       lastHeartbeat: router.lastHeartbeat,
       lastHeartbeatTimestamp: router.lastHeartbeatTimestamp,
+      lastRealHeartbeatAt: router.lastRealHeartbeatAt,
       secondsSinceHeartbeat: elapsedSeconds,
+      elapsedSecondsWithoutHeartbeat: elapsedSeconds,
       missedBeats: router.missedBeats,
       offlineSince: router.offlineSince,
       offlineReason: router.offlineReason,
@@ -5321,7 +5376,7 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   res.json({
     watchdogActive: true,
     checkIntervalMs: 5000,
-    deadmanThresholdSeconds: 30,
+    deadmanThresholdSeconds: 60,
     monitoredRoutersCount: monitoredRouters.size,
     routers: list,
     recentAlerts: emailService.getAlertLogs().slice(0, 10),
@@ -5343,7 +5398,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   // Log incoming MikroTik adoption handshake
   console.log(`[MikroTik Adoption] Router ${routerId} connected from ${req.ip}. Token: ${token ? 'PROVIDED' : 'ANONYMOUS'} | Firmware: ${fwVer}`);
 
-  // Register in watchdog map immediately (preserve existing properties if synced from UI)
+  // Register in watchdog map immediately upon real MikroTik fetch of /adopt.rsc
   const now = Date.now();
   const existing = monitoredRouters.get(routerId);
   if (existing) {
@@ -5353,6 +5408,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     existing.token = undefined;
     existing.lastHeartbeat = 'Just now';
     existing.lastHeartbeatTimestamp = now;
+    existing.lastRealHeartbeatAt = now;
     existing.publicWanIp = req.ip || existing.publicWanIp;
     existing.missedBeats = 0;
     existing.offlineSince = undefined;
@@ -5373,6 +5429,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       wireguardIp: '10.99.1.50',
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
+      lastRealHeartbeatAt: now,
       uptime: '0m',
       cpuLoad: 2,
       memoryUsage: 20,
@@ -5468,6 +5525,7 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
       wireguardIp: '10.99.1.50',
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
+      lastRealHeartbeatAt: now,
       uptime,
       cpuLoad: cpu,
       memoryUsage: memory,
@@ -5483,6 +5541,7 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     router.lastHeartbeat = 'Just now';
     router.lastHeartbeatTimestamp = now;
+    router.lastRealHeartbeatAt = now;
     router.uptime = uptime;
     router.cpuLoad = cpu;
     router.memoryUsage = memory;
@@ -5553,6 +5612,7 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
       wireguardIp: '10.99.1.50',
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
+      lastRealHeartbeatAt: now,
       uptime,
       cpuLoad: cpu,
       memoryUsage: memory,
@@ -5568,6 +5628,7 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     router.lastHeartbeat = 'Just now';
     router.lastHeartbeatTimestamp = now;
+    router.lastRealHeartbeatAt = now;
     router.uptime = uptime;
     router.cpuLoad = cpu;
     router.memoryUsage = memory;
@@ -5598,16 +5659,16 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
 app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response) => {
   const routerId = req.params.routerId;
   const now = Date.now();
-  let router = monitoredRouters.get(routerId);
+  const router = monitoredRouters.get(routerId);
 
-  // If router is present and has checked in recently (or is marked online)
-  if (router && (router.status === 'online' || router.keepAliveAdopted || (router.lastHeartbeatTimestamp && now - router.lastHeartbeatTimestamp < 300000))) {
+  // Only confirm online status if the physical router has actually contacted /adopt.rsc or /heartbeat within the 60s window
+  const realHb = router?.lastRealHeartbeatAt || 0;
+  if (router && realHb > 0 && now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS) {
     router.status = 'online';
     router.keepAliveAdopted = true;
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     router.token = undefined;
     router.lastHeartbeat = 'Just now';
-    router.lastHeartbeatTimestamp = now;
     router.missedBeats = 0;
     router.offlineSince = undefined;
     router.offlineReason = undefined;
@@ -5616,36 +5677,15 @@ app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response
     return res.json({
       verified: true,
       status: 'online',
-      message: `Active connection confirmed! Last heartbeat received ${Math.round((now - router.lastHeartbeatTimestamp) / 1000)}s ago.`,
+      message: `Active WireGuard/HTTP handshake confirmed! Last heartbeat received ${Math.max(0, Math.round((now - realHb) / 1000))}s ago.`,
       router
     });
   }
 
-  // If router was synced, promote and confirm adoption
-  if (router) {
-    router.status = 'online';
-    router.keepAliveAdopted = true;
-    router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
-    router.token = undefined;
-    router.lastHeartbeat = 'Just now';
-    router.lastHeartbeatTimestamp = now;
-    router.missedBeats = 0;
-    router.offlineSince = undefined;
-    router.offlineReason = undefined;
-    persistMonitoredRoutersToStore();
-    return res.json({
-      verified: true,
-      status: 'online',
-      message: 'Telemetry handshake verified! Router is online and connected.',
-      router
-    });
-  }
-
-  // Auto-register and verify if queried
   res.json({
     verified: false,
-    status: 'pending_adoption',
-    message: 'Router not yet seen by controller. Paste one-liner into WinBox Terminal to begin.'
+    status: router?.status || 'pending_adoption',
+    message: 'No live heartbeat received from this MikroTik router within the last 60s. Paste the RouterOS v7 one-liner into WinBox Terminal to adopt.'
   });
 });
 
@@ -5669,6 +5709,7 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
       wireguardIp: '10.99.1.50',
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
+      lastRealHeartbeatAt: now,
       uptime: '1m',
       cpuLoad: 2,
       memoryUsage: 22,
@@ -5685,6 +5726,7 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
     router.token = undefined;
     router.lastHeartbeat = 'Just now';
     router.lastHeartbeatTimestamp = now;
+    router.lastRealHeartbeatAt = now;
     router.missedBeats = 0;
     router.offlineSince = undefined;
     router.offlineReason = undefined;

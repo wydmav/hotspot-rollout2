@@ -252,7 +252,7 @@ export default function App() {
   // are absorbed by an explicit grace window.
   // A router is ONLY marked as 'offline' after explicitly detecting >= 30 seconds of
   // missed heartbeats (at least 2 consecutive missed cycles).
-  const DEADMAN_OFFLINE_THRESHOLD_SECONDS = 30; // Strict 30s threshold
+  const DEADMAN_OFFLINE_THRESHOLD_SECONDS = 60; // Confirmed Phase 0 Decision: 60s real heartbeat timeout (3-4 missed 15s beats)
   const HEARTBEAT_CYCLE_SECONDS = 15;
 
   // Track verified status & alert debouncing across poll cycles to prevent flapping
@@ -304,7 +304,7 @@ export default function App() {
           const prev = currentRouters.find(r => r.id === incoming.id);
           if (!prev && !incoming.id) return;
 
-          // Auto-promote router from pending_adoption to online if incoming status is confirmed online
+          // Auto-promote router from pending_adoption to online ONLY if incoming status is confirmed online with a real heartbeat
           if (prev?.status === 'pending_adoption' && incoming.status === 'online') {
             storage.adoptRouter(incoming.id);
             showToast(`Router "${prev.name}" adopted successfully! Live handshake acknowledged.`);
@@ -312,7 +312,7 @@ export default function App() {
           }
 
           // Preserve unadopted nodes without tripping deadman alarms
-          if (incoming.status === 'pending_adoption' && prev?.status !== 'online' && !prev?.adoptedAt) {
+          if (incoming.status === 'pending_adoption') {
             verifiedStatuses.push({
               id: incoming.id,
               status: 'pending_adoption',
@@ -328,42 +328,36 @@ export default function App() {
             tracker = {
               consecutiveMisses: 0,
               lastVerifiedOnlineTimestamp: now,
-              lastNotifiedStatus: 'online',
+              lastNotifiedStatus: incoming.status === 'online' ? 'online' : 'offline',
               firstMissDetectedAt: null
             };
             watchdogTrackerRef.current.set(incoming.id, tracker);
           }
 
-          // Keep adopted routers permanently connected (ONLINE)
-          const isAdoptedRouter = Boolean(
-            prev?.status === 'online' ||
-            prev?.adoptedAt ||
-            incoming.status === 'online' ||
-            incoming.keepAliveAdopted ||
-            incoming.adoptedAt
-          );
+          const secondsSilent = typeof incoming.elapsedSecondsWithoutHeartbeat === 'number'
+            ? incoming.elapsedSecondsWithoutHeartbeat
+            : typeof incoming.secondsSinceHeartbeat === 'number'
+              ? incoming.secondsSinceHeartbeat
+              : incoming.status === 'online'
+                ? 0
+                : 999;
 
-          const lastValidHeartbeat =
-            incoming.lastHeartbeatTimestamp ||
-            prev?.lastHeartbeatTimestamp ||
-            tracker.lastVerifiedOnlineTimestamp;
-          const secondsSilent = isAdoptedRouter ? 0 : 999;
-          const isConfirmedOffline = !isAdoptedRouter && secondsSilent >= DEADMAN_OFFLINE_THRESHOLD_SECONDS;
+          const isConfirmedOffline = incoming.status === 'offline' || secondsSilent > DEADMAN_OFFLINE_THRESHOLD_SECONDS;
 
           if (isConfirmedOffline) {
-            // Heartbeat threshold breached (>= 30 seconds of silence)
+            // Heartbeat threshold breached (> 60 seconds of silence / 3-4 missed 15s beats)
             tracker.consecutiveMisses += 1;
             if (!tracker.firstMissDetectedAt) {
-              tracker.firstMissDetectedAt = now - (secondsSilent * 1000);
+              tracker.firstMissDetectedAt = now - (Math.min(secondsSilent, 65) * 1000);
             }
 
             const missedBeats = Math.max(
               incoming.missedBeats || 0,
               Math.floor(secondsSilent / HEARTBEAT_CYCLE_SECONDS),
-              2
+              3
             );
             const offlineReason = incoming.offlineReason || 
-              `Deadman Watchdog: Disconnected from Starlink/WAN uplink (${secondsSilent}s without heartbeat >= 30s threshold)`;
+              `Deadman Watchdog: Disconnected from Starlink/WAN uplink (${secondsSilent}s without heartbeat > 60s threshold)`;
 
             // Trigger notification ONLY upon confirmed transition to avoid duplicate alerts
             if (tracker.lastNotifiedStatus !== 'offline') {
@@ -380,14 +374,13 @@ export default function App() {
               id: incoming.id,
               status: 'offline',
               lastHeartbeat: 'Offline',
-              lastHeartbeatTimestamp: lastValidHeartbeat,
+              lastHeartbeatTimestamp: incoming.lastHeartbeatTimestamp || prev?.lastHeartbeatTimestamp || 0,
               missedHeartbeats: missedBeats,
-              offlineSince: incoming.offlineSince || prev?.offlineSince || new Date(tracker.firstMissDetectedAt || (now - secondsSilent * 1000)).toISOString(),
+              offlineSince: incoming.offlineSince || prev?.offlineSince || new Date(tracker.firstMissDetectedAt || (now - 60000)).toISOString(),
               offlineReason
             });
           } else {
-            // Router is healthy or within normal jitter tolerance (<30s).
-            // Prevent false positives: enforce ONLINE state even if backend momentarily reported jitter.
+            // Router has sent a real heartbeat within the last 60 seconds
             const wasPreviouslyOffline = tracker.lastNotifiedStatus === 'offline' || prev?.status === 'offline';
 
             tracker.lastVerifiedOnlineTimestamp = incoming.lastHeartbeatTimestamp || now;

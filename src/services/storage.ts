@@ -454,13 +454,10 @@ class StorageService {
     serverRouters.forEach((sr: any) => {
       if (!sr || !sr.id) return;
       const existing = localById.get(sr.id);
-      const isAdopted = Boolean(
-        sr.status === 'online' ||
-        sr.keepAliveAdopted ||
-        sr.adoptedAt ||
-        existing?.status === 'online' ||
-        existing?.adoptedAt
-      );
+      const effectiveStatus: 'online' | 'offline' | 'pending_adoption' =
+        sr.status === 'online' || sr.status === 'offline' || sr.status === 'pending_adoption'
+          ? sr.status
+          : 'pending_adoption';
       if (!existing) {
         mutated = true;
         const hydrated: RouterDevice = {
@@ -480,17 +477,17 @@ class StorageService {
           macAddress: sr.macAddress || 'D4:01:C3:AA:BB:CC',
           wireguardIp: sr.wireguardIp || '10.99.1.50',
           publicWanIp: sr.publicWanIp || '127.0.0.1',
-          status: isAdopted ? 'online' : (sr.status || 'pending_adoption'),
-          uptime: sr.uptime || (isAdopted ? '1h' : '0m'),
-          cpuLoad: sr.cpuLoad || 2,
-          memoryUsage: sr.memoryUsage || 18,
-          lastHeartbeat: isAdopted ? 'Just now' : (sr.lastHeartbeat || 'Never'),
-          lastHeartbeatTimestamp: sr.lastHeartbeatTimestamp || Date.now(),
+          status: effectiveStatus,
+          uptime: sr.uptime || (effectiveStatus === 'online' ? '1h' : '0m'),
+          cpuLoad: effectiveStatus === 'online' ? (sr.cpuLoad || 2) : 0,
+          memoryUsage: effectiveStatus === 'online' ? (sr.memoryUsage || 18) : 0,
+          lastHeartbeat: sr.lastHeartbeat || (effectiveStatus === 'online' ? 'Just now' : 'Offline'),
+          lastHeartbeatTimestamp: sr.lastHeartbeatTimestamp || 0,
           firmware: sr.firmware || '7.15.2',
-          activeSessions: sr.activeSessions || 0,
-          token: isAdopted ? undefined : sr.token,
+          activeSessions: effectiveStatus === 'online' ? (sr.activeSessions || 0) : 0,
+          token: sr.adoptedAt ? undefined : sr.token,
           tokenExpiresAt: sr.tokenExpiresAt,
-          adoptedAt: sr.adoptedAt || (isAdopted ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
+          adoptedAt: sr.adoptedAt,
           accessMode: sr.accessMode || 'PAID_ONLY',
           freeModeEnabled: Boolean(sr.freeModeEnabled),
           freeDurationMinutes: sr.freeDurationMinutes ?? 30,
@@ -498,16 +495,18 @@ class StorageService {
           freeDailyQuotaMb: sr.freeDailyQuotaMb ?? 500
         };
         this.state.routers.push(hydrated);
-      } else if (isAdopted && existing.status !== 'online') {
+      } else if (existing.status !== effectiveStatus || existing.lastHeartbeat !== sr.lastHeartbeat) {
         mutated = true;
-        existing.status = 'online';
-        existing.lastHeartbeat = 'Just now';
-        existing.lastHeartbeatTimestamp = Date.now();
-        existing.missedHeartbeats = 0;
-        existing.offlineSince = undefined;
-        existing.offlineReason = undefined;
-        existing.adoptedAt = existing.adoptedAt || sr.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
-        existing.token = undefined;
+        existing.status = effectiveStatus;
+        existing.lastHeartbeat = sr.lastHeartbeat || existing.lastHeartbeat;
+        existing.lastHeartbeatTimestamp = sr.lastHeartbeatTimestamp || existing.lastHeartbeatTimestamp;
+        existing.missedHeartbeats = sr.missedBeats ?? existing.missedHeartbeats;
+        existing.offlineSince = sr.offlineSince;
+        existing.offlineReason = sr.offlineReason;
+        if (sr.adoptedAt) {
+          existing.adoptedAt = sr.adoptedAt;
+          existing.token = undefined;
+        }
       }
     });
 
@@ -687,19 +686,7 @@ class StorageService {
           } else {
             parsed.gateways = UNCONFIGURED_GATEWAYS;
           }
-          if (Array.isArray(parsed.routers)) {
-            parsed.routers = parsed.routers.map((r: RouterDevice) => {
-              const isAdopted = Boolean(r.status === 'online' || r.adoptedAt);
-              return {
-                ...r,
-                status: isAdopted ? 'online' : (r.status || 'pending_adoption'),
-                lastHeartbeat: isAdopted ? 'Just now' : (r.lastHeartbeat || 'Never'),
-                missedHeartbeats: 0,
-                offlineSince: undefined,
-                offlineReason: undefined
-              };
-            });
-          } else {
+          if (!Array.isArray(parsed.routers)) {
             parsed.routers = [];
           }
           if (!Array.isArray(parsed.tenantGroups)) parsed.tenantGroups = [];
@@ -1665,24 +1652,24 @@ class StorageService {
     this.state.routers = this.state.routers.map(r => {
       const match = watchdogStatuses.find(ws => ws.id === r.id);
       if (match) {
-        const isAdoptedOnline = Boolean(r.status === 'online' || r.adoptedAt || match.status === 'online');
-        const effectiveStatus: 'online' | 'offline' | 'pending_adoption' = isAdoptedOnline ? 'online' : match.status;
+        const effectiveStatus: 'online' | 'offline' | 'pending_adoption' = match.status;
         if (
           r.status !== effectiveStatus ||
-          r.missedHeartbeats !== (isAdoptedOnline ? 0 : match.missedHeartbeats) ||
-          r.offlineSince !== (isAdoptedOnline ? undefined : match.offlineSince)
+          r.missedHeartbeats !== match.missedHeartbeats ||
+          r.offlineSince !== match.offlineSince ||
+          r.lastHeartbeat !== match.lastHeartbeat
         ) {
           changed = true;
           return {
             ...r,
             status: effectiveStatus,
-            adoptedAt: r.adoptedAt || (isAdoptedOnline ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
-            token: isAdoptedOnline ? undefined : r.token,
-            lastHeartbeat: isAdoptedOnline ? 'Just now' : (match.lastHeartbeat || r.lastHeartbeat),
-            lastHeartbeatTimestamp: isAdoptedOnline ? Date.now() : (match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp),
-            missedHeartbeats: isAdoptedOnline ? 0 : match.missedHeartbeats,
-            offlineSince: undefined,
-            offlineReason: undefined
+            adoptedAt: r.adoptedAt || (effectiveStatus === 'online' ? new Date().toISOString().replace('T', ' ').slice(0, 19) : undefined),
+            token: effectiveStatus === 'online' ? undefined : r.token,
+            lastHeartbeat: match.lastHeartbeat || r.lastHeartbeat,
+            lastHeartbeatTimestamp: match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp,
+            missedHeartbeats: match.missedHeartbeats,
+            offlineSince: match.offlineSince,
+            offlineReason: match.offlineReason
           };
         }
       }
