@@ -103,6 +103,30 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     }
   }, [selectedVertical]);
 
+  // Keep selectedRouter synchronized with reactive routers array so adoption/policy changes reflect immediately
+  React.useEffect(() => {
+    if (!routers || routers.length === 0) return;
+    if (!selectedRouter) {
+      setSelectedRouter(routers[0]);
+      return;
+    }
+    const updated = routers.find((r) => r.id === selectedRouter.id);
+    if (updated) {
+      if (
+        updated.status !== selectedRouter.status ||
+        updated.lastHeartbeat !== selectedRouter.lastHeartbeat ||
+        updated.accessMode !== selectedRouter.accessMode ||
+        updated.freeModeEnabled !== selectedRouter.freeModeEnabled ||
+        updated.policyName !== selectedRouter.policyName ||
+        updated.wireguardIp !== selectedRouter.wireguardIp
+      ) {
+        setSelectedRouter(updated);
+      }
+    } else {
+      setSelectedRouter(routers[0]);
+    }
+  }, [routers, selectedRouter]);
+
   // Port & Bridge Management State
   const [showApAssistantModal, setShowApAssistantModal] = useState(false);
   const [showOfficeReadinessModal, setShowOfficeReadinessModal] = useState(false);
@@ -556,6 +580,18 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
             setSimulationStep('5/5: Enabling RADIUS auth (port 1812/1813) & removing temporary .rsc file...');
             setTimeout(() => {
               onAdoptRouter(selectedRouter.id);
+              void fetch(`/api/devices/${selectedRouter.id}/force-adopt`, { method: 'POST' }).catch(() => {});
+              setSelectedRouter((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      status: 'online',
+                      keepAliveAdopted: true,
+                      lastHeartbeat: 'Just now',
+                      token: undefined
+                    }
+                  : prev
+              );
               setIsSimulatingAdoption(false);
               setSimulationStep('');
             }, 600);

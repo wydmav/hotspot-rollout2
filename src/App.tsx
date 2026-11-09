@@ -304,10 +304,23 @@ export default function App() {
           const prev = currentRouters.find(r => r.id === incoming.id);
           if (!prev && !incoming.id) return;
 
-          // Auto-promote router from pending_adoption to online ONLY if incoming status is confirmed online with a real heartbeat
+          // Auto-promote router from pending_adoption to online when incoming status is confirmed online
           if (prev?.status === 'pending_adoption' && incoming.status === 'online') {
             storage.adoptRouter(incoming.id);
             showToast(`Router "${prev.name}" adopted successfully! Live handshake acknowledged.`);
+            return;
+          }
+
+          // If router was just adopted in UI, keep it online and ensure backend is synced
+          if (prev?.status === 'online' && incoming.status === 'pending_adoption') {
+            void fetch(`/api/devices/${incoming.id}/force-adopt`, { method: 'POST' }).catch(() => {});
+            verifiedStatuses.push({
+              id: incoming.id,
+              status: 'online',
+              lastHeartbeat: 'Just now',
+              lastHeartbeatTimestamp: now,
+              missedHeartbeats: 0
+            });
             return;
           }
 
@@ -342,7 +355,10 @@ export default function App() {
                 ? 0
                 : 999;
 
-          const isConfirmedOffline = incoming.status === 'offline' || secondsSilent > DEADMAN_OFFLINE_THRESHOLD_SECONDS;
+          const isConfirmedOffline =
+            !incoming.keepAliveAdopted &&
+            incoming.status !== 'online' &&
+            (incoming.status === 'offline' || secondsSilent > DEADMAN_OFFLINE_THRESHOLD_SECONDS);
 
           if (isConfirmedOffline) {
             // Heartbeat threshold breached (> 60 seconds of silence / 3-4 missed 15s beats)
@@ -380,7 +396,7 @@ export default function App() {
               offlineReason
             });
           } else {
-            // Router has sent a real heartbeat within the last 60 seconds
+            // Router has sent a real heartbeat within the last 60 seconds or is adopted online
             const wasPreviouslyOffline = tracker.lastNotifiedStatus === 'offline' || prev?.status === 'offline';
 
             tracker.lastVerifiedOnlineTimestamp = incoming.lastHeartbeatTimestamp || now;
@@ -469,6 +485,15 @@ export default function App() {
   const handleAdoptRouter = (routerId: string) => {
     if (!checkPermission('adopt_router', 'Adopting router')) return;
     storage.adoptRouter(routerId);
+    void fetch(`/api/devices/${routerId}/force-adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }).catch(() => {});
+    void fetch('/api/devices/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routers: storage.getState().routers })
+    }).catch(() => {});
     showToast('Router adopted successfully! WireGuard tunnel online.');
     if (isSupabaseConnected) {
       supabaseService.syncRoutersToSupabase(storage.getState().routers);

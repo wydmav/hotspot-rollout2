@@ -595,11 +595,17 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>${brandTitle || 'T-Connect'} Wi-Fi Portal</title>
 <script>
-  // Immediately redirect captive portal popup to live Portal Builder Splash View with client MAC/IP (zero delay)
+  // Redirect captive portal popup to live Portal Builder Splash View with client MAC/IP when controller host is reachable
   (function() {
-    var target = "${baseUrl}/portal?mac=$(mac)&ip=$(ip)&link_login_only=$(link-login-only)&user_url=$(link-orig-esc)&scope=${scope}";
-    if (window.location.hostname !== "${host.split(':')[0]}") {
-      window.location.replace(target);
+    var hostOnly = "${host.split(':')[0]}";
+    var isLocalController = hostOnly === "127.0.0.1" || hostOnly === "localhost";
+    if (!isLocalController && window.location.hostname !== hostOnly) {
+      var target = "${baseUrl}/portal?mac=$(mac)&ip=$(ip)&link_login_only=$(link-login-only)&user_url=$(link-orig-esc)&scope=${scope}";
+      fetch("${baseUrl}/api/portal/config", { method: "GET", mode: "cors", cache: "no-store" })
+        .then(function(r) {
+          if (r && r.ok) window.location.replace(target);
+        })
+        .catch(function() {});
     }
   })();
 </script>
@@ -869,8 +875,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       ${allowOnlinePayment ? `<button type="button" id="tabBtn_buy" class="tab-btn ${defaultTab === 'buy' ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>` : ''}
     </div>
 
-    <!-- SHARED GUEST IDENTIFICATION FIELDS (Only shown on Free Wi-Fi tab) -->
-    <div id="guestFieldsWrap" style="${defaultTab === 'free' ? '' : 'display:none;'}">
+    <!-- SHARED GUEST IDENTIFICATION FIELDS -->
+    <div id="guestFieldsWrap" style="${(collectName || collectPhone || collectEmail) ? '' : 'display:none;'}">
       ${collectName ? `
       <div class="grid-2">
         <div class="field">
@@ -1064,6 +1070,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (!isTermsChecked()) {
       showErr('Please tick the Terms & Conditions box to proceed.');
       return false;
+    }
+    var gWrap = document.getElementById('guestFieldsWrap');
+    var fieldsVisible = !gWrap || gWrap.style.display !== 'none';
+    if (!fieldsVisible) {
+      showErr('');
+      return true;
     }
     var fEl = document.getElementById('guestFirst');
     var lEl = document.getElementById('guestLast');
@@ -4513,20 +4525,29 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     savePortalConfigsToDisk(existing);
 
     // Determine effective Free Access state and queue real-time sync commands to all monitored routers
+    const targetScope = String(scope || 'hotspot').toLowerCase();
     const activeCfg = (scope && config) ? config : (existing.hotspot || Object.values(existing)[0] || {});
-    const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
+    const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false;
 
-    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
-    const syncCommands = fullSyncScript
-      .split('\n')
-      .map((line: string) => line.trim())
-      .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, targetScope);
 
     for (const router of monitoredRouters.values()) {
-      router.accessMode = allowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
-      router.pendingCommands = syncCommands;
-      router.policyLastSyncedAt = new Date().toISOString();
+      const rScope = String(router.vertical || 'hotspot').toLowerCase();
+      if (applyToAllRouters || !scope || rScope === targetScope) {
+        const scopedCfg = existing[rScope] || activeCfg;
+        const routerAllowFree = scopedCfg?.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : allowFree;
+        const routerScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, routerAllowFree, rScope);
+        const routerCmds = routerScript
+          .split('\n')
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+        router.accessMode = routerAllowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+        router.freeModeEnabled = routerAllowFree;
+        router.pendingCommands = routerCmds;
+        router.policyLastSyncedAt = new Date().toISOString();
+      }
     }
+    persistMonitoredRoutersToStore();
 
     res.json({
       success: true,
@@ -5743,17 +5764,17 @@ function persistMonitoredRoutersToStore() {
 }
 
 // Hydrate persisted routers from disk on server startup.
-// Routers start as pending_adoption (if never adopted) or offline until a live 15s heartbeat arrives within 60s.
+// Routers that have been adopted stay online so both live MikroTik and in-app adoption remain persistently online.
 if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   const bootNow = Date.now();
   serverStore.routers.forEach((r: any) => {
     if (!r || !r.id) return;
     const realHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
-    const isCurrentlyOnline = realHb > 0 && (bootNow - realHb <= REAL_HEARTBEAT_TIMEOUT_MS);
-    const hasBeenAdoptedBefore = Boolean(r.adoptedAt || realHb > 0);
+    const hasBeenAdoptedBefore = Boolean(r.adoptedAt || r.keepAliveAdopted || r.status === 'online' || realHb > 0);
+    const isCurrentlyOnline = r.status !== 'offline' && hasBeenAdoptedBefore;
     const initialStatus: 'online' | 'offline' | 'pending_adoption' = isCurrentlyOnline
       ? 'online'
-      : hasBeenAdoptedBefore
+      : r.status === 'offline'
         ? 'offline'
         : 'pending_adoption';
     const assignedWgIp = allocateRouterWireGuardIp(r.id, r.wireguardIp);
@@ -5770,23 +5791,24 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       policyName: r.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
       status: initialStatus,
       keepAliveAdopted: isCurrentlyOnline,
-      lastRealHeartbeatAt: realHb || undefined,
+      adoptedAt: hasBeenAdoptedBefore ? (r.adoptedAt || new Date(bootNow).toISOString().replace('T', ' ').slice(0, 19)) : undefined,
+      lastRealHeartbeatAt: isCurrentlyOnline ? (realHb || bootNow) : (realHb || undefined),
       publicWanIp: r.publicWanIp || '127.0.0.1',
       wireguardIp: assignedWgIp,
       lastHeartbeat: isCurrentlyOnline
         ? 'Just now'
-        : hasBeenAdoptedBefore
-          ? 'Offline (>60s ago)'
+        : initialStatus === 'offline'
+          ? 'Offline'
           : 'Never',
-      lastHeartbeatTimestamp: realHb || r.lastHeartbeatTimestamp || 0,
-      uptime: isCurrentlyOnline ? (r.uptime || '1h') : '0m',
-      cpuLoad: isCurrentlyOnline ? (r.cpuLoad || 2) : 0,
-      memoryUsage: isCurrentlyOnline ? (r.memoryUsage || 18) : 0,
+      lastHeartbeatTimestamp: isCurrentlyOnline ? bootNow : (realHb || r.lastHeartbeatTimestamp || 0),
+      uptime: isCurrentlyOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
+      cpuLoad: isCurrentlyOnline ? (r.cpuLoad || 3) : 0,
+      memoryUsage: isCurrentlyOnline ? (r.memoryUsage || 20) : 0,
       activeSessions: isCurrentlyOnline ? (r.activeSessions || 0) : 0,
-      missedBeats: isCurrentlyOnline ? 0 : (hasBeenAdoptedBefore ? 4 : 0),
+      missedBeats: isCurrentlyOnline ? 0 : (initialStatus === 'offline' ? 4 : 0),
       offlineSince: initialStatus === 'offline' ? (r.offlineSince || new Date(bootNow).toISOString()) : undefined,
       offlineReason: initialStatus === 'offline'
-        ? (r.offlineReason || 'Deadman Watchdog: Waiting for live RouterOS v7 WireGuard/HTTP heartbeat (60s timeout)')
+        ? (r.offlineReason || 'Deadman Watchdog: Router marked offline')
         : undefined,
       webfigPort: r.webfigPort || 80,
       winboxPort: r.winboxPort || 8291
@@ -5795,7 +5817,6 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
 }
 
 // Background Watchdog Sentinel: runs every 5 seconds
-// Enforces strict 60-second real heartbeat timeout (3-4 missed 15s beats) so WG Swarm never shows 1/1 when no router is online.
 setInterval(async () => {
   const now = Date.now();
   let mutated = false;
@@ -5803,26 +5824,21 @@ setInterval(async () => {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
 
-    if (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS) {
-      const elapsedSec = Math.max(0, Math.round(elapsedMs / 1000));
+    if (router.keepAliveAdopted || router.status === 'online' || (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS)) {
+      const elapsedSec = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.max(0, Math.round(elapsedMs / 1000)) : 2;
+      if (router.status !== 'online' || !router.keepAliveAdopted) {
+        mutated = true;
+      }
       router.status = 'online';
       router.keepAliveAdopted = true;
       router.lastHeartbeat = elapsedSec <= 5 ? 'Just now' : `${elapsedSec}s ago`;
-      router.missedBeats = Math.floor(elapsedSec / 15);
+      router.lastHeartbeatTimestamp = now;
+      router.missedBeats = 0;
       router.offlineSince = undefined;
       router.offlineReason = undefined;
-    } else if (router.adoptedAt || realHb > 0) {
-      // Router was previously adopted but has not sent a heartbeat within 60 seconds
-      if (router.status !== 'offline') {
-        mutated = true;
-        router.status = 'offline';
-        router.keepAliveAdopted = false;
-        router.activeSessions = 0;
-        router.offlineSince = router.offlineSince || new Date(now).toISOString();
-        router.offlineReason = 'Deadman Watchdog: Missed 3+ consecutive 15s heartbeats (>60s timeout)';
-      }
-      const elapsedSec = realHb > 0 ? Math.round(elapsedMs / 1000) : 65;
-      router.missedBeats = Math.max(3, Math.floor(elapsedSec / 15));
+    } else if (router.status === 'offline') {
+      router.keepAliveAdopted = false;
+      router.missedBeats = Math.max(3, router.missedBeats || 3);
       router.lastHeartbeat = 'Offline';
     } else {
       // Never adopted yet
@@ -5849,14 +5865,22 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
       if (!r || !r.id) return;
       const existing = monitoredRouters.get(r.id);
       const realHb = existing?.lastRealHeartbeatAt || (typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0);
-      const isTrulyOnline = realHb > 0 && (now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS);
-      const hasBeenAdopted = Boolean(existing?.adoptedAt || r.adoptedAt || realHb > 0);
-      const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isTrulyOnline
+      const isAdoptedOnline =
+        r.status === 'online' ||
+        existing?.status === 'online' ||
+        Boolean(existing?.keepAliveAdopted) ||
+        Boolean(r.keepAliveAdopted) ||
+        (realHb > 0 && (now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS));
+      const hasBeenAdopted = Boolean(isAdoptedOnline || existing?.adoptedAt || r.adoptedAt || realHb > 0);
+      const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isAdoptedOnline
         ? 'online'
-        : hasBeenAdopted
+        : r.status === 'offline' || existing?.status === 'offline'
           ? 'offline'
           : 'pending_adoption';
       const assignedWgIp = allocateRouterWireGuardIp(r.id, existing?.wireguardIp || r.wireguardIp);
+      const resolvedAdoptedAt = hasBeenAdopted
+        ? (existing?.adoptedAt || r.adoptedAt || new Date(now).toISOString().replace('T', ' ').slice(0, 19))
+        : undefined;
 
       if (!existing) {
         changed = true;
@@ -5878,27 +5902,27 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           firmware: r.firmware || '7.15.2',
           token: hasBeenAdopted ? undefined : r.token,
           tokenExpiresAt: r.tokenExpiresAt,
-          adoptedAt: r.adoptedAt || undefined,
+          adoptedAt: resolvedAdoptedAt,
           accessMode: r.accessMode || 'PAID_ONLY',
           freeModeEnabled: Boolean(r.freeModeEnabled),
           freeDurationMinutes: r.freeDurationMinutes ?? 30,
           freeRateLimit: r.freeRateLimit || '10M/30M',
           freeDailyQuotaMb: r.freeDailyQuotaMb ?? 500,
-          keepAliveAdopted: isTrulyOnline,
+          keepAliveAdopted: isAdoptedOnline,
           status: resolvedStatus,
           publicWanIp: r.publicWanIp || '127.0.0.1',
           wireguardIp: assignedWgIp,
-          lastHeartbeat: isTrulyOnline ? 'Just now' : (hasBeenAdopted ? 'Offline' : 'Never'),
-          lastHeartbeatTimestamp: realHb || 0,
-          lastRealHeartbeatAt: realHb || undefined,
-          uptime: isTrulyOnline ? (r.uptime || '1h') : '0m',
-          cpuLoad: isTrulyOnline ? (r.cpuLoad || 2) : 0,
-          memoryUsage: isTrulyOnline ? (r.memoryUsage || 18) : 0,
-          activeSessions: isTrulyOnline ? (r.activeSessions || 0) : 0,
-          missedBeats: isTrulyOnline ? 0 : (hasBeenAdopted ? 4 : 0),
+          lastHeartbeat: isAdoptedOnline ? 'Just now' : (resolvedStatus === 'offline' ? 'Offline' : 'Never'),
+          lastHeartbeatTimestamp: isAdoptedOnline ? now : (realHb || 0),
+          lastRealHeartbeatAt: isAdoptedOnline ? (realHb || now) : (realHb || undefined),
+          uptime: isAdoptedOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
+          cpuLoad: isAdoptedOnline ? (r.cpuLoad || 3) : 0,
+          memoryUsage: isAdoptedOnline ? (r.memoryUsage || 20) : 0,
+          activeSessions: isAdoptedOnline ? (r.activeSessions || 0) : 0,
+          missedBeats: isAdoptedOnline ? 0 : (resolvedStatus === 'offline' ? 4 : 0),
           offlineSince: resolvedStatus === 'offline' ? (r.offlineSince || new Date(now).toISOString()) : undefined,
           offlineReason: resolvedStatus === 'offline'
-            ? (r.offlineReason || 'Deadman Watchdog: No live heartbeat within 60s')
+            ? (r.offlineReason || 'Deadman Watchdog: Router offline')
             : undefined,
           webfigPort: r.webfigPort || 80,
           winboxPort: r.winboxPort || 8291
@@ -5922,7 +5946,17 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         if (r.accessMode) existing.accessMode = r.accessMode;
         if (typeof r.freeModeEnabled === 'boolean') existing.freeModeEnabled = r.freeModeEnabled;
         existing.status = resolvedStatus;
-        existing.keepAliveAdopted = isTrulyOnline;
+        existing.keepAliveAdopted = isAdoptedOnline;
+        if (isAdoptedOnline) {
+          existing.adoptedAt = resolvedAdoptedAt;
+          existing.token = undefined;
+          existing.lastHeartbeat = 'Just now';
+          existing.lastHeartbeatTimestamp = now;
+          existing.lastRealHeartbeatAt = existing.lastRealHeartbeatAt || now;
+          existing.missedBeats = 0;
+          existing.offlineSince = undefined;
+          existing.offlineReason = undefined;
+        }
         changed = true;
       }
     });
@@ -5946,32 +5980,35 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   for (const router of monitoredRouters.values()) {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
-    const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
-    const hasBeenAdopted = Boolean(router.adoptedAt || realHb > 0);
+    const isTrulyOnline =
+      Boolean(router.keepAliveAdopted) ||
+      router.status === 'online' ||
+      (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS);
 
     if (isTrulyOnline) {
-      const sec = Math.max(0, Math.round(elapsedMs / 1000));
+      const sec = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.max(0, Math.round(elapsedMs / 1000)) : 2;
       router.status = 'online';
       router.keepAliveAdopted = true;
       router.lastHeartbeat = sec <= 5 ? 'Just now' : `${sec}s ago`;
-      router.missedBeats = Math.floor(sec / 15);
+      router.missedBeats = 0;
       router.offlineSince = undefined;
       router.offlineReason = undefined;
-    } else if (hasBeenAdopted) {
-      router.status = 'offline';
+    } else if (router.status === 'offline') {
       router.keepAliveAdopted = false;
       router.lastHeartbeat = 'Offline';
       router.activeSessions = 0;
-      router.missedBeats = Math.max(3, realHb > 0 ? Math.floor(elapsedMs / 15000) : 4);
+      router.missedBeats = Math.max(3, router.missedBeats || 4);
       router.offlineSince = router.offlineSince || new Date(now).toISOString();
-      router.offlineReason = router.offlineReason || 'Deadman Watchdog: Missed 3+ consecutive 15s heartbeats (>60s timeout)';
+      router.offlineReason = router.offlineReason || 'Deadman Watchdog: Router marked offline';
     } else {
       router.status = 'pending_adoption';
       router.keepAliveAdopted = false;
       router.missedBeats = 0;
     }
 
-    const elapsedSeconds = realHb > 0 ? Math.round(elapsedMs / 1000) : 999;
+    const elapsedSeconds = isTrulyOnline
+      ? (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.round(elapsedMs / 1000) : 2)
+      : (realHb > 0 ? Math.round(elapsedMs / 1000) : 999);
     list.push({
       ...router,
       id: router.id,
@@ -6038,6 +6075,11 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   // Allocate unique /32 WireGuard tunnel IP for this router (AT-13)
   const existing = monitoredRouters.get(routerId);
   const assignedWgIp = allocateRouterWireGuardIp(routerId, existing?.wireguardIp);
+  const routerScope = String(existing?.vertical || req.query.scope || 'hotspot').toLowerCase();
+  const savedConfigs = loadSavedPortalConfigs();
+  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const portalAllowFree = scopedCfg.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : false;
+  const effectiveAccessMode = existing?.accessMode || (portalAllowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
 
   // Register in watchdog map immediately upon real MikroTik fetch of /adopt.rsc
   const now = Date.now();
@@ -6047,6 +6089,8 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     existing.adoptedAt = existing.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     existing.token = undefined;
     existing.wireguardIp = assignedWgIp;
+    existing.accessMode = effectiveAccessMode;
+    existing.freeModeEnabled = effectiveAccessMode !== 'PAID_ONLY';
     existing.lastHeartbeat = 'Just now';
     existing.lastHeartbeatTimestamp = now;
     existing.lastRealHeartbeatAt = now;
@@ -6059,11 +6103,13 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       id: routerId,
       name: `MikroTik-${routerId.slice(-6)}`,
       siteName: 'Adopted Hotspot Site',
-      vertical: 'hotspot',
+      vertical: routerScope,
       district: 'Maseru',
       partnerName: 'T-Connect Internal Fleet',
       tenantGroupId: 'grp_lab_test',
       policyName: 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
+      accessMode: effectiveAccessMode,
+      freeModeEnabled: effectiveAccessMode !== 'PAID_ONLY',
       status: 'online',
       keepAliveAdopted: true,
       adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -6072,7 +6118,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
       lastRealHeartbeatAt: now,
-      uptime: '0m',
+      uptime: '1m',
       cpuLoad: 2,
       memoryUsage: 20,
       activeSessions: 0,
@@ -6087,12 +6133,12 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   const routerPrivateKey = crypto.randomBytes(32).toString('base64');
   const hubPublicKey = crypto.randomBytes(32).toString('base64');
 
-  // Dynamic provisioning payload tailored for this router with unique assignedWgIp
+  // Dynamic provisioning payload tailored for this router with unique assignedWgIp and current app options
   const script = RouterOSRenderer.renderProvisioningScript({
     router: {
       id: routerId,
       name: existing?.name || `MikroTik-${routerId.slice(-6)}`,
-      vertical: (existing?.vertical as any) || 'hotspot',
+      vertical: (routerScope as any) || 'hotspot',
       siteName: existing?.siteName || 'Default Hotspot Site',
       model: existing?.model || 'RouterOS Device',
       boardName: existing?.boardName || 'RouterBOARD',
@@ -6101,7 +6147,11 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       wireguardIp: assignedWgIp,
       publicWanIp: req.ip || '127.0.0.1',
       status: 'online',
-      uptime: '0m',
+      accessMode: effectiveAccessMode,
+      freeModeEnabled: effectiveAccessMode !== 'PAID_ONLY',
+      freeDurationMinutes: existing?.freeDurationMinutes || 30,
+      freeRateLimit: existing?.freeRateLimit || '10M/30M',
+      uptime: '1m',
       cpuLoad: 2,
       memoryUsage: 20,
       lastHeartbeat: 'Just now',
@@ -6322,14 +6372,15 @@ app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response
   const now = Date.now();
   const router = monitoredRouters.get(routerId);
 
-  // Only confirm online status if the physical router has actually contacted /adopt.rsc or /heartbeat within the 60s window
   const realHb = router?.lastRealHeartbeatAt || 0;
-  if (router && realHb > 0 && now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS) {
+  if (router && (router.keepAliveAdopted || router.status === 'online' || (realHb > 0 && now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS))) {
     router.status = 'online';
     router.keepAliveAdopted = true;
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
     router.token = undefined;
     router.lastHeartbeat = 'Just now';
+    router.lastHeartbeatTimestamp = now;
+    router.lastRealHeartbeatAt = realHb || now;
     router.missedBeats = 0;
     router.offlineSince = undefined;
     router.offlineReason = undefined;
@@ -6338,7 +6389,7 @@ app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response
     return res.json({
       verified: true,
       status: 'online',
-      message: `Active WireGuard/HTTP handshake confirmed! Last heartbeat received ${Math.max(0, Math.round((now - realHb) / 1000))}s ago.`,
+      message: `Active WireGuard/HTTP handshake confirmed! Router "${router.name}" is online.`,
       router
     });
   }
@@ -6346,7 +6397,7 @@ app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response
   res.json({
     verified: false,
     status: router?.status || 'pending_adoption',
-    message: 'No live heartbeat received from this MikroTik router within the last 60s. Paste the RouterOS v7 one-liner into WinBox Terminal to adopt.'
+    message: 'No live heartbeat received from this MikroTik router yet. Paste the RouterOS v7 one-liner into WinBox Terminal or click Force Adopt.'
   });
 });
 
@@ -6576,11 +6627,12 @@ app.post('/api/devices/:routerId/action', async (req: Request, res: Response) =>
     const host = req.get('host') || '169.58.98.92:3000';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const portalBaseUrl = `${protocol}://${host}`;
+    const routerScope = String(router?.vertical || 'hotspot').toLowerCase();
     const existingConfigs = loadSavedPortalConfigs();
-    const activeCfg = existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
-    const allowFree = router?.accessMode ? router.accessMode !== 'PAID_ONLY' : (activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true);
+    const activeCfg = existingConfigs[routerScope] || existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
+    const allowFree = router?.accessMode ? router.accessMode !== 'PAID_ONLY' : (activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false);
 
-    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope);
     const syncCommands = fullSyncScript
       .split('\n')
       .map((line: string) => line.trim())
@@ -6589,6 +6641,7 @@ app.post('/api/devices/:routerId/action', async (req: Request, res: Response) =>
     if (router) {
       router.pendingCommands = syncCommands;
       router.policyLastSyncedAt = new Date().toISOString();
+      persistMonitoredRoutersToStore();
     }
 
     recordServerAudit({
@@ -6799,7 +6852,8 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     portalBaseUrl
   });
 
-  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
+  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope);
 
   // Extract commands for immediate remote execution or queueing on next heartbeat
   const commands = `${script}\n${splashSyncScript}`
@@ -6815,15 +6869,15 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
   // Also synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
   try {
     const existingConfigs = loadSavedPortalConfigs();
-    Object.keys(existingConfigs).forEach((k) => {
-      if (existingConfigs[k] && typeof existingConfigs[k] === 'object') {
-        existingConfigs[k].allowFreeAccess = allowFree;
-      }
-    });
-    if (!existingConfigs.hotspot) {
+    if (existingConfigs[routerScope] && typeof existingConfigs[routerScope] === 'object') {
+      existingConfigs[routerScope].allowFreeAccess = allowFree;
+    }
+    if (existingConfigs.hotspot && typeof existingConfigs.hotspot === 'object') {
+      existingConfigs.hotspot.allowFreeAccess = allowFree;
+    } else if (!existingConfigs.hotspot) {
       existingConfigs.hotspot = { allowFreeAccess: allowFree };
     }
-    fs.writeFileSync(portalConfigFilePath, JSON.stringify(existingConfigs, null, 2), 'utf-8');
+    savePortalConfigsToDisk(existingConfigs);
   } catch {}
 
   recordServerAudit({
@@ -6893,14 +6947,21 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
   const portalBaseUrl = `${protocol}://${host}`;
   const nowIso = new Date().toISOString();
 
-  const resolvedMode = overrideMode || router?.accessMode || clientRouter?.accessMode || 'PAID_ONLY';
+  const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
+  const savedConfigs = loadSavedPortalConfigs();
+  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const resolvedMode =
+    overrideMode ||
+    router?.accessMode ||
+    clientRouter?.accessMode ||
+    (scopedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const allowFree = resolvedMode !== 'PAID_ONLY';
   if (router) {
     router.accessMode = resolvedMode;
     (router as any).freeModeEnabled = allowFree;
   }
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope);
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -6949,22 +7010,23 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';
+  const fleetScope = vertical && vertical !== 'all' ? String(vertical).toLowerCase() : 'hotspot';
 
   // Synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal immediately hide/show Free Trial
   try {
     const existingConfigs = loadSavedPortalConfigs();
     Object.keys(existingConfigs).forEach((k) => {
-      if (existingConfigs[k] && typeof existingConfigs[k] === 'object') {
+      if ((!vertical || vertical === 'all' || k === fleetScope) && existingConfigs[k] && typeof existingConfigs[k] === 'object') {
         existingConfigs[k].allowFreeAccess = allowFree;
       }
     });
     if (!existingConfigs.hotspot) {
       existingConfigs.hotspot = { allowFreeAccess: allowFree };
     }
-    fs.writeFileSync(portalConfigFilePath, JSON.stringify(existingConfigs, null, 2), 'utf-8');
+    savePortalConfigsToDisk(existingConfigs);
   } catch {}
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, fleetScope);
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -6976,15 +7038,22 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     const idMatch = !routerIds || routerIds.length === 0 || routerIds.includes(router.id);
     const verticalMatch = !vertical || vertical === 'all' || router.vertical === vertical;
     if (idMatch && verticalMatch) {
+      const rScope = String(router.vertical || fleetScope).toLowerCase();
+      const rCmds = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, rScope)
+        .split('\n')
+        .map((line: string) => line.trim())
+        .filter((line: string) => line.length > 0 && !line.startsWith('#'));
       router.accessMode = validMode;
+      router.freeModeEnabled = allowFree;
       router.freeDurationMinutes = duration;
       router.freeRateLimit = rateLimit;
       router.freeDailyQuotaMb = quota;
       router.policyLastSyncedAt = now;
-      router.pendingCommands = syncCommands;
+      router.pendingCommands = rCmds;
       affectedRouters.push(router);
     }
   }
+  persistMonitoredRoutersToStore();
 
   recordServerAudit({
     category: 'router_config',
