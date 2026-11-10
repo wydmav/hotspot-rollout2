@@ -111,6 +111,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [userOrigUrl, setUserOrigUrl] = useState('https://www.google.com');
 
   // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
+  // Strict Auth Gate: Never auto-skip to 'connected' on mount — user must pay/redeem OTT voucher OR press Connect Free Wi-Fi
   const [portalStep, setPortalStep] = useState<
     'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
   >(() => {
@@ -119,11 +120,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         const params = new URLSearchParams(window.location.search);
         const stepParam = params.get('step');
         const reasonParam = params.get('reason');
-        if (!stepParam && reasonParam !== 'retrigger') {
-          const activeConn =
-            window.localStorage?.getItem('tconnect_active_connected_session') ||
-            window.sessionStorage?.getItem('tconnect_guest_connected_session');
-          if (activeConn) return 'connected';
+        if (reasonParam === 'retrigger') return 'video_ad';
+        if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'identification') {
+          return stepParam;
         }
       } catch {}
     }
@@ -456,6 +455,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       try {
         fetch(authRedirectUrl, { mode: 'no-cors' }).catch(() => {});
       } catch {}
+
+      // If redirected from an actual MikroTik router (?link_login_only=...), also submit the POST form or navigate so RouterOS authorizes the client MAC/IP immediately
+      if (hasExplicitRouterLogin && hiddenFormRef.current) {
+        try {
+          hiddenFormRef.current.submit();
+          return;
+        } catch {}
+      }
     }
 
     // Direct automatic release to device:

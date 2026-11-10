@@ -41,6 +41,7 @@ import {
 import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice, CaptivePortalLead } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { storage } from '../../services/storage';
+import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { TenantGroupsModal } from './TenantGroupsModal';
 import { CaptivePortalLeadsView } from './CaptivePortalLeadsView';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
@@ -969,9 +970,123 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
   };
 
+  // Compute active global speed & burst limits for RouterOS rate-limit
+  const globalDownloadMbps = currentConfig.globalDownloadMbps ?? 20;
+  const globalUploadMbps = currentConfig.globalUploadMbps ?? 10;
+  const globalBurstDownloadMbps = Math.max(globalDownloadMbps, currentConfig.globalBurstDownloadMbps ?? 30);
+  const globalBurstUploadMbps = Math.max(globalUploadMbps, currentConfig.globalBurstUploadMbps ?? 15);
+  const computedGlobalRateLimit = RouterOSRenderer.formatBurstRateLimit(
+    globalUploadMbps,
+    globalDownloadMbps,
+    globalBurstUploadMbps,
+    globalBurstDownloadMbps
+  );
+  const [isSyncingAllRouters, setIsSyncingAllRouters] = useState(false);
+
+  const handleUpdateGlobalSpeedBurst = (
+    nextDown: number,
+    nextUp: number,
+    nextBurstDown: number,
+    nextBurstUp: number
+  ) => {
+    const safeDown = Math.max(1, Math.round(nextDown));
+    const safeUp = Math.max(1, Math.round(nextUp));
+    const safeBDown = Math.max(safeDown, Math.round(nextBurstDown));
+    const safeBUp = Math.max(safeUp, Math.round(nextBurstUp));
+    const nextRateStr = RouterOSRenderer.formatBurstRateLimit(safeUp, safeDown, safeBUp, safeBDown);
+    handleUpdateCurrent({
+      globalDownloadMbps: safeDown,
+      globalUploadMbps: safeUp,
+      globalBurstDownloadMbps: safeBDown,
+      globalBurstUploadMbps: safeBUp,
+      globalRateLimit: nextRateStr
+    });
+  };
+
+  const handleSyncToAllRoutersNow = async () => {
+    setIsSyncingAllRouters(true);
+    const updatedCfg: ScopePortalConfig = {
+      ...currentConfig,
+      globalDownloadMbps,
+      globalUploadMbps,
+      globalBurstDownloadMbps,
+      globalBurstUploadMbps,
+      globalRateLimit: computedGlobalRateLimit
+    };
+    const nextAll: Record<VerticalType, ScopePortalConfig> = { ...scopeConfigs };
+    (Object.keys(nextAll) as VerticalType[]).forEach((k) => {
+      nextAll[k] = {
+        ...nextAll[k],
+        allowFreeAccess: updatedCfg.allowFreeAccess,
+        allowVoucherCode: updatedCfg.allowVoucherCode,
+        allowOnlinePayment: updatedCfg.allowOnlinePayment,
+        globalDownloadMbps,
+        globalUploadMbps,
+        globalBurstDownloadMbps,
+        globalBurstUploadMbps,
+        globalRateLimit: computedGlobalRateLimit
+      };
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(`tconnect_portal_scope_${k}`, JSON.stringify(nextAll[k]));
+        } catch {}
+      }
+    });
+    setScopeConfigs(nextAll);
+
+    try {
+      await fetch('/api/portal/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: updatedCfg.scope,
+          config: updatedCfg,
+          configs: nextAll,
+          applyToAllRouters: true
+        })
+      });
+      await fetch('/api/devices/fleet/access-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vertical: 'all',
+          accessMode: updatedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          freeRateLimit: computedGlobalRateLimit,
+          globalDownloadMbps,
+          globalUploadMbps,
+          globalBurstDownloadMbps,
+          globalBurstUploadMbps
+        })
+      });
+      storage.setRouterAccessPolicy('all', {
+        accessMode: updatedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+        freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+        freeRateLimit: computedGlobalRateLimit
+      });
+      setSavedToast(
+        `Synced to ALL Routers! Access Modes + RouterOS Speed & Burst (${computedGlobalRateLimit}) pushed across the fleet.`
+      );
+      setTimeout(() => setSavedToast(null), 4500);
+    } catch {
+      setSavedToast(`Saved & queued sync (${computedGlobalRateLimit}) for all routers.`);
+      setTimeout(() => setSavedToast(null), 3500);
+    } finally {
+      setIsSyncingAllRouters(false);
+    }
+  };
+
   // Toggle Free Access Mode across this scope and push to all routers in real time
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
-    handleUpdateCurrent({ allowFreeAccess: enableFree, collectEmail: true });
+    handleUpdateCurrent({
+      allowFreeAccess: enableFree,
+      collectEmail: true,
+      globalDownloadMbps,
+      globalUploadMbps,
+      globalBurstDownloadMbps,
+      globalBurstUploadMbps,
+      globalRateLimit: computedGlobalRateLimit
+    });
     if (!enableFree && previewStep === 'identification') {
       setPreviewStep(isVoucherModeActive ? 'voucher' : 'plan');
     } else if (enableFree) {
@@ -985,7 +1100,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           vertical: 'all',
           accessMode: enableFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
           freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
-          freeRateLimit: activeRouter?.freeRateLimit || '10M/30M'
+          freeRateLimit: computedGlobalRateLimit,
+          globalDownloadMbps,
+          globalUploadMbps,
+          globalBurstDownloadMbps,
+          globalBurstUploadMbps
         })
       });
       setSavedToast(
@@ -1638,17 +1757,13 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
           <button
             type="button"
-            onClick={() =>
-              saveScopeConfig(
-                currentConfig,
-                `All ${activeMeta.label} settings, presets & policies saved and pushed to routers in real time!`
-              )
-            }
-            className="px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md cursor-pointer transition-all"
-            title="Save all settings and push policy to routers in this scope immediately"
+            onClick={() => void handleSyncToAllRoutersNow()}
+            disabled={isSyncingAllRouters}
+            className="px-3.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 shadow-md cursor-pointer transition-all"
+            title="Save all access mode, speed/burst cap, and splash page changes and push to ALL routers immediately"
           >
-            <Save className="w-3.5 h-3.5" />
-            <span>Save &amp; Push to Routers</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
+            <span>{isSyncingAllRouters ? 'Syncing All Routers...' : 'Sync to All Routers'}</span>
           </button>
 
           <button
@@ -1781,6 +1896,126 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     >
                       {isBuyPassModeActive ? 'Turn OFF Buy Pass' : 'Turn ON Buy Pass'}
                     </button>
+                  </div>
+                </div>
+
+                {/* GLOBAL ROUTEROS SPEED & BURST CAP SLIDERS + SYNC TO ALL ROUTERS BUTTON */}
+                <div className="pt-3 border-t border-[#1b233a] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2 text-[11px]">
+                        <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Global RouterOS Speed &amp; Burst Cap (All Connected Users)</span>
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Caps download/upload speeds and configures RouterOS burst limits (<code className="text-emerald-300">rate-limit=&quot;{computedGlobalRateLimit}&quot;</code>).
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncToAllRoutersNow()}
+                      disabled={isSyncingAllRouters}
+                      className="px-3.5 py-2 rounded-xl font-extrabold text-[11px] flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 shadow-md cursor-pointer shrink-0 transition-all"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingAllRouters ? 'Syncing All Routers...' : 'Sync to All Routers'}</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438]">
+                    {/* Download Speed Cap Slider */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-slate-300 font-bold">Download Speed Cap</span>
+                        <span className="text-emerald-400 font-extrabold">{globalDownloadMbps} Mbps</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        value={globalDownloadMbps}
+                        onChange={(e) => {
+                          const nextDown = Number(e.target.value);
+                          handleUpdateGlobalSpeedBurst(
+                            nextDown,
+                            globalUploadMbps,
+                            Math.max(nextDown, globalBurstDownloadMbps),
+                            globalBurstUploadMbps
+                          );
+                        }}
+                        className="w-full accent-emerald-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Upload Speed Cap Slider */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-slate-300 font-bold">Upload Speed Cap</span>
+                        <span className="text-cyan-400 font-extrabold">{globalUploadMbps} Mbps</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        value={globalUploadMbps}
+                        onChange={(e) => {
+                          const nextUp = Number(e.target.value);
+                          handleUpdateGlobalSpeedBurst(
+                            globalDownloadMbps,
+                            nextUp,
+                            globalBurstDownloadMbps,
+                            Math.max(nextUp, globalBurstUploadMbps)
+                          );
+                        }}
+                        className="w-full accent-cyan-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Download Burst Speed Slider */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-slate-300 font-bold">Download Burst Speed (RouterOS Burst)</span>
+                        <span className="text-amber-400 font-extrabold">{globalBurstDownloadMbps} Mbps</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={globalDownloadMbps}
+                        max={150}
+                        value={globalBurstDownloadMbps}
+                        onChange={(e) =>
+                          handleUpdateGlobalSpeedBurst(
+                            globalDownloadMbps,
+                            globalUploadMbps,
+                            Number(e.target.value),
+                            globalBurstUploadMbps
+                          )
+                        }
+                        className="w-full accent-amber-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Upload Burst Speed Slider */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-slate-300 font-bold">Upload Burst Speed (RouterOS Burst)</span>
+                        <span className="text-orange-400 font-extrabold">{globalBurstUploadMbps} Mbps</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={globalUploadMbps}
+                        max={150}
+                        value={globalBurstUploadMbps}
+                        onChange={(e) =>
+                          handleUpdateGlobalSpeedBurst(
+                            globalDownloadMbps,
+                            globalUploadMbps,
+                            globalBurstDownloadMbps,
+                            Number(e.target.value)
+                          )
+                        }
+                        className="w-full accent-orange-500 cursor-pointer"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>

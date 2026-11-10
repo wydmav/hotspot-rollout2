@@ -311,16 +311,44 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     }
   };
 
-  // Fleet Bulk Access Policy Control State
+  // Fleet Bulk Access Policy & Global RouterOS Speed/Burst Cap State
   const [bulkAccessMode, setBulkAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
   const [bulkFreeMinutes, setBulkFreeMinutes] = useState<number>(30);
-  const [bulkRateLimit, setBulkRateLimit] = useState<string>('10M/30M');
+  const [fleetDownloadMbps, setFleetDownloadMbps] = useState<number>(20);
+  const [fleetUploadMbps, setFleetUploadMbps] = useState<number>(10);
+  const [fleetBurstDownloadMbps, setFleetBurstDownloadMbps] = useState<number>(30);
+  const [fleetBurstUploadMbps, setFleetBurstUploadMbps] = useState<number>(15);
+  const bulkRateLimit = RouterOSRenderer.formatBurstRateLimit(
+    fleetUploadMbps,
+    fleetDownloadMbps,
+    fleetBurstUploadMbps,
+    fleetBurstDownloadMbps
+  );
   const [isBulkPushing, setIsBulkPushing] = useState(false);
   const [bulkPushToast, setBulkPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSyncingAllRouters, setIsSyncingAllRouters] = useState(false);
   const [syncedFleetCliScript, setSyncedFleetCliScript] = useState<string | null>(null);
   const [copiedFleetCliScript, setCopiedFleetCliScript] = useState(false);
   const [copiedAllPortsBridgeCmd, setCopiedAllPortsBridgeCmd] = useState(false);
+
+  // Hydrate initial speed/burst values from server portal config
+  React.useEffect(() => {
+    fetch('/api/portal/config')
+      .then((r) => r.json())
+      .then((d) => {
+        const cfg = d?.configs?.hotspot;
+        if (cfg) {
+          if (typeof cfg.globalDownloadMbps === 'number') setFleetDownloadMbps(cfg.globalDownloadMbps);
+          if (typeof cfg.globalUploadMbps === 'number') setFleetUploadMbps(cfg.globalUploadMbps);
+          if (typeof cfg.globalBurstDownloadMbps === 'number') setFleetBurstDownloadMbps(cfg.globalBurstDownloadMbps);
+          if (typeof cfg.globalBurstUploadMbps === 'number') setFleetBurstUploadMbps(cfg.globalBurstUploadMbps);
+          if (typeof cfg.allowFreeAccess === 'boolean') {
+            setBulkAccessMode(cfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Adoption Handshake Verification & WinBox Terminal Diagnostics State
   const [isVerifyingHandshake, setIsVerifyingHandshake] = useState(false);
@@ -375,21 +403,25 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     }
   };
 
-  const handleBulkPolicyPush = async () => {
+  const handleBulkPolicyPush = async (syncAllFleet: boolean = true) => {
     setIsBulkPushing(true);
     setBulkPushToast(null);
 
     try {
-      const targetRouterIds = filteredRouters.map(r => r.id);
+      const targetRouterIds = syncAllFleet ? routers.map((r) => r.id) : filteredRouters.map((r) => r.id);
       const res = await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           routerIds: targetRouterIds,
-          vertical: localVerticalFilter === 'all' ? undefined : localVerticalFilter,
+          vertical: syncAllFleet || localVerticalFilter === 'all' ? 'all' : localVerticalFilter,
           accessMode: bulkAccessMode,
           freeDurationMinutes: bulkFreeMinutes,
-          freeRateLimit: bulkRateLimit
+          freeRateLimit: bulkRateLimit,
+          globalDownloadMbps: fleetDownloadMbps,
+          globalUploadMbps: fleetUploadMbps,
+          globalBurstDownloadMbps: fleetBurstDownloadMbps,
+          globalBurstUploadMbps: fleetBurstUploadMbps
         })
       });
 
@@ -405,7 +437,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         }
         setBulkPushToast({
           type: 'success',
-          message: `Policy '${bulkAccessMode}' pushed to ${data.updatedCount} routers across the fleet!`
+          message: `Synced to All Routers! Mode '${bulkAccessMode}' & Speed/Burst Cap (${bulkRateLimit}) pushed to ${data.updatedCount} router(s)!`
         });
         setTimeout(() => setBulkPushToast(null), 5000);
       } else {
@@ -952,17 +984,100 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
             <button
               type="button"
-              disabled={isBulkPushing || filteredRouters.length === 0}
-              onClick={handleBulkPolicyPush}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+              disabled={isBulkPushing || routers.length === 0}
+              onClick={() => void handleBulkPolicyPush(true)}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
                 isBulkPushing
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-950/40'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-950/40'
               }`}
             >
-              {isBulkPushing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3 fill-current" />}
-              <span>{isBulkPushing ? 'Pushing...' : 'Push to Scope'}</span>
+              {isBulkPushing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              <span>{isBulkPushing ? 'Syncing Routers...' : 'Sync to All Routers'}</span>
             </button>
+          </div>
+        </div>
+
+        {/* Global RouterOS Speed & Burst Cap Sliders */}
+        <div className="pt-3 border-t border-[#1e263c] space-y-2.5 font-mono text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-bold text-slate-200 flex items-center gap-1.5">
+              <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Global RouterOS Speed &amp; Burst Cap (All Connected Users)</span>
+            </span>
+            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-bold">
+              rate-limit=&quot;{bulkRateLimit}&quot;
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438]">
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-slate-300 font-bold">Download Cap</span>
+                <span className="text-emerald-400 font-extrabold">{fleetDownloadMbps} Mbps</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={fleetDownloadMbps}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setFleetDownloadMbps(val);
+                  if (fleetBurstDownloadMbps < val) setFleetBurstDownloadMbps(val);
+                }}
+                className="w-full accent-emerald-500 cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-slate-300 font-bold">Upload Cap</span>
+                <span className="text-cyan-400 font-extrabold">{fleetUploadMbps} Mbps</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={fleetUploadMbps}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setFleetUploadMbps(val);
+                  if (fleetBurstUploadMbps < val) setFleetBurstUploadMbps(val);
+                }}
+                className="w-full accent-cyan-500 cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-slate-300 font-bold">Download Burst</span>
+                <span className="text-amber-400 font-extrabold">{fleetBurstDownloadMbps} Mbps</span>
+              </div>
+              <input
+                type="range"
+                min={fleetDownloadMbps}
+                max={150}
+                value={fleetBurstDownloadMbps}
+                onChange={(e) => setFleetBurstDownloadMbps(Number(e.target.value))}
+                className="w-full accent-amber-500 cursor-pointer"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-slate-300 font-bold">Upload Burst</span>
+                <span className="text-orange-400 font-extrabold">{fleetBurstUploadMbps} Mbps</span>
+              </div>
+              <input
+                type="range"
+                min={fleetUploadMbps}
+                max={150}
+                value={fleetBurstUploadMbps}
+                onChange={(e) => setFleetBurstUploadMbps(Number(e.target.value))}
+                className="w-full accent-orange-500 cursor-pointer"
+              />
+            </div>
           </div>
         </div>
 

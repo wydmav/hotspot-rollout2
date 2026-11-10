@@ -96,28 +96,61 @@ export class RouterOSRenderer {
   }
 
   /**
+   * Formats a RouterOS-compliant speed + burst rate-limit string:
+   * rx-rate/tx-rate rx-burst-rate/tx-burst-rate rx-burst-threshold/tx-burst-threshold rx-burst-time/tx-burst-time
+   * Note: In RouterOS Hotspot, rx = client upload, tx = client download.
+   */
+  static formatBurstRateLimit(
+    uploadMbps: number = 10,
+    downloadMbps: number = 20,
+    burstUploadMbps: number = 15,
+    burstDownloadMbps: number = 30
+  ): string {
+    const up = Math.max(1, Math.round(Number(uploadMbps) || 10));
+    const down = Math.max(1, Math.round(Number(downloadMbps) || 20));
+    const bUp = Math.max(up, Math.round(Number(burstUploadMbps) || up));
+    const bDown = Math.max(down, Math.round(Number(burstDownloadMbps) || down));
+    const thUp = Math.max(1, Math.round(up * 0.8));
+    const thDown = Math.max(1, Math.round(down * 0.8));
+    if (bUp <= up && bDown <= down) {
+      return `${up}M/${down}M`;
+    }
+    return `${up}M/${down}M ${bUp}M/${bDown}M ${thUp}M/${thDown}M 15s/15s`;
+  }
+
+  /**
    * Builds RouterOS v7.16.2 compatible commands to deploy the Portal Builder Splash Page
    * directly onto the MikroTik router (hotspot/login.html and flash/hotspot/login.html)
-   * and synchronize Free Wi-Fi / Paid Only hotspot profile settings.
+   * and synchronize Free Wi-Fi / Paid Only hotspot profile settings and RouterOS speed/burst caps.
    * Uses /ip hotspot reset-html and /tool fetch from the VPS (never uses invalid /file add).
    */
-  static buildSplashPageFileCommands(portalBaseUrl: string, allowFreeAccess: boolean = true, scope: string = 'hotspot'): string {
+  static buildSplashPageFileCommands(
+    portalBaseUrl: string,
+    allowFreeAccess: boolean = true,
+    scope: string = 'hotspot',
+    rateLimit?: string
+  ): string {
     const cleanBaseUrl = portalBaseUrl.replace(/\/+$/, '');
     const hostOnly = cleanBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
     const safeScope = encodeURIComponent(scope || 'hotspot');
+    const safeRateLimit = RouterOSRenderer.escapeRouterOSString(
+      rateLimit && rateLimit.trim() ? rateLimit.trim() : '10M/20M 15M/30M 8M/16M 15s/15s'
+    );
     const redirectAndFallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>Wi-Fi Login</title><script>window.location.replace(\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\");</script><meta http-equiv=\\"refresh\\" content=\\"0; url=${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\"></head><body style=\\"background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center\\"><div style=\\"background:#0f1422;border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:24px;max-width:360px;width:100%\\"><h2 style=\\"margin:0 0 8px;font-size:18px\\">Opening Wi-Fi Portal...</h2><p style=\\"font-size:12px;color:#94a3b8;margin:0 0 16px\\">Redirecting to the hotspot splash page...</p><a href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\" style=\\"display:block;padding:12px;background:#f05e17;color:#fff;text-decoration:none;border-radius:12px;font-weight:800;font-size:13px\\">Tap Here if Not Redirected &rarr;</a></div></body></html>`;
 
     return [
       RouterOSRenderer.buildImmediateMultiPortBridgeCommands('bridgeLocal'),
-      `# Synchronize Hotspot Profile (dns-name="" for direct 10.10.0.1 redirect) & Free/Paid Auth Users with App Settings`,
+      `# Synchronize Hotspot Profile (dns-name="" for direct 10.10.0.1 redirect), Speed/Burst Cap & Strict Auth Gate`,
       `:do { /ip dns static remove [find name="hotspot.tconnect.local"] } on-error={}`,
-      `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] hotspot-address=10.10.0.1 dns-name="" login-by=${allowFreeAccess ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
-      `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=${allowFreeAccess ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
+      `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] hotspot-address=10.10.0.1 dns-name="" login-by=http-chap,http-pap http-cookie-lifetime=none rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+      `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap http-cookie-lifetime=none rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" shared-users=unlimited add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=unlimited add-mac-cookie=no } } on-error={}`,
+      `:do { /ip hotspot user profile set [find default=yes] rate-limit="${safeRateLimit}" shared-users=unlimited add-mac-cookie=no } on-error={}`,
       `:do { /ip hotspot user remove [find name="test"] } on-error={}`,
-      `:do { /ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing & Voucher User" } on-error={}`,
+      `:do { /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } on-error={ :do { /ip hotspot user add name="test" password="123" comment="T-Connect Verified Paid & OTT Voucher User" } on-error={} }`,
       `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
       allowFreeAccess
-        ? `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited Auth User" } on-error={}`
+        ? `:do { /ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Opt-In Auth User" } on-error={ :do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Opt-In Auth User" } on-error={} }`
         : `:do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
       `# Ensure OTT Lesotho, PayLesotho & Controller Walled Garden entries exist`,
       `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"connectivitycheck"] } on-error={}`,
@@ -173,6 +206,7 @@ export class RouterOSRenderer {
     const cleanDomain = effectiveHost.split(':')[0];
     const allowFree = router.accessMode !== 'PAID_ONLY' && (router.freeModeEnabled ?? true);
     const routerScope = router.vertical || 'hotspot';
+    const routerRateLimit = router.globalRateLimit || router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
 
     // Helper to validate Base64 32-byte WireGuard key
     const isValidWgKey = (k?: string) => typeof k === 'string' && /^[A-Za-z0-9+/]{42,43}=*$/.test(k.trim()) && k.trim().length >= 40;
@@ -233,19 +267,20 @@ export class RouterOSRenderer {
       `# NAT Firewall Masquerade on WAN ether1`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="tc-hotspot-nat" } } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-hotspot-nat-wan"]] = 0) do={ /ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="tc-hotspot-nat-wan" } } on-error={}`,
-      `# Hotspot Server Profile & Server on bridgeLocal (dns-name="" for instant 10.10.0.1 captive portal popup; addresses-per-mac=unlimited for APs)`,
+      `# Hotspot Server Profile & Server on bridgeLocal (dns-name="" for instant 10.10.0.1 captive portal popup; strict http-chap,http-pap auth gate)`,
       `:do { /ip dns static remove [find name="hotspot.tconnect.local"] } on-error={}`,
       `:do { /ip hotspot profile remove [find name="tc-hotspot-profile"] } on-error={}`,
-      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none split-user-domain=no trial-uptime-limit=0s trial-uptime-reset=0s rate-limit="" use-radius=no`,
-      `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=${allowFree ? 'http-chap,http-pap,trial' : 'http-chap,http-pap'} http-cookie-lifetime=none trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
+      `/ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap http-cookie-lifetime=none split-user-domain=no rate-limit="${RouterOSRenderer.escapeRouterOSString(routerRateLimit)}" use-radius=no`,
+      `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap http-cookie-lifetime=none rate-limit="${RouterOSRenderer.escapeRouterOSString(routerRateLimit)}" use-radius=no } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${RouterOSRenderer.escapeRouterOSString(routerRateLimit)}" shared-users=unlimited add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${RouterOSRenderer.escapeRouterOSString(routerRateLimit)}" shared-users=unlimited add-mac-cookie=no } } on-error={}`,
       `:do { /ip hotspot remove [find interface="bridgeLocal"] } on-error={}`,
       `/ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=5m keepalive-timeout=2m disabled=no`,
-      `# Pre-Provisioned Hotspot Auth Users`,
+      `# Pre-Provisioned Hotspot Auth Users (Strictly gated until user pays/redeems OTT Voucher or clicks Connect Free Wi-Fi)`,
       `:do { /ip hotspot user remove [find name="test"] } on-error={}`,
-      `/ip hotspot user add name="test" password="123" comment="T-Connect Instant Testing User"`,
+      `/ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User"`,
       `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
       allowFree
-        ? `/ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited Auth User"`
+        ? `/ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Opt-In Auth User"`
         : `# Free Trial Disabled by Admin Policy (T-TRIAL user omitted)`,
       `# Static Management Bypasses Strictly for AP Hardware IPs (No PC bypass so test PC sees Splash Page)`,
       `:do { /ip hotspot ip-binding remove [find comment~"tc-bypass"] } on-error={}`,
@@ -318,7 +353,7 @@ export class RouterOSRenderer {
       `/ip hotspot walled-garden add dst-host="*${cleanDomain}*" action=allow comment="tc-vps-controller-domain"`,
       ``,
       `# 8. Deploy Portal Builder On-Router Splash Page (hotspot/login.html & flash/hotspot/login.html)`,
-      RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope)
+      RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope, routerRateLimit)
     );
 
     walledGardenDomains
@@ -375,7 +410,8 @@ export class RouterOSRenderer {
    */
   static renderAccessPolicyScript(options: AccessPolicyOptions): string {
     const { router, accessMode } = options;
-    const rateLimit = options.rateLimit || router.freeRateLimit || '10M/30M';
+    const rateLimit = options.rateLimit || router.globalRateLimit || router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
+    const safeRateLimit = RouterOSRenderer.escapeRouterOSString(rateLimit);
     const portalBaseUrl = (options.portalBaseUrl || 'http://169.58.98.92:3000').replace(/\/+$/, '');
     const routerScope = router.vertical || 'hotspot';
     const lines: string[] = [
@@ -383,9 +419,10 @@ export class RouterOSRenderer {
       `# T-Connect Dynamic Access Policy & Real-Time Splash Sync`,
       `# Target Router: ${router.name} (${router.id})`,
       `# Policy Mode: ${accessMode}`,
+      `# Speed & Burst Rate Limit: ${safeRateLimit}`,
       `# Timestamp: ${new Date().toISOString()}`,
       `# ============================================================`,
-      `:log info "[T-Connect Policy] Pushing Access Mode '${accessMode}' to router...";`
+      `:log info "[T-Connect Policy] Pushing Access Mode '${accessMode}' (Rate-Limit: ${safeRateLimit}) to router...";`
     ];
 
     if (accessMode === 'PAID_ONLY') {
@@ -394,30 +431,30 @@ export class RouterOSRenderer {
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
         `:do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
         `:do { /ip hotspot cookie remove [find] } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap use-radius=no } on-error={}`,
-        `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap use-radius=no } on-error={}`,
-        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, false, routerScope),
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, false, routerScope, rateLimit),
         `:log info "[T-Connect Policy] Router configured for PAID_ONLY access. Free trial removed from Splash Page.";`
       );
     } else if (accessMode === 'FREE_TRIAL_AND_PAID') {
       lines.push(
-        `# Policy: Hybrid Access (Unlimited Free Wi-Fi + Paid Vouchers + EcoCash/OTT, Cookies Disabled)`,
+        `# Policy: Hybrid Access (Free Wi-Fi Button + Paid Vouchers + PayLesotho/OTT, Strict Auth Gate, Cookies Disabled)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
-        `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Unlimited User" } on-error={}`,
+        `:do { /ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Opt-In Auth User" } on-error={ :do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Opt-In Auth User" } on-error={} }`,
         `:do { /ip hotspot cookie remove [find] } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap,trial trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
-        `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap,trial trial-uptime-limit=0s trial-uptime-reset=0s use-radius=no } on-error={}`,
-        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true, routerScope),
-        `:log info "[T-Connect Policy] Hybrid mode active: Unlimited free Wi-Fi enabled on Splash Page.";`
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true, routerScope, rateLimit),
+        `:log info "[T-Connect Policy] Hybrid mode active: Free Wi-Fi button & Paid OTT enabled on Splash Page.";`
       );
     } else if (accessMode === 'COMPLETELY_FREE') {
       lines.push(
-        `# Policy: 100% Free Open Access (Community Sponsored)`,
+        `# Policy: 100% Free Open Access (Community Sponsored, Requires Pressing Connect Free Wi-Fi Button)`,
         `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}`,
-        `:do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Open Pool" } on-error={}`,
+        `:do { /ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Open Pool" } on-error={ :do { /ip hotspot user add name="T-TRIAL" password="123" comment="T-Connect Free Open Pool" } on-error={} }`,
         `:do { /ip hotspot cookie remove [find] } on-error={}`,
-        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap,trial rate-limit="${rateLimit}" use-radius=no } on-error={}`,
-        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true, routerScope),
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] dns-name="" login-by=http-chap,http-pap rate-limit="${safeRateLimit}" use-radius=no } on-error={}`,
+        RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, true, routerScope, rateLimit),
         `:log info "[T-Connect Policy] COMPLETELY_FREE mode active on router.";`
       );
     }

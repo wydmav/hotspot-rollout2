@@ -68,6 +68,11 @@ export interface RouterDevice {
   freeModeEnabled?: boolean;
   freeDurationMinutes?: number;
   freeRateLimit?: string;
+  globalDownloadMbps?: number;
+  globalUploadMbps?: number;
+  globalBurstDownloadMbps?: number;
+  globalBurstUploadMbps?: number;
+  globalRateLimit?: string;
   freeDailyQuotaMb?: number;
   freeCooldownHours?: number;
   policyLastSyncedAt?: string;
@@ -503,6 +508,12 @@ export interface ScopePortalConfig {
   freeAccessDurationMinutes: number;
   allowVoucherCode: boolean;
   allowOnlinePayment: boolean;
+  // Global RouterOS Speed & Burst Capping (Mbps)
+  globalDownloadMbps?: number;
+  globalUploadMbps?: number;
+  globalBurstDownloadMbps?: number;
+  globalBurstUploadMbps?: number;
+  globalRateLimit?: string;
   // Scope-specific plans & pricing
   plans: ScopePlan[];
   customPresets?: WallpaperPresetSlot[];

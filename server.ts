@@ -956,9 +956,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           <img src="${baseUrl}/assets/aistudio/images_e91c64e4.jpeg" alt="" style="height:24px;width:92px;object-fit:contain;border-radius:4px;background:#fff;padding:1px 3px;" />
           <span style="font-size:9px;font-family:monospace;color:#34d399;font-weight:800;">T-Connect &middot; PayLesotho</span>
         </div>
-        <div class="gw-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="gw-grid" style="grid-template-columns:repeat(4,1fr);">
           <button type="button" class="gw-btn active" onclick="selectGw('mpesa', this)">M-Pesa</button>
           <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
+          <button type="button" class="gw-btn" onclick="selectGw('card', this)">Bank/Card</button>
           <button type="button" class="gw-btn" onclick="selectGw('ottvoucher', this)">OTT PIN</button>
         </div>
         <div class="field" id="payField">
@@ -1197,6 +1198,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       inp.maxLength = 8;
       if (ctr) ctr.style.display = 'none';
       if (btn) btn.textContent = 'Pay with M-Pesa (PayLesotho) \\u2192';
+    } else if (gw === 'card') {
+      lbl.textContent = 'Bank / Card Contact Number (+266) *';
+      inp.placeholder = '5xxxxxxx / 6xxxxxxx (8 digits)';
+      inp.maxLength = 8;
+      if (ctr) ctr.style.display = 'none';
+      if (btn) btn.textContent = 'Pay with Bank / Card (XPayments) \\u2192';
     } else {
       lbl.textContent = 'EcoCash Mobile Number (+266) *';
       inp.placeholder = '6xxxxxxx (8 digits)';
@@ -4513,36 +4520,67 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       existing = { ...existing, ...configs };
     } else if (scope && config) {
       existing[scope] = config;
-      // If admin toggled Free Access with applyToAllRouters, propagate allowFreeAccess across all scopes
-      if (applyToAllRouters && typeof config.allowFreeAccess === 'boolean') {
-        Object.keys(existing).forEach((k) => {
-          if (existing[k] && typeof existing[k] === 'object') {
-            existing[k].allowFreeAccess = config.allowFreeAccess;
+    }
+
+    const targetScope = String(scope || 'hotspot').toLowerCase();
+    const activeCfg = (scope && config) ? config : (existing[targetScope] || existing.hotspot || Object.values(existing)[0] || {});
+    const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false;
+    const effectiveRateLimit =
+      activeCfg.globalRateLimit ||
+      RouterOSRenderer.formatBurstRateLimit(
+        activeCfg.globalUploadMbps ?? 10,
+        activeCfg.globalDownloadMbps ?? 20,
+        activeCfg.globalBurstUploadMbps ?? 15,
+        activeCfg.globalBurstDownloadMbps ?? 30
+      );
+
+    if (applyToAllRouters) {
+      Object.keys(existing).forEach((k) => {
+        if (existing[k] && typeof existing[k] === 'object') {
+          if (typeof activeCfg.allowFreeAccess === 'boolean') {
+            existing[k].allowFreeAccess = activeCfg.allowFreeAccess;
           }
-        });
-      }
+          if (activeCfg.globalDownloadMbps !== undefined) existing[k].globalDownloadMbps = activeCfg.globalDownloadMbps;
+          if (activeCfg.globalUploadMbps !== undefined) existing[k].globalUploadMbps = activeCfg.globalUploadMbps;
+          if (activeCfg.globalBurstDownloadMbps !== undefined) existing[k].globalBurstDownloadMbps = activeCfg.globalBurstDownloadMbps;
+          if (activeCfg.globalBurstUploadMbps !== undefined) existing[k].globalBurstUploadMbps = activeCfg.globalBurstUploadMbps;
+          existing[k].globalRateLimit = effectiveRateLimit;
+        }
+      });
     }
     savePortalConfigsToDisk(existing);
 
-    // Determine effective Free Access state and queue real-time sync commands to all monitored routers
-    const targetScope = String(scope || 'hotspot').toLowerCase();
-    const activeCfg = (scope && config) ? config : (existing.hotspot || Object.values(existing)[0] || {});
-    const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false;
-
-    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, targetScope);
+    const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(
+      portalBaseUrl,
+      allowFree,
+      targetScope,
+      effectiveRateLimit
+    );
 
     for (const router of monitoredRouters.values()) {
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
       if (applyToAllRouters || !scope || rScope === targetScope) {
         const scopedCfg = existing[rScope] || activeCfg;
         const routerAllowFree = scopedCfg?.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : allowFree;
-        const routerScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, routerAllowFree, rScope);
+        const routerRateLimit =
+          scopedCfg?.globalRateLimit ||
+          effectiveRateLimit ||
+          router.freeRateLimit ||
+          '10M/20M 15M/30M 8M/16M 15s/15s';
+        const routerScript = RouterOSRenderer.buildSplashPageFileCommands(
+          portalBaseUrl,
+          routerAllowFree,
+          rScope,
+          routerRateLimit
+        );
         const routerCmds = routerScript
           .split('\n')
           .map((line: string) => line.trim())
           .filter((line: string) => line.length > 0 && !line.startsWith('#'));
         router.accessMode = routerAllowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
         router.freeModeEnabled = routerAllowFree;
+        router.freeRateLimit = routerRateLimit;
+        (router as any).globalRateLimit = routerRateLimit;
         router.pendingCommands = routerCmds;
         router.policyLastSyncedAt = new Date().toISOString();
       }
@@ -4553,6 +4591,7 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       success: true,
       configs: existing,
       allowFreeAccess: allowFree,
+      globalRateLimit: effectiveRateLimit,
       syncedRouters: monitoredRouters.size,
       cliScript: fullSyncScript
     });
@@ -6853,7 +6892,7 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
   });
 
   const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
-  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope);
+  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope, rateLimit);
 
   // Extract commands for immediate remote execution or queueing on next heartbeat
   const commands = `${script}\n${splashSyncScript}`
@@ -6866,16 +6905,18 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     persistMonitoredRoutersToStore();
   }
 
-  // Also synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
+  // Also synchronize allowFreeAccess and globalRateLimit in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
   try {
     const existingConfigs = loadSavedPortalConfigs();
     if (existingConfigs[routerScope] && typeof existingConfigs[routerScope] === 'object') {
       existingConfigs[routerScope].allowFreeAccess = allowFree;
+      existingConfigs[routerScope].globalRateLimit = rateLimit;
     }
     if (existingConfigs.hotspot && typeof existingConfigs.hotspot === 'object') {
       existingConfigs.hotspot.allowFreeAccess = allowFree;
+      existingConfigs.hotspot.globalRateLimit = rateLimit;
     } else if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree };
+      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit };
     }
     savePortalConfigsToDisk(existingConfigs);
   } catch {}
@@ -6886,7 +6927,7 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     target: routerName,
     routerId,
     routerName,
-    details: `Real-time access policy updated to ${validMode} (${validMode === 'PAID_ONLY' ? 'Strictly Paid / Vouchers Only' : validMode === 'COMPLETELY_FREE' ? '100% Free Mode ON' : `${duration}m Free Trial + Paid`}). Queued ${commands.length} RouterOS commands.`,
+    details: `Real-time access policy updated to ${validMode} (Rate-Limit: ${rateLimit}, ${validMode === 'PAID_ONLY' ? 'Strictly Paid / Vouchers Only' : validMode === 'COMPLETELY_FREE' ? '100% Free Mode ON' : `${duration}m Free Trial + Paid`}). Queued ${commands.length} RouterOS commands.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
@@ -6910,14 +6951,14 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     appliedAt: now,
     script: `${script}\n\n# --- FULL SPLASH & AD REAL-TIME SYNC ---\n${splashSyncScript}`,
     commandCount: commands.length,
-    message: `Real-time policy '${validMode}' applied to ${routerName} and queued for immediate RouterOS execution.`
+    message: `Real-time policy '${validMode}' (${rateLimit}) applied to ${routerName} and queued for immediate RouterOS execution.`
   });
 });
 
-// Per-Router Real-Time Full Sync Endpoint (pushes current Free/Paid policy, splash branding, ads, plans & walled garden to a specific adopted router)
+// Per-Router Real-Time Full Sync Endpoint (pushes current Free/Paid policy, speed/burst cap, splash branding, ads, plans & walled garden to a specific adopted router)
 app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) => {
   const routerId = req.params.routerId;
-  const { router: clientRouter, accessMode: overrideMode } = req.body || {};
+  const { router: clientRouter, accessMode: overrideMode, freeRateLimit: overrideRateLimit } = req.body || {};
   let router = monitoredRouters.get(routerId);
   if (!router && clientRouter && typeof clientRouter === 'object') {
     router = {
@@ -6956,12 +6997,19 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     clientRouter?.accessMode ||
     (scopedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const allowFree = resolvedMode !== 'PAID_ONLY';
+  const effectiveRateLimit =
+    overrideRateLimit ||
+    scopedCfg.globalRateLimit ||
+    router?.freeRateLimit ||
+    clientRouter?.freeRateLimit ||
+    '10M/20M 15M/30M 8M/16M 15s/15s';
   if (router) {
     router.accessMode = resolvedMode;
     (router as any).freeModeEnabled = allowFree;
+    router.freeRateLimit = effectiveRateLimit;
   }
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope, effectiveRateLimit);
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -6980,7 +7028,7 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     target: routerName,
     routerId,
     routerName,
-    details: `Real-time router sync triggered for ${routerName} (Mode: ${resolvedMode}, Free Access: ${allowFree ? 'ON' : 'OFF'}, ${syncCommands.length} commands queued).`,
+    details: `Real-time router sync triggered for ${routerName} (Mode: ${resolvedMode}, Free Access: ${allowFree ? 'ON' : 'OFF'}, Speed Cap: ${effectiveRateLimit}, ${syncCommands.length} commands queued).`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1'
   });
@@ -6991,46 +7039,66 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     routerName,
     accessMode: resolvedMode,
     allowFreeAccess: allowFree,
+    freeRateLimit: effectiveRateLimit,
     commandCount: syncCommands.length,
     cliScript: fullSyncScript,
     syncedAt: nowIso,
-    message: `Real-time sync queued for ${routerName} (${syncCommands.length} RouterOS commands, Free Mode: ${allowFree ? 'ON' : 'OFF'}).`
+    message: `Real-time sync queued for ${routerName} (${syncCommands.length} RouterOS commands, Free Mode: ${allowFree ? 'ON' : 'OFF'}, Rate-Limit: ${effectiveRateLimit}).`
   });
 });
 
 app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
-  const { routerIds, vertical, accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb } = req.body;
+  const {
+    routerIds,
+    vertical,
+    accessMode,
+    freeDurationMinutes,
+    freeRateLimit,
+    freeDailyQuotaMb,
+    globalDownloadMbps,
+    globalUploadMbps,
+    globalBurstDownloadMbps,
+    globalBurstUploadMbps
+  } = req.body || {};
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const portalBaseUrl = `${protocol}://${host}`;
 
   const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const duration = Number(freeDurationMinutes) || 30;
-  const rateLimit = freeRateLimit || '10M/30M';
+  const rateLimit =
+    freeRateLimit ||
+    RouterOSRenderer.formatBurstRateLimit(
+      globalUploadMbps ?? 10,
+      globalDownloadMbps ?? 20,
+      globalBurstUploadMbps ?? 15,
+      globalBurstDownloadMbps ?? 30
+    );
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';
   const fleetScope = vertical && vertical !== 'all' ? String(vertical).toLowerCase() : 'hotspot';
 
-  // Synchronize allowFreeAccess in portal-configs.json so On-Router Splash Page & /portal immediately hide/show Free Trial
+  // Synchronize allowFreeAccess and speed/burst caps in portal-configs.json so On-Router Splash Page & /portal reflect immediately
   try {
     const existingConfigs = loadSavedPortalConfigs();
     Object.keys(existingConfigs).forEach((k) => {
       if ((!vertical || vertical === 'all' || k === fleetScope) && existingConfigs[k] && typeof existingConfigs[k] === 'object') {
         existingConfigs[k].allowFreeAccess = allowFree;
+        existingConfigs[k].globalRateLimit = rateLimit;
+        if (globalDownloadMbps !== undefined) existingConfigs[k].globalDownloadMbps = Number(globalDownloadMbps);
+        if (globalUploadMbps !== undefined) existingConfigs[k].globalUploadMbps = Number(globalUploadMbps);
+        if (globalBurstDownloadMbps !== undefined) existingConfigs[k].globalBurstDownloadMbps = Number(globalBurstDownloadMbps);
+        if (globalBurstUploadMbps !== undefined) existingConfigs[k].globalBurstUploadMbps = Number(globalBurstUploadMbps);
       }
     });
     if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree };
+      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit };
     }
     savePortalConfigsToDisk(existingConfigs);
   } catch {}
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, fleetScope);
-  const syncCommands = fullSyncScript
-    .split('\n')
-    .map((line: string) => line.trim())
-    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, fleetScope, rateLimit);
 
   let affectedRouters: MonitoredRouter[] = [];
 
@@ -7039,7 +7107,7 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     const verticalMatch = !vertical || vertical === 'all' || router.vertical === vertical;
     if (idMatch && verticalMatch) {
       const rScope = String(router.vertical || fleetScope).toLowerCase();
-      const rCmds = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, rScope)
+      const rCmds = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, rScope, rateLimit)
         .split('\n')
         .map((line: string) => line.trim())
         .filter((line: string) => line.length > 0 && !line.startsWith('#'));
@@ -7047,6 +7115,7 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
       router.freeModeEnabled = allowFree;
       router.freeDurationMinutes = duration;
       router.freeRateLimit = rateLimit;
+      (router as any).globalRateLimit = rateLimit;
       router.freeDailyQuotaMb = quota;
       router.policyLastSyncedAt = now;
       router.pendingCommands = rCmds;
@@ -7059,12 +7128,13 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     category: 'router_config',
     action: 'fleet.bulk_policy_push',
     target: 'Fleet Management',
-    details: `Bulk access policy updated to ${validMode} across ${affectedRouters.length} routers.`,
+    details: `Bulk access policy updated to ${validMode} (Rate-Limit: ${rateLimit}) across ${affectedRouters.length} routers.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       affectedCount: affectedRouters.length,
-      accessMode: validMode
+      accessMode: validMode,
+      rateLimit
     }
   });
 
@@ -7072,17 +7142,18 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     success: true,
     accessMode: validMode,
     allowFreeAccess: allowFree,
+    freeRateLimit: rateLimit,
     updatedCount: affectedRouters.length,
     routerIds: affectedRouters.map(r => r.id),
     appliedAt: now,
     cliScript: fullSyncScript,
-    message: `Bulk policy '${validMode}' pushed to ${affectedRouters.length} routers.`
+    message: `Bulk policy '${validMode}' (Rate-Limit: ${rateLimit}) pushed to ${affectedRouters.length} routers.`
   });
 });
 
-// Real-Time Fleet Sync Endpoint: pushes OTT Lesotho Walled Garden, 5-Port Bridge, login.html & alogin.html to all adopted routers
+// Real-Time Fleet Sync Endpoint: pushes OTT Lesotho Walled Garden, Speed/Burst Caps, 5-Port Bridge, login.html & alogin.html to all adopted routers
 app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
-  const { routers: clientRouters, controllerHost, endpointProtocol } = req.body || {};
+  const { routers: clientRouters, controllerHost, endpointProtocol, freeRateLimit: overrideRateLimit } = req.body || {};
   const host = (controllerHost && String(controllerHost).trim()) || req.get('host') || '169.58.98.92:3000';
   const protocol = endpointProtocol || (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http');
   const portalBaseUrl = `${protocol}://${host}`;
@@ -7121,8 +7192,17 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
   const existingConfigs = loadSavedPortalConfigs();
   const activeCfg = existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
   const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
+  const effectiveRateLimit =
+    overrideRateLimit ||
+    activeCfg.globalRateLimit ||
+    RouterOSRenderer.formatBurstRateLimit(
+      activeCfg.globalUploadMbps ?? 10,
+      activeCfg.globalDownloadMbps ?? 20,
+      activeCfg.globalBurstUploadMbps ?? 15,
+      activeCfg.globalBurstDownloadMbps ?? 30
+    );
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, 'hotspot', effectiveRateLimit);
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -7132,23 +7212,27 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
   const syncedRouterIds: string[] = [];
 
   for (const router of monitoredRouters.values()) {
+    router.freeRateLimit = effectiveRateLimit;
+    (router as any).globalRateLimit = effectiveRateLimit;
     router.pendingCommands = syncCommands;
     router.policyLastSyncedAt = nowIso;
     syncedRouterNames.push(router.name);
     syncedRouterIds.push(router.id);
   }
+  persistMonitoredRoutersToStore();
 
   recordServerAudit({
     category: 'router_config',
     action: 'fleet.sync_all_realtime',
     target: 'All Adopted Routers',
-    details: `Real-time fleet sync dispatched to ${syncedRouterIds.length} routers: 5-port bridgeLocal (ether2-ether6 + wifi1-wifi2), OTT Lesotho 16-digit voucher redemption, compact T&Cs splash page, and full-screen ads.`,
+    details: `Real-time fleet sync dispatched to ${syncedRouterIds.length} routers (Rate-Limit: ${effectiveRateLimit}, Free Mode: ${allowFree ? 'ON' : 'OFF'}): 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, compact T&Cs splash page, and full-screen ads.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       syncedCount: syncedRouterIds.length,
       routerIds: syncedRouterIds,
-      portalBaseUrl
+      portalBaseUrl,
+      rateLimit: effectiveRateLimit
     }
   });
 
@@ -7159,9 +7243,10 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
     routerNames: syncedRouterNames,
     portalBaseUrl,
     allowFreeAccess: allowFree,
+    freeRateLimit: effectiveRateLimit,
     cliScript: fullSyncScript,
     syncedAt: nowIso,
-    message: `Real-time sync queued for ${syncedRouterIds.length} router(s)! All 5 downstream ports bridged to bridgeLocal, OTT Lesotho 16-digit voucher redemption enabled, and splash/ad pages pushed.`
+    message: `Real-time sync queued for ${syncedRouterIds.length} router(s)! Speed & Burst (${effectiveRateLimit}), 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, and splash/ad pages pushed.`
   });
 });
 
