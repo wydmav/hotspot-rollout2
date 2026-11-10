@@ -5942,10 +5942,10 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           token: hasBeenAdopted ? undefined : r.token,
           tokenExpiresAt: r.tokenExpiresAt,
           adoptedAt: resolvedAdoptedAt,
-          accessMode: r.accessMode || 'PAID_ONLY',
-          freeModeEnabled: Boolean(r.freeModeEnabled),
+          accessMode: r.accessMode || 'FREE_TRIAL_AND_PAID',
+          freeModeEnabled: r.freeModeEnabled !== undefined ? Boolean(r.freeModeEnabled) : (r.accessMode || 'FREE_TRIAL_AND_PAID') !== 'PAID_ONLY',
           freeDurationMinutes: r.freeDurationMinutes ?? 30,
-          freeRateLimit: r.freeRateLimit || '10M/30M',
+          freeRateLimit: r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
           freeDailyQuotaMb: r.freeDailyQuotaMb ?? 500,
           keepAliveAdopted: isAdoptedOnline,
           status: resolvedStatus,
@@ -6458,6 +6458,20 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
   const now = Date.now();
   let router = monitoredRouters.get(routerId);
   const wanIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = `${protocol}://${host}`;
+  const savedConfigs = loadSavedPortalConfigs();
+  const routerScope = String(router?.vertical || 'hotspot').toLowerCase();
+  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const effectiveRateLimit =
+    router?.freeRateLimit ||
+    scopedCfg.globalRateLimit ||
+    '10M/20M 15M/30M 8M/16M 15s/15s';
+  const defaultAccessMode =
+    router?.accessMode ||
+    (scopedCfg.allowFreeAccess !== false ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const allowFree = defaultAccessMode !== 'PAID_ONLY';
 
   if (!router) {
     router = {
@@ -6480,7 +6494,12 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
       activeSessions: 0,
       missedBeats: 0,
       webfigPort: 80,
-      winboxPort: 8291
+      winboxPort: 8291,
+      accessMode: defaultAccessMode,
+      freeModeEnabled: allowFree,
+      freeDurationMinutes: 30,
+      freeRateLimit: effectiveRateLimit,
+      freeDailyQuotaMb: 500
     };
     monitoredRouters.set(routerId, router);
   } else {
@@ -6494,13 +6513,28 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
     router.missedBeats = 0;
     router.offlineSince = undefined;
     router.offlineReason = undefined;
+    router.accessMode = defaultAccessMode;
+    router.freeModeEnabled = allowFree;
+    router.freeRateLimit = effectiveRateLimit;
   }
+
+  // Queue the full 8-point provisioning bundle (5-port bridgeLocal, DNS 53 intercept, Walled Garden, FastTrack removal, Simple Queue speed cap, login.html)
+  const splashProvisioningCmd = RouterOSRenderer.buildSplashPageFileCommands(
+    portalBaseUrl,
+    allowFree,
+    routerScope,
+    effectiveRateLimit
+  );
+  if (!Array.isArray(router.pendingCommands)) {
+    router.pendingCommands = [];
+  }
+  router.pendingCommands.push(splashProvisioningCmd);
   persistMonitoredRoutersToStore();
 
   res.json({
     success: true,
     status: 'online',
-    message: `Router "${router.name}" verified and promoted to ONLINE status.`,
+    message: `Router "${router.name}" verified, promoted to ONLINE status, and queued with full 8-point Hotspot + Walled Garden + Speed Cap bundle.`,
     router
   });
 });
@@ -6785,9 +6819,11 @@ app.get('/api/devices/:routerId/access-policy', (req: Request, res: Response) =>
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const portalBaseUrl = `${protocol}://${host}`;
 
-  const accessMode = router?.accessMode || 'PAID_ONLY';
+  const savedConfigs = loadSavedPortalConfigs();
+  const scopedCfg = savedConfigs[String(router?.vertical || 'hotspot').toLowerCase()] || savedConfigs.hotspot || {};
+  const accessMode = router?.accessMode || (scopedCfg.allowFreeAccess !== false ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const freeDurationMinutes = router?.freeDurationMinutes || 30;
-  const freeRateLimit = router?.freeRateLimit || '10M/30M';
+  const freeRateLimit = router?.freeRateLimit || scopedCfg.globalRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
   const freeDailyQuotaMb = router?.freeDailyQuotaMb || 500;
 
   const script = RouterOSRenderer.renderAccessPolicyScript({
@@ -6860,9 +6896,11 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const portalBaseUrl = `${protocol}://${host}`;
 
+  const savedConfigs = loadSavedPortalConfigs();
+  const scopedCfg = savedConfigs[String(router?.vertical || 'hotspot').toLowerCase()] || savedConfigs.hotspot || {};
   const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const duration = Number(freeDurationMinutes) || 30;
-  const rateLimit = freeRateLimit || '10M/30M';
+  const rateLimit = freeRateLimit || scopedCfg.globalRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';

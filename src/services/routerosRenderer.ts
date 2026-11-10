@@ -32,6 +32,7 @@ export interface ProvisioningOptions {
   controllerHost?: string;
   backhaulMbps?: number;
   wan2Interface?: string;
+  rateLimit?: string;
 }
 
 export class RouterOSRenderer {
@@ -259,7 +260,7 @@ export class RouterOSRenderer {
     const cleanDomain = effectiveHost.split(':')[0];
     const allowFree = router.accessMode !== 'PAID_ONLY' && (router.freeModeEnabled ?? true);
     const routerScope = router.vertical || 'hotspot';
-    const routerRateLimit = router.globalRateLimit || router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
+    const routerRateLimit = options.rateLimit || router.globalRateLimit || router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
     const rateParts = RouterOSRenderer.parseRateLimitParts(routerRateLimit);
     const safeRateLimit = RouterOSRenderer.escapeRouterOSString(rateParts.fullRateLimit);
 

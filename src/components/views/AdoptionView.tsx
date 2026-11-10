@@ -151,8 +151,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [customPartnerInput, setCustomPartnerInput] = useState('');
   const [serverPartnerNames, setServerPartnerNames] = useState<string[]>([]);
   const [syncingRouterId, setSyncingRouterId] = useState<string | null>(null);
-  const [newPolicyName, setNewPolicyName] = useState('PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy');
-  const [newAccessMode, setNewAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
+  const [newPolicyName, setNewPolicyName] = useState('Hybrid Trial + PayLesotho 16-Digit OTT Policy');
+  const [newAccessMode, setNewAccessMode] = useState<RouterAccessMode>('FREE_TRIAL_AND_PAID');
   const [newSiteName, setNewSiteName] = useState('');
   const [newDistrict, setNewDistrict] = useState<LesothoDistrict>('Maseru');
   const [newPhysicalAddress, setNewPhysicalAddress] = useState('');
@@ -230,7 +230,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     storage.setRouterAccessPolicy(router.id, {
       accessMode: mode,
       freeDurationMinutes: router.freeDurationMinutes || 30,
-      freeRateLimit: router.freeRateLimit || '10M/30M'
+      freeRateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'
     });
     storage.updateRouter(router.id, {
       accessMode: mode,
@@ -254,7 +254,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         body: JSON.stringify({
           accessMode: mode,
           freeDurationMinutes: router.freeDurationMinutes || 30,
-          freeRateLimit: router.freeRateLimit || '10M/30M',
+          freeRateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
           router: {
             ...router,
             accessMode: mode,
@@ -534,8 +534,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   // Generate full provisioning script preview
   const provisioningScript = selectedRouter ? RouterOSRenderer.renderProvisioningScript({
     router: selectedRouter,
-    hubDomain: controllerHost.trim() || 'app.tconnect.co.ls',
-    controllerHost: controllerHost.trim() || 'app.tconnect.co.ls',
+    hubDomain: controllerHost.trim() || '169.58.98.92:3000',
+    controllerHost: controllerHost.trim() || '169.58.98.92:3000',
     endpointProtocol,
     hubWgPort: 51820,
     hubTunnelIp: '10.99.0.1',
@@ -545,7 +545,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     radiusSecret: 'radsec_tconnect_lesotho_99120',
     apiPassword: 'tc_pass_crypto_random_32char',
     walledGardenDomains: WALLED_GARDEN_DOMAINS,
-    blockDoH: true
+    blockDoH: true,
+    rateLimit: selectedRouter.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'
   }) : '';
 
   const handleCopyOneLiner = () => {
@@ -732,7 +733,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       radiusSecret: 'radsec_tconnect_lesotho_99120',
       apiPassword: 'tc_pass_crypto_random_32char',
       walledGardenDomains: WALLED_GARDEN_DOMAINS,
-      blockDoH: true
+      blockDoH: true,
+      rateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'
     });
     void copyToClipboard(script);
     triggerToast(`Master Adoption Script copied for ${router.name}! Paste into WinBox -> New Terminal.`, 'info');

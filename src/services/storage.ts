@@ -492,7 +492,10 @@ export const STARTER_TENANT_GROUPS: TenantGroup[] = [
 ];
 
 export const WALLED_GARDEN_DOMAINS = [
-  // Payment Providers (EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)
+  // Payment Providers (PayLesotho, EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)
+  'api.paylesotho.co.ls',
+  'xpayments.paylesotho.co.ls',
+  'paylesotho.co.ls',
   'api.ottlesotho.com',
   'test-api.ottlesotho.com',
   'portal.ottlesotho.com',
@@ -502,7 +505,8 @@ export const WALLED_GARDEN_DOMAINS = [
   'callpay.com',
   'vouchers.ott-mobile.com',
   'api.ecocash.co.ls',
-  'ecocash.co.ls'
+  'ecocash.co.ls',
+  'econet.co.ls'
 ];
 
 export const INITIAL_ACTIVE_SESSIONS: ActiveSession[] = [];
@@ -610,10 +614,10 @@ class StorageService {
           token: sr.adoptedAt ? undefined : sr.token,
           tokenExpiresAt: sr.tokenExpiresAt,
           adoptedAt: sr.adoptedAt,
-          accessMode: sr.accessMode || 'PAID_ONLY',
-          freeModeEnabled: Boolean(sr.freeModeEnabled),
+          accessMode: sr.accessMode || 'FREE_TRIAL_AND_PAID',
+          freeModeEnabled: sr.freeModeEnabled !== undefined ? Boolean(sr.freeModeEnabled) : (sr.accessMode || 'FREE_TRIAL_AND_PAID') !== 'PAID_ONLY',
           freeDurationMinutes: sr.freeDurationMinutes ?? 30,
-          freeRateLimit: sr.freeRateLimit || '10M/30M',
+          freeRateLimit: sr.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
           freeDailyQuotaMb: sr.freeDailyQuotaMb ?? 500
         };
         this.state.routers.push(hydrated);
@@ -1224,7 +1228,7 @@ class StorageService {
     const token = `adopt_tok_${Math.random().toString(36).substring(2, 12)}`;
     const expiresAt = new Date(Date.now() + 3600000).toISOString(); // 1 hour
 
-    const resolvedAccessMode = router.accessMode || 'PAID_ONLY';
+    const resolvedAccessMode = router.accessMode || 'FREE_TRIAL_AND_PAID';
     const resolvedPartner = router.partnerName || 'T-Connect Internal Fleet';
     const resolvedPolicy =
       router.policyName ||
@@ -1251,9 +1255,9 @@ class StorageService {
       tokenExpiresAt: expiresAt,
       accessMode: resolvedAccessMode,
       freeModeEnabled: resolvedAccessMode !== 'PAID_ONLY',
-      freeDurationMinutes: 30,
-      freeRateLimit: '10M/30M',
-      freeDailyQuotaMb: 500
+      freeDurationMinutes: router.freeDurationMinutes || 30,
+      freeRateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
+      freeDailyQuotaMb: router.freeDailyQuotaMb || 500
     };
 
     this.state.routers.unshift(newRouter);
@@ -1308,7 +1312,7 @@ class StorageService {
         accessMode: policy.accessMode,
         freeModeEnabled: isFree,
         freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
-        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/30M'),
+        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'),
         freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
         policyLastSyncedAt: now
       }));
@@ -1325,7 +1329,7 @@ class StorageService {
         accessMode: policy.accessMode,
         freeModeEnabled: isFree,
         freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
-        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/30M'),
+        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'),
         freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
         policyLastSyncedAt: now
       }) : r);
