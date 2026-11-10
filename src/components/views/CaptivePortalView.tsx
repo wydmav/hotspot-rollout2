@@ -666,7 +666,7 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
 
 # 3. Disable MAC/Browser Cookies so Reconnecting Devices Always Redirect Immediately
 /ip hotspot profile
-:do { set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,trial http-cookie-lifetime=none split-user-domain=no } on-error={}
+:do { set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap split-user-domain=no } on-error={}
 
 # 4. Intercept ALL DNS Port 53 (TCP & UDP) to Local Router
 /ip firewall nat

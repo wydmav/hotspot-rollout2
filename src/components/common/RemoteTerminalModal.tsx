@@ -51,6 +51,9 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
 }) => {
   const [activeMode, setActiveMode] = useState<TerminalMode>('cli');
   const [command, setCommand] = useState('');
+  const [azGroupFilter, setAzGroupFilter] = useState<'ALL' | 'A-F' | 'G-L' | 'M-R' | 'S-Z'>('ALL');
+  const [showMultilineDrawer, setShowMultilineDrawer] = useState(false);
+  const [multilineScript, setMultilineScript] = useState('');
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -192,19 +195,19 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
         {
           id: 'b-6',
           type: 'system',
-          text: `MikroTik RouterOS 7.15.2 (c) 1999-2026       http://www.mikrotik.com/`,
+          text: `MikroTik RouterOS 7.16.2 (c) 1999-2026       https://www.mikrotik.com/`,
           timestamp: new Date().toLocaleTimeString()
         },
         {
           id: 'b-7',
           type: 'system',
-          text: `[T-Connect Controller Remote SSH Bridge: ${router.wireguardIp || '10.99.1.50'} | Node: ${router.name}]`,
+          text: `[T-Connect Built-In WinBox CLI Replacement | Full A–Z Commands + HTTP/WireGuard Bridge | Node: ${router.name} (${router.wireguardIp || '10.99.1.50'})]`,
           timestamp: new Date().toLocaleTimeString()
         },
         {
           id: 'b-8',
           type: 'system',
-          text: `[Location: ${router.district || 'Maseru'} District · ${router.physicalAddress || router.siteName || 'Maseru Central'}]`,
+          text: `[Tip: Type 'help' or '?' for full A–Z command list, press Tab to autocomplete, or click 'Fix Redirect & Speed Cap' above]`,
           timestamp: new Date().toLocaleTimeString()
         }
       ];
@@ -226,6 +229,59 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Full A–Z RouterOS v7 Command Dictionary (replaces opening WinBox Terminal)
+  const routerOsAzCatalog: Array<{ letter: string; group: 'A-F' | 'G-L' | 'M-R' | 'S-Z'; label: string; cmd: string }> = [
+    { letter: 'A', group: 'A-F', label: 'A: IP Addresses', cmd: '/ip address print' },
+    { letter: 'A', group: 'A-F', label: 'A: ARP Table', cmd: '/ip arp print' },
+    { letter: 'B', group: 'A-F', label: 'B: Bridges', cmd: '/interface bridge print' },
+    { letter: 'B', group: 'A-F', label: 'B: Bridge Ports', cmd: '/interface bridge port print' },
+    { letter: 'C', group: 'A-F', label: 'C: Clock', cmd: '/system clock print' },
+    { letter: 'C', group: 'A-F', label: 'C: Clear Cookies', cmd: '/ip hotspot cookie remove [find]' },
+    { letter: 'D', group: 'A-F', label: 'D: DHCP Server', cmd: '/ip dhcp-server print' },
+    { letter: 'D', group: 'A-F', label: 'D: DHCP Leases', cmd: '/ip dhcp-server lease print' },
+    { letter: 'D', group: 'A-F', label: 'D: DNS Config', cmd: '/ip dns print' },
+    { letter: 'E', group: 'A-F', label: 'E: Ethernet Ports', cmd: '/interface ethernet print' },
+    { letter: 'E', group: 'A-F', label: 'E: Export Full Config', cmd: '/export compact' },
+    { letter: 'F', group: 'A-F', label: 'F: Firewall Filter', cmd: '/ip firewall filter print' },
+    { letter: 'F', group: 'A-F', label: 'F: Disable FastTrack', cmd: '/ip firewall filter remove [find action="fasttrack-connection"]' },
+    { letter: 'F', group: 'A-F', label: 'F: Firewall NAT', cmd: '/ip firewall nat print' },
+    { letter: 'F', group: 'A-F', label: 'F: Files (login.html)', cmd: '/file print' },
+    { letter: 'H', group: 'G-L', label: 'H: Hotspot Server', cmd: '/ip hotspot print' },
+    { letter: 'H', group: 'G-L', label: 'H: Hotspot Profiles', cmd: '/ip hotspot profile print' },
+    { letter: 'H', group: 'G-L', label: 'H: Hotspot Users', cmd: '/ip hotspot user print' },
+    { letter: 'H', group: 'G-L', label: 'H: User Speed Profiles', cmd: '/ip hotspot user profile print' },
+    { letter: 'H', group: 'G-L', label: 'H: Active Sessions', cmd: '/ip hotspot active print' },
+    { letter: 'H', group: 'G-L', label: 'H: Hotspot Hosts', cmd: '/ip hotspot host print' },
+    { letter: 'H', group: 'G-L', label: 'H: Walled Garden', cmd: '/ip hotspot walled-garden print' },
+    { letter: 'I', group: 'G-L', label: 'I: Interfaces', cmd: '/interface print' },
+    { letter: 'I', group: 'G-L', label: 'I: System Identity', cmd: '/system identity print' },
+    { letter: 'L', group: 'G-L', label: 'L: Live System Logs', cmd: '/log print' },
+    { letter: 'N', group: 'M-R', label: 'N: Neighbors (APs)', cmd: '/ip neighbor print' },
+    { letter: 'N', group: 'M-R', label: 'N: Netwatch', cmd: '/tool netwatch print' },
+    { letter: 'P', group: 'M-R', label: 'P: IP Pool (10.10.0.x)', cmd: '/ip pool print' },
+    { letter: 'P', group: 'M-R', label: 'P: Ping 1.1.1.1', cmd: '/ping 1.1.1.1 count=4' },
+    { letter: 'P', group: 'M-R', label: 'P: Packages (v7.16.2)', cmd: '/system package print' },
+    { letter: 'Q', group: 'M-R', label: 'Q: Simple Queues (Speed Cap)', cmd: '/queue simple print' },
+    { letter: 'Q', group: 'M-R', label: 'Q: Enforce 10M/20M Queue', cmd: '/queue simple add name="tc-hotspot-speed-cap" target=10.10.0.0/22 max-limit=10M/20M burst-limit=15M/30M burst-threshold=8M/16M burst-time=15s/15s' },
+    { letter: 'R', group: 'M-R', label: 'R: Routes', cmd: '/ip route print' },
+    { letter: 'R', group: 'M-R', label: 'R: RADIUS', cmd: '/radius print' },
+    { letter: 'R', group: 'M-R', label: 'R: Resources (CPU/RAM)', cmd: '/system resource print' },
+    { letter: 'R', group: 'M-R', label: 'R: RouterBOARD Info', cmd: '/system routerboard print' },
+    { letter: 'S', group: 'S-Z', label: 'S: Services (Port 80/8291)', cmd: '/ip service print' },
+    { letter: 'S', group: 'S-Z', label: 'S: Scheduler (15s Sync)', cmd: '/system scheduler print' },
+    { letter: 'S', group: 'S-Z', label: 'S: Speed Test (20M/10M)', cmd: '/tool speed-test download=20M upload=10M' },
+    { letter: 'T', group: 'S-Z', label: 'T: Traceroute', cmd: '/tool traceroute 1.1.1.1' },
+    { letter: 'T', group: 'S-Z', label: 'T: Torch Traffic', cmd: '/tool torch interface=bridgeLocal' },
+    { letter: 'U', group: 'S-Z', label: 'U: Router Users', cmd: '/user print' },
+    { letter: 'W', group: 'S-Z', label: 'W: Wi-Fi Radios (MIKROTIK-TC)', cmd: '/interface wifi print' },
+    { letter: 'W', group: 'S-Z', label: 'W: WireGuard Tunnel', cmd: '/interface wireguard print' },
+    { letter: 'W', group: 'S-Z', label: 'W: WireGuard Peers', cmd: '/interface wireguard peers print' }
+  ];
+
+  const filteredAzCommands = azGroupFilter === 'ALL'
+    ? routerOsAzCatalog
+    : routerOsAzCatalog.filter((item) => item.group === azGroupFilter);
+
   const handleExecuteCommand = async (cmdToRun?: string) => {
     const rawCmd = (cmdToRun !== undefined ? cmdToRun : command).trim();
     if (!rawCmd) return;
@@ -246,7 +302,9 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
     // Save to command history
     setHistory(prev => [...prev.filter(h => h !== rawCmd), rawCmd]);
     setHistoryIndex(-1);
-    setCommand('');
+    if (cmdToRun === undefined) {
+      setCommand('');
+    }
     setLoading(true);
 
     const startTime = Date.now();
@@ -336,6 +394,21 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleExecuteCommand();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const trimmed = command.trim().toLowerCase();
+      if (!trimmed) {
+        setCommand('/ip hotspot print');
+        return;
+      }
+      const match = routerOsAzCatalog.find(
+        (c) =>
+          c.cmd.toLowerCase().startsWith(trimmed) ||
+          c.cmd.toLowerCase().slice(1).startsWith(trimmed)
+      );
+      if (match) {
+        setCommand(match.cmd);
+      }
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (history.length > 0) {
@@ -468,12 +541,11 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
   const runWireguardSentinelTest = async () => {
     setWgTestStatus({ status: 'testing' });
     try {
-      const res = await fetch(`/api/devices/${router.id}/terminal`, {
+      await fetch(`/api/devices/${router.id}/terminal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command: '/interface wireguard peers print detail' })
       });
-      const data = await res.json();
       setTimeout(() => {
         setWgTestStatus({
           status: 'healthy',
@@ -512,18 +584,9 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
     blockDoH: true
   });
 
-  const quickPresets = [
-    { label: 'Resources', cmd: '/system resource print' },
-    { label: 'IP Addresses', cmd: '/ip address print' },
-    { label: 'Interfaces', cmd: '/interface print' },
-    { label: 'Active Hotspot', cmd: '/ip hotspot active print' },
-    { label: 'Ping 1.1.1.1', cmd: '/ping 1.1.1.1 count=4' },
-    { label: 'Reboot', cmd: '/system reboot' }
-  ];
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="bg-[#0b0f19] border border-slate-700/80 rounded-2xl w-full max-w-4xl h-[85vh] max-h-[820px] flex flex-col shadow-2xl overflow-hidden font-mono">
+      <div className="bg-[#0b0f19] border border-slate-700/80 rounded-2xl w-full max-w-5xl h-[88vh] max-h-[860px] flex flex-col shadow-2xl overflow-hidden font-mono">
         {/* Terminal Header */}
         <div className="px-5 py-3 bg-[#0f1422] border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -558,6 +621,29 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
           <div className="flex items-center gap-1.5 shrink-0">
             {activeMode === 'cli' && (
               <>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteCommand('/tconnect fix-all')}
+                  disabled={loading}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Repair iOS/Android Captive Portal Redirect, Remove FastTrack & Enforce Simple Queue Speed Cap"
+                >
+                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Fix Redirect &amp; Speed Cap</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMultilineDrawer((prev) => !prev)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer border ${
+                    showMultilineDrawer
+                      ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700'
+                  }`}
+                  title="Paste & Run Multi-Line RouterOS Script"
+                >
+                  <FileCode className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Paste .rsc</span>
+                </button>
                 <button
                   onClick={copyTerminalOutput}
                   className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 transition-colors"
@@ -607,7 +693,7 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>1. CLI Shell</span>
+            <span>1. Built-In WinBox CLI (All Commands A–Z)</span>
           </button>
 
           {/* Option 2: Quick Ops & Reboot */}
@@ -654,31 +740,103 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
         </div>
 
         {/* ============================================================= */}
-        {/* MODE 1: INTERACTIVE CLI TERMINAL SCREEN                       */}
+        {/* MODE 1: INTERACTIVE CLI TERMINAL SCREEN (A-Z WINBOX CLI)      */}
         {/* ============================================================= */}
         {activeMode === 'cli' && (
           <div className="flex-1 flex flex-col min-h-0">
-            {/* Quick Presets Strip */}
-            <div className="px-4 py-1.5 bg-[#090d15] border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 scrollbar-none">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mr-1 shrink-0">
-                Shortcuts:
-              </span>
-              {quickPresets.map((preset) => (
+            {/* A–Z RouterOS Command Explorer Bar */}
+            <div className="px-4 py-2 bg-[#090d15] border-b border-slate-800/80 flex flex-col gap-1.5 shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
+                    RouterOS A–Z Explorer:
+                  </span>
+                  {(['ALL', 'A-F', 'G-L', 'M-R', 'S-Z'] as const).map((grp) => (
+                    <button
+                      key={grp}
+                      type="button"
+                      onClick={() => setAzGroupFilter(grp)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
+                        azGroupFilter === grp
+                          ? 'bg-[#f05e17] text-white'
+                          : 'bg-slate-800/80 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {grp}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={preset.cmd}
-                  onClick={() => handleExecuteCommand(preset.cmd)}
-                  disabled={loading}
-                  className={`px-2 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap flex items-center gap-1 border ${
-                    preset.cmd.includes('reboot')
-                      ? 'bg-rose-950/40 hover:bg-rose-900/60 border-rose-800/50 text-rose-300'
-                      : 'bg-slate-800/60 hover:bg-slate-700/80 border-slate-700/60 text-slate-200'
-                  }`}
+                  type="button"
+                  onClick={() => handleExecuteCommand('help')}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold cursor-pointer"
                 >
-                  <Play className="w-2.5 h-2.5 text-orange-400" />
-                  <span>{preset.label}</span>
+                  Show All A–Z Syntax (?)
                 </button>
-              ))}
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                {filteredAzCommands.map((preset) => (
+                  <button
+                    key={preset.cmd}
+                    onClick={() => handleExecuteCommand(preset.cmd)}
+                    disabled={loading}
+                    className="px-2 py-1 rounded text-[11px] transition-colors whitespace-nowrap flex items-center gap-1 border bg-slate-800/60 hover:bg-slate-700/80 border-slate-700/60 text-slate-200 cursor-pointer shrink-0"
+                    title={preset.cmd}
+                  >
+                    <Play className="w-2.5 h-2.5 text-orange-400" />
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {/* Optional Multi-Line .rsc Paste & Execute Drawer */}
+            {showMultilineDrawer && (
+              <div className="p-3 bg-[#0d1322] border-b border-slate-800 space-y-2 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-300">
+                    Paste Multi-Line RouterOS Script (.rsc) — Executes &amp; Queues to Router via HTTP/WireGuard Bridge
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowMultilineDrawer(false)}
+                    className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+                <textarea
+                  value={multilineScript}
+                  onChange={(e) => setMultilineScript(e.target.value)}
+                  rows={4}
+                  placeholder={`# Paste any multi-line RouterOS commands (A-Z) here:\n/ip firewall filter remove [find action="fasttrack-connection"]\n/queue simple print\n/ip hotspot print`}
+                  className="w-full bg-[#070a12] border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-emerald-300 focus:outline-none focus:border-[#f05e17]"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMultilineScript('')}
+                    className="px-3 py-1 rounded-lg bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading || !multilineScript.trim()}
+                    onClick={() => {
+                      const scriptToRun = multilineScript;
+                      setShowMultilineDrawer(false);
+                      void handleExecuteCommand(scriptToRun);
+                    }}
+                    className="px-3.5 py-1 rounded-lg bg-[#f05e17] hover:bg-[#d94c0b] disabled:bg-slate-800 disabled:text-slate-600 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Play className="w-3 h-3" />
+                    <span>Execute Multi-Line Script on Router</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Terminal Screen / Output View */}
             <div 
@@ -688,27 +846,27 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
               {terminalLines.map((line) => {
                 if (line.type === 'system') {
                   return (
-                    <div key={line.id} className="text-slate-500 whitespace-pre font-mono text-[11px]">
+                    <div key={line.id} className="text-slate-500 whitespace-pre-wrap font-mono text-[11px]">
                       {line.text}
                     </div>
                   );
                 }
                 if (line.type === 'input') {
                   return (
-                    <div key={line.id} className="text-cyan-300 font-bold mt-2 font-mono flex items-center gap-2">
+                    <div key={line.id} className="text-cyan-300 font-bold mt-2 font-mono flex items-center gap-2 whitespace-pre-wrap">
                       <span>{line.text}</span>
                     </div>
                   );
                 }
                 if (line.type === 'error') {
                   return (
-                    <div key={line.id} className="text-rose-400 font-mono pl-4 whitespace-pre">
+                    <div key={line.id} className="text-rose-400 font-mono pl-4 whitespace-pre-wrap">
                       {line.text}
                     </div>
                   );
                 }
                 return (
-                  <div key={line.id} className="text-emerald-300 font-mono pl-2 whitespace-pre leading-relaxed">
+                  <div key={line.id} className="text-emerald-300 font-mono pl-2 whitespace-pre-wrap leading-relaxed">
                     {line.text}
                   </div>
                 );
@@ -717,7 +875,7 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
               {loading && (
                 <div className="flex items-center gap-2 text-amber-400 text-xs font-mono py-1 pl-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Executing RouterOS command over WireGuard tunnel...</span>
+                  <span>Executing RouterOS command over HTTP/WireGuard bridge...</span>
                 </div>
               )}
 
@@ -736,7 +894,7 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Type RouterOS command (e.g. /system resource print, /ping 1.1.1.1)..."
+                placeholder="Run any RouterOS command A–Z (e.g. /ip hotspot print, /queue simple print, /ip firewall filter print, Tab to autocomplete)..."
                 disabled={loading}
                 className="flex-1 bg-transparent border-none text-white text-xs font-mono focus:outline-none placeholder:text-slate-600"
                 autoFocus
