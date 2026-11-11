@@ -535,10 +535,19 @@ function resolveServerWalledGardenMediaUrl(rawUrl: string, baseUrl: string, titl
   return clean;
 }
 
+function resolveControllerBaseUrl(host?: string, protocol?: string): string {
+  const rawHost = String(host || '169.58.98.92:3000').trim();
+  if (!rawHost || rawHost.includes('localhost') || rawHost.includes('127.0.0.1') || rawHost.includes('.run.app')) {
+    return 'http://169.58.98.92:3000';
+  }
+  const cleanProto = (rawHost.includes(':') || /^\d+\.\d+\.\d+\.\d+/.test(rawHost)) ? 'http' : (protocol || 'https');
+  return `${cleanProto}://${rawHost}`;
+}
+
 function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot'): string {
   const allConfigs = loadSavedPortalConfigs();
   const cfg = allConfigs[scope] || allConfigs['hotspot'] || {};
-  const baseUrl = `${protocol}://${host}`;
+  const baseUrl = resolveControllerBaseUrl(host, protocol);
 
   const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
   const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'STARLINK HIGH-SPEED';
@@ -1442,7 +1451,7 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
 });
 
 function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', reason = 'post_auth'): string {
-  const baseUrl = `${protocol}://${host}`;
+  const baseUrl = resolveControllerBaseUrl(host, protocol);
   const sponsorCfg: any = serverStore.sponsorAd || {};
   const enabled = sponsorCfg.enabled !== false;
   const defaultLib = [
@@ -1721,17 +1730,24 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
 }
 
 // MikroTik alogin.html (Served immediately after /login succeeds on the router):
-// Since the user ALREADY viewed the sponsor ad on /portal before pressing "X" to trigger /login,
-// router-alogin.html immediately releases the phone to the internet and signals CNA completion
-// so it never loops back to the sign-up screen or shows the ad twice.
-app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
+// Immediately redirects the newly authenticated guest to the full-screen Sponsor Ad Carousel
+// (with the top-right X button to release to the internet), or directly to the internet if ads are disabled.
+app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const scope = (req.query.scope as string) || 'hotspot';
+  const baseUrl = resolveControllerBaseUrl(host, protocol);
+  const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
+  const adUrl = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
+  const defaultTarget = videoAdsEnabled ? adUrl : 'https://www.google.com';
+
   const releaseHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="0; url=https://www.google.com">
-<title>Connected — T-Connect Wi-Fi</title>
+<meta http-equiv="refresh" content="0; url=${defaultTarget}">
+<title>Connected — T-Connect Hotspot</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
   body{min-height:100vh;background:#0b0f19;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
@@ -1739,42 +1755,21 @@ app.get('/api/portal/router-alogin.html', (_req: Request, res: Response) => {
   .badge{width:48px;height:48px;border-radius:999px;background:rgba(16,185,129,0.2);border:2px solid #10b981;color:#34d399;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 12px}
   h1{font-size:18px;font-weight:900;margin-bottom:6px;color:#fff}
   p{font-size:12px;color:#94a3b8;margin-bottom:16px;line-height:1.4}
-  .btn{display:block;width:100%;padding:12px 16px;border-radius:12px;background:#10b981;color:#052e16;font-weight:800;font-size:13px;text-decoration:none}
+  .btn{display:block;width:100%;padding:12px 16px;border-radius:12px;background:#f05e17;color:#fff;font-weight:800;font-size:13px;text-decoration:none}
 </style>
 <script>
   (function() {
-    var orig = '$(link-orig-esc)';
-    var target = 'https://www.google.com';
-    if (orig && orig.indexOf('$(') === -1) {
-      try {
-        var decoded = decodeURIComponent(orig);
-        var lower = decoded.toLowerCase();
-        if (
-          decoded.indexOf('http') === 0 &&
-          lower.indexOf('/portal') === -1 &&
-          lower.indexOf('169.58.98.92') === -1 &&
-          lower.indexOf('10.10.') === -1 &&
-          lower.indexOf('192.168.') === -1 &&
-          lower.indexOf('/login') === -1 &&
-          lower.indexOf('captive.apple.com') === -1
-        ) {
-          target = decoded;
-        }
-      } catch (e) {}
-    }
-    try { window.close(); } catch (e) {}
-    setTimeout(function() {
-      window.location.replace(target);
-    }, 80);
+    var target = '${defaultTarget}';
+    window.location.replace(target);
   })();
 </script>
 </head>
 <body>
   <div class="card">
     <div class="badge">&#10003;</div>
-    <h1>Connected to T-Connect Wi-Fi</h1>
-    <p>Your device is now online. Enjoy fast, reliable Starlink internet connectivity.</p>
-    <a class="btn" href="https://www.google.com">Browse the Internet &rarr;</a>
+    <h1>Connected to T-Connect Hotspot</h1>
+    <p>Loading partner showcase...</p>
+    <a class="btn" href="${defaultTarget}">Continue &rarr;</a>
   </div>
 </body>
 </html>`;
@@ -6506,7 +6501,12 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
   persistMonitoredRoutersToStore();
 
   const pendingCmds = router.pendingCommands && router.pendingCommands.length > 0
-    ? [...router.pendingCommands]
+    ? router.pendingCommands.map((cmd: string) =>
+        cmd
+          .replace(/https?:\/\/localhost(:\d+)?/g, 'http://169.58.98.92:3000')
+          .replace(/https?:\/\/127\.0\.0\.1(:\d+)?/g, 'http://169.58.98.92:3000')
+          .replace(/https?:\/\/[a-zA-Z0-9-]+\.europe-west2\.run\.app/g, 'http://169.58.98.92:3000')
+      )
     : [];
   router.pendingCommands = [];
 

@@ -62,20 +62,26 @@ export class RouterOSRenderer {
    * verbose import for error visibility, and clean cleanup.
    */
   static renderOneLiner(options: OneLinerOptions): string {
-    const { controllerDomain, routerId, token } = options;
+    const rawDomain = (options.controllerDomain || '169.58.98.92:3000').trim();
+    const controllerDomain = (rawDomain.includes('localhost') || rawDomain.includes('127.0.0.1') || rawDomain.includes('.run.app'))
+      ? '169.58.98.92:3000'
+      : rawDomain;
+    const { routerId, token } = options;
     const safeRouterId = RouterOSRenderer.escapeRouterOSString(routerId);
     const safeToken = RouterOSRenderer.escapeRouterOSString(token);
-    const protocol = options.endpointProtocol || (controllerDomain.includes('localhost') || controllerDomain.includes(':') || /^\d+\.\d+\.\d+\.\d+/.test(controllerDomain) ? 'http' : 'https');
+    const protocol = (controllerDomain.includes(':') || /^\d+\.\d+\.\d+\.\d+/.test(controllerDomain))
+      ? 'http'
+      : (options.endpointProtocol || 'https');
     const domainOnly = controllerDomain.split(':')[0];
     const isRawIp = /^\d+\.\d+\.\d+\.\d+$/.test(domainOnly);
     const fetchUrl = `${protocol}://${controllerDomain}/api/devices/${safeRouterId}/adopt.rsc?token=${safeToken}`;
     const filename = `tc-${safeRouterId.slice(0, 8)}.rsc`;
 
     const dnsCheck = isRawIp 
-      ? `:log info "T-Connect - Direct IP endpoint detected (${domainOnly}). DNS check bypassed.";` 
-      : `:do { :resolve "${domainOnly}" } on-error={ /log warning "T-Connect - DNS check for ${domainOnly} failed. Continuing..."; };`;
+      ? `:log info "T-Connect - Direct IP endpoint detected (${domainOnly}). DNS check bypassed."` 
+      : `:do { :resolve "${domainOnly}" } on-error={ /log warning "T-Connect - DNS check for ${domainOnly} failed. Continuing..." }`;
 
-    return `${dnsCheck} :local fetchDisabled false;; :do { :local chk [:parse ":return ([/system/device-mode/get fetch] = false)"]; :set fetchDisabled [$chk] } on-error={};; :if ($fetchDisabled) do={ /log error "T-Connect - Fetch is locked by Device Mode. Enable fetch in /system/device-mode and retry."; :error "Device Mode restricted" };; :local fwVer [/system resource get version];; :put "T-Connect: Fetching provisioning configuration from ${protocol}://${controllerDomain}...";; :do { /tool fetch url="${fetchUrl}" http-method=post http-data="fw=$fwVer" dst-path="${filename}" check-certificate=no; } on-error={ /tool fetch url="${fetchUrl}" http-method=get dst-path="${filename}" check-certificate=no; };; :do { /import file-name="${filename}" verbose=yes; :delay 1s; /file remove "${filename}"; /log info "T-Connect - Device adopted successfully. WireGuard and RADIUS operational."; :put "T-Connect: [SUCCESS] Router adopted successfully! WireGuard and RADIUS operational."; } on-error={ /log error "T-Connect - Adoption script encountered an error during import. File retained as ${filename} for inspection."; :put "T-Connect: [ERROR] Import encountered an issue. File retained as ${filename}. Run: /import file-name=${filename} verbose=yes"; :error "Import failed" };`;
+    return `{ ${dnsCheck}; :local fetchDisabled false; :do { :local chk [:parse ":return ([/system/device-mode/get fetch] = false)"]; :set fetchDisabled [$chk] } on-error={}; :if ($fetchDisabled) do={ /log error "T-Connect - Fetch is locked by Device Mode. Enable fetch in /system/device-mode and retry."; :error "Device Mode restricted" }; :local fwVer [/system resource get version]; :put "T-Connect: Fetching Master Adoption Script from ${protocol}://${controllerDomain}..."; :do { /tool fetch url="${fetchUrl}" http-method=post http-data="fw=$fwVer" dst-path="${filename}" check-certificate=no } on-error={ /tool fetch url="${fetchUrl}" http-method=get dst-path="${filename}" check-certificate=no }; :do { /import file-name="${filename}" verbose=yes; :delay 1s; /file remove "${filename}"; /log info "T-Connect - Device adopted successfully. T-Connect Hotspot and Captive Portal operational."; :put "T-Connect: [SUCCESS] Router adopted! T-Connect Hotspot and Captive Portal operational." } on-error={ /log error "T-Connect - Adoption script encountered an error during import. File retained as ${filename} for inspection."; :put "T-Connect: [ERROR] Import encountered an issue. File retained as ${filename}. Run: /import file-name=${filename} verbose=yes"; :error "Import failed" } }`;
   }
 
   /**
@@ -102,11 +108,6 @@ export class RouterOSRenderer {
     ].join('\n');
   }
 
-  /**
-   * Formats a RouterOS-compliant speed + burst rate-limit string:
-   * rx-rate/tx-rate rx-burst-rate/tx-burst-rate rx-burst-threshold/tx-burst-threshold rx-burst-time/tx-burst-time
-   * Note: In RouterOS Hotspot, rx = client upload, tx = client download.
-   */
   /**
    * Formats a RouterOS-compliant speed + burst rate-limit string:
    * rx-rate/tx-rate rx-burst-rate/tx-burst-rate rx-burst-threshold/tx-burst-threshold rx-burst-time/tx-burst-time
@@ -169,12 +170,15 @@ export class RouterOSRenderer {
     scope: string = 'hotspot',
     rateLimit?: string
   ): string {
-    const cleanBaseUrl = portalBaseUrl.replace(/\/+$/, '');
+    const rawBase = portalBaseUrl.replace(/\/+$/, '');
+    const cleanBaseUrl = (rawBase.includes('localhost') || rawBase.includes('127.0.0.1') || rawBase.includes('.run.app'))
+      ? 'http://169.58.98.92:3000'
+      : rawBase;
     const hostOnly = cleanBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
+    const isHostIpv4 = /^\d+\.\d+\.\d+\.\d+$/.test(hostOnly);
     const safeScope = encodeURIComponent(scope || 'hotspot');
     const rateParts = RouterOSRenderer.parseRateLimitParts(rateLimit);
     const safeRateLimit = RouterOSRenderer.escapeRouterOSString(rateParts.fullRateLimit);
-    const redirectAndFallbackHtml = `<!DOCTYPE html><html><head><meta charset=\\"utf-8\\"><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\"><title>Wi-Fi Login</title><script>window.location.replace(\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\");</script><meta http-equiv=\\"refresh\\" content=\\"0; url=${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\"></head><body style=\\"background:#05070c;color:#fff;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center\\"><div style=\\"background:#0f1422;border:1px solid rgba(255,255,255,0.15);border-radius:24px;padding:24px;max-width:360px;width:100%\\"><h2 style=\\"margin:0 0 8px;font-size:18px\\">Opening Wi-Fi Portal...</h2><p style=\\"font-size:12px;color:#94a3b8;margin:0 0 16px\\">Redirecting to the hotspot splash page...</p><a href=\\"${cleanBaseUrl}/portal?mac=\\$(mac)&ip=\\$(ip)&link_login_only=\\$(link-login-only)&user_url=\\$(link-orig-esc)&scope=${safeScope}\\" style=\\"display:block;padding:12px;background:#f05e17;color:#fff;text-decoration:none;border-radius:12px;font-weight:800;font-size:13px\\">Tap Here if Not Redirected &rarr;</a></div></body></html>`;
 
     return [
       RouterOSRenderer.buildImmediateMultiPortBridgeCommands('bridgeLocal'),
@@ -214,7 +218,9 @@ export class RouterOSRenderer {
       `# 6. Ensure OTT Lesotho, PayLesotho & Controller Walled Garden entries exist (and remove OS probe bypasses)`,
       `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"connectivitycheck"] } on-error={}`,
       `:do { :if ([:len [/ip hotspot walled-garden ip find dst-address=169.58.98.92]] = 0) do={ /ip hotspot walled-garden ip add dst-address=169.58.98.92 action=accept comment="tc-vps-server-access" } } on-error={}`,
-      `:do { :if ("${hostOnly}" != "169.58.98.92" and [:len [/ip hotspot walled-garden ip find dst-address=${hostOnly}]] = 0) do={ /ip hotspot walled-garden ip add dst-address=${hostOnly} action=accept comment="tc-vps-controller-ip" } } on-error={}`,
+      isHostIpv4 && hostOnly !== '169.58.98.92'
+        ? `:do { :if ([:len [/ip hotspot walled-garden ip find dst-address=${hostOnly}]] = 0) do={ /ip hotspot walled-garden ip add dst-address=${hostOnly} action=accept comment="tc-vps-controller-ip" } } on-error={}`
+        : `# Controller IP 169.58.98.92 whitelisted in walled-garden ip`,
       `:do { :if ([:len [/ip hotspot walled-garden find dst-host="*${hostOnly}*"]] = 0) do={ /ip hotspot walled-garden add dst-host="*${hostOnly}*" action=allow comment="tc-vps-controller-domain" } } on-error={}`,
       `:do { :if ([:len [/ip hotspot walled-garden find dst-host="*api.paylesotho.co.ls"]] = 0) do={ /ip hotspot walled-garden add dst-host="*api.paylesotho.co.ls" action=allow comment="tc-paylesotho-api" } } on-error={}`,
       `:do { :if ([:len [/ip hotspot walled-garden find dst-host="*xpayments.paylesotho.co.ls"]] = 0) do={ /ip hotspot walled-garden add dst-host="*xpayments.paylesotho.co.ls" action=allow comment="tc-xpayments-api" } } on-error={}`,
@@ -252,8 +258,13 @@ export class RouterOSRenderer {
     } = options;
 
     const isV7 = router.rosVersion === 'v7';
-    const effectiveHost = controllerHost || hubDomain;
-    const protocol = endpointProtocol || (effectiveHost.includes(':') || effectiveHost.includes('localhost') || /^\d+\.\d+\.\d+\.\d+/.test(effectiveHost) ? 'http' : 'https');
+    const rawHost = (controllerHost || hubDomain || '169.58.98.92:3000').trim();
+    const effectiveHost = (rawHost.includes('localhost') || rawHost.includes('127.0.0.1') || rawHost.includes('.run.app'))
+      ? '169.58.98.92:3000'
+      : rawHost;
+    const protocol = (effectiveHost.includes(':') || /^\d+\.\d+\.\d+\.\d+/.test(effectiveHost))
+      ? 'http'
+      : (endpointProtocol || 'https');
     const portalBaseUrl = `${protocol}://${effectiveHost}`;
     const cleanDomain = effectiveHost.split(':')[0];
     const allowFree = router.accessMode !== 'PAID_ONLY' && (router.freeModeEnabled ?? true);
@@ -292,12 +303,9 @@ export class RouterOSRenderer {
       `:do { /interface list member add list=WAN interface=ether1 comment="T-Connect WAN1: Starlink / ISP" } on-error={}`,
       `:do { :if ([:len [/ip dhcp-client find interface="ether1"]] = 0) do={ /ip dhcp-client add interface=ether1 disabled=no add-default-route=yes default-route-distance=1 use-peer-dns=yes comment="Starlink WAN1 DHCP Client" } else={ /ip dhcp-client set [find interface="ether1"] disabled=no add-default-route=yes default-route-distance=1 } } on-error={}`,
       ``,
-      `# 3. Hotspot & AP Bridge Configuration (bridgeLocal & 10.10.0.0/22 across all 5+ LAN/AP ports + Wi-Fi radios)`,
-      `:if ([:len [/interface bridge find name="bridgeLocal"]] = 0) do={ /interface bridge add name="bridgeLocal" arp=enabled protocol-mode=rstp disabled=no comment="T-Connect Hotspot & AP Local Bridge" } else={ /interface bridge set [find name="bridgeLocal"] arp=enabled protocol-mode=rstp disabled=no };`,
+      `# 3. Hotspot & AP Bridge Configuration (bridgeLocal & 10.10.0.0/22 across all 5+ LAN/AP ports + Open Wi-Fi SSID "T-Connect Hotspot")`,
+      RouterOSRenderer.buildImmediateMultiPortBridgeCommands('bridgeLocal'),
       `:do { /interface list member add list=LAN interface=bridgeLocal comment="T-Connect Hotspot LAN Bridge" } on-error={}`,
-      `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}`,
-      `# Reassign all 5+ downstream ports (ether2..ether6, sfp1, sfp-sfpplus1) & wifi1..wifi2/wlan1..wlan2 into bridgeLocal with horizon=none`,
-      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={ :do { :if ([:len [/interface find name=$p]] > 0) do={ :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="bridgeLocal" horizon=none disabled=no } else={ /interface bridge port add bridge="bridgeLocal" interface=$p horizon=none disabled=no } } } on-error={} };`,
       `# Remove Conflicting LAN IP / DHCP / Hotspot on Factory Bridges or Direct Ethernet Ports (Preserves ether1 WAN)`,
       `:do { /ip dhcp-server remove [find interface!="bridgeLocal"] } on-error={}`,
       `:do { /ip hotspot remove [find interface!="bridgeLocal"] } on-error={}`,
@@ -349,13 +357,6 @@ export class RouterOSRenderer {
       `:do { /ip hotspot ip-binding add address=10.10.0.3 type=bypassed comment="tc-bypass-AP2-ether3" } on-error={}`,
       `:do { /ip hotspot ip-binding add address=10.10.0.4 type=bypassed comment="tc-bypass-AP3-ether4" } on-error={}`,
       `:do { /ip hotspot ip-binding add address=10.10.0.5 type=bypassed comment="tc-bypass-AP4-ether5" } on-error={}`,
-      `# Open Wi-Fi SSID "T-Connect Hotspot" on 2.4GHz & 5GHz Bound to bridgeLocal`,
-      `:do { /interface wifi datapath set [find] bridge="bridgeLocal" disabled=no } on-error={}`,
-      `:do { /interface wifi security set [find] authentication-types="" passphrase="" } on-error={}`,
-      `:do { /interface wifi configuration set [find] ssid="T-Connect Hotspot" mode=ap datapath.bridge="bridgeLocal" disabled=no; :do { /interface wifi configuration unset [find] security } on-error={}; :do { /interface wifi configuration unset [find] security.passphrase } on-error={} } on-error={}`,
-      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="bridgeLocal" disabled=no; :do { /interface wifi unset $w security } on-error={}; :do { /interface wifi unset $w security.passphrase } on-error={}; :do { /interface wifi unset $w security.authentication-types } on-error={} } } on-error={}`,
-      `:do { /interface wireless security-profiles set [find default=yes] mode=none authentication-types="" } on-error={}`,
-      `:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default disabled=no } on-error={}`,
       `/log info "T-Connect: [2/7] Hotspot Bridge bridgeLocal, 10.10.0.1/22, DHCP, Speed Caps, and Open SSID T-Connect Hotspot configured."`,
       ``,
     ];
