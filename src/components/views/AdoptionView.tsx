@@ -777,15 +777,24 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   };
 
   const handleCopyRouterScript = (router: RouterDevice) => {
-    const cmd = RouterOSRenderer.renderOneLiner({
-      controllerDomain: controllerHost.trim() || '169.58.98.92:3000',
+    const fullMasterScript = RouterOSRenderer.renderProvisioningScript({
+      router,
+      hubDomain: controllerHost.trim() || '169.58.98.92:3000',
+      controllerHost: controllerHost.trim() || '169.58.98.92:3000',
       endpointProtocol,
-      routerId: router.id,
-      token: router.token || 'tok_live_session',
-      rosVersion: router.rosVersion || 'v7'
+      hubWgPort: 51820,
+      hubTunnelIp: '10.99.0.1',
+      routerWgIp: router.wireguardIp || '10.99.1.50',
+      routerPrivateKey: 'eB3xK92ZlP4qN7mW1v8Y0sR5tU6iO2aL3cE5jH7kM9g=',
+      hubPublicKey: 'v7Tc0nnectHubWireguardKey2026Base64Salted99=',
+      radiusSecret: 'radsec_tconnect_lesotho_99120',
+      apiPassword: 'tc_pass_crypto_random_32char',
+      walledGardenDomains: WALLED_GARDEN_DOMAINS,
+      blockDoH: true,
+      rateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'
     });
-    void copyToClipboard(cmd);
-    triggerToast(`Master Adoption One-Liner copied for ${router.name}! Paste into WinBox -> New Terminal.`, 'info');
+    void copyToClipboard(fullMasterScript);
+    triggerToast(`Self-Contained Master Adoption Script copied for ${router.name}! Paste directly into WinBox -> New Terminal.`, 'info');
   };
 
   return (
@@ -1623,7 +1632,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </div>
               )}
 
-              {/* UNIFIED MASTER ADOPTION ONE-LINER (FETCHES & IMPORTS MASTER SCRIPT + ON-ROUTER SPLASH HTML + 15S LIVE SYNC) */}
+              {/* SELF-CONTAINED MASTER ADOPTION SCRIPT (EXECUTES DIRECTLY IN WINBOX TERMINAL + WRITES ON-ROUTER SPLASH HTML + 15S LIVE SYNC) */}
               <div className="bg-gradient-to-r from-emerald-500/15 via-[#12192c] to-amber-500/15 p-5 rounded-xl border border-emerald-500/40 space-y-4 font-mono">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
@@ -1633,14 +1642,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-extrabold text-white tracking-wide uppercase">
-                          MASTER ROUTER ADOPTION ONE-LINER (PASTE INTO WINBOX &rarr; NEW TERMINAL)
+                          SELF-CONTAINED MASTER ADOPTION SCRIPT (PASTE INTO WINBOX &rarr; NEW TERMINAL)
                         </span>
                         <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded">
-                          ONE-LINER AUTO-IMPORT
+                          ZERO PRE-FETCH REQUIRED
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-0.5">
-                        One command fetches and imports the complete Master Script: <strong>ether1 WAN1 Internet + NAT</strong>, <strong>ether2–ether6 + Open Wi-Fi &ldquo;T-Connect Hotspot&rdquo; (2.4GHz &amp; 5GHz)</strong> on <strong>bridgeLocal (10.10.0.1/22)</strong>, <strong>On-Router Hosted Splash HTML (<code>hotspot/login.html</code>)</strong>, and <strong>15s Live Dashboard Sync</strong>.
+                        Configures everything directly in WinBox Terminal (never fails with <code>Network unreachable</code>): <strong>ether1 WAN1 Internet + NAT</strong>, <strong>ether2–ether6 + Open Wi-Fi &ldquo;T-Connect Hotspot&rdquo; (2.4GHz &amp; 5GHz)</strong> on <strong>bridgeLocal (10.10.0.1/22)</strong>, writes <strong>Splash HTML (<code>hotspot/login.html</code>) directly onto Router Storage</strong>, and runs <strong>15s Live Dashboard Sync</strong>.
                       </p>
                     </div>
                   </div>
@@ -1648,37 +1657,37 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={handleCopyOneLiner}
+                      onClick={handleCopyFullScript}
                       className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-xs rounded-lg transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
                     >
-                      {copiedOneLiner ? (
+                      {copiedFullScript ? (
                         <>
                           <Check className="w-4 h-4 text-slate-950" />
-                          <span>Copied Master One-Liner!</span>
+                          <span>Copied Master Adoption Script!</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-4 h-4 text-slate-950" />
-                          <span>Copy Master One-Liner Command</span>
+                          <span>Copy Master Adoption Script</span>
                         </>
                       )}
                     </button>
 
                     <button
                       type="button"
-                      onClick={handleCopyFullScript}
+                      onClick={handleCopyOneLiner}
                       className="flex items-center gap-1.5 px-3 py-2.5 bg-[#161d31] hover:bg-[#232d42] border border-[#2b3752] text-slate-200 font-bold text-xs rounded-lg transition-colors cursor-pointer"
-                      title="Copy the raw full .rsc script directly if needed"
+                      title="Optional: Copy HTTP Fetch One-Liner (only if router already has WAN internet access)"
                     >
-                      {copiedFullScript ? (
+                      {copiedOneLiner ? (
                         <>
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Copied Full .rsc</span>
+                          <span>Copied Fetch One-Liner</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5 text-slate-400" />
-                          <span>Copy Raw .rsc</span>
+                          <span>Copy Fetch One-Liner</span>
                         </>
                       )}
                     </button>
@@ -1714,25 +1723,25 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   </div>
                 </div>
 
-                {/* One-Liner Terminal Command Box */}
+                {/* Self-Contained Master Adoption Script Box */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-[11px] text-emerald-300 font-bold">
-                    <span>1. Paste this single command into WinBox &rarr; New Terminal:</span>
+                    <span>1. Copy and paste this Self-Contained Master Adoption Script into WinBox &rarr; New Terminal:</span>
                     <span className="text-slate-400">SSID: <strong className="text-amber-300">T-Connect Hotspot</strong> (Open 2.4GHz &amp; 5GHz)</span>
                   </div>
-                  <div className="p-3.5 bg-[#080b12] rounded-lg border border-emerald-500/40 font-mono text-xs text-emerald-300 overflow-x-auto whitespace-pre select-all shadow-inner">
-                    {oneLiner}
+                  <div className="p-3.5 bg-[#080b12] rounded-lg border border-emerald-500/40 font-mono text-[11px] text-emerald-300 max-h-72 overflow-y-auto overflow-x-auto whitespace-pre select-all shadow-inner leading-relaxed">
+                    {provisioningScript}
                   </div>
                 </div>
 
-                {/* Expandable Full Master Script Preview */}
+                {/* Optional HTTP Fetch One-Liner Preview */}
                 <details className="group bg-[#0b0f1a] rounded-lg border border-[#1b233a] overflow-hidden">
                   <summary className="px-3.5 py-2 text-[11px] font-bold text-slate-300 cursor-pointer hover:text-white flex items-center justify-between select-none">
-                    <span>Inspect Underlying Master Adoption Script (<code>/api/devices/{selectedRouter.id}/adopt.rsc</code>)</span>
+                    <span>Optional: Remote Fetch One-Liner (Use only if router already has WAN internet access to {controllerHost || '169.58.98.92:3000'})</span>
                     <span className="text-[10px] text-emerald-400 group-open:rotate-180 transition-transform">▼</span>
                   </summary>
-                  <div className="p-3 bg-[#080b12] border-t border-[#1b233a] font-mono text-[11px] text-emerald-200/90 max-h-64 overflow-y-auto whitespace-pre leading-relaxed select-all">
-                    {provisioningScript}
+                  <div className="p-3 bg-[#080b12] border-t border-[#1b233a] font-mono text-[11px] text-emerald-200/90 overflow-x-auto whitespace-pre leading-relaxed select-all">
+                    {oneLiner}
                   </div>
                 </details>
               </div>
