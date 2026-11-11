@@ -9,11 +9,13 @@ import {
   AlertTriangle, 
   Plus, 
   Trash2,
+  Edit3,
   RefreshCw,
   Lock
 } from 'lucide-react';
 import { ContentFilterRule, RouterDevice, VerticalType } from '../../types';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
+import { storage } from '../../services/storage';
 import { copyToClipboard } from '../../utils/clipboard';
 
 interface BandwidthFilterViewProps {
@@ -27,7 +29,6 @@ export const BandwidthFilterView: React.FC<BandwidthFilterViewProps> = ({
   contentFilters,
   onToggleFilter,
   routers,
-  selectedVertical,
 }) => {
   const [selectedSiteId, setSelectedSiteId] = useState<string>('all');
   const [copiedDnsScript, setCopiedDnsScript] = useState(false);
@@ -38,33 +39,86 @@ export const BandwidthFilterView: React.FC<BandwidthFilterViewProps> = ({
   const [siteMaxUpMbps, setSiteMaxUpMbps] = useState<number>(20);
   const [enableFairUse, setEnableFairUse] = useState<boolean>(true);
   const [fairUseLimitGb, setFairUseLimitGb] = useState<number>(5);
-  const [throttleDownMbps, setThrottleDownMbps] = useState<number>(1);
+  const [throttleDownMbps] = useState<number>(1);
 
-  // Custom Domain Override State
-  const [customDomains, setCustomDomains] = useState<Array<{ id: string; domain: string; action: 'block' | 'allow' }>>([
-    { id: 'cd_1', domain: 'torrentz.eu', action: 'block' },
-    { id: 'cd_2', domain: 'gov.ls', action: 'allow' },
-    { id: 'cd_3', domain: 'education.org.ls', action: 'allow' },
-  ]);
+  // Content Filter Category CRUD State
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [editingFilter, setEditingFilter] = useState<ContentFilterRule | null>(null);
+  const [filterName, setFilterName] = useState('');
+  const [filterCategory, setFilterCategory] = useState<ContentFilterRule['category']>('adult');
+  const [filterDesc, setFilterDesc] = useState('');
+  const [filterCount, setFilterCount] = useState<number>(10000);
+  const [confirmDeleteFilterId, setConfirmDeleteFilterId] = useState<string | null>(null);
+
+  // Persistent Custom Domain Override State
+  const [customDomains, setCustomDomains] = useState<Array<{ id: string; domain: string; action: 'block' | 'allow' }>>(
+    () => storage.getCustomDnsRules()
+  );
   const [newDomainInput, setNewDomainInput] = useState('');
   const [newDomainAction, setNewDomainAction] = useState<'block' | 'allow'>('block');
+
+  const refreshCustomDomains = () => {
+    setCustomDomains([...storage.getCustomDnsRules()]);
+  };
 
   const handleAddCustomDomain = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDomainInput.trim()) return;
-    setCustomDomains([
-      ...customDomains,
-      {
-        id: `cd_${Date.now()}`,
-        domain: newDomainInput.trim().toLowerCase(),
-        action: newDomainAction
-      }
-    ]);
+    storage.addCustomDnsRule(newDomainInput.trim().toLowerCase(), newDomainAction);
     setNewDomainInput('');
+    refreshCustomDomains();
+  };
+
+  const handleToggleCustomDomainAction = (id: string, currentAction: 'block' | 'allow') => {
+    storage.updateCustomDnsRule(id, { action: currentAction === 'block' ? 'allow' : 'block' });
+    refreshCustomDomains();
   };
 
   const handleRemoveCustomDomain = (id: string) => {
-    setCustomDomains(customDomains.filter(d => d.id !== id));
+    storage.deleteCustomDnsRule(id);
+    refreshCustomDomains();
+  };
+
+  const openCreateFilterModal = () => {
+    setEditingFilter(null);
+    setFilterName('');
+    setFilterCategory('adult');
+    setFilterDesc('');
+    setFilterCount(10000);
+    setShowFilterModal(true);
+  };
+
+  const openEditFilterModal = (rule: ContentFilterRule) => {
+    setEditingFilter(rule);
+    setFilterName(rule.name);
+    setFilterCategory(rule.category);
+    setFilterDesc(rule.description);
+    setFilterCount(rule.blockedDomainsCount);
+    setShowFilterModal(true);
+  };
+
+  const handleSaveFilterRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!filterName.trim()) return;
+    if (editingFilter) {
+      storage.updateContentFilter(editingFilter.id, {
+        name: filterName.trim(),
+        category: filterCategory,
+        description: filterDesc.trim(),
+        blockedDomainsCount: Number(filterCount) || 0
+      });
+    } else {
+      storage.createContentFilter({
+        name: filterName.trim(),
+        category: filterCategory,
+        description: filterDesc.trim() || 'Custom DNS sinkhole category',
+        blockedDomainsCount: Number(filterCount) || 1000,
+        enabled: true,
+        siteId: 'all'
+      });
+    }
+    setShowFilterModal(false);
+    setEditingFilter(null);
   };
 
   const sampleBlockedDomains = [
@@ -207,7 +261,7 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
               setCopiedQosScript(true);
               setTimeout(() => setCopiedQosScript(false), 2000);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded-lg text-xs font-mono text-slate-200"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded-lg text-xs font-mono text-slate-200 cursor-pointer"
           >
             {copiedQosScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span>{copiedQosScript ? 'Copied QoS Script' : 'Copy RouterOS Queue Script'}</span>
@@ -219,11 +273,21 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Category Toggles */}
         <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-extrabold text-white uppercase font-mono tracking-wider">
-              DNS-LEVEL CONTENT FILTER CATEGORIES
-            </h2>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-sm font-extrabold text-white uppercase font-mono tracking-wider">
+                DNS-LEVEL CONTENT FILTER CATEGORIES
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={openCreateFilterModal}
+              className="px-2.5 py-1 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-mono font-bold rounded-lg flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Category</span>
+            </button>
           </div>
 
           <div className="space-y-3">
@@ -232,23 +296,68 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
                 key={filter.id}
                 className="p-3 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between gap-3"
               >
-                <div>
-                  <h3 className="text-xs font-bold text-white">{filter.name}</h3>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold text-white">{filter.name}</h3>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 uppercase">
+                      {filter.category}
+                    </span>
+                  </div>
                   <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{filter.description}</p>
                   <span className="text-[10px] font-mono text-slate-500 mt-1 block">
                     {filter.blockedDomainsCount.toLocaleString()} known hostnames blocked
                   </span>
                 </div>
 
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={filter.enabled}
-                    onChange={(e) => onToggleFilter(filter.id, e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-[#232d42] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#f05e17]"></div>
-                </label>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openEditFilterModal(filter)}
+                    className="p-1 text-slate-400 hover:text-cyan-400 rounded cursor-pointer"
+                    title="Edit Filter Category"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  {confirmDeleteFilterId === filter.id ? (
+                    <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5 text-[10px] font-mono">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          storage.deleteContentFilter(filter.id);
+                          setConfirmDeleteFilterId(null);
+                        }}
+                        className="text-rose-300 font-bold hover:text-white cursor-pointer"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteFilterId(null)}
+                        className="text-slate-400 hover:text-white ml-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteFilterId(filter.id)}
+                      className="p-1 text-slate-400 hover:text-rose-400 rounded cursor-pointer"
+                      title="Delete Filter Category"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={filter.enabled}
+                      onChange={(e) => onToggleFilter(filter.id, e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-[#232d42] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#f05e17]"></div>
+                  </label>
+                </div>
               </div>
             ))}
           </div>
@@ -268,7 +377,7 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-cyan-400" />
               <h2 className="text-sm font-extrabold text-white uppercase font-mono tracking-wider">
-                CUSTOM DOMAIN OVERRIDES
+                CUSTOM DOMAIN OVERRIDES ({customDomains.length})
               </h2>
             </div>
             <button
@@ -277,7 +386,7 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
                 setCopiedDnsScript(true);
                 setTimeout(() => setCopiedDnsScript(false), 2000);
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] font-mono text-slate-300"
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] font-mono text-slate-300 cursor-pointer"
             >
               {copiedDnsScript ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
               <span>{copiedDnsScript ? 'Copied' : 'Export Script'}</span>
@@ -297,14 +406,14 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
             <select
               value={newDomainAction}
               onChange={(e) => setNewDomainAction(e.target.value as 'block' | 'allow')}
-              className="px-2 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono"
+              className="px-2 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono cursor-pointer"
             >
               <option value="block">Block</option>
               <option value="allow">Allow</option>
             </select>
             <button
               type="submit"
-              className="px-3 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
+              className="px-3 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm cursor-pointer"
             >
               Add
             </button>
@@ -322,14 +431,23 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
                   <span className="text-white font-semibold">{dom.domain}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                    dom.action === 'block' ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'
-                  }`}>
-                    {dom.action}
-                  </span>
                   <button
+                    type="button"
+                    onClick={() => handleToggleCustomDomainAction(dom.id, dom.action)}
+                    className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border cursor-pointer transition-colors ${
+                      dom.action === 'block'
+                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                    }`}
+                    title="Click to toggle Block / Allow"
+                  >
+                    {dom.action}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleRemoveCustomDomain(dom.id)}
-                    className="text-slate-500 hover:text-rose-400 p-1"
+                    className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                    title="Delete custom domain rule"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -339,6 +457,87 @@ ${enableFairUse ? `add name="tc-fair-use-burst" parent="tc-site-aggregate" targe
           </div>
         </div>
       </div>
+
+      {/* Add / Edit Content Filter Modal */}
+      {showFilterModal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl text-xs font-mono">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <h3 className="text-sm font-extrabold text-white">
+                {editingFilter ? `Edit Filter Category: ${editingFilter.name}` : 'Add Content Filter Category'}
+              </h3>
+              <button onClick={() => setShowFilterModal(false)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveFilterRule} className="space-y-3">
+              <div>
+                <label className="text-slate-400 block mb-1">Category Name</label>
+                <input
+                  type="text"
+                  required
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
+                  placeholder="e.g. Social Media Streaming"
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Category Type</label>
+                  <select
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value as ContentFilterRule['category'])}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  >
+                    <option value="adult">Adult</option>
+                    <option value="gambling">Gambling</option>
+                    <option value="malware">Malware</option>
+                    <option value="piracy">Piracy / Torrents</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Hostname Count</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={filterCount}
+                    onChange={(e) => setFilterCount(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={filterDesc}
+                  onChange={(e) => setFilterDesc(e.target.value)}
+                  placeholder="Describe what domains this DNS category blocks..."
+                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFilterModal(false)}
+                  className="px-3 py-1.5 bg-[#161d31] text-slate-300 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg cursor-pointer"
+                >
+                  {editingFilter ? 'Save Changes' : 'Create Category'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

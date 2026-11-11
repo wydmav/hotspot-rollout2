@@ -23,7 +23,8 @@ import {
   Lock,
   Globe,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Edit2
 } from 'lucide-react';
 import { CaptivePortalLead, VerticalType } from '../../types';
 import { storage } from '../../services/storage';
@@ -97,6 +98,16 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [serverAdoptedRouters, setServerAdoptedRouters] = useState<
     Array<{ id: string; name: string; siteName: string; vertical: string }>
   >([]);
+  const [confirmDeleteLeadId, setConfirmDeleteLeadId] = useState<string | null>(null);
+  const [confirmDeleteKeyId, setConfirmDeleteKeyId] = useState<string | null>(null);
+  const [editingLead, setEditingLead] = useState<CaptivePortalLead | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editCountryCode, setEditCountryCode] = useState<'+266' | '+27'>('+266');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editSiteName, setEditSiteName] = useState('');
+  const [editRouterName, setEditRouterName] = useState('');
 
   const adoptedRoutersList = useMemo(() => {
     if (serverAdoptedRouters.length > 0) return serverAdoptedRouters;
@@ -473,8 +484,42 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
 
   const handleDeleteLead = (id: string, name: string) => {
     storage.deleteCaptiveLead(id);
+    setConfirmDeleteLeadId(null);
     refreshLeads();
     showToast(`Deleted guest lead record for ${name}`);
+  };
+
+  const openEditLeadModal = (lead: CaptivePortalLead) => {
+    setEditingLead(lead);
+    setEditFirstName(lead.firstName);
+    setEditLastName(lead.lastName);
+    setEditCountryCode(lead.countryCode === '+27' ? '+27' : '+266');
+    setEditPhone(lead.phone);
+    setEditEmail(lead.email);
+    setEditSiteName(lead.siteName);
+    setEditRouterName(lead.routerName);
+  };
+
+  const handleSaveEditedLead = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLead) return;
+    const fName = editFirstName.trim() || editingLead.firstName;
+    const lName = editLastName.trim() || editingLead.lastName;
+    const rawDigits = editPhone.replace(/\D/g, '') || editingLead.phone;
+    storage.updateCaptiveLead(editingLead.id, {
+      firstName: fName,
+      lastName: lName,
+      fullName: `${fName} ${lName}`.trim(),
+      countryCode: editCountryCode,
+      phone: rawDigits,
+      fullPhone: `${editCountryCode} ${rawDigits}`,
+      email: editEmail.trim() || editingLead.email,
+      siteName: editSiteName.trim() || editingLead.siteName,
+      routerName: editRouterName.trim() || editingLead.routerName
+    });
+    setEditingLead(null);
+    refreshLeads();
+    showToast(`Updated guest lead record for ${fName} ${lName}`);
   };
 
   const handleSeedSampleLead = () => {
@@ -1144,14 +1189,36 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                             >
                               {pk.status === 'active' ? 'Revoke' : 'Activate'}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeletePartnerKey(pk)}
-                              className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400"
-                              title="Delete key"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                            {confirmDeleteKeyId === pk.id ? (
+                              <div className="inline-flex items-center gap-1 bg-rose-950/60 border border-rose-500/40 rounded px-1.5 py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleDeletePartnerKey(pk);
+                                    setConfirmDeleteKeyId(null);
+                                  }}
+                                  className="px-1.5 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteKeyId(null)}
+                                  className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteKeyId(pk.id)}
+                                className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400"
+                                title="Delete key"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1518,12 +1585,41 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                         </button>
 
                         <button
-                          onClick={() => handleDeleteLead(lead.id, lead.fullName)}
-                          className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
-                          title="Delete guest lead"
+                          type="button"
+                          onClick={() => openEditLeadModal(lead)}
+                          className="p-1 rounded hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-300 transition-colors"
+                          title="Edit guest lead details"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Edit2 className="w-3.5 h-3.5" />
                         </button>
+
+                        {confirmDeleteLeadId === lead.id ? (
+                          <div className="inline-flex items-center gap-1 bg-rose-950/60 border border-rose-500/40 rounded px-1.5 py-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteLead(lead.id, lead.fullName)}
+                              className="px-1.5 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteLeadId(null)}
+                              className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteLeadId(lead.id)}
+                            className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
+                            title="Delete guest lead"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1559,6 +1655,124 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           Showing <strong>{filteredLeads.length}</strong> of <strong>{leads.length}</strong> captive portal subscriber leads
         </div>
       </div>
+
+      {/* Edit Lead Modal */}
+      {editingLead && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-5 space-y-4 shadow-2xl font-mono text-xs">
+            <div className="flex items-center justify-between border-b border-[#1b233a] pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Edit2 className="w-4 h-4 text-[#f05e17]" />
+                <span>Edit Guest Subscriber Lead</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLead(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedLead} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">First Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFirstName}
+                    onChange={(e) => setEditFirstName(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Last Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editLastName}
+                    onChange={(e) => setEditLastName(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Region</label>
+                  <select
+                    value={editCountryCode}
+                    onChange={(e) => setEditCountryCode(e.target.value as '+266' | '+27')}
+                    className="w-full px-2 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  >
+                    <option value="+266">+266 (LS)</option>
+                    <option value="+27">+27 (ZA)</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-slate-400 mb-1">Mobile Digits</label>
+                  <input
+                    type="text"
+                    required
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-1">Verified Email</label>
+                <input
+                  type="email"
+                  required
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Router Name</label>
+                  <input
+                    type="text"
+                    value={editRouterName}
+                    onChange={(e) => setEditRouterName(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-1">Site Name</label>
+                  <input
+                    type="text"
+                    value={editSiteName}
+                    onChange={(e) => setEditSiteName(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#1b233a]">
+                <button
+                  type="button"
+                  onClick={() => setEditingLead(null)}
+                  className="px-3 py-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold"
+                >
+                  Save Lead Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

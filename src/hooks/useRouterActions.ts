@@ -60,13 +60,6 @@ export function useRouterActions(defaultRouter?: RouterDevice | null, options?: 
     const r = targetRouter || defaultRouter;
     if (!r) return false;
 
-    if (!opts?.skipConfirm && typeof window !== 'undefined') {
-      const confirmed = window.confirm(
-        `Are you sure you want to reboot "${r.name}"? Active hotspot sessions will temporarily disconnect.`
-      );
-      if (!confirmed) return false;
-    }
-
     setIsActionPending(true);
     setActiveAction('reboot');
 

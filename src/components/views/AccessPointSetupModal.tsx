@@ -675,19 +675,19 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </div>
                 </div>
 
-                {/* 2. Configure Open Test WiFi SSID "MIKROTIK-TC" (RouterOS 7.16.2 wifi-qcom) */}
+                {/* 2. Configure Open WiFi SSID "T-Connect Hotspot" (RouterOS 7.16.2 wifi-qcom) */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        2. Setup Open Test WiFi SSID &quot;MIKROTIK-TC&quot; (RouterOS 7.16.2 wifi-qcom)
+                        2. Setup Open WiFi SSID &quot;T-Connect Hotspot&quot; (RouterOS 7.16.2 wifi-qcom)
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => copyToClipboard(
-                          `/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no`,
+                          `/interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no`,
                           'wifi-direct'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-emerald-300 hover:text-white px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 transition-colors cursor-pointer"
@@ -697,7 +697,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                       </button>
                       <button
                         onClick={() => copyToClipboard(
-                          `:do { :if ([:len [/interface wifi find]] > 0) do={ :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no } } else={ :if ([:len [/interface wireless find]] > 0) do={ /interface wireless set [:pick [/interface wireless find] 0] ssid="MIKROTIK-TC" mode=ap-bridge frequency=auto disabled=no } } } on-error={};`,
+                          `:do { :if ([:len [/interface wifi find]] > 0) do={ :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no } } else={ :if ([:len [/interface wireless find]] > 0) do={ :foreach wl in=[/interface wireless find] do={ /interface wireless set $wl ssid="T-Connect Hotspot" mode=ap-bridge disabled=no } } } } on-error={};`,
                           'wifi-setup-script'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
@@ -709,11 +709,11 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed bg-black/40">
 {`# RouterOS 7.16.2 (wifi-qcom - wifi1 & wifi2):
-/interface wifi set [find] configuration.ssid="MIKROTIK-TC" disabled=no
+/interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no
 
 # Multi-radio auto-configuration script:
 :foreach w in=[/interface wifi find] do={
-  /interface wifi set $w configuration.ssid="MIKROTIK-TC" disabled=no
+  /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no
 };`}
                   </pre>
                 </div>

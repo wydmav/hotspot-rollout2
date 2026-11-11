@@ -144,7 +144,7 @@ export const CaptivePortalEditor: React.FC<CaptivePortalEditorProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
-        alert('File size exceeds 5MB limit. Please upload an optimized image.');
+        setPaymentError('File size exceeds 5MB limit. Please upload an optimized image.');
         return;
       }
       const reader = new FileReader();

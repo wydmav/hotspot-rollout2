@@ -16,10 +16,14 @@ import {
   SlidersHorizontal,
   Layers,
   Copy,
-  Check
+  Check,
+  Edit3,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { HotspotPlan, Voucher, VerticalType } from '../../types';
 import { ExportService } from '../../services/exportService';
+import { storage } from '../../services/storage';
 import { copyToClipboard } from '../../utils/clipboard';
 
 interface PlansVouchersViewProps {
@@ -45,9 +49,12 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const [voucherSearch, setVoucherSearch] = useState('');
   const [copiedVoucherId, setCopiedVoucherId] = useState<string | null>(null);
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<HotspotPlan | null>(null);
+  const [confirmDeletePlanId, setConfirmDeletePlanId] = useState<string | null>(null);
+  const [confirmDeleteVoucherId, setConfirmDeleteVoucherId] = useState<string | null>(null);
   const [uniqueRefInput, setUniqueRefInput] = useState('');
 
-  // New Plan form state
+  // Plan form state
   const [planName, setPlanName] = useState('');
   const [planPrice, setPlanPrice] = useState(10);
   const [planVertical, setPlanVertical] = useState<VerticalType>('hotspot');
@@ -146,26 +153,59 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     ExportService.exportVouchersToCsv(filteredVouchers);
   };
 
-  const handleCreatePlan = (e: React.FormEvent) => {
+  const openCreateModal = () => {
+    setEditingPlan(null);
+    setPlanName('');
+    setPlanPrice(10);
+    setPlanVertical(selectedVertical === 'all' ? 'hotspot' : selectedVertical);
+    setPlanDurationHours(24);
+    setPlanDownMbps(10);
+    setPlanUpMbps(5);
+    setPlanDeviceLimit(2);
+    setPlanDataCapGb('');
+    setShowCreatePlanModal(true);
+  };
+
+  const openEditModal = (plan: HotspotPlan) => {
+    setEditingPlan(plan);
+    setPlanName(plan.name);
+    setPlanPrice(plan.price);
+    setPlanVertical(plan.vertical);
+    setPlanDurationHours(Math.max(1, Math.round(plan.durationSeconds / 3600)));
+    setPlanDownMbps(plan.downloadSpeedMbps);
+    setPlanUpMbps(plan.uploadSpeedMbps);
+    setPlanDeviceLimit(plan.deviceLimit);
+    setPlanDataCapGb(plan.dataCapMb ? Math.round(plan.dataCapMb / 1024) : '');
+    setShowCreatePlanModal(true);
+  };
+
+  const handleSavePlan = (e: React.FormEvent) => {
     e.preventDefault();
     if (!planName.trim()) return;
 
-    onCreatePlan({
+    const payload = {
       name: planName.trim(),
       vertical: planVertical,
       price: planPrice,
       currency,
       durationSeconds: planDurationHours * 3600,
-      durationLabel: planDurationHours >= 24 ? `${planDurationHours / 24} Day(s)` : `${planDurationHours} Hours`,
+      durationLabel: planDurationHours >= 24 && planDurationHours % 24 === 0 ? `${planDurationHours / 24} Day(s)` : `${planDurationHours} Hours`,
       dataCapMb: planDataCapGb ? Number(planDataCapGb) * 1024 : null,
       downloadSpeedMbps: planDownMbps,
       uploadSpeedMbps: planUpMbps,
       deviceLimit: planDeviceLimit,
       burstDownloadMbps: planDownMbps * 2,
       burstUploadMbps: planUpMbps * 2,
-    });
+    };
+
+    if (editingPlan) {
+      storage.updatePlan(editingPlan.id, payload);
+    } else {
+      onCreatePlan(payload);
+    }
 
     setShowCreatePlanModal(false);
+    setEditingPlan(null);
     setPlanName('');
   };
 
@@ -176,17 +216,27 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
         <div>
           <h1 className="text-xl font-extrabold text-white tracking-tight">Hotspot Plans, Vouchers & Entitlements</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Exact pricing-to-entitlement mapping with atomic, concurrency-hardened voucher redemption
+            Exact pricing-to-entitlement mapping with full CRUD management &amp; atomic voucher redemption
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowCreatePlanModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+            type="button"
+            onClick={() => storage.resetStarterPlans()}
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#161d31] hover:bg-[#1f2942] border border-[#232d42] text-slate-300 hover:text-white text-xs font-mono font-bold rounded-lg transition-colors cursor-pointer"
+            title="Restore default hotspot pricing plans"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Restore Starter Plans</span>
+          </button>
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Create Plan</span>
+            <span>+ Create Plan</span>
           </button>
         </div>
       </div>
@@ -205,7 +255,47 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
             <div>
               <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-1">
                 <span className="uppercase">{plan.vertical}</span>
-                <span className="text-slate-500">{plan.deviceLimit} device limit</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500">{plan.deviceLimit} device limit</span>
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(plan)}
+                    className="p-1 text-cyan-400 hover:text-white hover:bg-cyan-500/20 rounded transition-colors cursor-pointer"
+                    title="Edit Plan"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  {confirmDeletePlanId === plan.id ? (
+                    <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          storage.deletePlan(plan.id);
+                          setConfirmDeletePlanId(null);
+                        }}
+                        className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeletePlanId(null)}
+                        className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeletePlanId(plan.id)}
+                      className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
+                      title="Delete Plan"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <h3 className="text-base font-extrabold text-white">{plan.name}</h3>
 
@@ -526,15 +616,58 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOttPin(voucher.code.replace(/\D/g, ''));
-                        }}
-                        className="px-2.5 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-emerald-400 hover:text-white cursor-pointer"
-                      >
-                        Inspect PIN
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOttPin(voucher.code.replace(/\D/g, ''));
+                          }}
+                          className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-emerald-400 hover:text-white cursor-pointer"
+                        >
+                          Inspect PIN
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextStatus = voucher.status === 'expired' ? 'active' : 'expired';
+                            storage.updateVoucher(voucher.id, { status: nextStatus });
+                          }}
+                          className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-amber-300 hover:text-white cursor-pointer"
+                          title={voucher.status === 'expired' ? 'Re-activate Voucher' : 'Revoke / Expire Voucher'}
+                        >
+                          {voucher.status === 'expired' ? 'Activate' : 'Revoke'}
+                        </button>
+                        {confirmDeleteVoucherId === voucher.id ? (
+                          <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                storage.deleteVoucher(voucher.id);
+                                setConfirmDeleteVoucherId(null);
+                              }}
+                              className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteVoucherId(null)}
+                              className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteVoucherId(voucher.id)}
+                            className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
+                            title="Delete Voucher Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -556,26 +689,52 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
         </div>
       </div>
 
-      {/* Create Plan Modal */}
+      {/* Create / Edit Plan Modal */}
       {showCreatePlanModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
-              <h3 className="text-base font-extrabold text-white">Create New Hotspot Plan</h3>
-              <button onClick={() => setShowCreatePlanModal(false)} className="text-slate-400 hover:text-white">✕</button>
+              <h3 className="text-base font-extrabold text-white">
+                {editingPlan ? `Edit Hotspot Plan: ${editingPlan.name}` : 'Create New Hotspot Plan'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowCreatePlanModal(false);
+                  setEditingPlan(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
-            <form onSubmit={handleCreatePlan} className="space-y-3.5 text-xs font-mono">
-              <div>
-                <label className="text-slate-400 block mb-1">Plan Name</label>
-                <input
-                  type="text"
-                  required
-                  value={planName}
-                  onChange={(e) => setPlanName(e.target.value)}
-                  placeholder="e.g. Weekend Pass (48h)"
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                />
+            <form onSubmit={handleSavePlan} className="space-y-3.5 text-xs font-mono">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Plan Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={planName}
+                    onChange={(e) => setPlanName(e.target.value)}
+                    placeholder="e.g. Weekend Pass (48h)"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Vertical Scope</label>
+                  <select
+                    value={planVertical}
+                    onChange={(e) => setPlanVertical(e.target.value as VerticalType)}
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  >
+                    <option value="hotspot">☕ Hotspot</option>
+                    <option value="village">🏡 Village / Mesh</option>
+                    <option value="bus">🚌 Bus / Transit</option>
+                    <option value="stadium">🏟️ Stadium / Arena</option>
+                    <option value="park">🌳 Municipal Park</option>
+                  </select>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -653,16 +812,19 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowCreatePlanModal(false)}
-                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
+                  onClick={() => {
+                    setShowCreatePlanModal(false);
+                    setEditingPlan(null);
+                  }}
+                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
+                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm cursor-pointer"
                 >
-                  Save Plan
+                  {editingPlan ? 'Save Plan Changes' : 'Save Plan'}
                 </button>
               </div>
             </form>

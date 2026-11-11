@@ -71,6 +71,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           return {
             ...fallback,
             ...parsed,
+            freeButtonX: typeof parsed.freeButtonX === 'number' ? parsed.freeButtonX : 50,
+            freeButtonY: typeof parsed.freeButtonY === 'number' ? parsed.freeButtonY : 88,
+            freeButtonText: parsed.freeButtonText || 'Login for free',
             termsText: normalizeScopeTermsText(parsed.termsText)
           };
         }
@@ -213,6 +216,16 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setSelectedPlanId(enabledPlans[0].id);
     }
   }, [enabledPlans, selectedPlanId]);
+
+  // Real-time sync when Admin toggles Free Access Mode ON or OFF on the Dashboard
+  useEffect(() => {
+    if (portalStep === 'video_ad' || portalStep === 'connected') return;
+    if (isFreeAccessAllowed && portalStep !== 'identification') {
+      setPortalStep('identification');
+    } else if (!isFreeAccessAllowed && portalStep === 'identification') {
+      setPortalStep(isVoucherAllowed ? 'voucher' : 'plan');
+    }
+  }, [isFreeAccessAllowed, isVoucherAllowed, portalStep]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -667,12 +680,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Connect Free Wi-Fi (Unlimited — Only when Free Access is enabled by Admin)
+  // Connect Free Wi-Fi (1-Tap Instant Connect — Only when Free Access Mode is enabled by Admin on Dashboard)
   const handleConnectFree = async () => {
-    if (!isTermsSatisfied || !isGuestFormValid || isConnecting) return;
+    if (!isFreeAccessAllowed || isConnecting) return;
     isConnectingRef.current = true;
     setIsConnecting(true);
-    setStatusBanner('Activating your unlimited free Wi-Fi...');
+    setStatusBanner('Connecting to free Wi-Fi...');
 
     await syncGuestSessionToAdmin({
       mode: 'free',
@@ -1511,13 +1524,44 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )})`
         }}
       >
-        {/* Configured Darken Overlay */}
+        {/* Configured Darken Overlay (0% when Free Access Mode is ON so the custom hotspot artwork is 100% clear) */}
         <div
           className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-          style={{ opacity: (currentConfig.bgDarken ?? 35) / 100 }}
+          style={{ opacity: isFreeAccessAllowed ? 0 : (currentConfig.bgDarken ?? 35) / 100 }}
         />
 
-        {/* Top Brand & Welcome Headline (Compact so background wallpaper stays clear) */}
+        {/* ================================================================= */}
+        {/* PURE FREE ACCESS MODE: Single Repositionable "Login for free"     */}
+        {/* Button Floating Over Wallpaper (Only when toggled ON in Dashboard)*/}
+        {/* ================================================================= */}
+        {isFreeAccessAllowed ? (
+          <div
+            className="absolute z-20 w-[86%] max-w-[360px]"
+            style={{
+              left: `${currentConfig.freeButtonX ?? 50}%`,
+              top: `${currentConfig.freeButtonY ?? 88}%`,
+              transform: 'translate(-50%, -50%)'
+            }}
+          >
+            {statusBanner && (
+              <div className="mb-2.5 p-2 rounded-lg bg-black/80 backdrop-blur-md border border-white/25 text-xs text-white flex items-center justify-center gap-2 shadow-xl">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#f05e17] shrink-0" />
+                <span>{statusBanner}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleConnectFree}
+              disabled={isConnecting}
+              style={{ backgroundColor: accentColor || '#f05e17' }}
+              className="w-full py-3.5 px-6 text-white font-normal text-lg sm:text-xl tracking-wide rounded-[4px] shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition-transform active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center justify-center text-center"
+            >
+              {isConnecting ? 'Connecting...' : (currentConfig.freeButtonText?.trim() || 'Login for free')}
+            </button>
+          </div>
+        ) : (
+        <>
+        {/* Top Brand & Welcome Headline (Shown only in Paid / Voucher Mode) */}
         <div className="relative z-10 text-center max-w-sm w-full pt-4 pb-2 px-4">
           {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
             <div className="text-[11px] font-semibold text-white/95 tracking-wide mb-0.5 drop-shadow">
@@ -1531,7 +1575,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )}
         </div>
 
-        {/* Slim Docked Bottom Sheet Captive Portal Box (Docked at base with crisp border & solid dark background) */}
+        {/* Slim Docked Bottom Sheet Captive Portal Box (Shown only when Free Access Mode is OFF) */}
         <div className="relative z-10 w-full max-w-sm sm:max-w-md mt-auto mb-0 px-2 sm:px-3">
           {statusBanner && (
             <div className="mb-2 p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-200 flex items-center gap-2 shadow-lg">
@@ -1541,36 +1585,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           )}
 
           {/* ================================================================= */}
-          {/* DYNAMIC MODE QUICK TABS HELPER                                    */}
+          {/* DYNAMIC MODE QUICK TABS HELPER (Voucher / Buy Pass)               */}
           {/* ================================================================= */}
           {(() => {
             const enabledModesCount =
-              (isFreeAccessAllowed ? 1 : 0) +
               (isVoucherAllowed ? 1 : 0) +
               (isBuyPassAllowed ? 1 : 0);
 
             const renderModeQuickTabs = (activeTab: 'identification' | 'voucher' | 'plan') => {
               if (enabledModesCount <= 1) return null;
-              const gridCols =
-                enabledModesCount === 3
-                  ? 'grid-cols-3'
-                  : 'grid-cols-2';
               return (
-                <div className={`grid ${gridCols} gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[10px]`}>
-                  {isFreeAccessAllowed && (
-                    <button
-                      type="button"
-                      onClick={() => setPortalStep('identification')}
-                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
-                        activeTab === 'identification'
-                          ? 'bg-[#f05e17] text-white shadow'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      <Zap className="w-3 h-3" />
-                      <span>Free Wi-Fi</span>
-                    </button>
-                  )}
+                <div className="grid grid-cols-2 gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[10px]">
                   {isVoucherAllowed && (
                     <button
                       type="button"
@@ -1605,33 +1630,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
             return (
               <>
-                {/* ================================================================= */}
-                {/* STEP 1: FREE WI-FI SIGN-UP (Only when Free Access Mode is ON)     */}
-                {/* ================================================================= */}
-                {portalStep === 'identification' && isFreeAccessAllowed && (
-                  <div className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left">
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-
-                    {renderModeQuickTabs('identification')}
-
-                    {renderGuestIdentificationInputs()}
-
-                    {renderTermsAndConditionsRow()}
-
-                    <div className="pt-0.5">
-                      <button
-                        type="button"
-                        onClick={handleConnectFree}
-                        disabled={!isTermsSatisfied || !isGuestFormValid || isConnecting}
-                        className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>{isConnecting ? 'Connecting...' : 'Connect Free Wi-Fi \u2192'}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 {/* ================================================================= */}
                 {/* STEP 2: 16-DIGIT OTT VOUCHER CODE LOGIN (Only when Voucher is ON) */}
                 {/* ================================================================= */}
@@ -2168,6 +2166,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             </form>
           )}
         </div>
+        </>
+        )}
       </main>
       )}
 

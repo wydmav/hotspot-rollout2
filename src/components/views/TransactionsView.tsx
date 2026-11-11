@@ -10,10 +10,12 @@ import {
   Bug,
   Copy,
   Check,
-  Ticket
+  Ticket,
+  Trash2
 } from 'lucide-react';
 import { PaymentTransaction, VerticalType } from '../../types';
 import { ExportService } from '../../services/exportService';
+import { storage } from '../../services/storage';
 import { ProviderLogo } from '../common/BrandLogos';
 import { copyToClipboard } from '../../utils/clipboard';
 
@@ -115,6 +117,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [isRechecking, setIsRechecking] = useState(false);
   const [recheckMessage, setRecheckMessage] = useState<string | null>(null);
   const [copiedPinId, setCopiedPinId] = useState<string | null>(null);
+  const [confirmDeleteTxId, setConfirmDeleteTxId] = useState<string | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   useEffect(() => {
     if (transactions.length === 0) {
@@ -180,9 +184,43 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {transactions.length > 0 && (
+            confirmClearAll ? (
+              <div className="flex items-center gap-1.5 bg-rose-950/80 border border-rose-500/50 rounded-lg px-2.5 py-1.5 text-xs font-mono">
+                <span className="text-rose-200 font-bold">Clear all {transactions.length}?</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    storage.clearTransactions();
+                    setSelectedTx(null);
+                    setConfirmClearAll(false);
+                  }}
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded cursor-pointer"
+                >
+                  Yes, Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearAll(false)}
+                  className="px-2 py-0.5 bg-slate-800 text-slate-300 rounded cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmClearAll(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-mono text-rose-300 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear Ledger</span>
+              </button>
+            )
+          )}
           <button
             onClick={() => ExportService.exportTransactionsToCsv(transactions)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-xs font-mono text-slate-300 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-xs font-mono text-slate-300 rounded-lg transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-slate-400" />
             <span>Export CSV</span>
@@ -309,15 +347,47 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           {tx.createdAt ? tx.createdAt.replace('T', ' ').slice(11, 19) : '—'}
                         </td>
                         <td className="py-3 text-right">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            isSuccess
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : tx.status === 'pending'
-                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                                : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          }`}>
-                            {tx.status.toUpperCase()}
-                          </span>
+                          <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              isSuccess
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : tx.status === 'pending'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                            }`}>
+                              {tx.status.toUpperCase()}
+                            </span>
+                            {confirmDeleteTxId === tx.id ? (
+                              <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    storage.deleteTransaction(tx.id);
+                                    setConfirmDeleteTxId(null);
+                                  }}
+                                  className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteTxId(null)}
+                                  className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteTxId(tx.id)}
+                                className="p-1 text-slate-500 hover:text-rose-400 rounded cursor-pointer"
+                                title="Delete Transaction"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

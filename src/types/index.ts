@@ -506,6 +506,9 @@ export interface ScopePortalConfig {
   // Auth & Access
   allowFreeAccess: boolean;
   freeAccessDurationMinutes: number;
+  freeButtonX?: number; // 0 - 100 horizontal % (default 50)
+  freeButtonY?: number; // 5 - 95 vertical % (default 88 at bottom)
+  freeButtonText?: string; // default "Login for free"
   allowVoucherCode: boolean;
   allowOnlinePayment: boolean;
   // Global RouterOS Speed & Burst Capping (Mbps)

@@ -91,7 +91,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
 
   // External Client Groups (Tenant Brands) Modal State
   const [showTenantModal, setShowTenantModal] = useState(false);
-  const tenantGroups = storage.getTenantGroups();
+  const [tenantGroups, setTenantGroups] = useState(() => storage.getTenantGroups());
+  const [editingRouter, setEditingRouter] = useState<RouterDevice | null>(null);
 
   // Local Vertical Filter (Allows instant switching to bus, hotspot, village/community, stadium, park)
   const [localVerticalFilter, setLocalVerticalFilter] = useState<VerticalType | 'all'>(selectedVertical);
@@ -160,7 +161,9 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const [newRosVersion, setNewRosVersion] = useState<'v7' | 'v6'>('v7');
   const [newMacAddress, setNewMacAddress] = useState('D4:01:C3:AA:BB:CC');
 
-  React.useEffect(() => {
+  const refreshPartnerGroups = React.useCallback(() => {
+    const currentGroups = storage.getTenantGroups();
+    setTenantGroups([...currentGroups]);
     fetch('/api/partner-groups')
       .then((r) => r.json())
       .then((d) => {
@@ -171,19 +174,12 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       .catch(() => {});
   }, []);
 
+  React.useEffect(() => {
+    refreshPartnerGroups();
+  }, [refreshPartnerGroups]);
+
   const allPartnerGroupNames = React.useMemo(() => {
     const names = [
-      'Alliance Insurance Lesotho',
-      'Vodacom Lesotho Foundation',
-      'Econet Telecom Lesotho',
-      'Standard Lesotho Bank',
-      'Maluti Mountain Brewery',
-      'First National Bank Lesotho',
-      'Metropolitan Lesotho',
-      'LNDC Lesotho',
-      'T-Connect Internal Fleet',
-      'Lab / Test (MIKROTIK-TC)',
-      'Quarantine (Holding Group)',
       ...tenantGroups.map((g) => g.name),
       ...serverPartnerNames
     ];
@@ -194,7 +190,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         unique.push(clean);
       }
     });
-    return unique;
+    return unique.length > 0 ? unique : ['T-Connect Internal Fleet'];
   }, [tenantGroups, serverPartnerNames]);
 
   const handleSaveCustomPartnerGroup = () => {
@@ -561,12 +557,76 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     setTimeout(() => setCopiedFullScript(false), 2000);
   };
 
+  const openCreateRouterModal = () => {
+    setEditingRouter(null);
+    setNewName('');
+    setNewVertical('hotspot');
+    setNewPartnerName(allPartnerGroupNames[0] || 'Alliance Insurance Lesotho');
+    setNewTenantGroupId(tenantGroups[0]?.id || '');
+    setNewPolicyName('Hybrid Trial + PayLesotho 16-Digit OTT Policy');
+    setNewAccessMode('FREE_TRIAL_AND_PAID');
+    setNewSiteName('');
+    setNewDistrict('Maseru');
+    setNewPhysicalAddress('');
+    setNewModel('MikroTik hAP ax³ (v7)');
+    setNewRosVersion('v7');
+    setNewMacAddress('D4:01:C3:AA:BB:CC');
+    setShowAddModal(true);
+  };
+
+  const openEditRouterModal = (router: RouterDevice) => {
+    setEditingRouter(router);
+    setNewName(router.name);
+    setNewVertical(router.vertical || 'hotspot');
+    setNewPartnerName(router.partnerName || allPartnerGroupNames[0] || 'Alliance Insurance Lesotho');
+    setNewTenantGroupId(router.tenantGroupId || '');
+    setNewPolicyName(router.policyName || 'Hybrid Trial + PayLesotho 16-Digit OTT Policy');
+    setNewAccessMode(router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY'));
+    setNewSiteName(router.siteName || '');
+    setNewDistrict((router.district as LesothoDistrict) || 'Maseru');
+    setNewPhysicalAddress(router.physicalAddress || router.siteName || '');
+    setNewModel(router.model || 'MikroTik hAP ax³ (v7)');
+    setNewRosVersion(router.rosVersion || 'v7');
+    setNewMacAddress(router.macAddress || 'D4:01:C3:AA:BB:CC');
+    setShowAddModal(true);
+  };
+
   const handleCreateRouter = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newSiteName.trim() || !newPartnerName.trim() || !newPolicyName.trim()) return;
 
     const matchedGroup = tenantGroups.find((g) => g.id === newTenantGroupId || g.name.toLowerCase() === newPartnerName.trim().toLowerCase());
     const partnerTag = matchedGroup?.tag || `client:${newPartnerName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+    if (editingRouter) {
+      storage.updateRouter(editingRouter.id, {
+        name: newName.trim(),
+        vertical: newVertical,
+        siteName: newSiteName.trim(),
+        district: newDistrict,
+        physicalAddress: newPhysicalAddress.trim() || newSiteName.trim(),
+        partnerName: newPartnerName.trim(),
+        tenantGroupId: matchedGroup?.id || newTenantGroupId || undefined,
+        policyName: newPolicyName.trim(),
+        accessMode: newAccessMode,
+        freeModeEnabled: newAccessMode !== 'PAID_ONLY',
+        tags: [partnerTag, `scope:${newVertical}`, `district:${newDistrict.toLowerCase()}`],
+        model: newModel,
+        boardName: newModel.includes('ax3') ? 'hAP ax3' : 'RouterBOARD',
+        rosVersion: newRosVersion,
+        macAddress: newMacAddress.trim().toUpperCase(),
+        firmware: newRosVersion === 'v7' ? '7.15.2' : '6.49.10'
+      });
+      const updatedList = storage.getState().routers;
+      const updatedObj = updatedList.find((r) => r.id === editingRouter.id);
+      if (updatedObj) {
+        setSelectedRouter(updatedObj);
+      }
+      setEditingRouter(null);
+      setShowAddModal(false);
+      triggerToast(`Updated router "${newName.trim()}" details and synced to controller.`, 'success');
+      return;
+    }
 
     const created = onAddRouter({
       name: newName.trim(),
@@ -662,9 +722,6 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   };
 
   const handleRebootRouter = async (router: RouterDevice) => {
-    if (!confirm(`Are you sure you want to reboot "${router.name}"? Active hotspot sessions will temporarily disconnect.`)) {
-      return;
-    }
     setIsActionPending(true);
     setActiveAction('reboot');
     try {
@@ -720,24 +777,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   };
 
   const handleCopyRouterScript = (router: RouterDevice) => {
-    const script = RouterOSRenderer.renderProvisioningScript({
-      router,
-      hubDomain: controllerHost.trim() || '169.58.98.92:3000',
-      controllerHost: controllerHost.trim() || '169.58.98.92:3000',
+    const cmd = RouterOSRenderer.renderOneLiner({
+      controllerDomain: controllerHost.trim() || '169.58.98.92:3000',
       endpointProtocol,
-      hubWgPort: 51820,
-      hubTunnelIp: '10.99.0.1',
-      routerWgIp: router.wireguardIp || '10.99.1.50',
-      routerPrivateKey: 'eB3xK92ZlP4qN7mW1v8Y0sR5tU6iO2aL3cE5jH7kM9g=',
-      hubPublicKey: 'v7Tc0nnectHubWireguardKey2026Base64Salted99=',
-      radiusSecret: 'radsec_tconnect_lesotho_99120',
-      apiPassword: 'tc_pass_crypto_random_32char',
-      walledGardenDomains: WALLED_GARDEN_DOMAINS,
-      blockDoH: true,
-      rateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'
+      routerId: router.id,
+      token: router.token || 'tok_live_session',
+      rosVersion: router.rosVersion || 'v7'
     });
-    void copyToClipboard(script);
-    triggerToast(`Master Adoption Script copied for ${router.name}! Paste into WinBox -> New Terminal.`, 'info');
+    void copyToClipboard(cmd);
+    triggerToast(`Master Adoption One-Liner copied for ${router.name}! Paste into WinBox -> New Terminal.`, 'info');
   };
 
   return (
@@ -822,8 +870,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </button>
 
           <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+            onClick={openCreateRouterModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>+ Add Router to Fleet</span>
@@ -1250,20 +1298,43 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                         activeAction={activeAction}
                       />
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSlideoverRouter(router);
-                          setIsSlideoverOpen(true);
-                        }}
-                        className="py-1 px-2 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                        title="Open Detailed Inspection Slide-over"
-                      >
-                        <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
-                        <span>Inspect</span>
-                        <ChevronRight className="w-3 h-3 text-indigo-400" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditRouterModal(router);
+                          }}
+                          className="py-1 px-2 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer"
+                          title="Edit Router Details"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeadoptModalRouter(router);
+                          }}
+                          className="py-1 px-2 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer"
+                          title="Delete / De-Adopt Router"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-400" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSlideoverRouter(router);
+                            setIsSlideoverOpen(true);
+                          }}
+                          className="py-1 px-2 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Open Detailed Inspection Slide-over"
+                        >
+                          <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
+                          <span>Inspect</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1276,8 +1347,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   Click "+ Add Router to Fleet" above to register your first MikroTik hardware unit.
                 </p>
                 <button
-                  onClick={() => setShowAddModal(true)}
-                  className="px-3 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5"
+                  onClick={openCreateRouterModal}
+                  className="px-3 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add First Router</span>
@@ -1432,7 +1503,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   <button
                     onClick={() => setShowApAssistantModal(true)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold font-mono transition-colors shadow-sm cursor-pointer whitespace-nowrap"
-                    title="Access Points and Winbox Setup Assistant (Ethernet Bridge & MIKROTIK-TC WiFi)"
+                    title="Access Points and Winbox Setup Assistant (Ethernet Bridge & T-Connect Hotspot Wi-Fi)"
                   >
                     <Network className="w-3.5 h-3.5 text-amber-400" />
                     <span>APs &amp; Winbox Assistant</span>
@@ -1517,7 +1588,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <div>
                       <p className="font-bold text-amber-300">Awaiting WinBox Handshake</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        Already ran the script in WinBox? Click <strong>Verify Handshake</strong> or <strong>Mark Adopted</strong> to confirm.
+                        Already ran the Master One-Liner in WinBox? Click <strong>Verify Handshake</strong> or <strong>Mark Adopted</strong> to confirm.
                       </p>
                     </div>
                   </div>
@@ -1552,8 +1623,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </div>
               )}
 
-              {/* Single Master Adoption Script (100% Working Captive Portal Redirect + Internet NAT + 15s Live Sync) */}
-              <div className="bg-gradient-to-r from-emerald-500/15 via-[#12192c] to-amber-500/15 p-5 rounded-xl border border-emerald-500/40 space-y-3.5 font-mono">
+              {/* UNIFIED MASTER ADOPTION ONE-LINER (FETCHES & IMPORTS MASTER SCRIPT + ON-ROUTER SPLASH HTML + 15S LIVE SYNC) */}
+              <div className="bg-gradient-to-r from-emerald-500/15 via-[#12192c] to-amber-500/15 p-5 rounded-xl border border-emerald-500/40 space-y-4 font-mono">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
                     <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0">
@@ -1562,34 +1633,56 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-extrabold text-white tracking-wide uppercase">
-                          MASTER ROUTER ADOPTION SCRIPT (PASTE INTO WINBOX &rarr; NEW TERMINAL)
+                          MASTER ROUTER ADOPTION ONE-LINER (PASTE INTO WINBOX &rarr; NEW TERMINAL)
                         </span>
                         <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded">
-                          1-CLICK END-TO-END
+                          ONE-LINER AUTO-IMPORT
                         </span>
                       </div>
                       <p className="text-xs text-slate-300 mt-0.5">
-                        Configures everything in one paste: <strong>ether1 WAN1 Internet + NAT</strong>, <strong>ether2–ether6 + MIKROTIK-TC Wi-Fi</strong> on <strong>bridgeLocal (10.10.0.1/22)</strong>, instant <strong>Captive Portal Popup Redirect</strong> to <code>{endpointProtocol}://{controllerHost}/portal</code>, and <strong>15s Real-Time Sync</strong>.
+                        One command fetches and imports the complete Master Script: <strong>ether1 WAN1 Internet + NAT</strong>, <strong>ether2–ether6 + Open Wi-Fi &ldquo;T-Connect Hotspot&rdquo; (2.4GHz &amp; 5GHz)</strong> on <strong>bridgeLocal (10.10.0.1/22)</strong>, <strong>On-Router Hosted Splash HTML (<code>hotspot/login.html</code>)</strong>, and <strong>15s Live Dashboard Sync</strong>.
                       </p>
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleCopyFullScript}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-xs rounded-lg transition-all shadow-md shadow-emerald-500/20 cursor-pointer shrink-0"
-                  >
-                    {copiedFullScript ? (
-                      <>
-                        <Check className="w-4 h-4 text-slate-950" />
-                        <span>Copied Master Adoption Script!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-4 h-4 text-slate-950" />
-                        <span>Copy Master Adoption Script</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleCopyOneLiner}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-xs rounded-lg transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
+                    >
+                      {copiedOneLiner ? (
+                        <>
+                          <Check className="w-4 h-4 text-slate-950" />
+                          <span>Copied Master One-Liner!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4 text-slate-950" />
+                          <span>Copy Master One-Liner Command</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyFullScript}
+                      className="flex items-center gap-1.5 px-3 py-2.5 bg-[#161d31] hover:bg-[#232d42] border border-[#2b3752] text-slate-200 font-bold text-xs rounded-lg transition-colors cursor-pointer"
+                      title="Copy the raw full .rsc script directly if needed"
+                    >
+                      {copiedFullScript ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Copied Full .rsc</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Copy Raw .rsc</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Controller Endpoint Configuration for VPS / Router */}
@@ -1621,176 +1714,27 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                   </div>
                 </div>
 
-                <div className="p-3 bg-[#080b12] rounded-lg border border-[#1b233a] font-mono text-[11px] text-emerald-200/90 max-h-64 overflow-y-auto whitespace-pre leading-relaxed select-all">
-                  {provisioningScript}
-                </div>
-              </div>
-
-              {/* ======================================================= */}
-              {/* SECTION: PORT 1 WAN (STARLINK) & BRIDGE PORTS MANAGER    */}
-              {/* ======================================================= */}
-              <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4 font-mono text-xs">
-                <div className="flex items-center justify-between border-b border-[#1b233a] pb-3">
-                  <div className="flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-cyan-400" />
-                    <span className="font-extrabold text-white uppercase tracking-wider">
-                      Port 1 WAN (Starlink) &amp; Hotspot Bridge Ports
-                    </span>
+                {/* One-Liner Terminal Command Box */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-emerald-300 font-bold">
+                    <span>1. Paste this single command into WinBox &rarr; New Terminal:</span>
+                    <span className="text-slate-400">SSID: <strong className="text-amber-300">T-Connect Hotspot</strong> (Open 2.4GHz &amp; 5GHz)</span>
                   </div>
-                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                    hAP ax³ Ready
-                  </span>
-                </div>
-
-                <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-2 text-[11px]">
-                  <div className="flex items-center gap-2 text-white font-bold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Port 1 (<code className="text-cyan-300">ether1</code>) is Primary WAN</span>
-                  </div>
-                  <p className="text-slate-400 leading-relaxed">
-                    Connect your <strong>Starlink Dishy / Ethernet Adapter</strong> into <strong>Port 1</strong>. It automatically runs a DHCP client, captures your Starlink public/CGNAT IP, and acts as the default gateway.
-                  </p>
-                </div>
-
-                {/* Bridge Extra Ports Generator */}
-                <div className="space-y-3 pt-1">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="text-slate-300 font-bold">Bridge Extra Ports for Hotspot Clients / Access Points:</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400 text-[10px]">Bridge Name:</span>
-                      <select
-                        value={selectedBridgeName}
-                        onChange={(e) => setSelectedBridgeName(e.target.value)}
-                        className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white text-xs"
-                      >
-                        <option value="bridgeLocal">bridgeLocal (hAP ax³ Default)</option>
-                        <option value="tctower-bridge">tctower-bridge (Tower AP Bridge)</option>
-                        <option value="mkcontroller-bridge">mkcontroller-bridge (Standard)</option>
-                        <option value="tconnect-bridge">tconnect-bridge</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-slate-400 text-[11px]">Select Extra Port:</span>
-                      {(['ether2', 'ether3', 'ether4', 'ether5', 'ether6', 'wifi1', 'wifi2', 'sfp1', 'sfp-sfpplus1'] as const).map((port) => (
-                        <button
-                          key={port}
-                          type="button"
-                          onClick={() => setSelectedExtraPort(port)}
-                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
-                            selectedExtraPort === port
-                              ? 'bg-[#f05e17] border-[#f05e17] text-white'
-                              : 'bg-[#161d31] border-[#232d42] text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {port}
-                        </button>
-                      ))}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allPortsCmd = RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName);
-                        void copyToClipboard(allPortsCmd);
-                        setCopiedAllPortsBridgeCmd(true);
-                        setTimeout(() => setCopiedAllPortsBridgeCmd(false), 2500);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold rounded text-[11px] transition-colors cursor-pointer"
-                    >
-                      {copiedAllPortsBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedAllPortsBridgeCmd ? 'Copied All 5+ Ports Bridge!' : 'Copy Bridge All 5+ Ports (ether2–ether6 + WiFi)'}</span>
-                    </button>
-                  </div>
-
-                  {/* Generated Bridge Port Command */}
-                  <div className="p-3 bg-[#080b12] rounded-xl border border-[#1b233a] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-[10px]">RouterOS Terminal Command to Bridge All 5+ Ports Immediately (or {selectedExtraPort}):</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void copyToClipboard(
-                            RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName)
-                          );
-                          setCopiedBridgeCmd(true);
-                          setTimeout(() => setCopiedBridgeCmd(false), 2000);
-                        }}
-                        className="flex items-center gap-1.5 px-2.5 py-0.5 bg-[#161d31] hover:bg-[#232d42] border border-[#232d42] text-[11px] text-white rounded transition-colors"
-                      >
-                        {copiedBridgeCmd ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedBridgeCmd ? 'Copied!' : 'Copy 5-Port Bridge Script'}</span>
-                      </button>
-                    </div>
-                    <pre className="text-emerald-400 font-mono text-xs select-all whitespace-pre-wrap max-h-40 overflow-y-auto">
-                      {RouterOSRenderer.buildImmediateMultiPortBridgeCommands(selectedBridgeName)}
-                    </pre>
-                  </div>
-
-                  {/* Dual AP & Master Full-Stack Alignment Launcher Banner */}
-                  <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-[#161d31] to-emerald-500/15 border border-amber-500/40 rounded-xl flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-[280px] flex-1">
-                      <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
-                        <Network className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
-                          <span>Master Full-Stack Alignment Script &amp; AP Assistant</span>
-                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20 font-bold">
-                            10.10.0.1/22 · bridgeLocal (1,022 Hosts)
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                          Harmonizes all 5+ downstream ports <span className="font-mono text-amber-300">ether2, ether3, ether4, ether5, ether6, sfp1, wifi1, wifi2</span> to <span className="font-mono text-white">bridgeLocal</span>, DHCP pool <span className="font-mono text-emerald-400">10.10.0.50-10.10.3.250</span>, NAT, Hotspot captive portal, and open SSID <span className="font-mono text-amber-300">MIKROTIK-TC</span>.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const masterScript = RouterOSRenderer.renderFullStackAlignmentScript({
-                            bridgeName: 'bridgeLocal',
-                            gatewayIp: '10.10.0.1',
-                            subnetCidr: '10.10.0.0/22',
-                            dhcpRange: '10.10.0.50-10.10.3.250',
-                            ap1Ip: '10.10.0.2',
-                            ap2Ip: '10.10.0.3',
-                            ap3Ip: '10.10.0.5',
-                            vpsHost: controllerHost.trim() || '169.58.98.92:3000'
-                          });
-                          void copyToClipboard(masterScript);
-                          setCopiedMasterScript(true);
-                          setTimeout(() => setCopiedMasterScript(false), 2500);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs rounded-lg transition-all shadow-md shadow-orange-500/20 cursor-pointer"
-                      >
-                        {copiedMasterScript ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-slate-950" />
-                            <span>Copied Master Script!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5 text-slate-950" />
-                            <span>Copy Master Script</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setShowApAssistantModal(true)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-lg border border-slate-700 transition-colors shadow-sm shrink-0 whitespace-nowrap cursor-pointer"
-                      >
-                        Open AP &amp; Winbox Assistant &rarr;
-                      </button>
-                    </div>
+                  <div className="p-3.5 bg-[#080b12] rounded-lg border border-emerald-500/40 font-mono text-xs text-emerald-300 overflow-x-auto whitespace-pre select-all shadow-inner">
+                    {oneLiner}
                   </div>
                 </div>
+
+                {/* Expandable Full Master Script Preview */}
+                <details className="group bg-[#0b0f1a] rounded-lg border border-[#1b233a] overflow-hidden">
+                  <summary className="px-3.5 py-2 text-[11px] font-bold text-slate-300 cursor-pointer hover:text-white flex items-center justify-between select-none">
+                    <span>Inspect Underlying Master Adoption Script (<code>/api/devices/{selectedRouter.id}/adopt.rsc</code>)</span>
+                    <span className="text-[10px] text-emerald-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <div className="p-3 bg-[#080b12] border-t border-[#1b233a] font-mono text-[11px] text-emerald-200/90 max-h-64 overflow-y-auto whitespace-pre leading-relaxed select-all">
+                    {provisioningScript}
+                  </div>
+                </details>
               </div>
 
               {/* ======================================================= */}
@@ -1917,8 +1861,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 Add a new MikroTik hardware unit to generate an encrypted, single-use one-line terminal adoption script for RouterOS v6 or v7.
               </p>
               <button
-                onClick={() => setShowAddModal(true)}
-                className="mt-2 px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-mono text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                onClick={openCreateRouterModal}
+                className="mt-2 px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-mono text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ Add MikroTik Router</span>
@@ -1928,20 +1872,25 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         </div>
       </div>
 
-      {/* Add Router / Hotspot Modal (Enforces Scope, Partner/Group, Policy, District & Venue) */}
+      {/* Add / Edit Router Modal (Enforces Scope, Partner/Group, Policy, District & Venue) */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl my-6">
             <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
               <div>
-                <h3 className="text-base font-extrabold text-white">Add New Hotspot &amp; MikroTik Router</h3>
+                <h3 className="text-base font-extrabold text-white">
+                  {editingRouter ? `Edit Router: ${editingRouter.name}` : 'Add New Hotspot & MikroTik Router'}
+                </h3>
                 <p className="text-[11px] font-mono text-cyan-400 mt-0.5">
                   Mandatory Map Binding: Scope &middot; Partner/Group &middot; Policy &middot; District &middot; Venue
                 </p>
               </div>
               <button 
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-white text-sm"
+                onClick={() => {
+                  setShowAddModal(false);
+                  setEditingRouter(null);
+                }}
+                className="text-slate-400 hover:text-white text-sm cursor-pointer"
               >
                 ✕
               </button>
@@ -2153,16 +2102,19 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
               <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingRouter(null);
+                  }}
+                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
+                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm cursor-pointer"
                 >
-                  Add Hotspot &amp; Plot on Map
+                  {editingRouter ? 'Save Router Changes' : 'Add Hotspot & Plot on Map'}
                 </button>
               </div>
             </form>
@@ -2225,6 +2177,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           onRebootRouter={(r) => handleRebootRouter(r)}
           onResyncConfig={(r) => handleResyncConfig(r)}
           onCopyOneLiner={(r) => handleCopyRouterScript(r)}
+          onEditRouter={(r) => openEditRouterModal(r)}
           onDeleteRouter={(id) => {
             const r = routers.find(item => item.id === id);
             if (r) {
@@ -2537,6 +2490,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         onClose={() => setShowTenantModal(false)}
         routers={routers}
         onGroupsUpdated={() => {
+          refreshPartnerGroups();
           triggerToast('External client tenant groups and splash policies updated.', 'success');
         }}
       />

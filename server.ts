@@ -549,6 +549,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
   const allowVoucherCode = cfg.allowVoucherCode !== undefined ? Boolean(cfg.allowVoucherCode) : true;
   const allowOnlinePayment = cfg.allowOnlinePayment !== undefined ? Boolean(cfg.allowOnlinePayment) : true;
+  const freeButtonX = typeof cfg.freeButtonX === 'number' ? cfg.freeButtonX : 50;
+  const freeButtonY = typeof cfg.freeButtonY === 'number' ? cfg.freeButtonY : 88;
+  const freeButtonText = cfg.freeButtonText ? String(cfg.freeButtonText).trim() : 'Login for free';
   const collectName = cfg.collectName !== undefined ? Boolean(cfg.collectName) : true;
   const collectPhone = cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true;
   const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : true;
@@ -593,22 +596,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>${brandTitle || 'T-Connect'} Wi-Fi Portal</title>
-<script>
-  // Redirect captive portal popup to live Portal Builder Splash View with client MAC/IP when controller host is reachable
-  (function() {
-    var hostOnly = "${host.split(':')[0]}";
-    var isLocalController = hostOnly === "127.0.0.1" || hostOnly === "localhost";
-    if (!isLocalController && window.location.hostname !== hostOnly) {
-      var target = "${baseUrl}/portal?mac=$(mac)&ip=$(ip)&link_login_only=$(link-login-only)&user_url=$(link-orig-esc)&scope=${scope}";
-      fetch("${baseUrl}/api/portal/config", { method: "GET", mode: "cors", cache: "no-store" })
-        .then(function(r) {
-          if (r && r.ok) window.location.replace(target);
-        })
-        .catch(function() {});
-    }
-  })();
-</script>
+<title>${brandTitle || 'T-Connect Hotspot'} Wi-Fi Portal</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body {
@@ -626,9 +614,36 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, ${(bgDarken / 100).toFixed(2)});
+    background: rgba(0, 0, 0, ${allowFreeAccess ? '0' : (bgDarken / 100).toFixed(2)});
     pointer-events: none;
     z-index: 1;
+  }
+  .free-only-wrap {
+    position: fixed;
+    z-index: 25;
+    left: ${freeButtonX}%;
+    top: ${freeButtonY}%;
+    transform: translate(-50%, -50%);
+    width: 86%;
+    max-width: 360px;
+  }
+  .btn-free-login {
+    width: 100%;
+    padding: 14px 20px;
+    border-radius: 4px;
+    border: none;
+    background: ${accentColor};
+    color: #fff;
+    font-size: 19px;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    text-align: center;
+    transition: transform 0.15s ease;
+  }
+  .btn-free-login:active {
+    transform: scale(0.98);
   }
   .main-wrap {
     position: relative;
@@ -861,6 +876,17 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 </div>
 
 <main class="main-wrap">
+  ${allowFreeAccess ? `
+  <!-- PURE FREE ACCESS MODE: Single Repositionable "Login for free" Button Over Wallpaper -->
+  <div class="free-only-wrap">
+    <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
+      <input type="hidden" name="username" value="T-TRIAL">
+      <input type="hidden" name="password" value="123">
+      <input type="hidden" name="dst" value="${postAuthDst}">
+      <button type="submit" id="freeSubmitBtn" class="btn-free-login">${freeButtonText}</button>
+    </form>
+  </div>
+  ` : `
   <div class="hero">
     ${badgeText ? `<div class="kicker">${badgeText}</div>` : ''}
     ${welcomeHeadline ? `<h1>${welcomeHeadline}</h1>` : ''}
@@ -870,7 +896,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     <div id="errBox" class="err-box"></div>
 
     <div class="tabs">
-      ${allowFreeAccess ? `<button type="button" id="tabBtn_free" class="tab-btn ${defaultTab === 'free' ? 'active' : ''}" onclick="switchTab('free')">Free Wi-Fi</button>` : ''}
       ${allowVoucherCode ? `<button type="button" id="tabBtn_voucher" class="tab-btn ${defaultTab === 'voucher' ? 'active' : ''}" onclick="switchTab('voucher')">Voucher</button>` : ''}
       ${allowOnlinePayment ? `<button type="button" id="tabBtn_buy" class="tab-btn ${defaultTab === 'buy' ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>` : ''}
     </div>
@@ -906,7 +931,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       </div>` : ''}
     </div>
 
-    <!-- SHARED MANDATORY T&Cs CHECKBOX + HYPERLINK POPUP FOR ALL MODES -->
+    <!-- SHARED MANDATORY T&Cs CHECKBOX + HYPERLINK POPUP FOR PAID/VOUCHER MODES -->
     ${termsEnabled ? `
     <div class="tc-row">
       <input type="checkbox" id="tcAcceptedBox" onchange="syncButtonsWithTerms()" />
@@ -915,20 +940,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       </label>
     </div>
     ` : ''}
+`}
 
-    ${allowFreeAccess ? `
-    <!-- TAB 1: FREE WI-FI -->
-    <div id="sec_free" class="sec ${defaultTab === 'free' ? 'active' : ''}">
-      <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
-        <input type="hidden" name="username" value="T-TRIAL">
-        <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="${postAuthDst}">
-        <button type="submit" id="freeSubmitBtn" class="btn-primary" ${termsEnabled ? 'disabled' : ''}>Connect Free Wi-Fi &rarr;</button>
-      </form>
-    </div>
-    ` : ''}
-
-    ${allowVoucherCode ? `
+    ${!allowFreeAccess && allowVoucherCode ? `
     <!-- TAB 2: 16-DIGIT OTT VOUCHER CODE -->
     <div id="sec_voucher" class="sec ${defaultTab === 'voucher' ? 'active' : ''}">
       <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
@@ -944,7 +958,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </div>
     ` : ''}
 
-    ${allowOnlinePayment ? `
+    ${!allowFreeAccess && allowOnlinePayment ? `
     <!-- TAB 3: BUY SPEED PASS (PayLesotho M-Pesa / EcoCash -> Copy OTT Voucher -> Redeem) -->
     <div id="sec_buy" class="sec ${defaultTab === 'buy' ? 'active' : ''}">
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
@@ -989,9 +1003,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       </form>
     </div>
     ` : ''}
-  </div>
-
-  <div style="height:8px"></div>
+  ${!allowFreeAccess ? '</div><div style="height:8px"></div>' : ''}
 </main>
 
 <script>
@@ -1279,7 +1291,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
 
   function handleFreeSubmit(e) {
-    if (!validateGuestFields()) { e.preventDefault(); return false; }
     try {
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
@@ -2333,20 +2344,28 @@ app.post('/api/supabase/sync-all', async (req: Request, res: Response) => {
   });
 });
 
-// Partner / Sponsor Groups Registry Endpoints
+// Partner / Sponsor Groups Registry Endpoints (Full CRUD: GET, POST, PUT, DELETE)
 app.get('/api/partner-groups', (_req: Request, res: Response) => {
-  const customList: string[] = Array.isArray((serverStore as any).partnerGroups)
-    ? (serverStore as any).partnerGroups
-    : [];
-  const merged = Array.from(new Set([...customList, ...DEFAULT_PARTNER_GROUP_NAMES]));
+  if (!Array.isArray((serverStore as any).partnerGroups)) {
+    (serverStore as any).partnerGroups = [...DEFAULT_PARTNER_GROUP_NAMES];
+    saveServerPortalStore(serverStore);
+  }
   res.json({
     success: true,
-    partnerGroups: merged
+    partnerGroups: (serverStore as any).partnerGroups
   });
 });
 
 app.post('/api/partner-groups', async (req: Request, res: Response) => {
-  const { name, group } = req.body || {};
+  const { name, group, partnerGroups } = req.body || {};
+  if (Array.isArray(partnerGroups)) {
+    (serverStore as any).partnerGroups = partnerGroups.map((n: any) => String(n || '').trim()).filter(Boolean);
+    saveServerPortalStore(serverStore);
+    return res.json({
+      success: true,
+      partnerGroups: (serverStore as any).partnerGroups
+    });
+  }
   const groupName = String(name || group?.name || '').trim();
   if (!groupName) {
     return res.status(400).json({ success: false, message: 'Partner / Sponsor Group name is required.' });
@@ -2376,7 +2395,51 @@ app.post('/api/partner-groups', async (req: Request, res: Response) => {
   res.json({
     success: true,
     name: groupName,
-    partnerGroups: Array.from(new Set([...current, ...DEFAULT_PARTNER_GROUP_NAMES]))
+    partnerGroups: current
+  });
+});
+
+app.put('/api/partner-groups', (req: Request, res: Response) => {
+  const { oldName, newName, group } = req.body || {};
+  const targetOld = String(oldName || '').trim();
+  const targetNew = String(newName || group?.name || '').trim();
+  if (!targetNew) {
+    return res.status(400).json({ success: false, message: 'Updated Partner / Sponsor Group name is required.' });
+  }
+  const current: string[] = Array.isArray((serverStore as any).partnerGroups)
+    ? (serverStore as any).partnerGroups
+    : [...DEFAULT_PARTNER_GROUP_NAMES];
+  const updated = current.map((n) =>
+    targetOld && n.toLowerCase() === targetOld.toLowerCase() ? targetNew : n
+  );
+  if (!updated.some((n) => n.toLowerCase() === targetNew.toLowerCase())) {
+    updated.unshift(targetNew);
+  }
+  (serverStore as any).partnerGroups = Array.from(new Set(updated));
+  saveServerPortalStore(serverStore);
+  res.json({
+    success: true,
+    name: targetNew,
+    partnerGroups: (serverStore as any).partnerGroups
+  });
+});
+
+app.delete('/api/partner-groups', (req: Request, res: Response) => {
+  const nameParam = String(req.body?.name || req.query?.name || '').trim();
+  if (!nameParam) {
+    return res.status(400).json({ success: false, message: 'Group name is required to delete.' });
+  }
+  const current: string[] = Array.isArray((serverStore as any).partnerGroups)
+    ? (serverStore as any).partnerGroups
+    : [...DEFAULT_PARTNER_GROUP_NAMES];
+  (serverStore as any).partnerGroups = current.filter(
+    (n) => n.toLowerCase() !== nameParam.toLowerCase()
+  );
+  saveServerPortalStore(serverStore);
+  res.json({
+    success: true,
+    deleted: nameParam,
+    partnerGroups: (serverStore as any).partnerGroups
   });
 });
 
@@ -4496,6 +4559,44 @@ app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
   });
 });
 
+app.delete('/api/portal/guest-connect/:id', (req: Request, res: Response) => {
+  const targetId = String(req.params.id || '').replace(/^lead_srv_|^lead_/, '');
+  const rawId = String(req.params.id || '');
+  serverStore.guestEvents = (serverStore.guestEvents || []).filter(
+    (ev: any) => ev.id !== rawId && ev.id !== targetId && `lead_${ev.id}` !== rawId && `lead_srv_${ev.id}` !== rawId
+  );
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, deletedId: rawId });
+});
+
+app.delete('/api/portal/transactions/:id', (req: Request, res: Response) => {
+  const txId = String(req.params.id || '');
+  serverStore.transactions = (serverStore.transactions || []).filter(
+    (t: any) => t.id !== txId && t.transactionRef !== txId
+  );
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, deletedId: txId });
+});
+
+app.delete('/api/portal/transactions', (_req: Request, res: Response) => {
+  serverStore.transactions = [];
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, cleared: true });
+});
+
+app.delete('/api/portal/vouchers/:id', (req: Request, res: Response) => {
+  const vId = String(req.params.id || '');
+  const cleanDigits = vId.replace(/\D/g, '');
+  serverStore.vouchers = (serverStore.vouchers || []).filter(
+    (v: any) => v.id !== vId && v.code !== vId && (cleanDigits.length < 12 || String(v.code || '').replace(/\D/g, '') !== cleanDigits)
+  );
+  serverStore.issuedPayLesothoOttVouchers = (serverStore.issuedPayLesothoOttVouchers || []).filter(
+    (v: any) => v.pin !== cleanDigits && v.transactionId !== vId
+  );
+  saveServerPortalStore(serverStore);
+  res.json({ success: true, deletedId: vId });
+});
+
 app.get('/api/portal/config', (_req: Request, res: Response) => {
   try {
     if (fs.existsSync(portalConfigFilePath)) {
@@ -5797,7 +5898,25 @@ app.post('/api/gateways/paylesotho/reconcile', async (req: Request, res: Respons
   });
 });
 
+function isPhantomTestRouter(id?: string, name?: string): boolean {
+  const cleanId = String(id || '').trim().toLowerCase();
+  const cleanName = String(name || '').trim().toLowerCase();
+  return (
+    cleanId === 'rt-test' ||
+    cleanId === 'rt_demo' ||
+    cleanId === 'rt_test' ||
+    cleanName === 'mikrotik-t-test' ||
+    cleanName === 'mikrotik-rt_demo' ||
+    cleanName === 'mikrotik-rt-test'
+  );
+}
+
 function persistMonitoredRoutersToStore() {
+  for (const [id, r] of monitoredRouters.entries()) {
+    if (isPhantomTestRouter(id, r?.name)) {
+      monitoredRouters.delete(id);
+    }
+  }
   serverStore.routers = Array.from(monitoredRouters.values());
   saveServerPortalStore(serverStore);
 }
@@ -5807,7 +5926,7 @@ function persistMonitoredRoutersToStore() {
 if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   const bootNow = Date.now();
   serverStore.routers.forEach((r: any) => {
-    if (!r || !r.id) return;
+    if (!r || !r.id || isPhantomTestRouter(r.id, r.name)) return;
     const realHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
     const hasBeenAdoptedBefore = Boolean(r.adoptedAt || r.keepAliveAdopted || r.status === 'online' || realHb > 0);
     const isCurrentlyOnline = r.status !== 'offline' && hasBeenAdoptedBefore;
@@ -5896,11 +6015,21 @@ setInterval(async () => {
 
 // Client UI Router Sync endpoint
 app.post('/api/devices/sync', (req: Request, res: Response) => {
-  const { routers } = req.body;
+  const { routers, replaceAll } = req.body || {};
   if (Array.isArray(routers)) {
     const now = Date.now();
     let changed = false;
-    routers.forEach((r: any) => {
+    const validRouters = routers.filter((r: any) => r && r.id && !isPhantomTestRouter(r.id, r.name));
+    if (replaceAll) {
+      const incomingIds = new Set(validRouters.map((r: any) => String(r.id)));
+      for (const existingId of Array.from(monitoredRouters.keys())) {
+        if (!incomingIds.has(existingId)) {
+          monitoredRouters.delete(existingId);
+          changed = true;
+        }
+      }
+    }
+    validRouters.forEach((r: any) => {
       if (!r || !r.id) return;
       const existing = monitoredRouters.get(r.id);
       const realHb = existing?.lastRealHeartbeatAt || (typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0);
@@ -6129,56 +6258,29 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       scopedCfg.globalBurstDownloadMbps ?? 30
     );
 
-  // Register in watchdog map immediately upon real MikroTik fetch of /adopt.rsc
+  // Register in watchdog map upon real MikroTik fetch of /adopt.rsc (ignore synthetic test/demo IDs)
   const now = Date.now();
-  if (existing) {
-    existing.status = 'online';
-    existing.keepAliveAdopted = true;
-    existing.adoptedAt = existing.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
-    existing.token = undefined;
-    existing.wireguardIp = assignedWgIp;
-    existing.accessMode = effectiveAccessMode;
-    existing.freeModeEnabled = effectiveAccessMode !== 'PAID_ONLY';
-    existing.freeRateLimit = effectiveRateLimit;
-    (existing as any).globalRateLimit = effectiveRateLimit;
-    existing.lastHeartbeat = 'Just now';
-    existing.lastHeartbeatTimestamp = now;
-    existing.lastRealHeartbeatAt = now;
-    existing.publicWanIp = req.ip || existing.publicWanIp;
-    existing.missedBeats = 0;
-    existing.offlineSince = undefined;
-    existing.offlineReason = undefined;
-  } else {
-    monitoredRouters.set(routerId, {
-      id: routerId,
-      name: `MikroTik-${routerId.slice(-6)}`,
-      siteName: 'Adopted Hotspot Site',
-      vertical: routerScope,
-      district: 'Maseru',
-      partnerName: 'T-Connect Internal Fleet',
-      tenantGroupId: 'grp_lab_test',
-      policyName: 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
-      accessMode: effectiveAccessMode,
-      freeModeEnabled: effectiveAccessMode !== 'PAID_ONLY',
-      freeRateLimit: effectiveRateLimit,
-      status: 'online',
-      keepAliveAdopted: true,
-      adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      publicWanIp: req.ip || '127.0.0.1',
-      wireguardIp: assignedWgIp,
-      lastHeartbeat: 'Just now',
-      lastHeartbeatTimestamp: now,
-      lastRealHeartbeatAt: now,
-      uptime: '1m',
-      cpuLoad: 2,
-      memoryUsage: 20,
-      activeSessions: 0,
-      missedBeats: 0,
-      webfigPort: 80,
-      winboxPort: 8291
-    });
+  if (!isPhantomTestRouter(routerId)) {
+    if (existing) {
+      existing.status = 'online';
+      existing.keepAliveAdopted = true;
+      existing.adoptedAt = existing.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
+      existing.token = undefined;
+      existing.wireguardIp = assignedWgIp;
+      existing.accessMode = effectiveAccessMode;
+      existing.freeModeEnabled = effectiveAccessMode !== 'PAID_ONLY';
+      existing.freeRateLimit = effectiveRateLimit;
+      (existing as any).globalRateLimit = effectiveRateLimit;
+      existing.lastHeartbeat = 'Just now';
+      existing.lastHeartbeatTimestamp = now;
+      existing.lastRealHeartbeatAt = now;
+      existing.publicWanIp = req.ip || existing.publicWanIp;
+      existing.missedBeats = 0;
+      existing.offlineSince = undefined;
+      existing.offlineReason = undefined;
+      persistMonitoredRoutersToStore();
+    }
   }
-  persistMonitoredRoutersToStore();
 
   // Generate valid 32-byte Base64 curve25519 WireGuard keys
   const routerPrivateKey = crypto.randomBytes(32).toString('base64');
@@ -6473,13 +6575,21 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
     (scopedCfg.allowFreeAccess !== false ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
   const allowFree = defaultAccessMode !== 'PAID_ONLY';
 
+  if (isPhantomTestRouter(routerId)) {
+    return res.json({
+      success: true,
+      status: 'online',
+      message: `Diagnostic test router verified (not persisted to production fleet).`
+    });
+  }
+
   if (!router) {
     router = {
       id: routerId,
-      name: `MikroTik-${routerId.slice(-6)}`,
-      siteName: 'Adopted Hotspot Site',
-      vertical: 'hotspot',
-      district: 'Maseru',
+      name: req.body?.name || `MikroTik-${routerId.slice(-6)}`,
+      siteName: req.body?.siteName || 'Adopted Hotspot Site',
+      vertical: req.body?.vertical || 'hotspot',
+      district: req.body?.district || 'Maseru',
       status: 'online',
       keepAliveAdopted: true,
       adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -7372,13 +7482,13 @@ function executeRouterOSCliCommand(
     queueToRouter(fixCmds);
     return {
       output: `[T-Connect Auto-Fix & Speed Enforcement Executed on ${routerName}]
-  1. Bridge & Radios  : ether2..ether6 + wifi1..wifi2 (MIKROTIK-TC) -> bridgeLocal (10.10.0.1/22)
-  2. Hotspot Server   : tc-hotspot enabled on bridgeLocal (port 80 www enabled, http-cookie-lifetime fixed)
+  1. Bridge & Radios  : ether2..ether6 + wifi1..wifi2 (T-Connect Hotspot) -> bridgeLocal (10.10.0.1/22)
+  2. Hotspot Server   : tc-hotspot enabled on bridgeLocal (port 80 www enabled, NO invalid rate-limit on server profile)
   3. DNS Intercept    : UDP/53 & TCP/53 dstnat redirected to 10.10.0.1 (iOS CNA & Android probe ready)
   4. FastTrack Status : DISABLED & REMOVED from /ip firewall filter (prevents speed cap bypass)
   5. Simple Queue Cap : tc-hotspot-speed-cap on 10.10.0.0/22 -> max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit}
   6. Hotspot Profile  : tc-speed-cap rate-limit="${rateParts.fullRateLimit}"
-  7. On-Router Portal : hotspot/login.html & flash/hotspot/login.html synced with ${portalBaseUrl}/portal
+  7. On-Router Portal : hotspot/login.html hosted directly on router & synced with ${portalBaseUrl}
   8. Bridge Dispatch  : ${fixCmds.length} RouterOS commands queued to live router (${wgIp})`,
       queuedCount: fixCmds.length
     };
@@ -7689,14 +7799,14 @@ add arp=enabled comment="T-Connect Hotspot & AP Local Bridge" name=bridgeLocal p
 /interface wireguard
 add comment="T-Connect Management Tunnel" listen-port=51820 name=wg-tconnect
 /interface wifi
-set [ find default-name=wifi1 ] configuration.mode=ap configuration.ssid=MIKROTIK-TC datapath.bridge=bridgeLocal disabled=no
-set [ find default-name=wifi2 ] configuration.mode=ap configuration.ssid=MIKROTIK-TC datapath.bridge=bridgeLocal disabled=no
+set [ find default-name=wifi1 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal disabled=no
+set [ find default-name=wifi2 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal disabled=no
 /ip pool
 add name=tc-hotspot-pool ranges=10.10.0.50-10.10.3.250
 /ip dhcp-server
 add address-pool=tc-hotspot-pool interface=bridgeLocal lease-time=1h name=tc-dhcp-server
 /ip hotspot profile
-add dns-name="" hotspot-address=10.10.0.1 html-directory=hotspot login-by=http-chap,http-pap name=tc-hotspot-profile rate-limit="${rateParts.fullRateLimit}" split-user-domain=no use-radius=no
+add dns-name="" hotspot-address=10.10.0.1 html-directory=hotspot login-by=http-chap,http-pap name=tc-hotspot-profile split-user-domain=no use-radius=no
 /ip hotspot
 add address-pool=tc-hotspot-pool addresses-per-mac=unlimited disabled=no idle-timeout=5m interface=bridgeLocal keepalive-timeout=2m name=tc-hotspot profile=tc-hotspot-profile
 /ip hotspot user profile
@@ -7823,16 +7933,11 @@ set name="${routerName}"`);
       if (normLower.includes('print')) {
         outputs.push(`Flags: * - default
  0 * name="default" hotspot-address=0.0.0.0 dns-name="" html-directory=hotspot
-     login-by=http-chap,http-pap rate-limit="${rateParts.fullRateLimit}" use-radius=no
+     login-by=http-chap,http-pap use-radius=no
  1   name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot
-     login-by=http-chap,http-pap split-user-domain=no rate-limit="${rateParts.fullRateLimit}" use-radius=no`);
+     login-by=http-chap,http-pap split-user-domain=no use-radius=no`);
       } else {
-        const rlMatch = line.match(/rate-limit="([^"]+)"/i) || line.match(/rate-limit=([^\s]+)/i);
-        if (rlMatch && router) {
-          router.freeRateLimit = rlMatch[1];
-          (router as any).globalRateLimit = rlMatch[1];
-        }
-        outputs.push(`[OK] Hotspot server profile tc-hotspot-profile updated (login-by=http-chap,http-pap, rate-limit="${rlMatch ? rlMatch[1] : rateParts.fullRateLimit}").`);
+        outputs.push(`[OK] Hotspot server profile tc-hotspot-profile updated (hotspot-address=10.10.0.1, login-by=http-chap,http-pap).`);
       }
       continue;
     }
@@ -7953,10 +8058,10 @@ Columns: SERVER, USER, ADDRESS, MAC-ADDRESS, UPTIME, RATE-LIMIT
         outputs.push(`Flags: M - MASTER; B - BOUND; R - RUNNING
 Columns: NAME, CONFIGURATION.MODE, CONFIGURATION.SSID, DATAPATH.BRIDGE
 #     NAME   CONFIGURATION.MODE  CONFIGURATION.SSID  DATAPATH.BRIDGE
-0 MBR wifi1  ap                  MIKROTIK-TC         bridgeLocal
-1 MBR wifi2  ap                  MIKROTIK-TC         bridgeLocal`);
+0 MBR wifi1  ap                  T-Connect Hotspot   bridgeLocal
+1 MBR wifi2  ap                  T-Connect Hotspot   bridgeLocal`);
       } else {
-        outputs.push(`[OK] Wi-Fi radios wifi1/wifi2 (SSID: MIKROTIK-TC, bridge: bridgeLocal) updated on ${routerName}.`);
+        outputs.push(`[OK] Wi-Fi radios wifi1/wifi2 (SSID: T-Connect Hotspot, bridge: bridgeLocal) updated on ${routerName}.`);
       }
       continue;
     }

@@ -264,14 +264,12 @@ export default function App() {
   }>>(new Map());
 
   useEffect(() => {
-    // Sync current router inventory with server-side sentinel map
-    if (state.routers && state.routers.length > 0) {
-      fetch('/api/devices/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ routers: state.routers })
-      }).catch(() => {});
-    }
+    // Sync current router inventory with server-side sentinel map (including when 0 routers remain)
+    fetch('/api/devices/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routers: state.routers || [], replaceAll: true })
+    }).catch(() => {});
 
     const pollWatchdog = async () => {
       try {
@@ -512,10 +510,15 @@ export default function App() {
 
   const handleDeleteRouter = async (routerId: string) => {
     if (!checkPermission('delete_router', 'Revoking router and tunnel keys')) return;
+    storage.deleteRouter(routerId);
     try {
       await fetch(`/api/devices/${routerId}`, { method: 'DELETE' });
+      await fetch('/api/devices/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routers: storage.getState().routers, replaceAll: true })
+      });
     } catch {}
-    storage.deleteRouter(routerId);
     showToast('Router unlinked from platform and tunnel keys revoked. Device can now be re-adopted freely.');
     if (isSupabaseConnected) {
       supabaseService.deleteRouterFromSupabase(routerId);

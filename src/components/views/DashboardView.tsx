@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   DollarSign, 
   Users, 
@@ -14,12 +14,16 @@ import {
   Radio,
   Ticket,
   Database,
-  Clock
+  Clock,
+  Smartphone,
+  Unlock,
+  Lock
 } from 'lucide-react';
-import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType } from '../../types';
+import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType, ScopePortalConfig } from '../../types';
 import { RegionalFleetMap } from './RegionalFleetMap';
 import { TransactionTrendsChart } from './TransactionTrendsChart';
 import { SessionDurationTrackingDisplay, computeSessionStats } from '../common/SessionDurationTrackingDisplay';
+import { DEFAULT_SCOPE_CONFIGS } from './ScopeCaptivePortalBuilder';
 import { storage } from '../../services/storage';
 
 interface DashboardViewProps {
@@ -48,6 +52,114 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [showTransitWidget, setShowTransitWidget] = useState(true);
   const [showWaveChart, setShowWaveChart] = useState(true);
   const [showSessionTracking, setShowSessionTracking] = useState(true);
+
+  const activeScopeKey: VerticalType =
+    selectedVertical === 'all'
+      ? 'hotspot'
+      : selectedVertical === 'village'
+      ? 'community'
+      : selectedVertical;
+
+  const readDashboardPortalScope = (scopeKey: VerticalType): ScopePortalConfig => {
+    const fallback = DEFAULT_SCOPE_CONFIGS[scopeKey] || DEFAULT_SCOPE_CONFIGS.hotspot;
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(`tconnect_portal_scope_${scopeKey}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return {
+            ...fallback,
+            ...parsed,
+            freeButtonX: typeof parsed.freeButtonX === 'number' ? parsed.freeButtonX : 50,
+            freeButtonY: typeof parsed.freeButtonY === 'number' ? parsed.freeButtonY : 88,
+            freeButtonText: parsed.freeButtonText || 'Login for free'
+          };
+        }
+      } catch {}
+    }
+    return fallback;
+  };
+
+  const [portalConfig, setPortalConfig] = useState<ScopePortalConfig>(() =>
+    readDashboardPortalScope(activeScopeKey)
+  );
+  const [freeModeSyncToast, setFreeModeSyncToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPortalConfig(readDashboardPortalScope(activeScopeKey));
+    fetch('/api/portal/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.success && data?.configs && data.configs[activeScopeKey]) {
+          const serverCfg = data.configs[activeScopeKey];
+          setPortalConfig((prev) => ({
+            ...prev,
+            ...serverCfg,
+            freeButtonX: typeof serverCfg.freeButtonX === 'number' ? serverCfg.freeButtonX : 50,
+            freeButtonY: typeof serverCfg.freeButtonY === 'number' ? serverCfg.freeButtonY : 88,
+            freeButtonText: serverCfg.freeButtonText || 'Login for free'
+          }));
+        }
+      })
+      .catch(() => {});
+  }, [activeScopeKey]);
+
+  const applyDashboardFreeAccessPatch = async (patch: Partial<ScopePortalConfig>, toastLabel?: string) => {
+    const targetScopes: VerticalType[] =
+      selectedVertical === 'all'
+        ? ['hotspot', 'community', 'village', 'park', 'bus', 'stadium']
+        : selectedVertical === 'village' || selectedVertical === 'community'
+        ? ['community', 'village']
+        : [selectedVertical];
+
+    const nextActive = {
+      ...portalConfig,
+      ...patch
+    };
+    setPortalConfig(nextActive);
+
+    const configsPayload: Record<string, ScopePortalConfig> = {};
+    (['hotspot', 'community', 'village', 'park', 'bus', 'stadium'] as VerticalType[]).forEach((sc) => {
+      const baseCfg = readDashboardPortalScope(sc === 'village' ? 'community' : sc);
+      const updatedCfg = targetScopes.includes(sc) ? { ...baseCfg, ...patch, scope: sc } : baseCfg;
+      configsPayload[sc] = updatedCfg;
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(`tconnect_portal_scope_${sc}`, JSON.stringify(updatedCfg));
+        } catch {}
+      }
+    });
+
+    try {
+      await fetch('/api/portal/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ configs: configsPayload })
+      });
+      if (patch.allowFreeAccess !== undefined) {
+        const nextPolicyMode = patch.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY';
+        await fetch('/api/devices/fleet/access-policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            vertical: selectedVertical === 'all' ? undefined : selectedVertical,
+            accessMode: nextPolicyMode,
+            freeDurationMinutes: 0,
+            freeRateLimit: '25M/10M'
+          })
+        });
+        storage.setRouterAccessPolicy('all', {
+          accessMode: nextPolicyMode,
+          freeDurationMinutes: 0,
+          freeRateLimit: '25M/10M'
+        });
+      }
+      if (toastLabel) {
+        setFreeModeSyncToast(toastLabel);
+        setTimeout(() => setFreeModeSyncToast(null), 3500);
+      }
+    } catch {}
+  };
 
   // Filter based on selected vertical
   const filteredRouters = selectedVertical === 'all' 
@@ -209,6 +321,160 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </label>
           </div>
         </div>
+      </div>
+
+      {/* ================================================================= */}
+      {/* MASTER FREE ACCESS MODE ("Login for free") DASHBOARD CONTROL BAR  */}
+      {/* ================================================================= */}
+      <div
+        className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-lg ${
+          portalConfig.allowFreeAccess
+            ? 'bg-gradient-to-r from-[#f05e17]/15 via-[#121829] to-[#0f1422] border-[#f05e17]/50'
+            : 'bg-[#0f1422] border-[#232d42]'
+        }`}
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                portalConfig.allowFreeAccess
+                  ? 'bg-[#f05e17]/20 border-[#f05e17]/40 text-[#f05e17]'
+                  : 'bg-[#161d31] border-[#232d42] text-slate-400'
+              }`}
+            >
+              {portalConfig.allowFreeAccess ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-extrabold text-white">
+                  Hotspot Free Access Mode (&ldquo;{portalConfig.freeButtonText || 'Login for free'}&rdquo; Splash Button)
+                </h2>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                    portalConfig.allowFreeAccess
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                >
+                  {portalConfig.allowFreeAccess ? 'ACTIVE — 1-TAP FREE LOGIN ON' : 'OFF — PAID / VOUCHER MODE ONLY'}
+                </span>
+                {freeModeSyncToast && (
+                  <span className="text-[11px] font-mono text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded">
+                    {freeModeSyncToast}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 mt-1">
+                {portalConfig.allowFreeAccess
+                  ? `Showing ONLY the clean orange "${portalConfig.freeButtonText || 'Login for free'}" button over your hotspot wallpaper (positioned at X: ${portalConfig.freeButtonX ?? 50}%, Y: ${portalConfig.freeButtonY ?? 88}%).`
+                  : 'Free Wi-Fi is currently disabled. Guests must enter a 16-digit OTT Voucher PIN or purchase a pass.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const nextState = !portalConfig.allowFreeAccess;
+                applyDashboardFreeAccessPatch(
+                  { allowFreeAccess: nextState },
+                  nextState
+                    ? 'Free Access ("Login for free") enabled across portal & routers'
+                    : 'Free Access disabled — reverted to Paid/Voucher mode'
+                );
+              }}
+              className={`px-4 py-2.5 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 shadow-md ${
+                portalConfig.allowFreeAccess
+                  ? 'bg-[#f05e17] hover:bg-[#d94c0b] text-white'
+                  : 'bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>
+                {portalConfig.allowFreeAccess ? 'Turn Free Access Mode OFF' : 'Turn Free Access Mode ON'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigateTab('portal')}
+              className="px-3.5 py-2.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 font-mono text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-[#f05e17]" />
+              <span>Open Portal Preview &amp; Drag Position</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Repositioning Sliders & Presets (Visible right on Dashboard when Free Access Mode is ON) */}
+        {portalConfig.allowFreeAccess && (
+          <div className="mt-4 pt-3.5 border-t border-white/10 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-mono text-slate-400 mr-1">Quick Position:</span>
+              {[
+                { label: 'Bottom (Default)', x: 50, y: 88 },
+                { label: 'Center', x: 50, y: 50 },
+                { label: 'Top', x: 50, y: 15 }
+              ].map((preset) => {
+                const isSelected =
+                  Math.abs((portalConfig.freeButtonY ?? 88) - preset.y) <= 3 &&
+                  Math.abs((portalConfig.freeButtonX ?? 50) - preset.x) <= 3;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() =>
+                      applyDashboardFreeAccessPatch(
+                        { freeButtonX: preset.x, freeButtonY: preset.y },
+                        `Button moved to ${preset.label}`
+                      )
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                        : 'bg-[#121829] text-slate-300 border-[#232d42] hover:border-white/30'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
+                Vertical (Y: {portalConfig.freeButtonY ?? 88}%):
+              </span>
+              <input
+                type="range"
+                min={8}
+                max={92}
+                value={portalConfig.freeButtonY ?? 88}
+                onChange={(e) =>
+                  applyDashboardFreeAccessPatch({ freeButtonY: Number(e.target.value) })
+                }
+                className="w-full accent-[#f05e17] cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
+                Horizontal (X: {portalConfig.freeButtonX ?? 50}%):
+              </span>
+              <input
+                type="range"
+                min={15}
+                max={85}
+                value={portalConfig.freeButtonX ?? 50}
+                onChange={(e) =>
+                  applyDashboardFreeAccessPatch({ freeButtonX: Number(e.target.value) })
+                }
+                className="w-full accent-[#f05e17] cursor-pointer"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Pristine Scratch Onboarding Card (Shown when zero mock data) */}

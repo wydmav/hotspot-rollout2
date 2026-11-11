@@ -553,19 +553,36 @@ class StorageService {
     }
   }
 
+  private isPhantomRouterRecord(r: any): boolean {
+    if (!r) return true;
+    const id = String(r.id || '').trim().toLowerCase();
+    const name = String(r.name || '').trim().toLowerCase();
+    return (
+      id === 'rt-test' ||
+      id === 'rt_demo' ||
+      id === 'rt_test' ||
+      name === 'mikrotik-t-test' ||
+      name === 'mikrotik-rt_demo' ||
+      name === 'mikrotik-rt-test'
+    );
+  }
+
   async hydrateRoutersFromServer(): Promise<void> {
     if (typeof window === 'undefined') return;
     try {
       const res = await fetch('/api/devices/watchdog/status');
       if (!res.ok) return;
       const data = await res.json();
-      if (data && Array.isArray(data.routers) && data.routers.length > 0) {
-        this.mergeRoutersFromServer(data.routers);
+      const validServerRouters = Array.isArray(data?.routers)
+        ? data.routers.filter((r: any) => !this.isPhantomRouterRecord(r))
+        : [];
+      if (validServerRouters.length > 0) {
+        this.mergeRoutersFromServer(validServerRouters);
       } else if (this.state.routers.length > 0) {
         fetch('/api/devices/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ routers: this.state.routers })
+          body: JSON.stringify({ routers: this.state.routers, replaceAll: true })
         }).catch(() => {});
       }
     } catch {}
@@ -574,11 +591,14 @@ class StorageService {
   mergeRoutersFromServer(serverRouters: any[]): void {
     if (!Array.isArray(serverRouters) || serverRouters.length === 0) return;
     let mutated = false;
+    const deletedIds: string[] = Array.isArray((this.state as any).deletedRouterIds)
+      ? (this.state as any).deletedRouterIds
+      : [];
     const localById = new Map<string, RouterDevice>();
     this.state.routers.forEach((r) => localById.set(r.id, r));
 
     serverRouters.forEach((sr: any) => {
-      if (!sr || !sr.id) return;
+      if (!sr || !sr.id || this.isPhantomRouterRecord(sr) || deletedIds.includes(sr.id)) return;
       const existing = localById.get(sr.id);
       const effectiveStatus: 'online' | 'offline' | 'pending_adoption' =
         sr.status === 'online' || sr.status === 'offline' || sr.status === 'pending_adoption'
@@ -730,33 +750,24 @@ class StorageService {
         const stored = window.localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.plans) {
-            const has10 = parsed.plans.some((p: HotspotPlan) => p.price === 10);
-            const has60 = parsed.plans.some((p: HotspotPlan) => p.price === 60);
-            const has280 = parsed.plans.some((p: HotspotPlan) => p.price === 280);
-            if (!has10 || !has60 || !has280) {
-              parsed.plans = STARTER_PLANS;
-            }
-          }
-          if (parsed.team && Array.isArray(parsed.team)) {
-            // Ensure all 5 designated accounts exist with their designated roles and passwords
-            INITIAL_TEAM.forEach((defaultMember) => {
-              const existingIndex = parsed.team.findIndex((m: any) => m.email?.toLowerCase() === defaultMember.email.toLowerCase());
-              if (existingIndex >= 0) {
-                parsed.team[existingIndex] = {
-                  ...defaultMember,
-                  ...parsed.team[existingIndex],
-                  role: defaultMember.role,
-                  name: defaultMember.name,
-                  password: defaultMember.password,
-                  status: 'active'
-                };
-              } else {
-                parsed.team.push(defaultMember);
-              }
-            });
+          if (!Array.isArray(parsed.plans)) {
+            parsed.plans = [...STARTER_PLANS];
+            parsed.plansInitialized = true;
+          } else if (!parsed.plansInitialized && parsed.plans.length === 0) {
+            parsed.plans = [...STARTER_PLANS];
+            parsed.plansInitialized = true;
           } else {
-            parsed.team = INITIAL_TEAM;
+            parsed.plansInitialized = true;
+          }
+
+          if (!Array.isArray(parsed.team)) {
+            parsed.team = [...INITIAL_TEAM];
+            parsed.teamInitialized = true;
+          } else if (!parsed.teamInitialized && parsed.team.length === 0) {
+            parsed.team = [...INITIAL_TEAM];
+            parsed.teamInitialized = true;
+          } else {
+            parsed.teamInitialized = true;
           }
 
           if (Array.isArray(parsed.gateways)) {
@@ -801,7 +812,6 @@ class StorageService {
                 }
                 return g;
               });
-            // Ensure paylesotho is present in gateways
             if (!parsed.gateways.some((g: GatewayConfig) => g.provider === 'paylesotho')) {
               const defaultPayLesotho = UNCONFIGURED_GATEWAYS.find((g) => g.provider === 'paylesotho');
               if (defaultPayLesotho) parsed.gateways.unshift(defaultPayLesotho);
@@ -812,90 +822,72 @@ class StorageService {
           } else {
             parsed.gateways = UNCONFIGURED_GATEWAYS;
           }
-          if (!Array.isArray(parsed.routers)) {
+
+          if (Array.isArray(parsed.routers)) {
+            parsed.routers = parsed.routers.filter((r: any) => !this.isPhantomRouterRecord(r));
+          } else {
             parsed.routers = [];
           }
-          if (!Array.isArray(parsed.tenantGroups)) parsed.tenantGroups = [];
+
+          if (!parsed.tenantGroupsInitialized) {
+            const existingGroups = Array.isArray(parsed.tenantGroups) ? parsed.tenantGroups : [];
+            const seeded = [...existingGroups];
+            STARTER_TENANT_GROUPS.forEach((starter) => {
+              if (!seeded.some((g: any) => g.id === starter.id || String(g.name || '').toLowerCase() === starter.name.toLowerCase())) {
+                seeded.push({ ...starter });
+              }
+            });
+            parsed.tenantGroups = seeded;
+            parsed.tenantGroupsInitialized = true;
+          } else if (!Array.isArray(parsed.tenantGroups)) {
+            parsed.tenantGroups = [];
+          }
+
+          if (!Array.isArray(parsed.contentFilters)) {
+            parsed.contentFilters = [...INITIAL_CONTENT_FILTERS];
+          }
+          if (!Array.isArray(parsed.customDnsRules)) {
+            parsed.customDnsRules = [
+              { id: 'cd_1', domain: 'torrentz.eu', action: 'block', siteId: 'all' },
+              { id: 'cd_2', domain: 'gov.ls', action: 'allow', siteId: 'all' },
+              { id: 'cd_3', domain: 'education.org.ls', action: 'allow', siteId: 'all' }
+            ];
+          }
           if (!Array.isArray(parsed.activeSessions)) parsed.activeSessions = [];
           if (!Array.isArray(parsed.captiveLeads)) parsed.captiveLeads = [];
           if (!Array.isArray(parsed.connectionAttempts)) parsed.connectionAttempts = [];
+          if (!Array.isArray(parsed.deletedRouterIds)) parsed.deletedRouterIds = [];
           return parsed;
-        }
-
-        // Migrate any added/adopted routers and tenant groups from prior localStorage versions before removing legacy keys
-        let migratedRouters: RouterDevice[] = [];
-        let migratedTenantGroups: TenantGroup[] = [];
-        const legacyKeys = [
-          'tconnect_controller_clean_state_v7',
-          'tconnect_controller_clean_state_v6',
-          'tconnect_controller_clean_state_v5',
-          'tconnect_controller_scratch_state_v4'
-        ];
-        for (const lKey of legacyKeys) {
-          try {
-            const rawLegacy = window.localStorage.getItem(lKey);
-            if (rawLegacy) {
-              const parsedLegacy = JSON.parse(rawLegacy);
-              if (Array.isArray(parsedLegacy?.routers) && parsedLegacy.routers.length > 0 && migratedRouters.length === 0) {
-                migratedRouters = parsedLegacy.routers.map((r: RouterDevice) => {
-                  const isAdopted = Boolean(r.status === 'online' || r.adoptedAt);
-                  return {
-                    ...r,
-                    status: isAdopted ? 'online' : (r.status || 'pending_adoption'),
-                    lastHeartbeat: isAdopted ? 'Just now' : (r.lastHeartbeat || 'Never'),
-                    missedHeartbeats: 0,
-                    offlineSince: undefined,
-                    offlineReason: undefined
-                  };
-                });
-              }
-              if (Array.isArray(parsedLegacy?.tenantGroups) && parsedLegacy.tenantGroups.length > 0 && migratedTenantGroups.length === 0) {
-                migratedTenantGroups = parsedLegacy.tenantGroups;
-              }
-            }
-          } catch {}
-          window.localStorage.removeItem(lKey);
-        }
-
-        if (migratedRouters.length > 0 || migratedTenantGroups.length > 0) {
-          const initialMigratedState = {
-            plans: STARTER_PLANS,
-            routers: migratedRouters,
-            gateways: UNCONFIGURED_GATEWAYS,
-            transactions: [],
-            vouchers: [],
-            alerts: [],
-            team: INITIAL_TEAM,
-            auditLogs: [],
-            contentFilters: INITIAL_CONTENT_FILTERS,
-            tenantGroups: migratedTenantGroups,
-            activeSessions: [],
-            captiveLeads: [],
-            connectionAttempts: []
-          };
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initialMigratedState));
-          return initialMigratedState;
         }
       } catch {
         // ignore
       }
     }
-    // Clean state: 0 fake sessions, 0 fake leads, 0 fake tenants, 0 fake logs
+    // Clean state: 0 routers on start, editable/deletable starter Client Groups seeded once
     return {
-      plans: STARTER_PLANS,
+      plans: [...STARTER_PLANS],
+      plansInitialized: true,
       routers: [],
+      deletedRouterIds: [],
       gateways: UNCONFIGURED_GATEWAYS,
       transactions: [],
       vouchers: [],
       alerts: [],
-      team: INITIAL_TEAM,
+      team: [...INITIAL_TEAM],
+      teamInitialized: true,
       auditLogs: [],
-      contentFilters: INITIAL_CONTENT_FILTERS,
-      tenantGroups: [],
+      contentFilters: [...INITIAL_CONTENT_FILTERS],
+      customDnsRules: [
+        { id: 'cd_1', domain: 'torrentz.eu', action: 'block', siteId: 'all' },
+        { id: 'cd_2', domain: 'gov.ls', action: 'allow', siteId: 'all' },
+        { id: 'cd_3', domain: 'education.org.ls', action: 'allow', siteId: 'all' }
+      ],
+      tenantGroups: [...STARTER_TENANT_GROUPS],
+      tenantGroupsInitialized: true,
       activeSessions: [],
       captiveLeads: [],
       connectionAttempts: []
-    };
+    } as any;
   }
 
   private saveState(explicitCredentialUpdate = false) {
@@ -920,11 +912,11 @@ class StorageService {
               explicitCredentialUpdate
             })
           }).catch(() => {});
-          if (Array.isArray(this.state.routers) && this.state.routers.length > 0) {
+          if (Array.isArray(this.state.routers)) {
             fetch('/api/devices/sync', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ routers: this.state.routers })
+              body: JSON.stringify({ routers: this.state.routers, replaceAll: true })
             }).catch(() => {});
           }
         }
@@ -1277,6 +1269,16 @@ class StorageService {
   deleteRouter(routerId: string) {
     const target = this.state.routers.find(r => r.id === routerId);
     this.state.routers = this.state.routers.filter(r => r.id !== routerId);
+    const deletedIds: string[] = Array.isArray((this.state as any).deletedRouterIds)
+      ? (this.state as any).deletedRouterIds
+      : [];
+    if (!deletedIds.includes(routerId)) {
+      deletedIds.push(routerId);
+      (this.state as any).deletedRouterIds = deletedIds;
+    }
+    if (typeof window !== 'undefined') {
+      fetch(`/api/devices/${encodeURIComponent(routerId)}`, { method: 'DELETE' }).catch(() => {});
+    }
     if (target) {
       this.logAudit({
         actor: 'Admin',
@@ -1371,9 +1373,20 @@ class StorageService {
     this.saveState();
   }
 
+  updateCaptiveLead(id: string, updates: Partial<CaptivePortalLead>): void {
+    if (!this.state.captiveLeads) return;
+    this.state.captiveLeads = this.state.captiveLeads.map((l) =>
+      l.id === id ? { ...l, ...updates } : l
+    );
+    this.saveState();
+  }
+
   deleteCaptiveLead(id: string): void {
     if (!this.state.captiveLeads) return;
     this.state.captiveLeads = this.state.captiveLeads.filter(l => l.id !== id);
+    if (typeof window !== 'undefined') {
+      fetch(`/api/portal/guest-connect/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    }
     this.saveState();
   }
 
@@ -1530,6 +1543,9 @@ class StorageService {
   removeActiveSession(id: string): void {
     if (!this.state.activeSessions) return;
     this.state.activeSessions = this.state.activeSessions.filter(s => s.id !== id);
+    if (typeof window !== 'undefined') {
+      fetch(`/api/portal/guest-connect/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+    }
     this.saveState();
   }
 
@@ -1570,25 +1586,37 @@ class StorageService {
   }
 
   // ---------------------------------------------------------------------------
-  // External Client Groups (Tenant Brands) Management
+  // External Client Groups (Tenant Brands) Management — Full Persistent CRUD
   // ---------------------------------------------------------------------------
+  private ensureTenantGroupsInitialized(): void {
+    if (!(this.state as any).tenantGroupsInitialized) {
+      const existing = Array.isArray(this.state.tenantGroups) ? this.state.tenantGroups : [];
+      const seeded = [...existing];
+      STARTER_TENANT_GROUPS.forEach((starter) => {
+        if (!seeded.some((g) => g.id === starter.id || g.name.toLowerCase() === starter.name.toLowerCase())) {
+          seeded.push({ ...starter });
+        }
+      });
+      this.state.tenantGroups = seeded;
+      (this.state as any).tenantGroupsInitialized = true;
+    } else if (!Array.isArray(this.state.tenantGroups)) {
+      this.state.tenantGroups = [];
+    }
+  }
+
   getTenantGroups(): TenantGroup[] {
+    this.ensureTenantGroupsInitialized();
     const stored = Array.isArray(this.state.tenantGroups) ? this.state.tenantGroups : [];
-    const merged: TenantGroup[] = [...stored];
-    STARTER_TENANT_GROUPS.forEach((starter) => {
-      if (!merged.some((g) => g.name.toLowerCase() === starter.name.toLowerCase())) {
-        merged.push(starter);
-      }
-    });
-    return merged.map(g => ({
+    return stored.map(g => ({
       ...g,
       routerCount: this.state.routers.filter(r => r.tenantGroupId === g.id || r.partnerName === g.name || (r.tags && r.tags.includes(g.tag))).length
     }));
   }
 
   createTenantGroup(group: Omit<TenantGroup, 'id' | 'createdAt'>): TenantGroup {
+    this.ensureTenantGroupsInitialized();
     const cleanName = group.name.trim();
-    const existing = this.getTenantGroups().find(
+    const existing = this.state.tenantGroups.find(
       (g) => g.name.toLowerCase() === cleanName.toLowerCase()
     );
     if (existing) {
@@ -1602,9 +1630,6 @@ class StorageService {
       createdAt: new Date().toISOString().slice(0, 10),
       routerCount: 0
     };
-    if (!this.state.tenantGroups || this.state.tenantGroups.length === 0) {
-      this.state.tenantGroups = [...STARTER_TENANT_GROUPS];
-    }
     this.state.tenantGroups.unshift(newGroup);
     this.logAudit({
       actor: 'Admin',
@@ -1619,34 +1644,82 @@ class StorageService {
       fetch('/api/partner-groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group: newGroup })
+        body: JSON.stringify({
+          group: newGroup,
+          partnerGroups: this.state.tenantGroups.map((g) => g.name)
+        })
       }).catch(() => {});
     }
     return newGroup;
   }
 
-  updateTenantGroup(groupId: string, updates: Partial<TenantGroup>): void {
+  updateTenantGroup(groupId: string, updates: Partial<TenantGroup>): TenantGroup | null {
+    this.ensureTenantGroupsInitialized();
     const target = (this.state.tenantGroups || []).find(g => g.id === groupId);
-    if (!target) return;
+    if (!target) return null;
+    const oldName = target.name;
+    const oldTag = target.tag;
     Object.assign(target, updates);
+    if (updates.name) target.name = updates.name.trim();
+    if (updates.tag) target.tag = updates.tag.trim();
+
+    // Sync any routers assigned to this group
+    this.state.routers = this.state.routers.map((r) => {
+      if (r.tenantGroupId === groupId || (oldName && r.partnerName === oldName)) {
+        const nextTags = Array.isArray(r.tags)
+          ? r.tags.map((t) => (t === oldTag ? target.tag : t))
+          : [];
+        return {
+          ...r,
+          tenantGroupId: groupId,
+          partnerName: target.name,
+          tags: nextTags
+        };
+      }
+      return r;
+    });
+
     this.logAudit({
       actor: 'Admin',
       role: 'Owner',
       category: 'security',
       action: 'tenant.update',
       target: target.name,
-      details: `Updated external client tenant group properties & splash wallpaper.`
+      details: `Updated external client tenant group '${target.name}' (Tag: ${target.tag}).`
     });
     this.saveState();
+    if (typeof window !== 'undefined') {
+      fetch('/api/partner-groups', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oldName,
+          newName: target.name,
+          group: target
+        })
+      }).catch(() => {});
+    }
+    return target;
   }
 
   deleteTenantGroup(groupId: string): void {
-    const target = (this.state.tenantGroups || []).find(g => g.id === groupId);
-    this.state.tenantGroups = (this.state.tenantGroups || []).filter(g => g.id !== groupId);
+    this.ensureTenantGroupsInitialized();
+    const target = (this.state.tenantGroups || []).find(
+      (g) => g.id === groupId || g.name.toLowerCase() === groupId.toLowerCase()
+    );
+    const targetName = target?.name || groupId;
+    this.state.tenantGroups = (this.state.tenantGroups || []).filter(
+      (g) => g.id !== groupId && g.name.toLowerCase() !== targetName.toLowerCase()
+    );
     // Unassign routers
     this.state.routers = this.state.routers.map(r => {
-      if (r.tenantGroupId === groupId) {
-        return { ...r, tenantGroupId: undefined };
+      if (r.tenantGroupId === groupId || (target && (r.partnerName || '').toLowerCase() === target.name.toLowerCase())) {
+        return {
+          ...r,
+          tenantGroupId: undefined,
+          partnerName: 'T-Connect Internal Fleet',
+          tags: (r.tags || []).filter(t => t !== target?.tag)
+        };
       }
       return r;
     });
@@ -1661,6 +1734,32 @@ class StorageService {
       });
     }
     this.saveState();
+    if (typeof window !== 'undefined') {
+      fetch('/api/partner-groups', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: targetName })
+      }).catch(() => {});
+      fetch('/api/partner-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ partnerGroups: this.state.tenantGroups.map((g) => g.name) })
+      }).catch(() => {});
+    }
+  }
+
+  resetStarterTenantGroups(): TenantGroup[] {
+    this.state.tenantGroups = [...STARTER_TENANT_GROUPS];
+    (this.state as any).tenantGroupsInitialized = true;
+    this.saveState();
+    if (typeof window !== 'undefined') {
+      fetch('/api/partner-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ partnerGroups: this.state.tenantGroups.map((g) => g.name) })
+      }).catch(() => {});
+    }
+    return this.getTenantGroups();
   }
 
   assignRouterToTenantGroup(routerId: string, tenantGroupId: string | null): void {
@@ -1845,9 +1944,9 @@ class StorageService {
   }
 
 
-  // Plan & Voucher Methods
+  // Plan & Voucher Methods (Full Persistent CRUD)
   getPlans(): HotspotPlan[] {
-    return this.state.plans && this.state.plans.length > 0 ? this.state.plans : STARTER_PLANS;
+    return Array.isArray(this.state.plans) ? this.state.plans : STARTER_PLANS;
   }
 
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
@@ -1856,6 +1955,7 @@ class StorageService {
       id: `plan_${Date.now()}`
     };
     this.state.plans.push(newPlan);
+    (this.state as any).plansInitialized = true;
     this.logAudit({
       actor: 'Admin',
       role: 'Owner',
@@ -1865,6 +1965,113 @@ class StorageService {
     });
     this.saveState();
     return newPlan;
+  }
+
+  updatePlan(planId: string, updates: Partial<HotspotPlan>): HotspotPlan | null {
+    const idx = this.state.plans.findIndex((p) => p.id === planId);
+    if (idx === -1) return null;
+    const updated: HotspotPlan = {
+      ...this.state.plans[idx],
+      ...updates,
+      id: planId
+    };
+    this.state.plans[idx] = updated;
+    (this.state as any).plansInitialized = true;
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'plan.update',
+      target: updated.name,
+      details: `Updated plan '${updated.name}' (${updated.currency}${updated.price}, ${updated.durationLabel}, ${updated.downloadSpeedMbps}M/${updated.uploadSpeedMbps}M).`
+    });
+    this.saveState();
+    return updated;
+  }
+
+  deletePlan(planId: string): boolean {
+    const target = this.state.plans.find((p) => p.id === planId);
+    if (!target) return false;
+    this.state.plans = this.state.plans.filter((p) => p.id !== planId);
+    (this.state as any).plansInitialized = true;
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'plan.delete',
+      target: target.name,
+      details: `Deleted hotspot plan '${target.name}' (${target.currency}${target.price}).`
+    });
+    this.saveState();
+    return true;
+  }
+
+  resetStarterPlans(): HotspotPlan[] {
+    this.state.plans = [...STARTER_PLANS];
+    (this.state as any).plansInitialized = true;
+    this.saveState();
+    return this.state.plans;
+  }
+
+  updateVoucher(voucherId: string, updates: Partial<Voucher>): Voucher | null {
+    const idx = this.state.vouchers.findIndex((v) => v.id === voucherId || v.code === voucherId);
+    if (idx === -1) return null;
+    const updated: Voucher = {
+      ...this.state.vouchers[idx],
+      ...updates
+    };
+    this.state.vouchers[idx] = updated;
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'voucher.update',
+      target: updated.code,
+      details: `Updated voucher ${updated.code} status to ${updated.status.toUpperCase()}.`
+    });
+    this.saveState();
+    return updated;
+  }
+
+  deleteVoucher(voucherId: string): boolean {
+    const target = this.state.vouchers.find((v) => v.id === voucherId || v.code === voucherId);
+    if (!target) return false;
+    this.state.vouchers = this.state.vouchers.filter((v) => v.id !== voucherId && v.code !== voucherId);
+    if (typeof window !== 'undefined') {
+      fetch(`/api/portal/vouchers/${encodeURIComponent(target.id)}`, { method: 'DELETE' }).catch(() => {});
+    }
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'voucher.delete',
+      target: target.code,
+      details: `Removed voucher record ${target.code} from ledger.`
+    });
+    this.saveState();
+    return true;
+  }
+
+  deleteTransaction(txId: string): boolean {
+    const target = this.state.transactions.find((t) => t.id === txId || t.transactionRef === txId);
+    if (!target) return false;
+    this.state.transactions = this.state.transactions.filter((t) => t.id !== txId && t.transactionRef !== txId);
+    if (typeof window !== 'undefined') {
+      fetch(`/api/portal/transactions/${encodeURIComponent(txId)}`, { method: 'DELETE' }).catch(() => {});
+    }
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'transaction.delete',
+      target: target.transactionRef,
+      details: `Deleted transaction record ${target.transactionRef} (${target.currency}${target.amount}).`
+    });
+    this.saveState();
+    return true;
+  }
+
+  clearTransactions(): void {
+    this.state.transactions = [];
+    if (typeof window !== 'undefined') {
+      fetch('/api/portal/transactions', { method: 'DELETE' }).catch(() => {});
+    }
+    this.saveState();
   }
 
   recordOttVoucherRedemption(entry: {
@@ -1918,8 +2125,6 @@ class StorageService {
   }
 
   generateVoucherBatch(_planId: string, _count: number): Voucher[] {
-    // Official OTT Lesotho transition: internally generated vouchers are discontinued.
-    // The platform exclusively accepts and redeems official 16-digit OTT Vouchers.
     return [];
   }
 
@@ -2585,14 +2790,13 @@ class StorageService {
     };
     if ((this.state as any).sponsorAd) {
       const saved: SponsorAdConfig = (this.state as any).sponsorAd;
-      let resolvedLibrary = Array.isArray(saved.videoLibrary) && saved.videoLibrary.length > 0
+      let resolvedLibrary = Array.isArray(saved.videoLibrary)
         ? saved.videoLibrary.map((item) =>
             item.id === 'carousel_tconnect_offers' && item.targetScope === 'park'
               ? { ...item, targetScope: 'all' as const }
               : item
           )
         : STARTER_VIDEO_AD_LIBRARY;
-      // Put image_carousel items first if carousel_tconnect_offers is in the library so picture sliding ads show first
       const carouselIdx = resolvedLibrary.findIndex((i) => i.mediaType === 'image_carousel' && i.enabled);
       if (carouselIdx > 0 && resolvedLibrary[0]?.id === 'vid_alliance_all') {
         const [carouselItem] = resolvedLibrary.splice(carouselIdx, 1);
@@ -2803,9 +3007,35 @@ class StorageService {
     this.saveState();
   }
 
+  updateTeamMember(memberId: string, updates: Partial<TeamMember>): TeamMember | null {
+    const member = this.state.team.find((m) => m.id === memberId);
+    if (!member) return null;
+    Object.assign(member, updates);
+    if (updates.name) member.name = updates.name.trim();
+    if (updates.email) member.email = updates.email.trim().toLowerCase();
+
+    const currentSession = this.getAuthSession();
+    if (currentSession && (currentSession.user.id === memberId || currentSession.user.email.toLowerCase() === member.email.toLowerCase())) {
+      currentSession.user = { ...currentSession.user, ...updates };
+      if (updates.role) currentSession.effectiveRole = updates.role;
+      this.setAuthSession(currentSession);
+    }
+
+    this.logAudit({
+      actor: 'Raphooko Phooko',
+      role: 'Owner',
+      action: 'team.member_update',
+      target: member.email,
+      details: `Updated team member profile for ${member.name} (${member.role}).`
+    });
+    this.saveState();
+    return member;
+  }
+
   deleteTeamMember(memberId: string) {
     const member = this.state.team.find((m) => m.id === memberId);
     this.state.team = this.state.team.filter((m) => m.id !== memberId);
+    (this.state as any).teamInitialized = true;
     if (member) {
       this.logAudit({
         actor: 'Raphooko Phooko',
@@ -3173,7 +3403,7 @@ class StorageService {
     this.saveState();
   }
 
-  // Content Filtering
+  // Content Filtering & Custom DNS Rules (Full Persistent CRUD)
   toggleContentFilter(ruleId: string, enabled: boolean) {
     const rule = this.state.contentFilters.find((r) => r.id === ruleId);
     if (!rule) return;
@@ -3186,6 +3416,94 @@ class StorageService {
       target: rule.name,
       details: `Category filter turned ${enabled ? 'ON (Sinkholed at local DNS)' : 'OFF'}.`
     });
+    this.saveState();
+  }
+
+  createContentFilter(rule: Omit<ContentFilterRule, 'id'>): ContentFilterRule {
+    const created: ContentFilterRule = {
+      ...rule,
+      id: `cf_${Date.now()}`
+    };
+    this.state.contentFilters.push(created);
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Technical',
+      action: 'dns_filter.create',
+      target: created.name,
+      details: `Added DNS content filter category '${created.name}' (${created.blockedDomainsCount} domains).`
+    });
+    this.saveState();
+    return created;
+  }
+
+  updateContentFilter(ruleId: string, updates: Partial<ContentFilterRule>): ContentFilterRule | null {
+    const rule = this.state.contentFilters.find((r) => r.id === ruleId);
+    if (!rule) return null;
+    Object.assign(rule, updates);
+    this.saveState();
+    return rule;
+  }
+
+  deleteContentFilter(ruleId: string): boolean {
+    const rule = this.state.contentFilters.find((r) => r.id === ruleId);
+    if (!rule) return false;
+    this.state.contentFilters = this.state.contentFilters.filter((r) => r.id !== ruleId);
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Technical',
+      action: 'dns_filter.delete',
+      target: rule.name,
+      details: `Removed DNS content filter category '${rule.name}'.`
+    });
+    this.saveState();
+    return true;
+  }
+
+  getCustomDnsRules(): Array<{ id: string; domain: string; action: 'block' | 'allow'; siteId?: string }> {
+    if (!Array.isArray((this.state as any).customDnsRules)) {
+      (this.state as any).customDnsRules = [
+        { id: 'cd_1', domain: 'torrentz.eu', action: 'block', siteId: 'all' },
+        { id: 'cd_2', domain: 'gov.ls', action: 'allow', siteId: 'all' },
+        { id: 'cd_3', domain: 'education.org.ls', action: 'allow', siteId: 'all' }
+      ];
+    }
+    return (this.state as any).customDnsRules;
+  }
+
+  addCustomDnsRule(domain: string, action: 'block' | 'allow', siteId = 'all') {
+    const rules = this.getCustomDnsRules();
+    const cleanDomain = domain.trim().toLowerCase();
+    const existing = rules.find((r) => r.domain === cleanDomain);
+    if (existing) {
+      existing.action = action;
+      existing.siteId = siteId;
+      this.saveState();
+      return existing;
+    }
+    const created = {
+      id: `cd_${Date.now()}`,
+      domain: cleanDomain,
+      action,
+      siteId
+    };
+    (this.state as any).customDnsRules = [created, ...rules];
+    this.saveState();
+    return created;
+  }
+
+  updateCustomDnsRule(id: string, updates: { domain?: string; action?: 'block' | 'allow'; siteId?: string }) {
+    const rules = this.getCustomDnsRules();
+    (this.state as any).customDnsRules = rules.map((r) =>
+      r.id === id
+        ? { ...r, ...updates, domain: updates.domain ? updates.domain.trim().toLowerCase() : r.domain }
+        : r
+    );
+    this.saveState();
+  }
+
+  deleteCustomDnsRule(id: string) {
+    const rules = this.getCustomDnsRules();
+    (this.state as any).customDnsRules = rules.filter((r) => r.id !== id);
     this.saveState();
   }
 

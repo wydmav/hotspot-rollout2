@@ -300,6 +300,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 15,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -372,6 +375,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 30,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -444,6 +450,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 30,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -516,6 +525,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 30,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -588,6 +600,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 15,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -660,6 +675,9 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     defaultCountryCode: '+266',
     allowFreeAccess: false,
     freeAccessDurationMinutes: 10,
+    freeButtonX: 50,
+    freeButtonY: 88,
+    freeButtonText: 'Login for free',
     allowVoucherCode: true,
     allowOnlinePayment: true,
     plans: [
@@ -761,6 +779,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             parsed.termsText = normalizedTerms;
             mutated = true;
           }
+          if (parsed.freeButtonX === undefined) parsed.freeButtonX = 50;
+          if (parsed.freeButtonY === undefined) parsed.freeButtonY = 88;
+          if (!parsed.freeButtonText) parsed.freeButtonText = 'Login for free';
           if (mutated) {
             try {
               window.localStorage.setItem(`tconnect_portal_scope_${scope}`, JSON.stringify(parsed));
@@ -801,6 +822,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [previewVoucherError, setPreviewVoucherError] = useState<string | null>(null);
   const [previewAdSlideIdx, setPreviewAdSlideIdx] = useState(0);
   const previewTouchStartXRef = useRef<number>(0);
+  const previewCanvasRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingFreeBtnRef = useRef<boolean>(false);
+  const freeBtnDragMovedRef = useRef<boolean>(false);
+  const [isDraggingFreeBtn, setIsDraggingFreeBtn] = useState<boolean>(false);
   const [showLeadsModal, setShowLeadsModal] = useState(false);
   const [capturedLeadsCount, setCapturedLeadsCount] = useState<number>(() => storage.getCaptiveLeads().length);
   
@@ -1018,6 +1043,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       nextAll[k] = {
         ...nextAll[k],
         allowFreeAccess: updatedCfg.allowFreeAccess,
+        freeButtonX: updatedCfg.freeButtonX ?? 50,
+        freeButtonY: updatedCfg.freeButtonY ?? 88,
+        freeButtonText: updatedCfg.freeButtonText || 'Login for free',
         allowVoucherCode: updatedCfg.allowVoucherCode,
         allowOnlinePayment: updatedCfg.allowOnlinePayment,
         globalDownloadMbps,
@@ -1080,7 +1108,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
     handleUpdateCurrent({
       allowFreeAccess: enableFree,
-      collectEmail: true,
+      freeButtonX: currentConfig.freeButtonX ?? 50,
+      freeButtonY: currentConfig.freeButtonY ?? 88,
+      freeButtonText: currentConfig.freeButtonText || 'Login for free',
       globalDownloadMbps,
       globalUploadMbps,
       globalBurstDownloadMbps,
@@ -1342,7 +1372,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 20 * 1024 * 1024) {
-        alert('File size exceeds 20MB limit. Please upload an optimized image.');
+        setSavedToast('File size exceeds 20MB limit. Please upload an optimized image.');
         return;
       }
       setIsUploadingPhoto(true);
@@ -1431,17 +1461,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
   const handleDeleteScopePlan = (planId: string) => {
     if (currentConfig.plans.length <= 1) {
-      alert('Scope must retain at least one configured plan.');
+      setSavedToast('Scope must retain at least one configured plan.');
       return;
     }
     const filtered = currentConfig.plans.filter((p) => p.id !== planId);
     handleUpdateCurrent({ plans: filtered });
   };
 
-  // Handle Free Access Connection (Unlimited Forever)
+  // Handle Free Access Connection (Instant 1-Tap Connect — Unlimited Forever)
   const handleConnectFree = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!isGuestFormValid) return;
 
     setSessionRemaining(0);
     setSessionElapsed(0);
@@ -1449,9 +1478,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
     // Persist active session & guest lead for metrics
     const sessionId = `sess_free_${Date.now()}`;
+    const fullGuestName = [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'Free Wi-Fi Guest';
+    const fullGuestPhone = guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '';
     storage.addActiveSession({
       id: sessionId,
-      voucherCode: `FREE-${guestPhone.slice(-4)}`,
+      voucherCode: `FREE-${(guestPhone.slice(-4) || '1TAP')}`,
       clientMac: '7A:91:02:11:44:99',
       clientIp: activeRouter?.wireguardIp || '10.89.1.45',
       deviceType: deviceFrame === 'iphone' ? 'Apple iPhone (iOS 17)' : deviceFrame === 'android' ? 'Samsung Galaxy (Android 14)' : 'Windows 11 Laptop',
@@ -1464,9 +1495,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       remainingSeconds: 0,
       bytesDown: 14200000,
       bytesUp: 3800000,
-      speedLimit: '30M/10M',
-      guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`,
-      guestPhone: `${guestCountryCode} ${guestPhone}`,
+      speedLimit: computedGlobalRateLimit,
+      guestName: fullGuestName,
+      guestPhone: fullGuestPhone,
       guestEmail: guestEmail.trim(),
       authMode: 'free'
     });
@@ -1476,12 +1507,12 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: sessionId,
-        firstName: guestFirstName.trim(),
-        lastName: guestSurname.trim(),
-        guestName: `${guestFirstName.trim()} ${guestSurname.trim()}`.trim(),
+        firstName: guestFirstName.trim() || 'Free',
+        lastName: guestSurname.trim() || 'Guest',
+        guestName: fullGuestName,
         countryCode: guestCountryCode,
         phone: guestPhone.trim(),
-        guestPhone: `${guestCountryCode} ${guestPhone.trim()}`,
+        guestPhone: fullGuestPhone,
         email: guestEmail.trim(),
         mac: '7A:91:02:11:44:99',
         ip: activeRouter?.wireguardIp || '10.89.1.45',
@@ -1814,13 +1845,13 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isFreeModeActive ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
                     <div>
                       <div className="font-bold flex items-center justify-between">
-                        <span>1. Free Wi-Fi</span>
+                        <span>1. Free Access Mode</span>
                         <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isFreeModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
                           {isFreeModeActive ? 'ON' : 'OFF'}
                         </span>
                       </div>
                       <p className="text-[10px] opacity-80 mt-1">
-                        {isFreeModeActive ? 'Captures Name, Phone & Mandatory Email.' : 'Hidden from splash page.'}
+                        {isFreeModeActive ? 'Shows ONLY "Login for free" 1-tap button over wallpaper.' : 'Hidden — portal uses Paid / OTT Voucher mode.'}
                       </p>
                     </div>
                     <button
@@ -1832,7 +1863,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
                       }`}
                     >
-                      {isFreeModeActive ? 'Turn OFF Free Wi-Fi' : 'Turn ON Free Wi-Fi'}
+                      {isFreeModeActive ? 'Turn OFF Free Mode' : 'Turn ON Free Mode'}
                     </button>
                   </div>
 
@@ -1846,7 +1877,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </span>
                       </div>
                       <p className="text-[10px] opacity-80 mt-1">
-                        {isVoucherModeActive ? 'Allows 16-Digit OTT Voucher PINs.' : 'Voucher tab hidden in real time.'}
+                        {isVoucherModeActive ? 'Allows 16-Digit OTT Voucher PINs (when Free Mode is OFF).' : 'Voucher tab hidden in real time.'}
                       </p>
                     </div>
                     <button
@@ -1898,6 +1929,110 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     </button>
                   </div>
                 </div>
+
+                {/* FREE ACCESS MODE BUTTON REPOSITIONING (X/Y SLIDERS + DRAG-AND-DROP + LABEL) */}
+                {isFreeModeActive && (
+                  <div className="p-3.5 rounded-xl bg-[#121829] border border-[#f05e17]/50 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <span className="font-extrabold text-white text-xs flex items-center gap-1.5">
+                          <SlidersHorizontal className="w-3.5 h-3.5 text-[#f05e17]" />
+                          <span>&ldquo;{currentConfig.freeButtonText || 'Login for free'}&rdquo; Button Position (Drag in Phone Preview or Use Sliders)</span>
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Defaults to the bottom (<code className="text-amber-300">X: 50%, Y: 88%</code>). Drag the button directly inside the phone preview or adjust X/Y sliders below.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCurrent({ freeButtonX: 50, freeButtonY: 88 })}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${
+                            (currentConfig.freeButtonY ?? 88) >= 75
+                              ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                              : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
+                          }`}
+                        >
+                          Bottom (Default)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCurrent({ freeButtonX: 50, freeButtonY: 50 })}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${
+                            (currentConfig.freeButtonY ?? 88) > 30 && (currentConfig.freeButtonY ?? 88) < 75
+                              ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                              : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
+                          }`}
+                        >
+                          Center
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCurrent({ freeButtonX: 50, freeButtonY: 16 })}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer transition-colors ${
+                            (currentConfig.freeButtonY ?? 88) <= 30
+                              ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                              : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
+                          }`}
+                        >
+                          Top
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] mb-1">
+                          <span className="text-slate-300 font-bold">Vertical Position (Y%)</span>
+                          <span className="text-[#f05e17] font-extrabold tabular-nums">{currentConfig.freeButtonY ?? 88}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={8}
+                          max={92}
+                          value={currentConfig.freeButtonY ?? 88}
+                          onChange={(e) => handleUpdateCurrent({ freeButtonY: Number(e.target.value) })}
+                          className="w-full accent-[#f05e17] cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[9px] text-slate-500">
+                          <span>Top (8%)</span>
+                          <span>Bottom (92%)</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] mb-1">
+                          <span className="text-slate-300 font-bold">Horizontal Position (X%)</span>
+                          <span className="text-cyan-400 font-extrabold tabular-nums">{currentConfig.freeButtonX ?? 50}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={15}
+                          max={85}
+                          value={currentConfig.freeButtonX ?? 50}
+                          onChange={(e) => handleUpdateCurrent({ freeButtonX: Number(e.target.value) })}
+                          className="w-full accent-cyan-500 cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[9px] text-slate-500">
+                          <span>Left (15%)</span>
+                          <span>Center (50%)</span>
+                          <span>Right (85%)</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-300 font-bold block mb-1">Button Label</label>
+                        <input
+                          type="text"
+                          value={currentConfig.freeButtonText ?? 'Login for free'}
+                          onChange={(e) => handleUpdateCurrent({ freeButtonText: e.target.value })}
+                          placeholder="Login for free"
+                          className="w-full px-2.5 py-1 bg-[#0b0f19] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* GLOBAL ROUTEROS SPEED & BURST CAP SLIDERS + SYNC TO ALL ROUTERS BUTTON */}
                 <div className="pt-3 border-t border-[#1b233a] space-y-3">
@@ -2885,19 +3020,44 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
             {/* Background Image Container */}
             <div
-              className="relative min-h-[560px] pt-3 px-3 pb-0 flex flex-col justify-between bg-cover bg-center transition-all duration-300"
+              ref={previewCanvasRef}
+              onPointerMove={(e) => {
+                if (!isDraggingFreeBtnRef.current || !previewCanvasRef.current) return;
+                const rect = previewCanvasRef.current.getBoundingClientRect();
+                if (!rect.width || !rect.height) return;
+                freeBtnDragMovedRef.current = true;
+                const rawX = ((e.clientX - rect.left) / rect.width) * 100;
+                const rawY = ((e.clientY - rect.top) / rect.height) * 100;
+                const clampedX = Math.max(15, Math.min(85, Math.round(rawX)));
+                const clampedY = Math.max(8, Math.min(92, Math.round(rawY)));
+                handleUpdateCurrent({ freeButtonX: clampedX, freeButtonY: clampedY });
+              }}
+              onPointerUp={() => {
+                if (isDraggingFreeBtnRef.current) {
+                  isDraggingFreeBtnRef.current = false;
+                  setIsDraggingFreeBtn(false);
+                }
+              }}
+              onPointerLeave={() => {
+                if (isDraggingFreeBtnRef.current) {
+                  isDraggingFreeBtnRef.current = false;
+                  setIsDraggingFreeBtn(false);
+                }
+              }}
+              className="relative min-h-[560px] pt-3 px-3 pb-0 flex flex-col justify-between bg-cover bg-center transition-all duration-300 select-none"
               style={{
                 backgroundImage: `url(${effectivePreviewBg})`,
               }}
             >
-              {/* Darken Overlay */}
+              {/* Darken Overlay — 0% unobstructed by default when Free Access Mode is ON unless admin explicitly darkens */}
               <div
                 className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-                style={{ opacity: currentConfig.bgDarken / 100 }}
+                style={{ opacity: isFreeModeActive && previewStep === 'identification' ? 0 : currentConfig.bgDarken / 100 }}
               />
 
-              {/* Scope Header: Render only when title, tagline, or headline is provided; otherwise show pure background */}
-              {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim() || currentConfig.welcomeHeadline?.trim()) ? (
+              {/* Scope Header: Hidden when Free Access Mode is ON (Identification step) so only the clean "Login for free" button shows over the wallpaper */}
+              {!(isFreeModeActive && previewStep === 'identification') &&
+              (currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim() || currentConfig.welcomeHeadline?.trim()) ? (
                 <div className="relative z-10 text-center pt-2">
                   {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
                     <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-1.5">
@@ -2914,6 +3074,50 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   )}
                 </div>
               ) : null}
+
+              {/* PURE 1-TAP "LOGIN FOR FREE" BUTTON FLOATING OVER WALLPAPER (When Free Access Mode is ON) */}
+              {isFreeModeActive && previewStep === 'identification' && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${currentConfig.freeButtonX ?? 50}%`,
+                    top: `${currentConfig.freeButtonY ?? 88}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: '88%',
+                    maxWidth: '340px',
+                    zIndex: 25
+                  }}
+                >
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      isDraggingFreeBtnRef.current = true;
+                      freeBtnDragMovedRef.current = false;
+                      setIsDraggingFreeBtn(true);
+                    }}
+                    onClick={() => {
+                      if (freeBtnDragMovedRef.current) {
+                        freeBtnDragMovedRef.current = false;
+                        return;
+                      }
+                      handleConnectFree();
+                    }}
+                    style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
+                    className={`w-full py-3.5 px-6 rounded-[4px] text-white text-lg font-normal tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
+                      isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
+                    }`}
+                    title="Drag to reposition or click to test 1-tap Free Wi-Fi login"
+                  >
+                    <span>{currentConfig.freeButtonText || 'Login for free'}</span>
+                  </button>
+                  <div className="mt-1 text-center pointer-events-none">
+                    <span className="inline-block px-2 py-0.5 rounded bg-black/65 text-white/90 text-[9px] font-mono">
+                      Drag to move ({currentConfig.freeButtonX ?? 50}%, {currentConfig.freeButtonY ?? 88}%) · Tap to connect
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* FULL-SCREEN POST-CONNECT SLIDING PICTURE AD OVERLAY IN EMULATOR */}
               {previewStep === 'video_ad' && activePreviewAd && (() => {
@@ -3044,30 +3248,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 );
               })()}
 
-              {/* Slim Docked Bottom Sheet Captive Portal Box */}
+              {/* Slim Docked Bottom Sheet Captive Portal Box (Hidden when Free Access Mode is ON & on Free Wi-Fi step) */}
+              {!(isFreeModeActive && previewStep === 'identification') && (
               <div className="relative z-10 w-full mt-auto mb-0">
-                {/* Mode Tabs Bar inside Phone Emulator */}
-                {(previewStep === 'identification' || previewStep === 'voucher' || previewStep === 'plan') && (() => {
+                {/* Mode Tabs Bar inside Phone Emulator (Only when NOT in pure Free Access Mode) */}
+                {(previewStep === 'voucher' || previewStep === 'plan') && (() => {
                   const enabledCount =
-                    (isFreeModeActive ? 1 : 0) +
                     (isVoucherModeActive ? 1 : 0) +
                     (isBuyPassModeActive ? 1 : 0);
                   if (enabledCount <= 1) return null;
-                  const cols = enabledCount === 3 ? 'grid-cols-3' : 'grid-cols-2';
                   return (
-                    <div className={`grid ${cols} gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[9px] font-mono mb-1.5`}>
-                      {isFreeModeActive && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewStep('identification')}
-                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
-                            previewStep === 'identification' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          <Zap className="w-2.5 h-2.5" />
-                          <span>Free Wi-Fi</span>
-                        </button>
-                      )}
+                    <div className="grid grid-cols-2 gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[9px] font-mono mb-1.5">
                       {isVoucherModeActive && (
                         <button
                           type="button"
@@ -3147,184 +3338,6 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     >
                       Redeem 16-Digit OTT Voucher &amp; Connect &rarr;
                     </button>
-                  </form>
-                )}
-
-                {/* STEP 1: GUEST SIGN-UP */}
-                {previewStep === 'identification' && isFreeModeActive && (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!isGuestFormValid) return;
-                      handleConnectFree();
-                    }}
-                    className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left"
-                  >
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-                    {/* Hotspot Free Mode Badge Notice */}
-                    {isFreeModeActive && (
-                      <div className="p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[9px] font-mono text-amber-200 flex items-center justify-between">
-                        <span className="flex items-center gap-1 font-bold">
-                          <Zap className="w-3 h-3 text-amber-300" />
-                          <span>Free Hotspot Access Enabled</span>
-                        </span>
-                        <span className="bg-emerald-500 text-black font-extrabold px-1.5 py-0.2 rounded text-[8px]">
-                          UNLIMITED
-                        </span>
-                      </div>
-                    )}
-
-                    {currentConfig.collectName && (
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <div>
-                          <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
-                            First Name <span className="text-red-400">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={guestFirstName}
-                            onChange={(e) => setGuestFirstName(e.target.value)}
-                            placeholder="First name"
-                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
-                              guestFirstName && !isFirstNameValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
-                            }`}
-                          />
-                          {guestFirstName && !isFirstNameValid && (
-                            <span className="text-[8px] text-red-300 font-mono block mt-0.5">
-                              Min 2 characters
-                            </span>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
-                            Surname <span className="text-red-400">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={guestSurname}
-                            onChange={(e) => setGuestSurname(e.target.value)}
-                            placeholder="Surname"
-                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
-                              guestSurname && !isSurnameValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
-                            }`}
-                          />
-                          {guestSurname && !isSurnameValid && (
-                            <span className="text-[8px] text-red-300 font-mono block mt-0.5">
-                              Min 2 characters
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {currentConfig.collectPhone && (
-                      <div>
-                        <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
-                          Mobile Number <span className="text-red-400">*</span>
-                        </label>
-                        <div className="flex items-center gap-1.5">
-                          <select
-                            value={guestCountryCode}
-                            onChange={(e) => setGuestCountryCode(e.target.value as '+266' | '+27')}
-                            className="px-1.5 py-1 bg-[#121829] border border-[#232d42] rounded-lg text-white text-[11px] font-mono focus:outline-none focus:border-[#f05e17] cursor-pointer shrink-0"
-                          >
-                            <option value="+266" className="bg-[#0b0f19] text-white">🇱🇸 +266</option>
-                            <option value="+27" className="bg-[#0b0f19] text-white">🇿🇦 +27</option>
-                          </select>
-                          <input
-                            type="tel"
-                            inputMode="numeric"
-                            maxLength={guestCountryCode === '+266' ? 8 : 10}
-                            required
-                            value={guestPhone}
-                            onChange={(e) => setGuestPhone(e.target.value)}
-                            placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx (8 digits)' : '07xxxxxxxx'}
-                            className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
-                              guestPhone && !isPhoneValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
-                            }`}
-                          />
-                        </div>
-                        {guestPhone && !isPhoneValid && (
-                          <span className="text-[8px] text-red-300 font-mono block mt-0.5">
-                            {phoneErrorMsg}
-                          </span>
-                        )}
-                        {guestPhone && isPhoneValid && (
-                          <span className="text-[8px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                            <Check className="w-2.5 h-2.5" />
-                            <span>Valid {guestCountryCode === '+266' ? 'Lesotho' : 'South African'} number</span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {currentConfig.collectEmail && (
-                      <div>
-                        <label className="text-[9px] font-mono text-slate-300 block mb-0.5">
-                          Email address <span className="text-red-400">*</span>
-                        </label>
-                        <input
-                          type="email"
-                          value={guestEmail}
-                          onChange={(e) => setGuestEmail(e.target.value)}
-                          placeholder="name@example.com"
-                          className={`w-full px-2 py-1 bg-[#121829] border rounded-lg text-white text-[11px] font-mono focus:outline-none transition-colors ${
-                            guestEmail && !isEmailValid ? 'border-red-400' : 'border-[#232d42] focus:border-[#f05e17]'
-                          }`}
-                        />
-                        {guestEmail && !isEmailValid && (
-                          <span className="text-[8px] text-red-300 font-mono block mt-0.5">
-                            {emailErrorMsg || 'Enter valid email with @ and . (e.g. name@domain.com)'}
-                          </span>
-                        )}
-                        {guestEmail && isEmailValid && (
-                          <span className="text-[8px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                            <Check className="w-2.5 h-2.5" />
-                            <span>Valid email format</span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {currentConfig.termsEnabled && (
-                      <div className="text-[9px] text-slate-300 leading-tight bg-[#121829] p-1.5 rounded-lg border border-[#232d42]">
-                        {currentConfig.termsText}
-                      </div>
-                    )}
-
-                    {/* FREE ACCESS MODE BUTTON IN TANGERINE */}
-                    {isFreeModeActive ? (
-                      <div className="space-y-1 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() => handleConnectFree()}
-                          disabled={!isGuestFormValid}
-                          className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs font-mono rounded-lg shadow-lg shadow-orange-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
-                        >
-                          <Zap className="w-3.5 h-3.5 fill-current text-white" />
-                          <span>Connect Free Wi-Fi &rarr;</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setPreviewStep('plan')}
-                          className="w-full py-1 text-slate-300 hover:text-white text-[9px] font-mono transition-colors cursor-pointer"
-                        >
-                          Or Buy Pass / Redeem OTT Voucher &rarr;
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setPreviewStep('plan')}
-                        className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold text-xs font-mono rounded-lg shadow-lg transition-transform active:scale-95 cursor-pointer"
-                      >
-                        Select Package &amp; Redeem OTT Voucher &rarr;
-                      </button>
-                    )}
                   </form>
                 )}
 
@@ -3571,11 +3584,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </div>
                 )}
               </div>
+              )}
 
-              {/* Footer Powered By Lockup */}
-              <div className="relative z-10 text-center text-[9px] font-mono text-slate-400 py-1 bg-[#0b0f19] border-t border-[#232d42]">
-                T-Connect - Starlink Powered Solutions
-              </div>
+              {/* Footer Powered By Lockup (Hidden in pure Free Access Mode so background is 100% clean) */}
+              {!(isFreeModeActive && previewStep === 'identification') && (
+                <div className="relative z-10 text-center text-[9px] font-mono text-slate-400 py-1 bg-[#0b0f19] border-t border-[#232d42]">
+                  T-Connect - Starlink Powered Solutions
+                </div>
+              )}
             </div>
           </div>
         </div>

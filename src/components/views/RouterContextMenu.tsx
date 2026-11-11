@@ -23,6 +23,7 @@ interface RouterContextMenuProps {
   onRebootRouter: (router: RouterDevice) => void;
   onResyncConfig: (router: RouterDevice) => void;
   onCopyOneLiner: (router: RouterDevice) => void;
+  onEditRouter?: (router: RouterDevice) => void;
   onDeleteRouter?: (routerId: string) => void;
   onOpenAuditModal?: (router: RouterDevice) => void;
   onOpenDetailedView?: (router: RouterDevice) => void;
@@ -38,6 +39,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
   onRebootRouter,
   onResyncConfig,
   onCopyOneLiner,
+  onEditRouter,
   onDeleteRouter,
   onOpenAuditModal,
   onOpenDetailedView
@@ -73,7 +75,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
 
   // Viewport bounds calculation to prevent overflowing the screen
   const menuWidth = 240;
-  const menuHeight = 310;
+  const menuHeight = 340;
   const screenW = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const screenH = typeof window !== 'undefined' ? window.innerHeight : 800;
 
@@ -120,10 +122,23 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
               onClose();
               onOpenDetailedView(router);
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left font-bold"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left font-bold cursor-pointer"
           >
             <Activity className="w-3.5 h-3.5 text-orange-400" />
             <span>Open Detailed Router View</span>
+          </button>
+        )}
+
+        {onEditRouter && (
+          <button
+            onClick={() => {
+              onClose();
+              onEditRouter(router);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-cyan-300 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left font-semibold cursor-pointer"
+          >
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Edit Router Details</span>
           </button>
         )}
 
@@ -132,7 +147,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
             onClose();
             onOpenTerminal(router);
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left cursor-pointer"
         >
           <Terminal className="w-3.5 h-3.5 text-emerald-400" />
           <span className="font-semibold">Open Remote Terminal</span>
@@ -143,7 +158,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
             onClose();
             onOpenWebfig(router);
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left cursor-pointer"
         >
           <Monitor className="w-3.5 h-3.5 text-orange-400" />
           <span className="font-semibold">Launch WebFig / WinBox</span>
@@ -154,7 +169,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
             onClose();
             onResyncConfig(router);
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left cursor-pointer"
         >
           <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
           <span className="font-semibold">Force Re-sync Config</span>
@@ -165,7 +180,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
             onClose();
             onRebootRouter(router);
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:text-rose-200 hover:bg-rose-950/40 rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-300 hover:text-rose-200 hover:bg-rose-950/40 rounded-lg transition-colors text-left cursor-pointer"
         >
           <Power className="w-3.5 h-3.5 text-rose-400" />
           <span className="font-semibold">Reboot Router</span>
@@ -177,7 +192,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
               onClose();
               onOpenAuditModal(router);
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-200 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left cursor-pointer"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
             <span className="font-semibold">View Audit Trail</span>
@@ -191,7 +206,7 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
             onClose();
             onCopyOneLiner(router);
           }}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-[#1b233a] rounded-lg transition-colors text-left cursor-pointer"
         >
           <Copy className="w-3.5 h-3.5 text-slate-400" />
           <span>Copy Adoption Script</span>
@@ -201,13 +216,11 @@ export const RouterContextMenu: React.FC<RouterContextMenuProps> = ({
           <button
             onClick={() => {
               onClose();
-              if (confirm(`Remove router "${router.name}" from fleet inventory?`)) {
-                onDeleteRouter(router.id);
-              }
+              onDeleteRouter(router.id);
             }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors text-left"
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-colors text-left font-bold cursor-pointer"
           >
-            <Trash2 className="w-3.5 h-3.5 text-slate-500" />
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
             <span>Delete from Fleet</span>
           </button>
         )}
