@@ -556,14 +556,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 38;
   const glassOpacity = typeof cfg.glassOpacity === 'number' ? cfg.glassOpacity : 88;
   const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
-  const allowVoucherCode = cfg.allowVoucherCode !== undefined ? Boolean(cfg.allowVoucherCode) : true;
-  const allowOnlinePayment = cfg.allowOnlinePayment !== undefined ? Boolean(cfg.allowOnlinePayment) : true;
+  // Strictly Binary Modes: When Paid Mode is active (!allowFreeAccess), always enable both Voucher and Buy Pass tabs
+  const allowVoucherCode = !allowFreeAccess ? true : (cfg.allowVoucherCode !== undefined ? Boolean(cfg.allowVoucherCode) : true);
+  const allowOnlinePayment = !allowFreeAccess ? true : (cfg.allowOnlinePayment !== undefined ? Boolean(cfg.allowOnlinePayment) : true);
   const freeButtonX = typeof cfg.freeButtonX === 'number' ? cfg.freeButtonX : 50;
   const freeButtonY = typeof cfg.freeButtonY === 'number' ? cfg.freeButtonY : 88;
   const freeButtonText = cfg.freeButtonText ? String(cfg.freeButtonText).trim() : 'Login for free';
-  const collectName = cfg.collectName !== undefined ? Boolean(cfg.collectName) : true;
-  const collectPhone = cfg.collectPhone !== undefined ? Boolean(cfg.collectPhone) : true;
-  const collectEmail = cfg.collectEmail !== undefined ? Boolean(cfg.collectEmail) : true;
   const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
   const termsText = normalizeScopeTermsText(cfg.termsText);
 
@@ -580,12 +578,15 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     : defaultPlans;
 
   const badgeText = [brandTitle.trim(), tagline.trim()].filter(Boolean).join(' · ');
-  const enabledTabsCount = (allowFreeAccess ? 1 : 0) + (allowVoucherCode ? 1 : 0) + (allowOnlinePayment ? 1 : 0);
-  const defaultTab = allowFreeAccess ? 'free' : allowVoucherCode ? 'voucher' : 'buy';
+  const enabledTabsCount = allowFreeAccess ? 1 : 2;
+  const defaultTab = allowFreeAccess ? 'free' : 'voucher';
   const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
-  const postAuthDst = videoAdsEnabled
-    ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
-    : 'https://www.google.com';
+  // Free Mode has NO ad carousel — clicking "Login for free" connects straight to the internet!
+  const postAuthDst = allowFreeAccess
+    ? 'https://www.google.com'
+    : (videoAdsEnabled
+        ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
+        : 'https://www.google.com');
 
   const plansHtml = plans.map((p: any, idx: number) => `
     <label class="plan-item ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${String(p.name).replace(/'/g, '')}', this)">
@@ -905,71 +906,29 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     <div id="errBox" class="err-box"></div>
 
     <div class="tabs">
-      ${allowVoucherCode ? `<button type="button" id="tabBtn_voucher" class="tab-btn ${defaultTab === 'voucher' ? 'active' : ''}" onclick="switchTab('voucher')">Voucher</button>` : ''}
-      ${allowOnlinePayment ? `<button type="button" id="tabBtn_buy" class="tab-btn ${defaultTab === 'buy' ? 'active' : ''}" onclick="switchTab('buy')">Buy Pass</button>` : ''}
+      <button type="button" id="tabBtn_voucher" class="tab-btn active" onclick="switchTab('voucher')">16-Digit OTT Voucher</button>
+      <button type="button" id="tabBtn_buy" class="tab-btn" onclick="switchTab('buy')">Buy Pass (M-Pesa / EcoCash)</button>
     </div>
 
-    <!-- SHARED GUEST IDENTIFICATION FIELDS -->
-    <div id="guestFieldsWrap" style="${(collectName || collectPhone || collectEmail) ? '' : 'display:none;'}">
-      ${collectName ? `
-      <div class="grid-2">
-        <div class="field">
-          <label class="lbl">First Name *</label>
-          <input class="inp" type="text" id="guestFirst" value="" placeholder="First name">
-        </div>
-        <div class="field">
-          <label class="lbl">Surname *</label>
-          <input class="inp" type="text" id="guestLast" value="" placeholder="Surname">
-        </div>
-      </div>` : ''}
-      ${collectPhone ? `
-      <div class="field">
-        <label class="lbl">Mobile Number *</label>
-        <div class="phone-row">
-          <select id="guestCc" class="cc-sel" onchange="handleGuestPhoneInput(document.getElementById('guestPhone'))">
-            <option value="+266">+266</option>
-            <option value="+27">+27</option>
-          </select>
-          <input class="inp" type="tel" inputmode="numeric" maxlength="8" id="guestPhone" value="" oninput="handleGuestPhoneInput(this)" placeholder="5xxxxxxx / 6xxxxxxx (8 digits)">
-        </div>
-      </div>` : ''}
-      ${collectEmail ? `
-      <div class="field">
-        <label class="lbl">Email Address *</label>
-        <input class="inp" type="email" id="guestEmail" value="" placeholder="name@example.com" required>
-      </div>` : ''}
-    </div>
-
-    <!-- SHARED MANDATORY T&Cs CHECKBOX + HYPERLINK POPUP FOR PAID/VOUCHER MODES -->
-    ${termsEnabled ? `
-    <div class="tc-row">
-      <input type="checkbox" id="tcAcceptedBox" onchange="syncButtonsWithTerms()" />
-      <label for="tcAcceptedBox" style="cursor:pointer;line-height:1.35;">
-        I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span> (T's &amp; C's apply)
-      </label>
-    </div>
-    ` : ''}
-`}
-
-    ${!allowFreeAccess && allowVoucherCode ? `
-    <!-- TAB 2: 16-DIGIT OTT VOUCHER CODE -->
-    <div id="sec_voucher" class="sec ${defaultTab === 'voucher' ? 'active' : ''}">
+    <!-- TAB 1: 16-DIGIT OTT VOUCHER CODE -->
+    <div id="sec_voucher" class="sec active">
       <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
         <div class="field">
-          <label class="lbl">16-Digit OTT Voucher PIN *</label>
-          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="voucherInput" value="" placeholder="1234 5678 9012 3456 (16 digits)" required style="font-family:monospace;letter-spacing:1.2px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+            <label class="lbl" style="margin-bottom:0;">16-Digit OTT Voucher PIN *</label>
+            <span id="voucherDigitCounter" style="font-size:9px;font-family:monospace;color:#34d399;font-weight:700;">0 / 16 digits</span>
+          </div>
+          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="voucherInput" value="" oninput="handleVoucherInputFormat(this)" placeholder="1234 5678 9012 3456" required style="font-family:monospace;letter-spacing:1.4px;text-align:center;font-weight:800;">
         </div>
-        <button type="submit" id="voucherSubmitBtn" class="btn-emerald" disabled>Redeem OTT Voucher &amp; Connect &rarr;</button>
+        <button type="submit" id="voucherSubmitBtn" class="btn-emerald">Redeem OTT Voucher &amp; Connect &rarr;</button>
       </form>
     </div>
-    ` : ''}
 
-    ${!allowFreeAccess && allowOnlinePayment ? `
-    <!-- TAB 3: BUY SPEED PASS (PayLesotho M-Pesa / EcoCash -> Copy OTT Voucher -> Redeem) -->
-    <div id="sec_buy" class="sec ${defaultTab === 'buy' ? 'active' : ''}">
+    <!-- TAB 2: BUY SPEED PASS (PayLesotho M-Pesa / EcoCash / Bank Card / OTT PIN) -->
+    <div id="sec_buy" class="sec">
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
@@ -993,26 +952,35 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           <input class="inp" type="text" inputmode="numeric" maxlength="8" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="5xxxxxxx / 6xxxxxxx (8 digits)" style="font-family:monospace;letter-spacing:1.2px;" required>
         </div>
 
-        <!-- Post-Payment OTT Voucher Copy & Redeem Box -->
+        <!-- Post-Payment OTT Voucher Copy & Instant Redeem Box -->
         <div id="ottCopyRedeemBox" style="display:none;background:#121829;border:1px solid #10b981;border-radius:10px;padding:10px;margin-bottom:8px;">
           <div style="font-size:10px;color:#34d399;font-weight:800;margin-bottom:4px;">PAYMENT VERIFIED — OTT VOUCHER ISSUED</div>
           <div id="issuedOttPinDisplay" style="font-family:monospace;font-size:14px;font-weight:900;color:#fff;letter-spacing:2px;background:#0b0f19;padding:8px;border-radius:8px;text-align:center;margin-bottom:6px;border:1px solid #232d42;"></div>
           <button type="button" id="copyOttPinBtn" onclick="copyIssuedOttVoucher()" style="width:100%;padding:8px;border-radius:8px;border:none;background:#f05e17;color:#fff;font-size:11px;font-weight:800;cursor:pointer;margin-bottom:6px;">
-            Step 1: Copy OTT Voucher PIN
+            Copy OTT Voucher PIN
           </button>
-          <div id="redeemCopiedWrap" style="display:none;">
-            <input class="inp" type="text" id="redeemCopiedPinInput" placeholder="Paste 16-digit OTT Voucher PIN" style="font-family:monospace;margin-bottom:6px;" />
+          <div id="redeemCopiedWrap">
+            <input class="inp" type="text" id="redeemCopiedPinInput" placeholder="16-digit OTT Voucher PIN" style="font-family:monospace;margin-bottom:6px;text-align:center;font-weight:800;" />
             <button type="button" id="redeemCopiedBtn" onclick="redeemCopiedOttVoucher()" class="btn-emerald">
-              Step 2: Redeem OTT Voucher &amp; Connect &rarr;
+              Redeem OTT Voucher &amp; Connect Now &rarr;
             </button>
           </div>
         </div>
 
-        <button type="submit" id="buySubmitBtn" class="btn-emerald" disabled>Pay with PayLesotho &rarr;</button>
+        <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay with PayLesotho &rarr;</button>
       </form>
     </div>
+
+    ${termsEnabled ? `
+    <div class="tc-row" style="margin:8px 0 0;">
+      <input type="checkbox" id="tcAcceptedBox" checked onchange="syncButtonsWithTerms()" />
+      <label for="tcAcceptedBox" style="cursor:pointer;line-height:1.35;">
+        I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span> (T's &amp; C's apply)
+      </label>
+    </div>
     ` : ''}
-  ${!allowFreeAccess ? '</div><div style="height:8px"></div>' : ''}
+  </div><div style="height:8px"></div>
+  `}
 </main>
 
 <script>
@@ -1020,7 +988,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   var selectedPlanName = '${String(plans[0]?.name || 'Daily Pass').replace(/'/g, '')}';
   var selectedGw = 'mpesa';
   var issuedOttPinRaw = '';
-  var hasCopiedIssuedOtt = false;
+  var hasCopiedIssuedOtt = true;
   var mtError = "$(error)";
   if (mtError && mtError.indexOf("$(") === -1 && mtError.trim().length > 0) {
     showErr(mtError);
@@ -1056,36 +1024,17 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
 
   function syncButtonsWithTerms() {
-    var ok = isTermsChecked();
-    if (ok) showErr('');
-    var fBtn = document.getElementById('freeSubmitBtn');
-    if (fBtn) fBtn.disabled = !ok;
-    var vBtn = document.getElementById('voucherSubmitBtn');
-    if (vBtn) vBtn.disabled = !ok;
-    var inp = document.getElementById('payInputVal');
-    if (inp) handlePayInputFormat(inp);
+    if (isTermsChecked()) showErr('');
   }
 
-  function handleGuestPhoneInput(inp) {
+  function handleVoucherInputFormat(inp) {
     if (!inp) return;
-    var ccEl = document.getElementById('guestCc');
-    var cc = ccEl ? ccEl.value : '+266';
-    var digits = inp.value.replace(/\\D/g, '');
-    if (cc === '+266') {
-      inp.maxLength = 8;
-      inp.placeholder = '5xxxxxxx / 6xxxxxxx (8 digits)';
-      if (digits.length > 0 && digits.charAt(0) !== '5' && digits.charAt(0) !== '6') {
-        showErr('Lesotho (+266) numbers must start with 5 or 6.');
-        digits = '';
-      } else {
-        showErr('');
-      }
-      inp.value = digits.slice(0, 8);
-    } else {
-      inp.maxLength = 12;
-      inp.placeholder = 'Mobile number';
-      inp.value = digits.slice(0, 12);
-    }
+    var raw = inp.value.replace(/\\D/g, '').slice(0, 16);
+    var groups = raw.match(/.{1,4}/g);
+    inp.value = groups ? groups.join(' ') : '';
+    var ctr = document.getElementById('voucherDigitCounter');
+    if (ctr) ctr.textContent = raw.length + ' / 16 digits';
+    if (raw.length > 0) showErr('');
   }
 
   function validateGuestFields() {
@@ -1093,56 +1042,21 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       showErr('Please tick the Terms & Conditions box to proceed.');
       return false;
     }
-    var gWrap = document.getElementById('guestFieldsWrap');
-    var fieldsVisible = !gWrap || gWrap.style.display !== 'none';
-    if (!fieldsVisible) {
-      showErr('');
-      return true;
-    }
-    var fEl = document.getElementById('guestFirst');
-    var lEl = document.getElementById('guestLast');
-    var pEl = document.getElementById('guestPhone');
-    var eEl = document.getElementById('guestEmail');
-    if (fEl && fEl.value.trim().length < 2) { showErr('Please enter your first name.'); return false; }
-    if (lEl && lEl.value.trim().length < 2) { showErr('Please enter your surname.'); return false; }
-    if (pEl) {
-      var ccVal = document.getElementById('guestCc') ? document.getElementById('guestCc').value : '+266';
-      var phDigits = pEl.value.replace(/\\D/g, '');
-      if (ccVal === '+266') {
-        if (!/^[56]\\d{7}$/.test(phDigits)) {
-          showErr('Lesotho (+266) numbers must start with 5 or 6 and be 8 digits.');
-          return false;
-        }
-      } else if (phDigits.length < 7) {
-        showErr('Please enter a valid mobile number.');
-        return false;
-      }
-    }
-    if (eEl) {
-      var emVal = eEl.value.trim();
-      if (!emVal || emVal.indexOf('@') === -1 || emVal.indexOf('.') === -1) {
-        showErr('Please enter a valid email address (e.g. name@example.com).');
-        return false;
-      }
-    }
     showErr('');
     return true;
   }
 
   function getGuestPayload(extra) {
-    var fName = document.getElementById('guestFirst') ? document.getElementById('guestFirst').value.trim() : '';
-    var lName = document.getElementById('guestLast') ? document.getElementById('guestLast').value.trim() : '';
-    var cc = document.getElementById('guestCc') ? document.getElementById('guestCc').value : '+266';
-    var ph = document.getElementById('guestPhone') ? document.getElementById('guestPhone').value.trim() : '';
-    var em = document.getElementById('guestEmail') ? document.getElementById('guestEmail').value.trim() : '';
+    var payInp = document.getElementById('payInputVal');
+    var rawPhone = (payInp && selectedGw !== 'ottvoucher') ? payInp.value.replace(/\\D/g, '') : '';
     var base = {
-      firstName: fName,
-      lastName: lName,
-      guestName: (fName + ' ' + lName).trim() || 'Guest User',
-      countryCode: cc,
-      phone: ph,
-      guestPhone: ph ? (cc + ' ' + ph) : '',
-      email: em,
+      firstName: 'Hotspot',
+      lastName: 'Guest',
+      guestName: 'Hotspot Guest',
+      countryCode: '+266',
+      phone: rawPhone,
+      guestPhone: rawPhone ? ('+266 ' + rawPhone) : '',
+      email: '',
       mac: '$(mac)',
       ip: '$(ip)',
       scope: '${scope}'
@@ -1153,9 +1067,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function switchTab(tab) {
     showErr('');
-    var gWrap = document.getElementById('guestFieldsWrap');
-    if (gWrap) gWrap.style.display = 'block';
-    ['free', 'voucher', 'buy'].forEach(function(t) {
+    ['voucher', 'buy'].forEach(function(t) {
       var btn = document.getElementById('tabBtn_' + t);
       var sec = document.getElementById('sec_' + t);
       if (btn) btn.className = 'tab-btn' + (t === tab ? ' active' : '');
@@ -1173,15 +1085,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function handlePayInputFormat(inp) {
     var raw = inp.value.replace(/\\D/g, '');
-    var btn = document.getElementById('buySubmitBtn');
-    var tcOk = isTermsChecked();
     if (selectedGw === 'ottvoucher') {
       raw = raw.slice(0, 16);
       var groups = raw.match(/.{1,4}/g);
       inp.value = groups ? groups.join(' ') : '';
       var ctr = document.getElementById('ottDigitCounter');
       if (ctr) ctr.textContent = raw.length + ' / 16 digits';
-      if (btn) btn.disabled = (raw.length !== 16 || !tcOk);
     } else {
       if (raw.length > 0 && raw.charAt(0) !== '5' && raw.charAt(0) !== '6') {
         showErr('Lesotho (+266) numbers must start with 5 or 6.');
@@ -1191,7 +1100,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       }
       raw = raw.slice(0, 8);
       inp.value = raw;
-      if (btn) btn.disabled = (!/^[56]\\d{7}$/.test(raw) || !tcOk);
     }
   }
 
@@ -1206,7 +1114,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     var ctr = document.getElementById('ottDigitCounter');
     var btn = document.getElementById('buySubmitBtn');
     inp.value = '';
-    if (btn) btn.disabled = true;
     if (gw === 'ottvoucher') {
       lbl.textContent = '16-Digit OTT Voucher PIN *';
       inp.placeholder = '1234 5678 9012 3456';
@@ -1254,7 +1161,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     }).catch(function(){});
     var copyBtn = document.getElementById('copyOttPinBtn');
     if (copyBtn) {
-      copyBtn.textContent = '\\u2713 Copied to Clipboard! Now Redeem Below';
+      copyBtn.textContent = '\\u2713 Copied to Clipboard!';
       copyBtn.style.background = '#059669';
     }
     var rWrap = document.getElementById('redeemCopiedWrap');
@@ -1264,14 +1171,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
 
   function redeemCopiedOttVoucher() {
-    if (!hasCopiedIssuedOtt) {
-      showErr('Please click Copy OTT Voucher PIN first before redeeming.');
-      return;
-    }
     var rInp = document.getElementById('redeemCopiedPinInput');
     var pinDigits = (rInp && rInp.value ? rInp.value : issuedOttPinRaw).replace(/\\D/g, '');
     if (pinDigits.length !== 16) {
-      showErr('Please paste your 16-digit OTT Voucher PIN.');
+      showErr('Please enter your 16-digit OTT Voucher PIN.');
       return;
     }
     var rBtn = document.getElementById('redeemCopiedBtn');
@@ -1283,24 +1186,31 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         code: pinDigits,
         expectedAmount: selectedPlanPrice,
         planName: selectedPlanName,
-        requireCopiedFirst: true,
+        flexibleAmount: true,
         mode: 'ottvoucher'
       }))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (!data || !data.success) {
-        if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Step 2: Redeem OTT Voucher & Connect \\u2192'; }
+        if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Redeem OTT Voucher & Connect Now \\u2192'; }
         showErr((data && data.message) ? data.message : 'OTT Voucher verification failed.');
         return;
       }
       document.getElementById('buyForm').submit();
     }).catch(function() {
-      if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Step 2: Redeem OTT Voucher & Connect \\u2192'; }
+      if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Redeem OTT Voucher & Connect Now \\u2192'; }
       showErr('Network error redeeming OTT Voucher.');
     });
   }
 
   function handleFreeSubmit(e) {
     try {
+      var origUrl = "$(link-orig)";
+      if (origUrl && origUrl.indexOf("$(") === -1 && origUrl.indexOf("10.10.") === -1 && origUrl.indexOf("169.58.98.92") === -1 && origUrl.indexOf("captive.apple") === -1 && origUrl.indexOf("generate_204") === -1 && /^https?:\\/\\//i.test(origUrl)) {
+        var fForm = document.getElementById('freeForm');
+        if (fForm && fForm.elements && fForm.elements['dst']) {
+          fForm.elements['dst'].value = origUrl;
+        }
+      }
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1394,13 +1304,15 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       }
       if (data.status === 'completed' && data.ottVoucherPin) {
         issuedOttPinRaw = String(data.ottVoucherPin).replace(/\\D/g, '');
-        hasCopiedIssuedOtt = false;
+        hasCopiedIssuedOtt = true;
         var box0 = document.getElementById('ottCopyRedeemBox');
         var disp0 = document.getElementById('issuedOttPinDisplay');
         var pField0 = document.getElementById('payField');
+        var rInp0 = document.getElementById('redeemCopiedPinInput');
         if (pField0) pField0.style.display = 'none';
         if (btn) btn.style.display = 'none';
         if (disp0) disp0.textContent = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ') + ' (M' + selectedPlanPrice + ')';
+        if (rInp0) rInp0.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
         if (box0) box0.style.display = 'block';
         return;
       }
@@ -1414,13 +1326,15 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
             if (st && st.success && st.status === 'completed' && st.ottVoucherPin) {
               clearInterval(timer);
               issuedOttPinRaw = String(st.ottVoucherPin).replace(/\\D/g, '');
-              hasCopiedIssuedOtt = false;
+              hasCopiedIssuedOtt = true;
               var box = document.getElementById('ottCopyRedeemBox');
               var disp = document.getElementById('issuedOttPinDisplay');
               var pField = document.getElementById('payField');
+              var rInp = document.getElementById('redeemCopiedPinInput');
               if (pField) pField.style.display = 'none';
               if (btn) btn.style.display = 'none';
               if (disp) disp.textContent = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ') + ' (M' + selectedPlanPrice + ')';
+              if (rInp) rInp.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
               if (box) box.style.display = 'block';
             } else if ((st && st.status === 'failed') || attempts > 20) {
               clearInterval(timer);
@@ -1452,6 +1366,11 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
 
 function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', reason = 'post_auth'): string {
   const baseUrl = resolveControllerBaseUrl(host, protocol);
+  const allConfigs = loadSavedPortalConfigs();
+  const scopeCfg = allConfigs[scope] || allConfigs['hotspot'] || {};
+  if (Boolean(scopeCfg.allowFreeAccess)) {
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0; url=https://www.google.com"><title>Connected</title><script>window.location.replace('https://www.google.com');</script></head><body style="background:#000"></body></html>`;
+  }
   const sponsorCfg: any = serverStore.sponsorAd || {};
   const enabled = sponsorCfg.enabled !== false;
   const defaultLib = [
@@ -1737,7 +1656,10 @@ app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const scope = (req.query.scope as string) || 'hotspot';
   const baseUrl = resolveControllerBaseUrl(host, protocol);
-  const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
+  const allConfigs = loadSavedPortalConfigs();
+  const scopeCfg = allConfigs[scope] || allConfigs['hotspot'] || {};
+  const isFreeMode = Boolean(scopeCfg.allowFreeAccess);
+  const videoAdsEnabled = !isFreeMode && (serverStore.sponsorAd?.enabled !== false);
   const adUrl = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
   const defaultTarget = videoAdsEnabled ? adUrl : 'https://www.google.com';
 
@@ -3012,15 +2934,6 @@ async function verify16DigitOttVoucher(
         };
       }
 
-      if (credentialOverrides?.requireCopiedFirst && !issuedVoucher.copiedAt) {
-        return {
-          verified: false,
-          merchantId: ottMerchantId,
-          hasLiveOttCredentials: true,
-          upstreamMessage: 'Please click the "Copy OTT Voucher" button first to copy your 16-digit PIN before redeeming it.'
-        };
-      }
-
       // AT-03 Strict Integer Lisente Comparison (100 lisente = M1.00)
       const voucherLisente = Math.round(Number(issuedVoucher.amount) * 100);
       if (strictExact && expectedLisente > 0 && voucherLisente !== expectedLisente) {
@@ -3033,6 +2946,7 @@ async function verify16DigitOttVoucher(
         };
       }
 
+      issuedVoucher.copiedAt = issuedVoucher.copiedAt || new Date().toISOString();
       issuedVoucher.status = 'redeemed';
       issuedVoucher.redeemedAt = new Date().toISOString();
       if (!serverStore.redeemedOttPins.includes(pinToRedeem)) {
@@ -3051,6 +2965,41 @@ async function verify16DigitOttVoucher(
         formulaUsed: 'PAYLESOTHO_OTT_VOUCHER_GET',
         hasLiveOttCredentials: true,
         upstreamMessage: `OTT Voucher (${currency}${issuedVoucher.amount}) verified for exact package denomination and redeemed!`
+      };
+    }
+
+    // 1b. Also check if this 16-digit PIN exists in Admin Dashboard Plans & Vouchers (serverStore.vouchers)
+    const adminVoucher = (serverStore.vouchers || []).find(
+      (v: any) => String(v.code || '').replace(/\D/g, '') === pinToRedeem
+    );
+    if (adminVoucher) {
+      if (adminVoucher.status === 'used' || adminVoucher.status === 'expired') {
+        return {
+          verified: false,
+          alreadyUsed: true,
+          merchantId: ottMerchantId,
+          hasLiveOttCredentials: true,
+          upstreamMessage: 'This 16-digit voucher PIN has already been redeemed.'
+        };
+      }
+      adminVoucher.status = 'used';
+      adminVoucher.usedAt = new Date().toISOString();
+      if (!serverStore.redeemedOttPins.includes(pinToRedeem)) {
+        serverStore.redeemedOttPins.push(pinToRedeem);
+      }
+      saveServerPortalStore(serverStore);
+      const vPrice = Number(adminVoucher.price) || expectedAmount || 10;
+      return {
+        verified: true,
+        receipt: `VCH-${pinToRedeem.slice(-6)}`,
+        planName: adminVoucher.planName || 'Daily Pass',
+        durationSeconds: Number(adminVoucher.durationSeconds) || 86400,
+        price: vPrice,
+        merchantId: ottMerchantId,
+        vendorIdUsed: 'TCONNECT_ADMIN_VOUCHER',
+        formulaUsed: 'LOCAL_16DIGIT_VOUCHER',
+        hasLiveOttCredentials: true,
+        upstreamMessage: `16-digit Voucher (${currency}${vPrice}) verified and redeemed!`
       };
     }
 
@@ -4609,7 +4558,7 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     const { scope, config, configs, applyToAllRouters } = req.body || {};
     const host = req.get('host') || '169.58.98.92:3000';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-    const portalBaseUrl = `${protocol}://${host}`;
+    const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
 
     let existing: Record<string, any> = loadSavedPortalConfigs();
     if (configs && typeof configs === 'object') {
@@ -4621,6 +4570,8 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     const targetScope = String(scope || 'hotspot').toLowerCase();
     const activeCfg = (scope && config) ? config : (existing[targetScope] || existing.hotspot || Object.values(existing)[0] || {});
     const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false;
+    const speedCapsEnabled = activeCfg.speedCapsEnabled !== undefined ? Boolean(activeCfg.speedCapsEnabled) : true;
+    const dhcpRange = activeCfg.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
     const effectiveRateLimit =
       activeCfg.globalRateLimit ||
       RouterOSRenderer.formatBurstRateLimit(
@@ -4636,6 +4587,10 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
           if (typeof activeCfg.allowFreeAccess === 'boolean') {
             existing[k].allowFreeAccess = activeCfg.allowFreeAccess;
           }
+          if (typeof activeCfg.speedCapsEnabled === 'boolean') {
+            existing[k].speedCapsEnabled = activeCfg.speedCapsEnabled;
+          }
+          if (activeCfg.dhcpRange) existing[k].dhcpRange = activeCfg.dhcpRange;
           if (activeCfg.globalDownloadMbps !== undefined) existing[k].globalDownloadMbps = activeCfg.globalDownloadMbps;
           if (activeCfg.globalUploadMbps !== undefined) existing[k].globalUploadMbps = activeCfg.globalUploadMbps;
           if (activeCfg.globalBurstDownloadMbps !== undefined) existing[k].globalBurstDownloadMbps = activeCfg.globalBurstDownloadMbps;
@@ -4650,7 +4605,9 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       portalBaseUrl,
       allowFree,
       targetScope,
-      effectiveRateLimit
+      effectiveRateLimit,
+      speedCapsEnabled,
+      dhcpRange
     );
 
     for (const router of monitoredRouters.values()) {
@@ -4658,6 +4615,8 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       if (applyToAllRouters || !scope || rScope === targetScope) {
         const scopedCfg = existing[rScope] || activeCfg;
         const routerAllowFree = scopedCfg?.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : allowFree;
+        const routerSpeedCapsEnabled = scopedCfg?.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : speedCapsEnabled;
+        const routerDhcpRange = scopedCfg?.dhcpRange || dhcpRange;
         const routerRateLimit =
           scopedCfg?.globalRateLimit ||
           effectiveRateLimit ||
@@ -4667,16 +4626,20 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
           portalBaseUrl,
           routerAllowFree,
           rScope,
-          routerRateLimit
+          routerRateLimit,
+          routerSpeedCapsEnabled,
+          routerDhcpRange
         );
         const routerCmds = routerScript
           .split('\n')
           .map((line: string) => line.trim())
           .filter((line: string) => line.length > 0 && !line.startsWith('#'));
-        router.accessMode = routerAllowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+        router.accessMode = routerAllowFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
         router.freeModeEnabled = routerAllowFree;
         router.freeRateLimit = routerRateLimit;
         (router as any).globalRateLimit = routerRateLimit;
+        (router as any).speedCapsEnabled = routerSpeedCapsEnabled;
+        (router as any).dhcpRange = routerDhcpRange;
         router.pendingCommands = routerCmds;
         router.policyLastSyncedAt = new Date().toISOString();
       }
@@ -4687,6 +4650,8 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       success: true,
       configs: existing,
       allowFreeAccess: allowFree,
+      speedCapsEnabled,
+      dhcpRange,
       globalRateLimit: effectiveRateLimit,
       syncedRouters: monitoredRouters.size,
       cliScript: fullSyncScript
@@ -6975,9 +6940,20 @@ app.get('/api/devices/:routerId/access-policy', (req: Request, res: Response) =>
   });
 });
 
-app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) => {
+app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, next) => {
   const routerId = req.params.routerId;
-  const { accessMode, freeDurationMinutes, freeRateLimit, freeDailyQuotaMb, router: clientRouter } = req.body || {};
+  if (routerId === 'fleet') return next();
+  const {
+    accessMode,
+    accessPolicy,
+    freeModeEnabled,
+    freeDurationMinutes,
+    freeRateLimit,
+    freeDailyQuotaMb,
+    speedCapsEnabled: bodySpeedCaps,
+    dhcpRange: bodyDhcpRange,
+    router: clientRouter
+  } = req.body || {};
   let router = monitoredRouters.get(routerId);
   if (!router && clientRouter && typeof clientRouter === 'object') {
     router = {
@@ -7004,13 +6980,19 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
   const routerName = router?.name || clientRouter?.name || `MikroTik-${routerId.slice(-6)}`;
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const portalBaseUrl = `${protocol}://${host}`;
+  const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
 
   const savedConfigs = loadSavedPortalConfigs();
-  const scopedCfg = savedConfigs[String(router?.vertical || 'hotspot').toLowerCase()] || savedConfigs.hotspot || {};
-  const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
+  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const rawMode = accessMode || accessPolicy || (typeof freeModeEnabled === 'boolean' ? (freeModeEnabled ? 'COMPLETELY_FREE' : 'PAID_ONLY') : undefined);
+  const validMode = rawMode === 'COMPLETELY_FREE' || rawMode === 'FREE_TRIAL_AND_PAID' ? 'COMPLETELY_FREE' : 'PAID_ONLY';
   const duration = Number(freeDurationMinutes) || 30;
   const rateLimit = freeRateLimit || scopedCfg.globalRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
+  const speedCapsEnabled = typeof bodySpeedCaps === 'boolean'
+    ? bodySpeedCaps
+    : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : ((router as any)?.speedCapsEnabled ?? true));
+  const dhcpRange = bodyDhcpRange || scopedCfg.dhcpRange || (router as any)?.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';
@@ -7020,43 +7002,22 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     (router as any).freeModeEnabled = allowFree;
     router.freeDurationMinutes = duration;
     router.freeRateLimit = rateLimit;
+    (router as any).speedCapsEnabled = speedCapsEnabled;
+    (router as any).dhcpRange = dhcpRange;
     router.freeDailyQuotaMb = quota;
     router.policyLastSyncedAt = now;
   }
 
-  const script = RouterOSRenderer.renderAccessPolicyScript({
-    router: {
-      id: routerId,
-      name: routerName,
-      vertical: (router?.vertical as any) || 'hotspot',
-      siteName: router?.siteName || 'Hotspot Site',
-      model: 'RouterOS Device',
-      boardName: 'RouterBOARD',
-      rosVersion: 'v7',
-      macAddress: 'AUTO',
-      wireguardIp: router?.wireguardIp || '10.99.1.50',
-      publicWanIp: router?.publicWanIp || '127.0.0.1',
-      status: router?.status || 'online',
-      uptime: router?.uptime || '1h',
-      cpuLoad: router?.cpuLoad || 2,
-      memoryUsage: router?.memoryUsage || 20,
-      lastHeartbeat: router?.lastHeartbeat || 'Just now',
-      firmware: '7.15.2',
-      activeSessions: router?.activeSessions || 0,
-      freeDurationMinutes: duration,
-      freeRateLimit: rateLimit
-    },
-    accessMode: validMode,
-    freeDurationMinutes: duration,
+  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(
+    portalBaseUrl,
+    allowFree,
+    routerScope,
     rateLimit,
-    portalBaseUrl
-  });
+    speedCapsEnabled,
+    dhcpRange
+  );
 
-  const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
-  const splashSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope, rateLimit);
-
-  // Extract commands for immediate remote execution or queueing on next heartbeat
-  const commands = `${script}\n${splashSyncScript}`
+  const commands = splashSyncScript
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0 && !line.startsWith('#'));
@@ -7066,18 +7027,22 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     persistMonitoredRoutersToStore();
   }
 
-  // Also synchronize allowFreeAccess and globalRateLimit in portal-configs.json so On-Router Splash Page & /portal reflect this policy immediately
+  // Synchronize allowFreeAccess, speedCapsEnabled, dhcpRange and globalRateLimit in portal-configs.json
   try {
     const existingConfigs = loadSavedPortalConfigs();
     if (existingConfigs[routerScope] && typeof existingConfigs[routerScope] === 'object') {
       existingConfigs[routerScope].allowFreeAccess = allowFree;
       existingConfigs[routerScope].globalRateLimit = rateLimit;
+      existingConfigs[routerScope].speedCapsEnabled = speedCapsEnabled;
+      existingConfigs[routerScope].dhcpRange = dhcpRange;
     }
     if (existingConfigs.hotspot && typeof existingConfigs.hotspot === 'object') {
       existingConfigs.hotspot.allowFreeAccess = allowFree;
       existingConfigs.hotspot.globalRateLimit = rateLimit;
+      existingConfigs.hotspot.speedCapsEnabled = speedCapsEnabled;
+      existingConfigs.hotspot.dhcpRange = dhcpRange;
     } else if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit };
+      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit, speedCapsEnabled, dhcpRange };
     }
     savePortalConfigsToDisk(existingConfigs);
   } catch {}
@@ -7088,12 +7053,14 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     target: routerName,
     routerId,
     routerName,
-    details: `Real-time access policy updated to ${validMode} (Rate-Limit: ${rateLimit}, ${validMode === 'PAID_ONLY' ? 'Strictly Paid / Vouchers Only' : validMode === 'COMPLETELY_FREE' ? '100% Free Mode ON' : `${duration}m Free Trial + Paid`}). Queued ${commands.length} RouterOS commands.`,
+    details: `Real-time access policy updated to ${validMode} (Speed Caps: ${speedCapsEnabled ? rateLimit : 'OFF / UNCAPPED'}, DHCP: ${dhcpRange}). Queued ${commands.length} non-disruptive RouterOS commands.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       accessMode: validMode,
       allowFreeAccess: allowFree,
+      speedCapsEnabled,
+      dhcpRange,
       freeDurationMinutes: duration,
       freeRateLimit: rateLimit,
       commandCount: commands.length
@@ -7106,20 +7073,29 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response) =
     routerName,
     accessMode: validMode,
     allowFreeAccess: allowFree,
+    speedCapsEnabled,
+    dhcpRange,
     freeDurationMinutes: duration,
     freeRateLimit: rateLimit,
     freeDailyQuotaMb: quota,
     appliedAt: now,
-    script: `${script}\n\n# --- FULL SPLASH & AD REAL-TIME SYNC ---\n${splashSyncScript}`,
+    script: splashSyncScript,
+    cliScript: splashSyncScript,
     commandCount: commands.length,
-    message: `Real-time policy '${validMode}' (${rateLimit}) applied to ${routerName} and queued for immediate RouterOS execution.`
+    message: `Real-time policy '${validMode}' (Speed Caps: ${speedCapsEnabled ? rateLimit : 'OFF / Uncapped'}) applied to ${routerName} non-disruptively.`
   });
 });
 
 // Per-Router Real-Time Full Sync Endpoint (pushes current Free/Paid policy, speed/burst cap, splash branding, ads, plans & walled garden to a specific adopted router)
 app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) => {
   const routerId = req.params.routerId;
-  const { router: clientRouter, accessMode: overrideMode, freeRateLimit: overrideRateLimit } = req.body || {};
+  const {
+    router: clientRouter,
+    accessMode: overrideMode,
+    freeRateLimit: overrideRateLimit,
+    speedCapsEnabled: overrideSpeedCaps,
+    dhcpRange: overrideDhcpRange
+  } = req.body || {};
   let router = monitoredRouters.get(routerId);
   if (!router && clientRouter && typeof clientRouter === 'object') {
     router = {
@@ -7146,7 +7122,7 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
 
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const portalBaseUrl = `${protocol}://${host}`;
+  const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
   const nowIso = new Date().toISOString();
 
   const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
@@ -7156,8 +7132,12 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     overrideMode ||
     router?.accessMode ||
     clientRouter?.accessMode ||
-    (scopedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+    (scopedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY');
   const allowFree = resolvedMode !== 'PAID_ONLY';
+  const speedCapsEnabled = typeof overrideSpeedCaps === 'boolean'
+    ? overrideSpeedCaps
+    : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : ((router as any)?.speedCapsEnabled ?? true));
+  const dhcpRange = overrideDhcpRange || scopedCfg.dhcpRange || (router as any)?.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
   const effectiveRateLimit =
     overrideRateLimit ||
     scopedCfg.globalRateLimit ||
@@ -7168,9 +7148,18 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     router.accessMode = resolvedMode;
     (router as any).freeModeEnabled = allowFree;
     router.freeRateLimit = effectiveRateLimit;
+    (router as any).speedCapsEnabled = speedCapsEnabled;
+    (router as any).dhcpRange = dhcpRange;
   }
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, routerScope, effectiveRateLimit);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(
+    portalBaseUrl,
+    allowFree,
+    routerScope,
+    effectiveRateLimit,
+    speedCapsEnabled,
+    dhcpRange
+  );
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -7189,7 +7178,7 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     target: routerName,
     routerId,
     routerName,
-    details: `Real-time router sync triggered for ${routerName} (Mode: ${resolvedMode}, Free Access: ${allowFree ? 'ON' : 'OFF'}, Speed Cap: ${effectiveRateLimit}, ${syncCommands.length} commands queued).`,
+    details: `Real-time router sync triggered for ${routerName} (Mode: ${resolvedMode}, Free Access: ${allowFree ? 'ON' : 'OFF'}, Speed Caps: ${speedCapsEnabled ? effectiveRateLimit : 'OFF / UNCAPPED'}, DHCP: ${dhcpRange}, ${syncCommands.length} commands queued).`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1'
   });
@@ -7200,11 +7189,13 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     routerName,
     accessMode: resolvedMode,
     allowFreeAccess: allowFree,
+    speedCapsEnabled,
+    dhcpRange,
     freeRateLimit: effectiveRateLimit,
     commandCount: syncCommands.length,
     cliScript: fullSyncScript,
     syncedAt: nowIso,
-    message: `Real-time sync queued for ${routerName} (${syncCommands.length} RouterOS commands, Free Mode: ${allowFree ? 'ON' : 'OFF'}, Rate-Limit: ${effectiveRateLimit}).`
+    message: `Real-time sync queued for ${routerName} (${syncCommands.length} non-disruptive commands, Free Mode: ${allowFree ? 'ON' : 'OFF'}, Speed Caps: ${speedCapsEnabled ? effectiveRateLimit : 'OFF / Uncapped'}).`
   });
 });
 
@@ -7213,9 +7204,13 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     routerIds,
     vertical,
     accessMode,
+    accessPolicy,
+    freeModeEnabled,
     freeDurationMinutes,
     freeRateLimit,
     freeDailyQuotaMb,
+    speedCapsEnabled: bodySpeedCaps,
+    dhcpRange: bodyDhcpRange,
     globalDownloadMbps,
     globalUploadMbps,
     globalBurstDownloadMbps,
@@ -7223,30 +7218,38 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   } = req.body || {};
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const portalBaseUrl = `${protocol}://${host}`;
+  const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
 
-  const validMode = accessMode === 'COMPLETELY_FREE' ? 'COMPLETELY_FREE' : (accessMode === 'FREE_TRIAL_AND_PAID' ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const existingConfigs = loadSavedPortalConfigs();
+  const fleetScope = vertical && vertical !== 'all' ? String(vertical).toLowerCase() : 'hotspot';
+  const currentScopeCfg = existingConfigs[fleetScope] || existingConfigs.hotspot || {};
+  const rawMode = accessMode || accessPolicy || (typeof freeModeEnabled === 'boolean' ? (freeModeEnabled ? 'COMPLETELY_FREE' : 'PAID_ONLY') : (currentScopeCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY'));
+  const validMode = rawMode === 'COMPLETELY_FREE' || rawMode === 'FREE_TRIAL_AND_PAID' ? 'COMPLETELY_FREE' : 'PAID_ONLY';
   const duration = Number(freeDurationMinutes) || 30;
+  const speedCapsEnabled = typeof bodySpeedCaps === 'boolean'
+    ? bodySpeedCaps
+    : (currentScopeCfg.speedCapsEnabled !== undefined ? Boolean(currentScopeCfg.speedCapsEnabled) : true);
+  const dhcpRange = bodyDhcpRange || currentScopeCfg.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
   const rateLimit =
     freeRateLimit ||
     RouterOSRenderer.formatBurstRateLimit(
-      globalUploadMbps ?? 10,
-      globalDownloadMbps ?? 20,
-      globalBurstUploadMbps ?? 15,
-      globalBurstDownloadMbps ?? 30
+      globalUploadMbps ?? currentScopeCfg.globalUploadMbps ?? 10,
+      globalDownloadMbps ?? currentScopeCfg.globalDownloadMbps ?? 20,
+      globalBurstUploadMbps ?? currentScopeCfg.globalBurstUploadMbps ?? 15,
+      globalBurstDownloadMbps ?? currentScopeCfg.globalBurstDownloadMbps ?? 30
     );
   const quota = Number(freeDailyQuotaMb) || 500;
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';
-  const fleetScope = vertical && vertical !== 'all' ? String(vertical).toLowerCase() : 'hotspot';
 
-  // Synchronize allowFreeAccess and speed/burst caps in portal-configs.json so On-Router Splash Page & /portal reflect immediately
+  // Synchronize allowFreeAccess, speedCapsEnabled, dhcpRange and speed/burst caps in portal-configs.json
   try {
-    const existingConfigs = loadSavedPortalConfigs();
     Object.keys(existingConfigs).forEach((k) => {
       if ((!vertical || vertical === 'all' || k === fleetScope) && existingConfigs[k] && typeof existingConfigs[k] === 'object') {
         existingConfigs[k].allowFreeAccess = allowFree;
         existingConfigs[k].globalRateLimit = rateLimit;
+        existingConfigs[k].speedCapsEnabled = speedCapsEnabled;
+        existingConfigs[k].dhcpRange = dhcpRange;
         if (globalDownloadMbps !== undefined) existingConfigs[k].globalDownloadMbps = Number(globalDownloadMbps);
         if (globalUploadMbps !== undefined) existingConfigs[k].globalUploadMbps = Number(globalUploadMbps);
         if (globalBurstDownloadMbps !== undefined) existingConfigs[k].globalBurstDownloadMbps = Number(globalBurstDownloadMbps);
@@ -7254,12 +7257,19 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
       }
     });
     if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit };
+      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit, speedCapsEnabled, dhcpRange };
     }
     savePortalConfigsToDisk(existingConfigs);
   } catch {}
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, fleetScope, rateLimit);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(
+    portalBaseUrl,
+    allowFree,
+    fleetScope,
+    rateLimit,
+    speedCapsEnabled,
+    dhcpRange
+  );
 
   let affectedRouters: MonitoredRouter[] = [];
 
@@ -7268,7 +7278,14 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     const verticalMatch = !vertical || vertical === 'all' || router.vertical === vertical;
     if (idMatch && verticalMatch) {
       const rScope = String(router.vertical || fleetScope).toLowerCase();
-      const rCmds = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, rScope, rateLimit)
+      const rCmds = RouterOSRenderer.buildSplashPageFileCommands(
+        portalBaseUrl,
+        allowFree,
+        rScope,
+        rateLimit,
+        speedCapsEnabled,
+        dhcpRange
+      )
         .split('\n')
         .map((line: string) => line.trim())
         .filter((line: string) => line.length > 0 && !line.startsWith('#'));
@@ -7277,6 +7294,8 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
       router.freeDurationMinutes = duration;
       router.freeRateLimit = rateLimit;
       (router as any).globalRateLimit = rateLimit;
+      (router as any).speedCapsEnabled = speedCapsEnabled;
+      (router as any).dhcpRange = dhcpRange;
       router.freeDailyQuotaMb = quota;
       router.policyLastSyncedAt = now;
       router.pendingCommands = rCmds;
@@ -7289,12 +7308,14 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     category: 'router_config',
     action: 'fleet.bulk_policy_push',
     target: 'Fleet Management',
-    details: `Bulk access policy updated to ${validMode} (Rate-Limit: ${rateLimit}) across ${affectedRouters.length} routers.`,
+    details: `Bulk access policy updated to ${validMode} (Speed Caps: ${speedCapsEnabled ? rateLimit : 'OFF / UNCAPPED'}, DHCP: ${dhcpRange}) across ${affectedRouters.length} routers.`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       affectedCount: affectedRouters.length,
       accessMode: validMode,
+      speedCapsEnabled,
+      dhcpRange,
       rateLimit
     }
   });
@@ -7303,25 +7324,221 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     success: true,
     accessMode: validMode,
     allowFreeAccess: allowFree,
+    speedCapsEnabled,
+    dhcpRange,
     freeRateLimit: rateLimit,
     updatedCount: affectedRouters.length,
     routerIds: affectedRouters.map(r => r.id),
     appliedAt: now,
     cliScript: fullSyncScript,
-    message: `Bulk policy '${validMode}' (Rate-Limit: ${rateLimit}) pushed to ${affectedRouters.length} routers.`
+    message: `Bulk policy '${validMode}' (Speed Caps: ${speedCapsEnabled ? rateLimit : 'OFF / Uncapped'}, DHCP: ${dhcpRange}) pushed to ${affectedRouters.length} routers.`
+  });
+});
+
+// Non-Disruptive Per-Router Maximize Client Capacity Endpoint (1,012 Simultaneous Users across 10.10.0.10-10.10.3.254)
+app.post('/api/devices/:routerId/maximize-capacity', (req: Request, res: Response, next) => {
+  const routerId = req.params.routerId;
+  if (routerId === 'fleet') return next();
+  const { dhcpRange: bodyDhcpRange, router: clientRouter } = req.body || {};
+  const dhcpRange = bodyDhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
+  const nowIso = new Date().toISOString();
+
+  let router = monitoredRouters.get(routerId);
+  if (!router && clientRouter && typeof clientRouter === 'object') {
+    router = {
+      id: routerId,
+      name: clientRouter.name || `MikroTik-${routerId.slice(-6)}`,
+      siteName: clientRouter.siteName || 'Hotspot Site',
+      vertical: clientRouter.vertical || 'hotspot',
+      status: clientRouter.status || 'online',
+      publicWanIp: clientRouter.publicWanIp || '127.0.0.1',
+      wireguardIp: clientRouter.wireguardIp || '10.99.1.50',
+      lastHeartbeat: clientRouter.lastHeartbeat || 'Just now',
+      lastHeartbeatTimestamp: Date.now(),
+      uptime: clientRouter.uptime || '1h',
+      cpuLoad: clientRouter.cpuLoad || 3,
+      memoryUsage: clientRouter.memoryUsage || 20,
+      activeSessions: clientRouter.activeSessions || 0,
+      missedBeats: 0,
+      webfigPort: 80,
+      winboxPort: 8291,
+      accessMode: clientRouter.accessMode || 'PAID_ONLY'
+    };
+    monitoredRouters.set(routerId, router);
+  }
+
+  const savedConfigs = loadSavedPortalConfigs();
+  const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
+  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const allowFree = router ? router.accessMode !== 'PAID_ONLY' : Boolean(scopedCfg.allowFreeAccess);
+  const speedCapsEnabled = scopedCfg.speedCapsEnabled !== undefined
+    ? Boolean(scopedCfg.speedCapsEnabled)
+    : ((router as any)?.speedCapsEnabled ?? true);
+  const effectiveRateLimit =
+    scopedCfg.globalRateLimit ||
+    router?.freeRateLimit ||
+    '10M/20M 15M/30M 8M/16M 15s/15s';
+
+  const capacityScript = RouterOSRenderer.buildNonDisruptiveCapacityCommands({
+    dhcpRange,
+    rateLimit: effectiveRateLimit,
+    speedCapsEnabled,
+    allowFreeAccess: allowFree
+  });
+  const commands = capacityScript
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+
+  if (router) {
+    (router as any).dhcpRange = dhcpRange;
+    (router as any).maxClientsCapacity = 1012;
+    router.pendingCommands = commands;
+    router.policyLastSyncedAt = nowIso;
+    persistMonitoredRoutersToStore();
+  }
+
+  try {
+    if (savedConfigs[routerScope]) savedConfigs[routerScope].dhcpRange = dhcpRange;
+    if (savedConfigs.hotspot) savedConfigs.hotspot.dhcpRange = dhcpRange;
+    savePortalConfigsToDisk(savedConfigs);
+  } catch {}
+
+  const routerName = router?.name || clientRouter?.name || `MikroTik-${routerId.slice(-6)}`;
+  recordServerAudit({
+    category: 'router_config',
+    action: 'router.maximize_capacity',
+    target: routerName,
+    routerId,
+    routerName,
+    details: `Non-disruptive capacity expansion queued for ${routerName}: Full /22 DHCP range (${dhcpRange}, 1,012 IPs), shared-users=1024, addresses-per-mac=unlimited, zero session drops.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    routerId,
+    routerName,
+    dhcpRange,
+    maxSimultaneousUsers: 1012,
+    sharedUsersLimit: 1024,
+    speedCapsEnabled,
+    commandCount: commands.length,
+    cliScript: capacityScript,
+    syncedAt: nowIso,
+    message: `Live capacity expanded on ${routerName} to 1,012 simultaneous users (${dhcpRange}, shared-users=1024) with zero disruption to connected users.`
+  });
+});
+
+// Non-Disruptive Fleet-Wide Maximize Client Capacity Endpoint (1,012 Simultaneous Users across all online routers)
+app.post('/api/devices/fleet/maximize-capacity', (req: Request, res: Response) => {
+  const { dhcpRange: bodyDhcpRange, routers: clientRouters } = req.body || {};
+  const dhcpRange = bodyDhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+
+  if (Array.isArray(clientRouters)) {
+    clientRouters.forEach((r: any) => {
+      if (!r || !r.id) return;
+      if (!monitoredRouters.has(r.id)) {
+        monitoredRouters.set(r.id, {
+          id: r.id,
+          name: r.name || `MikroTik-${String(r.id).slice(-6)}`,
+          siteName: r.siteName || 'Hotspot Site',
+          vertical: r.vertical || 'hotspot',
+          status: r.status || 'online',
+          publicWanIp: r.publicWanIp || '127.0.0.1',
+          wireguardIp: r.wireguardIp || '10.99.1.50',
+          lastHeartbeat: r.lastHeartbeat || 'Just now',
+          lastHeartbeatTimestamp: nowMs,
+          uptime: r.uptime || '1h',
+          cpuLoad: r.cpuLoad || 3,
+          memoryUsage: r.memoryUsage || 20,
+          activeSessions: r.activeSessions || 0,
+          missedBeats: 0,
+          webfigPort: 80,
+          winboxPort: 8291,
+          accessMode: r.accessMode || 'PAID_ONLY'
+        });
+      }
+    });
+  }
+
+  const savedConfigs = loadSavedPortalConfigs();
+  const activeCfg = savedConfigs.hotspot || Object.values(savedConfigs)[0] || {};
+  const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : false;
+  const speedCapsEnabled = activeCfg.speedCapsEnabled !== undefined ? Boolean(activeCfg.speedCapsEnabled) : true;
+  const effectiveRateLimit = activeCfg.globalRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s';
+
+  try {
+    Object.keys(savedConfigs).forEach((k) => {
+      if (savedConfigs[k] && typeof savedConfigs[k] === 'object') {
+        savedConfigs[k].dhcpRange = dhcpRange;
+      }
+    });
+    savePortalConfigsToDisk(savedConfigs);
+  } catch {}
+
+  const capacityScript = RouterOSRenderer.buildNonDisruptiveCapacityCommands({
+    dhcpRange,
+    rateLimit: effectiveRateLimit,
+    speedCapsEnabled,
+    allowFreeAccess: allowFree
+  });
+  const commands = capacityScript
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter((line: string) => line.length > 0 && !line.startsWith('#'));
+
+  const updatedRouterIds: string[] = [];
+  for (const router of monitoredRouters.values()) {
+    (router as any).dhcpRange = dhcpRange;
+    (router as any).maxClientsCapacity = 1012;
+    router.pendingCommands = commands;
+    router.policyLastSyncedAt = nowIso;
+    updatedRouterIds.push(router.id);
+  }
+  persistMonitoredRoutersToStore();
+
+  recordServerAudit({
+    category: 'router_config',
+    action: 'fleet.maximize_capacity',
+    target: 'All Adopted Routers',
+    details: `Fleet-wide non-disruptive capacity expansion queued across ${updatedRouterIds.length} router(s): ${dhcpRange} (1,012 IPs), shared-users=1024, addresses-per-mac=unlimited.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    dhcpRange,
+    maxSimultaneousUsers: 1012,
+    sharedUsersLimit: 1024,
+    updatedCount: updatedRouterIds.length,
+    routerIds: updatedRouterIds,
+    cliScript: capacityScript,
+    syncedAt: nowIso,
+    message: `Live capacity expanded across ${updatedRouterIds.length} router(s) to 1,012 simultaneous users (${dhcpRange}, shared-users=1024) with zero disruption.`
   });
 });
 
 // Real-Time Fleet Sync Endpoint: pushes OTT Lesotho Walled Garden, Speed/Burst Caps, 5-Port Bridge, login.html & alogin.html to all adopted routers
 app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
-  const { routers: clientRouters, controllerHost, endpointProtocol, freeRateLimit: overrideRateLimit } = req.body || {};
+  const {
+    routers: clientRouters,
+    controllerHost,
+    endpointProtocol,
+    freeRateLimit: overrideRateLimit,
+    speedCapsEnabled: overrideSpeedCaps,
+    dhcpRange: overrideDhcpRange
+  } = req.body || {};
   const host = (controllerHost && String(controllerHost).trim()) || req.get('host') || '169.58.98.92:3000';
   const protocol = endpointProtocol || (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http');
-  const portalBaseUrl = `${protocol}://${host}`;
+  const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
 
-  // Ensure any routers passed by the client are registered in monitoredRouters
   if (Array.isArray(clientRouters)) {
     clientRouters.forEach((r: any) => {
       if (!r || !r.id) return;
@@ -7344,7 +7561,7 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
           missedBeats: 0,
           webfigPort: 80,
           winboxPort: 8291,
-          accessMode: r.accessMode || 'FREE_TRIAL_AND_PAID'
+          accessMode: r.accessMode || 'COMPLETELY_FREE'
         });
       }
     });
@@ -7353,6 +7570,10 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
   const existingConfigs = loadSavedPortalConfigs();
   const activeCfg = existingConfigs.hotspot || Object.values(existingConfigs)[0] || {};
   const allowFree = activeCfg.allowFreeAccess !== undefined ? Boolean(activeCfg.allowFreeAccess) : true;
+  const speedCapsEnabled = typeof overrideSpeedCaps === 'boolean'
+    ? overrideSpeedCaps
+    : (activeCfg.speedCapsEnabled !== undefined ? Boolean(activeCfg.speedCapsEnabled) : true);
+  const dhcpRange = overrideDhcpRange || activeCfg.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
   const effectiveRateLimit =
     overrideRateLimit ||
     activeCfg.globalRateLimit ||
@@ -7363,7 +7584,14 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
       activeCfg.globalBurstDownloadMbps ?? 30
     );
 
-  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(portalBaseUrl, allowFree, 'hotspot', effectiveRateLimit);
+  const fullSyncScript = RouterOSRenderer.buildSplashPageFileCommands(
+    portalBaseUrl,
+    allowFree,
+    'hotspot',
+    effectiveRateLimit,
+    speedCapsEnabled,
+    dhcpRange
+  );
   const syncCommands = fullSyncScript
     .split('\n')
     .map((line: string) => line.trim())
@@ -7375,6 +7603,8 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
   for (const router of monitoredRouters.values()) {
     router.freeRateLimit = effectiveRateLimit;
     (router as any).globalRateLimit = effectiveRateLimit;
+    (router as any).speedCapsEnabled = speedCapsEnabled;
+    (router as any).dhcpRange = dhcpRange;
     router.pendingCommands = syncCommands;
     router.policyLastSyncedAt = nowIso;
     syncedRouterNames.push(router.name);
@@ -7386,13 +7616,15 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
     category: 'router_config',
     action: 'fleet.sync_all_realtime',
     target: 'All Adopted Routers',
-    details: `Real-time fleet sync dispatched to ${syncedRouterIds.length} routers (Rate-Limit: ${effectiveRateLimit}, Free Mode: ${allowFree ? 'ON' : 'OFF'}): 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, compact T&Cs splash page, and full-screen ads.`,
+    details: `Real-time fleet sync dispatched to ${syncedRouterIds.length} routers (Speed Caps: ${speedCapsEnabled ? effectiveRateLimit : 'OFF / UNCAPPED'}, Free Mode: ${allowFree ? 'ON' : 'OFF'}, DHCP: ${dhcpRange}).`,
     severity: 'info',
     ipAddress: req.ip || '127.0.0.1',
     metadata: {
       syncedCount: syncedRouterIds.length,
       routerIds: syncedRouterIds,
       portalBaseUrl,
+      speedCapsEnabled,
+      dhcpRange,
       rateLimit: effectiveRateLimit
     }
   });
@@ -7404,10 +7636,12 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
     routerNames: syncedRouterNames,
     portalBaseUrl,
     allowFreeAccess: allowFree,
+    speedCapsEnabled,
+    dhcpRange,
     freeRateLimit: effectiveRateLimit,
     cliScript: fullSyncScript,
     syncedAt: nowIso,
-    message: `Real-time sync queued for ${syncedRouterIds.length} router(s)! Speed & Burst (${effectiveRateLimit}), 5-port bridgeLocal, OTT Lesotho 16-digit voucher redemption, and splash/ad pages pushed.`
+    message: `Real-time sync queued for ${syncedRouterIds.length} router(s)! Capacity (${dhcpRange}), Speed Policy (${speedCapsEnabled ? effectiveRateLimit : 'Uncapped'}), and Splash Page pushed.`
   });
 });
 

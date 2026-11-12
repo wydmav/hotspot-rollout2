@@ -958,30 +958,31 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     return routers.find((r) => r.vertical === selectedScope) || routers[0];
   }, [previewClientGroupId, routers, selectedScope]);
 
-  // Real-time Mode Flags driven directly by Portal Builder toggles
+  // Strictly Binary Mode Flags: Either FREE MODE or PAID MODE
   const isFreeModeActive = Boolean(currentConfig.allowFreeAccess);
-  const isVoucherModeActive = currentConfig.allowVoucherCode !== false;
-  const isBuyPassModeActive = currentConfig.allowOnlinePayment !== false;
+  const isVoucherModeActive = !isFreeModeActive;
+  const isBuyPassModeActive = !isFreeModeActive;
 
-  // Auto-switch emulator step in real time when a mode is turned OFF
+  // Auto-switch emulator step in real time when switching between Free Mode and Paid Mode
   useEffect(() => {
-    if (previewStep === 'identification' && !isFreeModeActive) {
-      if (isVoucherModeActive) setPreviewStep('voucher');
-      else if (isBuyPassModeActive) setPreviewStep('plan');
-    } else if (previewStep === 'voucher' && !isVoucherModeActive) {
-      if (isFreeModeActive) setPreviewStep('identification');
-      else if (isBuyPassModeActive) setPreviewStep('plan');
-    } else if ((previewStep === 'plan' || previewStep === 'payment') && !isBuyPassModeActive) {
-      if (isFreeModeActive) setPreviewStep('identification');
-      else if (isVoucherModeActive) setPreviewStep('voucher');
+    if (isFreeModeActive && (previewStep === 'voucher' || previewStep === 'plan' || previewStep === 'payment')) {
+      setPreviewStep('identification');
+    } else if (!isFreeModeActive && previewStep === 'identification') {
+      setPreviewStep('voucher');
     }
-  }, [isFreeModeActive, isVoucherModeActive, isBuyPassModeActive, previewStep]);
+  }, [isFreeModeActive, previewStep]);
 
   const activePreviewAd = React.useMemo(() => {
     return storage.resolveVideoAdForScope(selectedScope);
   }, [selectedScope, previewStep]);
 
-  const enterPostAuthAdOrUsage = () => {
+  const enterPostAuthAdOrUsage = (isFreeFlow = false) => {
+    if (isFreeFlow || isFreeModeActive) {
+      setSavedToast('Connected! Free Mode authenticated -> Straight to the internet (No ad carousel).');
+      setTimeout(() => setSavedToast(null), 3500);
+      setPreviewStep('usage');
+      return;
+    }
     const sponsorCfg = storage.getSponsorAdConfig();
     const ad = storage.resolveVideoAdForScope(selectedScope);
     if (sponsorCfg.enabled && ad) {
@@ -995,7 +996,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
   };
 
-  // Compute active global speed & burst limits for RouterOS rate-limit
+  // Compute active global speed & burst limits for RouterOS rate-limit + global ON/OFF toggle
+  const speedCapsEnabled = currentConfig.speedCapsEnabled !== false;
+  const dhcpRange = currentConfig.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
   const globalDownloadMbps = currentConfig.globalDownloadMbps ?? 20;
   const globalUploadMbps = currentConfig.globalUploadMbps ?? 10;
   const globalBurstDownloadMbps = Math.max(globalDownloadMbps, currentConfig.globalBurstDownloadMbps ?? 30);
@@ -1007,6 +1010,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     globalBurstDownloadMbps
   );
   const [isSyncingAllRouters, setIsSyncingAllRouters] = useState(false);
+  const [isMaximizingCapacity, setIsMaximizingCapacity] = useState(false);
+  const [copiedCapacityScript, setCopiedCapacityScript] = useState(false);
 
   const handleUpdateGlobalSpeedBurst = (
     nextDown: number,
@@ -1020,6 +1025,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     const safeBUp = Math.max(safeUp, Math.round(nextBurstUp));
     const nextRateStr = RouterOSRenderer.formatBurstRateLimit(safeUp, safeDown, safeBUp, safeBDown);
     handleUpdateCurrent({
+      speedCapsEnabled,
+      dhcpRange,
       globalDownloadMbps: safeDown,
       globalUploadMbps: safeUp,
       globalBurstDownloadMbps: safeBDown,
@@ -1028,10 +1035,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     });
   };
 
-  const handleSyncToAllRoutersNow = async () => {
-    setIsSyncingAllRouters(true);
+  const handleToggleSpeedCapsRealtime = async (enabled: boolean) => {
     const updatedCfg: ScopePortalConfig = {
       ...currentConfig,
+      speedCapsEnabled: enabled,
+      dhcpRange,
       globalDownloadMbps,
       globalUploadMbps,
       globalBurstDownloadMbps,
@@ -1042,12 +1050,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     (Object.keys(nextAll) as VerticalType[]).forEach((k) => {
       nextAll[k] = {
         ...nextAll[k],
-        allowFreeAccess: updatedCfg.allowFreeAccess,
-        freeButtonX: updatedCfg.freeButtonX ?? 50,
-        freeButtonY: updatedCfg.freeButtonY ?? 88,
-        freeButtonText: updatedCfg.freeButtonText || 'Login for free',
-        allowVoucherCode: updatedCfg.allowVoucherCode,
-        allowOnlinePayment: updatedCfg.allowOnlinePayment,
+        speedCapsEnabled: enabled,
+        dhcpRange,
         globalDownloadMbps,
         globalUploadMbps,
         globalBurstDownloadMbps,
@@ -1078,9 +1082,136 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vertical: 'all',
-          accessMode: updatedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+          accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
           freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
           freeRateLimit: computedGlobalRateLimit,
+          speedCapsEnabled: enabled,
+          dhcpRange,
+          globalDownloadMbps,
+          globalUploadMbps,
+          globalBurstDownloadMbps,
+          globalBurstUploadMbps
+        })
+      });
+      setSavedToast(
+        enabled
+          ? `SPEED CAPS & BURSTS ON (${computedGlobalRateLimit})! Enforced on all live & new users in real time.`
+          : 'SPEED CAPS & BURSTS OFF (Uncapped 0/0)! All live & new users now have full uncapped Starlink speed.'
+      );
+      setTimeout(() => setSavedToast(null), 4500);
+    } catch {
+      setSavedToast(
+        enabled ? 'Speed Caps & Bursts enabled globally.' : 'Speed Caps & Bursts disabled (Uncapped 0/0).'
+      );
+      setTimeout(() => setSavedToast(null), 3500);
+    }
+  };
+
+  const handleMaximizeCapacityRealtime = async () => {
+    setIsMaximizingCapacity(true);
+    const fullRange = RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
+    handleUpdateCurrent({ dhcpRange: fullRange });
+    try {
+      const res = await fetch('/api/devices/fleet/maximize-capacity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dhcpRange: fullRange,
+          speedCapsEnabled,
+          freeRateLimit: computedGlobalRateLimit
+        })
+      });
+      const data = await res.json();
+      setSavedToast(
+        data?.message ||
+          `MAX CAPACITY ENFORCED (1,012 Users · ${fullRange} · shared-users=1024)! Applied to live routers with ZERO disconnect.`
+      );
+      setTimeout(() => setSavedToast(null), 5000);
+    } catch {
+      setSavedToast(`Max Capacity (${fullRange} · 1,012 Users) queued for live routers.`);
+      setTimeout(() => setSavedToast(null), 4000);
+    } finally {
+      setIsMaximizingCapacity(false);
+    }
+  };
+
+  const handleCopyNonDisruptiveCapacityCli = () => {
+    const cli = RouterOSRenderer.buildNonDisruptiveCapacityCommands({
+      dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
+      rateLimit: computedGlobalRateLimit,
+      speedCapsEnabled,
+      allowFreeAccess: isFreeModeActive
+    });
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(cli);
+    }
+    setCopiedCapacityScript(true);
+    setSavedToast('Copied Non-Disruptive 1,012-User Capacity CLI! Paste into WinBox Terminal anytime.');
+    setTimeout(() => {
+      setCopiedCapacityScript(false);
+      setSavedToast(null);
+    }, 3500);
+  };
+
+  const handleSyncToAllRoutersNow = async () => {
+    setIsSyncingAllRouters(true);
+    const updatedCfg: ScopePortalConfig = {
+      ...currentConfig,
+      speedCapsEnabled,
+      dhcpRange,
+      globalDownloadMbps,
+      globalUploadMbps,
+      globalBurstDownloadMbps,
+      globalBurstUploadMbps,
+      globalRateLimit: computedGlobalRateLimit
+    };
+    const nextAll: Record<VerticalType, ScopePortalConfig> = { ...scopeConfigs };
+    (Object.keys(nextAll) as VerticalType[]).forEach((k) => {
+      nextAll[k] = {
+        ...nextAll[k],
+        allowFreeAccess: updatedCfg.allowFreeAccess,
+        freeButtonX: updatedCfg.freeButtonX ?? 50,
+        freeButtonY: updatedCfg.freeButtonY ?? 88,
+        freeButtonText: updatedCfg.freeButtonText || 'Login for free',
+        allowVoucherCode: updatedCfg.allowVoucherCode,
+        allowOnlinePayment: updatedCfg.allowOnlinePayment,
+        speedCapsEnabled,
+        dhcpRange,
+        globalDownloadMbps,
+        globalUploadMbps,
+        globalBurstDownloadMbps,
+        globalBurstUploadMbps,
+        globalRateLimit: computedGlobalRateLimit
+      };
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(`tconnect_portal_scope_${k}`, JSON.stringify(nextAll[k]));
+        } catch {}
+      }
+    });
+    setScopeConfigs(nextAll);
+
+    try {
+      await fetch('/api/portal/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: updatedCfg.scope,
+          config: updatedCfg,
+          configs: nextAll,
+          applyToAllRouters: true
+        })
+      });
+      await fetch('/api/devices/fleet/access-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vertical: 'all',
+          accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
+          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          freeRateLimit: computedGlobalRateLimit,
+          speedCapsEnabled,
+          dhcpRange,
           globalDownloadMbps,
           globalUploadMbps,
           globalBurstDownloadMbps,
@@ -1088,49 +1219,60 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         })
       });
       storage.setRouterAccessPolicy('all', {
-        accessMode: updatedCfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+        accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
         freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
         freeRateLimit: computedGlobalRateLimit
       });
       setSavedToast(
-        `Synced to ALL Routers! Access Modes + RouterOS Speed & Burst (${computedGlobalRateLimit}) pushed across the fleet.`
+        `Synced to ALL Routers! Mode + Capacity (1,012 Users) + Speed Caps (${speedCapsEnabled ? computedGlobalRateLimit : 'OFF / Uncapped'}) pushed live.`
       );
       setTimeout(() => setSavedToast(null), 4500);
     } catch {
-      setSavedToast(`Saved & queued sync (${computedGlobalRateLimit}) for all routers.`);
+      setSavedToast(`Saved & queued sync (${speedCapsEnabled ? computedGlobalRateLimit : 'Uncapped'}) for all routers.`);
       setTimeout(() => setSavedToast(null), 3500);
     } finally {
       setIsSyncingAllRouters(false);
     }
   };
 
-  // Toggle Free Access Mode across this scope and push to all routers in real time
+  // Toggle strictly between FREE MODE (true) and PAID MODE (false) and push to all routers in real time
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
     handleUpdateCurrent({
       allowFreeAccess: enableFree,
+      allowVoucherCode: true,
+      allowOnlinePayment: true,
       freeButtonX: currentConfig.freeButtonX ?? 50,
       freeButtonY: currentConfig.freeButtonY ?? 88,
       freeButtonText: currentConfig.freeButtonText || 'Login for free',
+      speedCapsEnabled,
+      dhcpRange,
       globalDownloadMbps,
       globalUploadMbps,
       globalBurstDownloadMbps,
       globalBurstUploadMbps,
       globalRateLimit: computedGlobalRateLimit
     });
-    if (!enableFree && previewStep === 'identification') {
-      setPreviewStep(isVoucherModeActive ? 'voucher' : 'plan');
-    } else if (enableFree) {
+    if (!enableFree) {
+      setPreviewStep('voucher');
+    } else {
       setPreviewStep('identification');
     }
+    storage.setRouterAccessPolicy('all', {
+      accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
+      freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+      freeRateLimit: computedGlobalRateLimit
+    });
     try {
       await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vertical: 'all',
-          accessMode: enableFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY',
+          accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
           freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
           freeRateLimit: computedGlobalRateLimit,
+          speedCapsEnabled,
+          dhcpRange,
           globalDownloadMbps,
           globalUploadMbps,
           globalBurstDownloadMbps,
@@ -1139,8 +1281,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       });
       setSavedToast(
         enableFree
-          ? 'Free Access Mode ENABLED across all routers & splash pages in real time!'
-          : 'Free Access Mode HIDDEN & DISABLED across all routers in real time!'
+          ? 'FREE MODE ACTIVE! Splash page shows 1-tap "Login for free" -> Straight to the internet (no ad carousel).'
+          : 'PAID MODE ACTIVE! Splash page shows 16-Digit OTT Voucher & PayLesotho Buy Pass -> Sponsor Ad -> Internet.'
       );
       setTimeout(() => setSavedToast(null), 4000);
     } catch {
@@ -1526,7 +1668,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }).catch(() => {});
 
     setCapturedLeadsCount(storage.getCaptiveLeads().length);
-    enterPostAuthAdOrUsage();
+    enterPostAuthAdOrUsage(true);
   };
 
   // Execute & Verify Guest Payment Flow (Strict 16-Digit OTT Voucher Verification)
@@ -1818,16 +1960,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           {/* TAB: VISUAL BUILDER */}
           {activeBuilderTab === 'builder' && (
             <div className="space-y-4">
-              {/* REAL-TIME PUBLIC LOGIN MODES: FREE WI-FI, VOUCHER, AND BUY PASS */}
+              {/* STRICTLY BINARY SPLASH MODE SELECTOR: EITHER FREE MODE OR PAID MODE */}
               <div className="bg-[#0f1422] p-4 rounded-xl border border-[#232d42] space-y-3 font-mono text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1b233a] pb-3">
                   <div>
                     <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
                       <Zap className="w-4 h-4 text-[#f05e17]" />
-                      Public Splash Login Modes (Real-Time Fleet Control)
+                      Hotspot Splash Page Mode (Choose Either Free or Paid)
                     </span>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Turn ON or OFF Free Wi-Fi, Voucher, or Buy Pass in real time. All changes sync immediately to live portals &amp; routers.
+                      One click switches the entire Hotspot between <strong>FREE MODE</strong> and <strong>PAID MODE</strong> and syncs live to your MikroTik router every 15s.
                     </p>
                   </div>
                   <button
@@ -1840,94 +1982,70 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
-                  {/* 1. Free Wi-Fi Toggle Card */}
-                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isFreeModeActive ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
-                    <div>
-                      <div className="font-bold flex items-center justify-between">
-                        <span>1. Free Access Mode</span>
-                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isFreeModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
-                          {isFreeModeActive ? 'ON' : 'OFF'}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {/* OPTION 1: FREE MODE */}
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleFreeAccessRealtime(true)}
+                    className={`p-4 rounded-xl border-2 text-left flex flex-col justify-between gap-3 transition-all cursor-pointer ${
+                      isFreeModeActive
+                        ? 'bg-emerald-950/30 border-emerald-500 text-white shadow-lg shadow-emerald-500/15'
+                        : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-sm flex items-center gap-2">
+                          <Zap className={`w-4 h-4 ${isFreeModeActive ? 'text-emerald-400' : 'text-slate-500'}`} />
+                          <span>FREE MODE</span>
+                        </span>
+                        <span
+                          className={`text-[10px] uppercase px-2 py-0.5 rounded font-extrabold ${
+                            isFreeModeActive
+                              ? 'bg-emerald-500 text-slate-950'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {isFreeModeActive ? 'ACTIVE ON ROUTER' : 'CLICK TO ACTIVATE'}
                         </span>
                       </div>
-                      <p className="text-[10px] opacity-80 mt-1">
-                        {isFreeModeActive ? 'Shows ONLY "Login for free" 1-tap button over wallpaper.' : 'Hidden — portal uses Paid / OTT Voucher mode.'}
+                      <p className="text-[11px] leading-relaxed text-slate-300">
+                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Taps <strong>&ldquo;{currentConfig.freeButtonText || 'Login for free'}&rdquo;</strong> button over wallpaper &rarr; <strong>Straight to the Internet</strong> (Google / original URL, <strong>NO ad carousel</strong>).
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleFreeAccessRealtime(!isFreeModeActive)}
-                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
-                        isFreeModeActive
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 hover:bg-emerald-400'
-                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
-                      }`}
-                    >
-                      {isFreeModeActive ? 'Turn OFF Free Mode' : 'Turn ON Free Mode'}
-                    </button>
-                  </div>
+                  </button>
 
-                  {/* 2. Voucher Code Toggle Card */}
-                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isVoucherModeActive ? 'bg-amber-950/20 border-amber-500/40 text-amber-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
-                    <div>
-                      <div className="font-bold flex items-center justify-between">
-                        <span>2. Voucher</span>
-                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isVoucherModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
-                          {isVoucherModeActive ? 'ON' : 'OFF'}
+                  {/* OPTION 2: PAID MODE */}
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleFreeAccessRealtime(false)}
+                    className={`p-4 rounded-xl border-2 text-left flex flex-col justify-between gap-3 transition-all cursor-pointer ${
+                      !isFreeModeActive
+                        ? 'bg-amber-950/30 border-[#f05e17] text-white shadow-lg shadow-[#f05e17]/15'
+                        : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-sm flex items-center gap-2">
+                          <Lock className={`w-4 h-4 ${!isFreeModeActive ? 'text-[#f05e17]' : 'text-slate-500'}`} />
+                          <span>PAID MODE</span>
+                        </span>
+                        <span
+                          className={`text-[10px] uppercase px-2 py-0.5 rounded font-extrabold ${
+                            !isFreeModeActive
+                              ? 'bg-[#f05e17] text-white'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {!isFreeModeActive ? 'ACTIVE ON ROUTER' : 'CLICK TO ACTIVATE'}
                         </span>
                       </div>
-                      <p className="text-[10px] opacity-80 mt-1">
-                        {isVoucherModeActive ? 'Allows 16-Digit OTT Voucher PINs (when Free Mode is OFF).' : 'Voucher tab hidden in real time.'}
+                      <p className="text-[11px] leading-relaxed text-slate-300">
+                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Enters <strong>16-Digit OTT Voucher</strong> or pays via <strong>PayLesotho (M-Pesa / EcoCash / Card)</strong> &rarr; Views <strong>Sponsor Ad</strong> &rarr; Taps <strong>X</strong> to browse internet.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !isVoucherModeActive;
-                        handleUpdateCurrent({ allowVoucherCode: next });
-                        setSavedToast(next ? '16-Digit OTT Voucher Login ENABLED in real time!' : '16-Digit OTT Voucher Login TURNED OFF in real time!');
-                        setTimeout(() => setSavedToast(null), 3000);
-                      }}
-                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
-                        isVoucherModeActive
-                          ? 'bg-amber-500 text-slate-950 border-amber-400 hover:bg-amber-400'
-                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
-                      }`}
-                    >
-                      {isVoucherModeActive ? 'Turn OFF Voucher' : 'Turn ON Voucher'}
-                    </button>
-                  </div>
-
-                  {/* 3. Buy Pass Toggle Card */}
-                  <div className={`p-3 rounded-xl border flex flex-col justify-between gap-2 ${isBuyPassModeActive ? 'bg-blue-950/20 border-blue-500/40 text-blue-200' : 'bg-[#0b0f1a] border-[#1c2438] text-slate-400'}`}>
-                    <div>
-                      <div className="font-bold flex items-center justify-between">
-                        <span>3. Buy Pass</span>
-                        <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded font-extrabold ${isBuyPassModeActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
-                          {isBuyPassModeActive ? 'ON' : 'OFF'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] opacity-80 mt-1">
-                        {isBuyPassModeActive ? 'PayLesotho (M-Pesa/EcoCash) & 16-Digit OTT plans.' : 'Buy Pass tab hidden in real time.'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !isBuyPassModeActive;
-                        handleUpdateCurrent({ allowOnlinePayment: next });
-                        setSavedToast(next ? 'Buy Pass ENABLED in real time!' : 'Buy Pass TURNED OFF in real time!');
-                        setTimeout(() => setSavedToast(null), 3000);
-                      }}
-                      className={`w-full py-1.5 rounded-lg font-extrabold text-[10px] transition-all cursor-pointer border ${
-                        isBuyPassModeActive
-                          ? 'bg-blue-500 text-white border-blue-400 hover:bg-blue-400'
-                          : 'bg-[#161d31] text-slate-300 border-[#2b3754] hover:text-white'
-                      }`}
-                    >
-                      {isBuyPassModeActive ? 'Turn OFF Buy Pass' : 'Turn ON Buy Pass'}
-                    </button>
-                  </div>
+                  </button>
                 </div>
 
                 {/* FREE ACCESS MODE BUTTON REPOSITIONING (X/Y SLIDERS + DRAG-AND-DROP + LABEL) */}
@@ -2034,40 +2152,122 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </div>
                 )}
 
-                {/* GLOBAL ROUTEROS SPEED & BURST CAP SLIDERS + SYNC TO ALL ROUTERS BUTTON */}
+                {/* LIVE ROUTER CLIENT CAPACITY ENFORCER (1,012 SIMULTANEOUS USERS · ZERO DISRUPTION) */}
+                <div className="pt-3 border-t border-[#1b233a] space-y-2.5">
+                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/50 via-[#0d1424] to-emerald-950/40 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="font-extrabold text-white uppercase tracking-wider text-[11px]">
+                          LIVE ROUTER CLIENT CAPACITY: FULL /22 DHCP POOL (1,012 SIMULTANEOUS USERS)
+                        </span>
+                        <span className="text-[9px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold">
+                          ZERO DISRUPTION TO LIVE USERS
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-300 leading-relaxed">
+                        Expands <code className="text-cyan-300">tc-hotspot-pool</code> to <code className="text-emerald-300">10.10.0.10-10.10.3.254</code> (1,012 IPs) and sets <code className="text-amber-300">shared-users=1024</code> + <code className="text-amber-300">addresses-per-mac=unlimited</code> in-place on live routers <strong>without disconnecting anyone currently online</strong>.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void handleMaximizeCapacityRealtime()}
+                        disabled={isMaximizingCapacity}
+                        className="px-3.5 py-2 rounded-xl font-extrabold text-[11px] flex items-center gap-1.5 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 disabled:opacity-50 text-slate-950 shadow-md cursor-pointer transition-all"
+                        title="Expand DHCP range to 10.10.0.10-10.10.3.254 (1,012 users) and shared-users=1024 on live routers in real time without dropping connected users"
+                      >
+                        <Wifi className={`w-3.5 h-3.5 ${isMaximizingCapacity ? 'animate-spin' : ''}`} />
+                        <span>{isMaximizingCapacity ? 'Enforcing 1,012-User Capacity...' : 'Maximize Capacity Now (1,012 Users)'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyNonDisruptiveCapacityCli}
+                        className="px-2.5 py-2 rounded-xl font-bold text-[10px] flex items-center gap-1 bg-[#161d31] hover:bg-[#232d42] border border-cyan-500/40 text-cyan-300 cursor-pointer transition-colors"
+                        title="Copy non-disruptive RouterOS CLI commands to paste directly in WinBox Terminal"
+                      >
+                        {copiedCapacityScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedCapacityScript ? 'Copied CLI!' : 'Copy Live CLI'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* GLOBAL ROUTEROS SPEED & BURST CAP SLIDERS + GLOBAL ON/OFF TOGGLE */}
                 <div className="pt-3 border-t border-[#1b233a] space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <span className="font-extrabold text-white uppercase tracking-wider flex items-center gap-2 text-[11px]">
                         <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Global RouterOS Speed &amp; Burst Cap (All Connected Users)</span>
+                        <span>Global RouterOS Speed Caps &amp; Bursts (ON / OFF Everywhere)</span>
                       </span>
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        Caps download/upload speeds and configures RouterOS burst limits (<code className="text-emerald-300">rate-limit=&quot;{computedGlobalRateLimit}&quot;</code>).
+                        {speedCapsEnabled ? (
+                          <>
+                            Currently <strong>ON</strong>: Enforces <code className="text-emerald-300">rate-limit=&quot;{computedGlobalRateLimit}&quot;</code> on all live &amp; new users.
+                          </>
+                        ) : (
+                          <>
+                            Currently <strong>OFF (Uncapped 0/0)</strong>: All live &amp; new users receive full uncapped Starlink speed.
+                          </>
+                        )}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleSyncToAllRoutersNow()}
-                      disabled={isSyncingAllRouters}
-                      className="px-3.5 py-2 rounded-xl font-extrabold text-[11px] flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 shadow-md cursor-pointer shrink-0 transition-all"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
-                      <span>{isSyncingAllRouters ? 'Syncing All Routers...' : 'Sync to All Routers'}</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {/* Global ON / OFF Toggle Buttons */}
+                      <div className="flex items-center bg-[#0b0f19] p-1 rounded-xl border border-[#232d42]">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleSpeedCapsRealtime(true)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                            speedCapsEnabled
+                              ? 'bg-emerald-500 text-slate-950 shadow'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          SPEED CAPS ON
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleSpeedCapsRealtime(false)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                            !speedCapsEnabled
+                              ? 'bg-rose-500 text-white shadow'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          OFF (UNCAPPED)
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleSyncToAllRoutersNow()}
+                        disabled={isSyncingAllRouters}
+                        className="px-3.5 py-2 rounded-xl font-extrabold text-[11px] flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 shadow-md cursor-pointer shrink-0 transition-all"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAllRouters ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingAllRouters ? 'Syncing All Routers...' : 'Sync to All Routers'}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438]">
+                  <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438] transition-opacity ${
+                    speedCapsEnabled ? 'opacity-100' : 'opacity-45'
+                  }`}>
                     {/* Download Speed Cap Slider */}
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="text-slate-300 font-bold">Download Speed Cap</span>
-                        <span className="text-emerald-400 font-extrabold">{globalDownloadMbps} Mbps</span>
+                        <span className="text-emerald-400 font-extrabold">
+                          {speedCapsEnabled ? `${globalDownloadMbps} Mbps` : 'UNCAPPED'}
+                        </span>
                       </div>
                       <input
                         type="range"
                         min={1}
                         max={100}
+                        disabled={!speedCapsEnabled}
                         value={globalDownloadMbps}
                         onChange={(e) => {
                           const nextDown = Number(e.target.value);
@@ -2078,7 +2278,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             globalBurstUploadMbps
                           );
                         }}
-                        className="w-full accent-emerald-500 cursor-pointer"
+                        className="w-full accent-emerald-500 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
 
@@ -2086,12 +2286,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="text-slate-300 font-bold">Upload Speed Cap</span>
-                        <span className="text-cyan-400 font-extrabold">{globalUploadMbps} Mbps</span>
+                        <span className="text-cyan-400 font-extrabold">
+                          {speedCapsEnabled ? `${globalUploadMbps} Mbps` : 'UNCAPPED'}
+                        </span>
                       </div>
                       <input
                         type="range"
                         min={1}
                         max={100}
+                        disabled={!speedCapsEnabled}
                         value={globalUploadMbps}
                         onChange={(e) => {
                           const nextUp = Number(e.target.value);
@@ -2102,7 +2305,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             Math.max(nextUp, globalBurstUploadMbps)
                           );
                         }}
-                        className="w-full accent-cyan-500 cursor-pointer"
+                        className="w-full accent-cyan-500 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
 
@@ -2110,12 +2313,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="text-slate-300 font-bold">Download Burst Speed (RouterOS Burst)</span>
-                        <span className="text-amber-400 font-extrabold">{globalBurstDownloadMbps} Mbps</span>
+                        <span className="text-amber-400 font-extrabold">
+                          {speedCapsEnabled ? `${globalBurstDownloadMbps} Mbps` : 'UNCAPPED'}
+                        </span>
                       </div>
                       <input
                         type="range"
                         min={globalDownloadMbps}
                         max={150}
+                        disabled={!speedCapsEnabled}
                         value={globalBurstDownloadMbps}
                         onChange={(e) =>
                           handleUpdateGlobalSpeedBurst(
@@ -2125,7 +2331,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             globalBurstUploadMbps
                           )
                         }
-                        className="w-full accent-amber-500 cursor-pointer"
+                        className="w-full accent-amber-500 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
 
@@ -2133,12 +2339,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="text-slate-300 font-bold">Upload Burst Speed (RouterOS Burst)</span>
-                        <span className="text-orange-400 font-extrabold">{globalBurstUploadMbps} Mbps</span>
+                        <span className="text-orange-400 font-extrabold">
+                          {speedCapsEnabled ? `${globalBurstUploadMbps} Mbps` : 'UNCAPPED'}
+                        </span>
                       </div>
                       <input
                         type="range"
                         min={globalUploadMbps}
                         max={150}
+                        disabled={!speedCapsEnabled}
                         value={globalBurstUploadMbps}
                         onChange={(e) =>
                           handleUpdateGlobalSpeedBurst(
@@ -2148,7 +2357,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             Number(e.target.value)
                           )
                         }
-                        className="w-full accent-orange-500 cursor-pointer"
+                        className="w-full accent-orange-500 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -2512,20 +2721,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                     <button
                       type="button"
-                      onClick={() => {
-                        if (activeRouter) {
-                          storage.toggleRouterFreeMode(activeRouter.id, !activeRouter.freeModeEnabled);
-                        } else {
-                          handleUpdateCurrent({ allowFreeAccess: !currentConfig.allowFreeAccess });
-                        }
-                      }}
+                      onClick={() => handleToggleFreeAccessRealtime(!isFreeModeActive)}
                       className={`px-3 py-1.5 rounded-lg font-bold text-xs font-mono transition-all cursor-pointer ${
                         isFreeModeActive
-                          ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
-                          : 'bg-[#1b233a] text-slate-400 hover:text-white border border-[#232d42]'
+                          ? 'bg-emerald-500 text-black shadow-md shadow-emerald-500/20'
+                          : 'bg-cyan-500/20 text-cyan-300 hover:text-white border border-cyan-500/40'
                       }`}
                     >
-                      {isFreeModeActive ? '⚡ FREE MODE ACTIVE' : 'PAID ONLY'}
+                      {isFreeModeActive ? '⚡ FREE MODE' : '🔒 PAID MODE'}
                     </button>
                   </div>
 
@@ -3350,10 +3553,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         Select {activeMeta.label} Pass
                       </span>
                       <button
-                        onClick={() => setPreviewStep('identification')}
-                        className="text-[9px] text-slate-400 hover:text-white font-mono"
+                        type="button"
+                        onClick={() => setPreviewStep(isFreeModeActive ? 'identification' : 'voucher')}
+                        className="text-[9px] text-slate-400 hover:text-white font-mono cursor-pointer"
                       >
-                        &larr; Back
+                        &larr; Back to Voucher
                       </button>
                     </div>
 

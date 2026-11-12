@@ -310,6 +310,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   // Fleet Bulk Access Policy & Global RouterOS Speed/Burst Cap State
   const [bulkAccessMode, setBulkAccessMode] = useState<RouterAccessMode>('PAID_ONLY');
   const [bulkFreeMinutes, setBulkFreeMinutes] = useState<number>(30);
+  const [fleetSpeedCapsEnabled, setFleetSpeedCapsEnabled] = useState<boolean>(true);
   const [fleetDownloadMbps, setFleetDownloadMbps] = useState<number>(20);
   const [fleetUploadMbps, setFleetUploadMbps] = useState<number>(10);
   const [fleetBurstDownloadMbps, setFleetBurstDownloadMbps] = useState<number>(30);
@@ -321,6 +322,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     fleetBurstDownloadMbps
   );
   const [isBulkPushing, setIsBulkPushing] = useState(false);
+  const [isMaximizingCapacity, setIsMaximizingCapacity] = useState(false);
   const [bulkPushToast, setBulkPushToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isSyncingAllRouters, setIsSyncingAllRouters] = useState(false);
   const [syncedFleetCliScript, setSyncedFleetCliScript] = useState<string | null>(null);
@@ -334,17 +336,114 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       .then((d) => {
         const cfg = d?.configs?.hotspot;
         if (cfg) {
+          if (typeof cfg.speedCapsEnabled === 'boolean') setFleetSpeedCapsEnabled(cfg.speedCapsEnabled);
           if (typeof cfg.globalDownloadMbps === 'number') setFleetDownloadMbps(cfg.globalDownloadMbps);
           if (typeof cfg.globalUploadMbps === 'number') setFleetUploadMbps(cfg.globalUploadMbps);
           if (typeof cfg.globalBurstDownloadMbps === 'number') setFleetBurstDownloadMbps(cfg.globalBurstDownloadMbps);
           if (typeof cfg.globalBurstUploadMbps === 'number') setFleetBurstUploadMbps(cfg.globalBurstUploadMbps);
           if (typeof cfg.allowFreeAccess === 'boolean') {
-            setBulkAccessMode(cfg.allowFreeAccess ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+            setBulkAccessMode(cfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY');
           }
         }
       })
       .catch(() => {});
   }, []);
+
+  const handleToggleFleetSpeedCaps = async (enabled: boolean) => {
+    setFleetSpeedCapsEnabled(enabled);
+    try {
+      const targetRouterIds = routers.map((r) => r.id);
+      const res = await fetch('/api/devices/fleet/access-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerIds: targetRouterIds,
+          vertical: 'all',
+          accessMode: bulkAccessMode,
+          freeDurationMinutes: bulkFreeMinutes,
+          freeRateLimit: bulkRateLimit,
+          speedCapsEnabled: enabled,
+          dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
+          globalDownloadMbps: fleetDownloadMbps,
+          globalUploadMbps: fleetUploadMbps,
+          globalBurstDownloadMbps: fleetBurstDownloadMbps,
+          globalBurstUploadMbps: fleetBurstUploadMbps
+        })
+      });
+      const data = await res.json();
+      if (data?.cliScript) setSyncedFleetCliScript(data.cliScript);
+      triggerToast(
+        enabled
+          ? `SPEED CAPS & BURSTS ON (${bulkRateLimit})! Pushed to all live & new users across ${data?.updatedCount || routers.length} router(s).`
+          : `SPEED CAPS & BURSTS OFF (Uncapped 0/0)! All live & new users now have full uncapped Starlink speed.`,
+        'success'
+      );
+    } catch {
+      triggerToast(
+        enabled ? 'Speed Caps & Bursts enabled.' : 'Speed Caps & Bursts disabled (Uncapped 0/0).',
+        'info'
+      );
+    }
+  };
+
+  const handleMaximizeFleetCapacity = async () => {
+    setIsMaximizingCapacity(true);
+    try {
+      const res = await fetch('/api/devices/fleet/maximize-capacity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerIds: routers.map((r) => r.id),
+          dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
+          speedCapsEnabled: fleetSpeedCapsEnabled,
+          freeRateLimit: bulkRateLimit
+        })
+      });
+      const data = await res.json();
+      if (data?.cliScript) setSyncedFleetCliScript(data.cliScript);
+      triggerToast(
+        data?.message ||
+          `MAX CAPACITY ENFORCED (1,012 Users · 10.10.0.10-10.10.3.254 · shared-users=1024)! Pushed in real time with ZERO disconnect.`,
+        'success'
+      );
+    } catch {
+      triggerToast('Max Capacity (1,012 Users · 10.10.0.10-10.10.3.254) queued for live routers.', 'info');
+    } finally {
+      setIsMaximizingCapacity(false);
+    }
+  };
+
+  const handleMaximizeSingleRouterCapacity = async (router: RouterDevice, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSyncingRouterId(router.id);
+    try {
+      const res = await fetch(`/api/devices/${router.id}/maximize-capacity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
+          speedCapsEnabled: fleetSpeedCapsEnabled,
+          freeRateLimit: bulkRateLimit
+        })
+      });
+      const data = await res.json();
+      if (data?.cliScript) setSyncedFleetCliScript(data.cliScript);
+      storage.updateRouter(router.id, {
+        dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
+        maxClientsCapacity: 1012,
+        speedCapsEnabled: fleetSpeedCapsEnabled
+      });
+      triggerToast(
+        data?.message ||
+          `Non-disruptive capacity expansion (1,012 Users · 10.10.0.10-10.10.3.254 · shared-users=1024) pushed to ${router.name} in real time!`,
+        'success'
+      );
+    } catch {
+      triggerToast(`Capacity expansion (1,012 Users) queued for ${router.name}.`, 'info');
+    } finally {
+      setSyncingRouterId(null);
+    }
+  };
 
   // Adoption Handshake Verification & WinBox Terminal Diagnostics State
   const [isVerifyingHandshake, setIsVerifyingHandshake] = useState(false);
@@ -414,6 +513,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           accessMode: bulkAccessMode,
           freeDurationMinutes: bulkFreeMinutes,
           freeRateLimit: bulkRateLimit,
+          speedCapsEnabled: fleetSpeedCapsEnabled,
+          dhcpRange: RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
           globalDownloadMbps: fleetDownloadMbps,
           globalUploadMbps: fleetUploadMbps,
           globalBurstDownloadMbps: fleetBurstDownloadMbps,
@@ -433,7 +534,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         }
         setBulkPushToast({
           type: 'success',
-          message: `Synced to All Routers! Mode '${bulkAccessMode}' & Speed/Burst Cap (${bulkRateLimit}) pushed to ${data.updatedCount} router(s)!`
+          message: `Synced to All Routers! Mode '${bulkAccessMode}', Capacity (1,012 Users), & Speed Caps (${fleetSpeedCapsEnabled ? bulkRateLimit : 'OFF / Uncapped'}) pushed to ${data.updatedCount} router(s)!`
         });
         setTimeout(() => setBulkPushToast(null), 5000);
       } else {
@@ -1011,35 +1112,31 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </span>
               </span>
               <p className="text-[11px] text-slate-400 font-mono">
-                Dictate whether routers enforce paid vouchers, offer promotional free trials, or run 100% open Wi-Fi.
+                Switch routers between strictly <strong>PAID MODE</strong> (16-Digit OTT Voucher / PayLesotho) or <strong>FREE MODE</strong> (1-Tap Login for free).
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <select
-              value={bulkAccessMode}
+              value={bulkAccessMode === 'PAID_ONLY' ? 'PAID_ONLY' : 'COMPLETELY_FREE'}
               onChange={(e) => setBulkAccessMode(e.target.value as RouterAccessMode)}
               className="px-2.5 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
             >
-              <option value="PAID_ONLY">🔒 Strictly Paid / Vouchers Only</option>
-              <option value="FREE_TRIAL_AND_PAID">⚡ Free Trial + Paid Vouchers</option>
-              <option value="COMPLETELY_FREE">🌐 100% Free Public Wi-Fi</option>
+              <option value="PAID_ONLY">🔒 PAID MODE (OTT Voucher &amp; Buy Pass)</option>
+              <option value="COMPLETELY_FREE">⚡ FREE MODE (1-Tap Login &rarr; Direct Internet)</option>
             </select>
 
-            {bulkAccessMode !== 'PAID_ONLY' && (
-              <select
-                value={bulkFreeMinutes}
-                onChange={(e) => setBulkFreeMinutes(Number(e.target.value))}
-                className="px-2 py-1.5 bg-[#161d31] border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
-              >
-                <option value={15}>15 mins</option>
-                <option value={30}>30 mins</option>
-                <option value={45}>45 mins</option>
-                <option value={60}>60 mins</option>
-                <option value={120}>120 mins</option>
-              </select>
-            )}
+            <button
+              type="button"
+              disabled={isMaximizingCapacity || routers.length === 0}
+              onClick={() => void handleMaximizeFleetCapacity()}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold font-mono transition-all flex items-center gap-1.5 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 shadow-md cursor-pointer disabled:opacity-50"
+              title="Non-disruptively expand DHCP range to 10.10.0.10-10.10.3.254 (1,012 simultaneous users) and shared-users=1024 on live routers without dropping connected users"
+            >
+              <Wifi className={`w-3.5 h-3.5 ${isMaximizingCapacity ? 'animate-spin' : ''}`} />
+              <span>{isMaximizingCapacity ? 'Enforcing 1,012 Users...' : 'Maximize Capacity (1,012 Users · Live)'}</span>
+            </button>
 
             <button
               type="button"
@@ -1057,84 +1154,124 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           </div>
         </div>
 
-        {/* Global RouterOS Speed & Burst Cap Sliders */}
+        {/* Global RouterOS Speed & Burst Cap Sliders + Global ON/OFF Toggle */}
         <div className="pt-3 border-t border-[#1e263c] space-y-2.5 font-mono text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-bold text-slate-200 flex items-center gap-1.5">
               <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Global RouterOS Speed &amp; Burst Cap (All Connected Users)</span>
+              <span>Global RouterOS Speed Caps &amp; Bursts (ON / OFF Everywhere)</span>
             </span>
-            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-bold">
-              rate-limit=&quot;{bulkRateLimit}&quot;
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center bg-[#0b0f19] p-1 rounded-xl border border-[#232d42]">
+                <button
+                  type="button"
+                  onClick={() => void handleToggleFleetSpeedCaps(true)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                    fleetSpeedCapsEnabled
+                      ? 'bg-emerald-500 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  SPEED CAPS ON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleToggleFleetSpeedCaps(false)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
+                    !fleetSpeedCapsEnabled
+                      ? 'bg-rose-500 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  OFF (UNCAPPED 0/0)
+                </button>
+              </div>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-bold">
+                {fleetSpeedCapsEnabled ? `rate-limit="${bulkRateLimit}"` : 'UNCAPPED (0/0)'}
+              </span>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438]">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-[#0b0f1a] p-3 rounded-xl border border-[#1c2438] transition-opacity ${
+            fleetSpeedCapsEnabled ? 'opacity-100' : 'opacity-45'
+          }`}>
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-300 font-bold">Download Cap</span>
-                <span className="text-emerald-400 font-extrabold">{fleetDownloadMbps} Mbps</span>
+                <span className="text-emerald-400 font-extrabold">
+                  {fleetSpeedCapsEnabled ? `${fleetDownloadMbps} Mbps` : 'UNCAPPED'}
+                </span>
               </div>
               <input
                 type="range"
                 min={1}
                 max={100}
+                disabled={!fleetSpeedCapsEnabled}
                 value={fleetDownloadMbps}
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setFleetDownloadMbps(val);
                   if (fleetBurstDownloadMbps < val) setFleetBurstDownloadMbps(val);
                 }}
-                className="w-full accent-emerald-500 cursor-pointer"
+                className="w-full accent-emerald-500 cursor-pointer disabled:cursor-not-allowed"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-300 font-bold">Upload Cap</span>
-                <span className="text-cyan-400 font-extrabold">{fleetUploadMbps} Mbps</span>
+                <span className="text-cyan-400 font-extrabold">
+                  {fleetSpeedCapsEnabled ? `${fleetUploadMbps} Mbps` : 'UNCAPPED'}
+                </span>
               </div>
               <input
                 type="range"
                 min={1}
                 max={100}
+                disabled={!fleetSpeedCapsEnabled}
                 value={fleetUploadMbps}
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setFleetUploadMbps(val);
                   if (fleetBurstUploadMbps < val) setFleetBurstUploadMbps(val);
                 }}
-                className="w-full accent-cyan-500 cursor-pointer"
+                className="w-full accent-cyan-500 cursor-pointer disabled:cursor-not-allowed"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-300 font-bold">Download Burst</span>
-                <span className="text-amber-400 font-extrabold">{fleetBurstDownloadMbps} Mbps</span>
+                <span className="text-amber-400 font-extrabold">
+                  {fleetSpeedCapsEnabled ? `${fleetBurstDownloadMbps} Mbps` : 'UNCAPPED'}
+                </span>
               </div>
               <input
                 type="range"
                 min={fleetDownloadMbps}
                 max={150}
+                disabled={!fleetSpeedCapsEnabled}
                 value={fleetBurstDownloadMbps}
                 onChange={(e) => setFleetBurstDownloadMbps(Number(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer"
+                className="w-full accent-amber-500 cursor-pointer disabled:cursor-not-allowed"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-300 font-bold">Upload Burst</span>
-                <span className="text-orange-400 font-extrabold">{fleetBurstUploadMbps} Mbps</span>
+                <span className="text-orange-400 font-extrabold">
+                  {fleetSpeedCapsEnabled ? `${fleetBurstUploadMbps} Mbps` : 'UNCAPPED'}
+                </span>
               </div>
               <input
                 type="range"
                 min={fleetUploadMbps}
                 max={150}
+                disabled={!fleetSpeedCapsEnabled}
                 value={fleetBurstUploadMbps}
                 onChange={(e) => setFleetBurstUploadMbps(Number(e.target.value))}
-                className="w-full accent-orange-500 cursor-pointer"
+                className="w-full accent-orange-500 cursor-pointer disabled:cursor-not-allowed"
               />
             </div>
           </div>
@@ -1215,36 +1352,42 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                           🤝 {router.partnerName}
                         </span>
                       )}
-                      {router.accessMode === 'COMPLETELY_FREE' ? (
+                      {router.accessMode !== 'PAID_ONLY' && router.freeModeEnabled ? (
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                          <Unlock className="w-2.5 h-2.5" /> 100% FREE MODE ON
-                        </span>
-                      ) : (router.accessMode === 'FREE_TRIAL_AND_PAID' || router.freeModeEnabled) ? (
-                        <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <Zap className="w-2.5 h-2.5 fill-current" /> FREE TRIAL ({router.freeDurationMinutes || 30}m) + PAID
+                          <Unlock className="w-2.5 h-2.5" /> ⚡ FREE MODE
                         </span>
                       ) : (
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-center gap-1 truncate max-w-[165px]">
-                          <Lock className="w-2.5 h-2.5 shrink-0" /> <span className="truncate">STRICTLY PAID / OTT</span>
+                          <Lock className="w-2.5 h-2.5 shrink-0" /> <span className="truncate">🔒 PAID MODE</span>
                         </span>
                       )}
                     </div>
 
-                    {/* Real-Time Free Mode Toggle & Sync Controls directly on Adopted Router Card */}
+                    {/* Real-Time Free/Paid Mode Toggle & Sync Controls directly on Adopted Router Card */}
                     <div
                       onClick={(e) => e.stopPropagation()}
                       className="mt-2 p-1.5 rounded-lg bg-[#0b101d] border border-[#232d42] flex items-center justify-between gap-1.5"
                     >
                       <select
-                        value={router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY')}
+                        value={(router.accessMode !== 'PAID_ONLY' && router.freeModeEnabled) ? 'COMPLETELY_FREE' : 'PAID_ONLY'}
                         onChange={(e) => void handleLiveRouterAccessPolicy(router, e.target.value as RouterAccessMode)}
                         className="bg-[#161d31] text-[10px] font-mono font-bold text-white px-2 py-1 rounded border border-[#232d42] focus:outline-none focus:border-[#f05e17] cursor-pointer flex-1 truncate"
-                        title="Switch Free / Paid Mode on this adopted router in real time"
+                        title="Switch between Free Mode and Paid Mode on this router in real time"
                       >
-                        <option value="PAID_ONLY">🔒 Strictly Paid Only</option>
-                        <option value="FREE_TRIAL_AND_PAID">⚡ Free Trial + Paid</option>
-                        <option value="COMPLETELY_FREE">🌐 100% Free Mode ON</option>
+                        <option value="PAID_ONLY">🔒 PAID MODE</option>
+                        <option value="COMPLETELY_FREE">⚡ FREE MODE</option>
                       </select>
+
+                      <button
+                        type="button"
+                        onClick={(e) => void handleMaximizeSingleRouterCapacity(router, e)}
+                        disabled={syncingRouterId === router.id}
+                        className="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-bold flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
+                        title="Expand DHCP range to 10.10.0.10-10.10.3.254 (1,012 users) and shared-users=1024 on this live router in real time without dropping connected users"
+                      >
+                        <Wifi className="w-2.5 h-2.5" />
+                        <span>1,012 Users</span>
+                      </button>
 
                       <button
                         type="button"
@@ -1448,14 +1591,23 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                     <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     <span className="text-[10px] font-mono text-slate-300 font-bold">Mode:</span>
                     <select
-                      value={selectedRouter.accessMode || (selectedRouter.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY')}
+                      value={(selectedRouter.accessMode !== 'PAID_ONLY' && selectedRouter.freeModeEnabled) ? 'COMPLETELY_FREE' : 'PAID_ONLY'}
                       onChange={(e) => void handleLiveRouterAccessPolicy(selectedRouter, e.target.value as RouterAccessMode)}
                       className="bg-[#0f1422] text-amber-300 font-mono font-bold text-xs px-2 py-0.5 rounded border border-[#232d42] cursor-pointer focus:outline-none"
                     >
-                      <option value="PAID_ONLY" className="bg-[#0f1422] text-rose-300">🔒 Strictly Paid Only</option>
-                      <option value="FREE_TRIAL_AND_PAID" className="bg-[#0f1422] text-amber-300">⚡ Free Trial + Paid</option>
-                      <option value="COMPLETELY_FREE" className="bg-[#0f1422] text-emerald-300">🌐 100% Free Mode ON</option>
+                      <option value="PAID_ONLY" className="bg-[#0f1422] text-rose-300">🔒 PAID MODE (OTT Voucher &amp; Buy Pass)</option>
+                      <option value="COMPLETELY_FREE" className="bg-[#0f1422] text-emerald-300">⚡ FREE MODE (1-Tap Login for free)</option>
                     </select>
+                    <button
+                      type="button"
+                      onClick={(e) => void handleMaximizeSingleRouterCapacity(selectedRouter, e)}
+                      disabled={syncingRouterId === selectedRouter.id}
+                      className="px-2.5 py-1 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-[11px] font-mono font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Expand DHCP range to 10.10.0.10-10.10.3.254 (1,012 simultaneous users) and shared-users=1024 on this live router without disconnecting anyone"
+                    >
+                      <Wifi className="w-3 h-3" />
+                      <span>Max Capacity (1,012 Users)</span>
+                    </button>
                     <button
                       type="button"
                       onClick={(e) => void handleSyncSingleRouterRealtime(selectedRouter, e)}
@@ -1995,30 +2147,25 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">3. Bound Hotspot Policy *</label>
+                  <label className="text-slate-400 block mb-1">3. Hotspot Mode (Free or Paid) *</label>
                   <select
-                    value={newPolicyName}
+                    value={newAccessMode === 'PAID_ONLY' ? 'PAID_ONLY' : 'COMPLETELY_FREE'}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      setNewPolicyName(val);
-                      if (val.includes('Sponsored Free')) {
-                        setNewAccessMode('COMPLETELY_FREE');
-                      } else if (val.includes('Hybrid')) {
-                        setNewAccessMode('FREE_TRIAL_AND_PAID');
-                      } else {
-                        setNewAccessMode('PAID_ONLY');
-                      }
+                      const mode = e.target.value as RouterAccessMode;
+                      setNewAccessMode(mode);
+                      setNewPolicyName(
+                        mode === 'PAID_ONLY'
+                          ? 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy'
+                          : 'Sponsored Free Opt-In + Partner Ad Carousel Policy'
+                      );
                     }}
                     className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                   >
-                    <option value="PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy">
-                      PayLesotho + 16-Digit OTT Policy (Paid)
+                    <option value="PAID_ONLY">
+                      🔒 PAID MODE — 16-Digit OTT Voucher &amp; PayLesotho Buy Pass
                     </option>
-                    <option value="Hybrid Trial + PayLesotho 16-Digit OTT Policy">
-                      Hybrid Trial + PayLesotho OTT Policy
-                    </option>
-                    <option value="Sponsored Free Opt-In + Partner Ad Carousel Policy">
-                      Sponsored Free Opt-In + Ad Carousel Policy
+                    <option value="COMPLETELY_FREE">
+                      ⚡ FREE MODE — 1-Tap &ldquo;Login for free&rdquo; + Sponsor Ad
                     </option>
                   </select>
                 </div>

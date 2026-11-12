@@ -73,6 +73,9 @@ export interface RouterDevice {
   globalBurstDownloadMbps?: number;
   globalBurstUploadMbps?: number;
   globalRateLimit?: string;
+  speedCapsEnabled?: boolean;
+  dhcpRange?: string;
+  maxClientsCapacity?: number;
   freeDailyQuotaMb?: number;
   freeCooldownHours?: number;
   policyLastSyncedAt?: string;
@@ -511,7 +514,9 @@ export interface ScopePortalConfig {
   freeButtonText?: string; // default "Login for free"
   allowVoucherCode: boolean;
   allowOnlinePayment: boolean;
-  // Global RouterOS Speed & Burst Capping (Mbps)
+  // Global RouterOS Speed & Burst Capping (Mbps) + Global ON/OFF Toggle & DHCP Capacity Range
+  speedCapsEnabled?: boolean;
+  dhcpRange?: string;
   globalDownloadMbps?: number;
   globalUploadMbps?: number;
   globalBurstDownloadMbps?: number;
