@@ -838,6 +838,105 @@ export const VideoAdManagerPanel: React.FC = () => {
           </div>
         )}
 
+        {/* POST-LOGIN AD SCREEN & "PROCEED TO INTERNET" LINK BEHAVIOR SELECTOR */}
+        <div className="p-4 rounded-xl bg-[#121829] border border-[#f05e17]/40 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-white flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                <span>Post-Login Ad Screen (Replaces &ldquo;Connected &mdash; Resuming to Device&rdquo;)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                While the guest device authenticates on MikroTik, a <strong>randomly selected picture</strong> from your Ad Slides is displayed in full clarity with a small static <strong>&ldquo;Proceed to internet &rarr;&rdquo;</strong> link at the bottom. Choose what happens when the guest taps that link:
+              </p>
+            </div>
+            <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0b0f19] border border-[#232d42] text-[11px] font-bold text-slate-200 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={config.randomizeSlides !== false}
+                onChange={(e) =>
+                  persistConfig(
+                    { ...config, randomizeSlides: e.target.checked },
+                    e.target.checked
+                      ? 'Random Ad Slide picture selection enabled!'
+                      : 'Sequential Ad Slide picture order enabled.'
+                  )
+                }
+                className="accent-[#f05e17] rounded"
+              />
+              <span>Randomize Ad Picture Shown</span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() =>
+                persistConfig(
+                  { ...config, proceedActionMode: 'close_portal' },
+                  'Proceed to internet link set to: Option 1 — Close Captive Portal / Release to Internet Immediately!'
+                )
+              }
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                (config.proceedActionMode || 'close_portal') === 'close_portal'
+                  ? 'border-2 border-[#f05e17] bg-[#f05e17]/15 text-white shadow'
+                  : 'border-[#232d42] bg-[#0b0f19] text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-extrabold text-white">
+                  1. Close Captive Portal / Release to Internet Immediately
+                </span>
+                <span
+                  className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
+                    (config.proceedActionMode || 'close_portal') === 'close_portal'
+                      ? 'bg-[#f05e17] text-white'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {(config.proceedActionMode || 'close_portal') === 'close_portal' ? 'SELECTED' : 'SELECT'}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Tapping <strong>&ldquo;Proceed to internet &rarr;&rdquo;</strong> immediately dismisses the captive portal window and releases the guest device to the internet.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                persistConfig(
+                  { ...config, proceedActionMode: 'open_campaign_url' },
+                  'Proceed to internet link set to: Option 2 — Open Sponsor Campaign URL (if set) or Release to Internet!'
+                )
+              }
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                config.proceedActionMode === 'open_campaign_url'
+                  ? 'border-2 border-[#f05e17] bg-[#f05e17]/15 text-white shadow'
+                  : 'border-[#232d42] bg-[#0b0f19] text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-extrabold text-white">
+                  2. Open Sponsor Campaign URL (if set) or Release to Internet
+                </span>
+                <span
+                  className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
+                    config.proceedActionMode === 'open_campaign_url'
+                      ? 'bg-[#f05e17] text-white'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {config.proceedActionMode === 'open_campaign_url' ? 'SELECTED' : 'SELECT'}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                Tapping <strong>&ldquo;Proceed to internet &rarr;&rdquo;</strong> opens the picture&apos;s Sponsor Campaign Redirect URL (if configured) or releases to the internet.
+              </p>
+            </button>
+          </div>
+        </div>
+
         {/* 3 Trigger Rules Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="p-3.5 rounded-xl bg-[#141b2d] border border-emerald-500/30 flex items-start gap-3">

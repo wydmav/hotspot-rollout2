@@ -1,34 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ShieldCheck,
   CheckCircle2,
-  Ticket,
   ArrowRight,
-  Zap,
   RefreshCw,
-  Globe,
-  Sparkles,
   AlertCircle,
   Volume2,
   VolumeX,
-  ExternalLink,
   ChevronLeft,
   ChevronRight,
-  X,
   Copy,
   Check
 } from 'lucide-react';
 import { storage } from '../../services/storage';
-import { ScopePortalConfig, VerticalType, GatewayProvider, SponsorAdConfig, VideoAdItem } from '../../types';
+import { ScopePortalConfig, VerticalType, SponsorAdConfig, VideoAdItem } from '../../types';
 import {
   DEFAULT_SCOPE_CONFIGS,
-  SCOPE_LIST,
   OFFICIAL_SESOTHO_TERMS_TEXT,
   normalizeScopeTermsText,
   resolveWalledGardenImageUrl,
   buildInlineFallbackSlideDataUri
 } from '../views/ScopeCaptivePortalBuilder';
-import { ProviderLogo } from '../common/BrandLogos';
+import { MPesaLogo, EcoCashLogo, OttVoucherLogo } from '../common/BrandLogos';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
 import { copyToClipboard } from '../../utils/clipboard';
 
@@ -58,6 +50,26 @@ const sanitizeDestinationUrl = (rawUrl?: string): string => {
   return /^https?:\/\//i.test(u) ? u : 'https://www.google.com';
 };
 
+const sanitizePortalErrorMessage = (raw: unknown, fallback: string): string => {
+  const str = typeof raw === 'string' ? raw.trim() : '';
+  if (!str) return fallback;
+  if (/<html|<head|<body|<title|403 Forbidden|Microsoft-Azure-Application-Gateway/i.test(str)) {
+    return 'Unable to verify 16-digit OTT Voucher PIN (upstream gateway returned 403 Forbidden or invalid PIN). Please check your 16-digit PIN and try again.';
+  }
+  return str.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || fallback;
+};
+
+const formatFreeDurationBadge = (minutes?: number): string => {
+  const mins = Math.max(60, Number(minutes) || 1440);
+  if (mins === 720) return '12 Hours';
+  if (mins === 1440) return '24 Hours';
+  if (mins % 1440 === 0) {
+    const days = mins / 1440;
+    return `${days} ${days === 1 ? 'Day' : 'Days'}`;
+  }
+  return `${Math.round(mins / 60)} Hours`;
+};
+
 export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   routerGatewayIp = '10.10.0.1'
 }) => {
@@ -74,6 +86,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             freeButtonX: typeof parsed.freeButtonX === 'number' ? parsed.freeButtonX : 50,
             freeButtonY: typeof parsed.freeButtonY === 'number' ? parsed.freeButtonY : 88,
             freeButtonText: parsed.freeButtonText || 'Login for free',
+            freeAccessDurationMinutes: Number(parsed.freeAccessDurationMinutes) || 1440,
             termsText: normalizeScopeTermsText(parsed.termsText)
           };
         }
@@ -99,10 +112,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   }));
 
   const currentConfig = scopeConfigs[activeScope] || DEFAULT_SCOPE_CONFIGS.hotspot;
-  const activeMeta = SCOPE_LIST.find((s) => s.id === activeScope) || SCOPE_LIST[0];
   const isFreeAccessAllowed = Boolean(currentConfig.allowFreeAccess);
-  const isVoucherAllowed = currentConfig.allowVoucherCode !== false;
-  const isBuyPassAllowed = currentConfig.allowOnlinePayment !== false;
   const isTermsRequired = currentConfig.termsEnabled !== false;
   const accentColor = currentConfig.accentColor || '#f05e17';
 
@@ -114,7 +124,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const [userOrigUrl, setUserOrigUrl] = useState('https://www.google.com');
 
   // Splash Flow Step: 'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
-  // Strict Auth Gate: Never auto-skip to 'connected' on mount — user must pay/redeem OTT voucher OR press Connect Free Wi-Fi
   const [portalStep, setPortalStep] = useState<
     'identification' | 'plan' | 'voucher' | 'payment' | 'video_ad' | 'connected'
   >(() => {
@@ -123,59 +132,49 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         const params = new URLSearchParams(window.location.search);
         const stepParam = params.get('step');
         const reasonParam = params.get('reason');
-        if (reasonParam === 'retrigger') return 'video_ad';
-        if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'identification') {
-          return stepParam;
-        }
+        if (reasonParam === 'retrigger' || stepParam === 'video_ad') return 'video_ad';
       } catch {}
     }
-    return isFreeAccessAllowed ? 'identification' : isVoucherAllowed ? 'voucher' : 'plan';
+    return isFreeAccessAllowed ? 'identification' : 'plan';
   });
 
-  // Video Ad Interstitial & 3h / 2GB Re-Trigger State
+  // Compact 2-Step Paid Mode state: 'details' (Step 1) -> 'package' (Step 2)
+  const [paidSubStep, setPaidSubStep] = useState<'details' | 'package'>('details');
+
+  // Video Ad / Picture Ad Interstitial State
   const [sponsorAdConfig, setSponsorAdConfig] = useState<SponsorAdConfig>(() => storage.getSponsorAdConfig());
-  const [adTriggerReason, setAdTriggerReason] = useState<'post_auth' | 'retrigger'>('post_auth');
-  const [adElapsedSec, setAdElapsedSec] = useState(0);
-  const [adDurationSec, setAdDurationSec] = useState(15);
-  const [isAdUnlocked, setIsAdUnlocked] = useState(true);
   const [isVideoMuted, setIsVideoMuted] = useState(true);
   const [carouselSlideIdx, setCarouselSlideIdx] = useState(0);
   const touchStartXRef = useRef<number>(0);
   const touchDraggedRef = useRef<boolean>(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Mandatory Terms & Conditions Checkbox + Popup Modal State (Enforced when termsEnabled is on)
+  // Mandatory Terms & Conditions Checkbox + Popup Modal State
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
   const isTermsSatisfied = !isTermsRequired || termsAccepted;
 
-  // Guest Registration Fields (100% empty initial state — collected across all modes and synced to Admin)
+  // Guest Registration Fields
   const [guestFirstName, setGuestFirstName] = useState('');
   const [guestSurname, setGuestSurname] = useState('');
   const [guestCountryCode, setGuestCountryCode] = useState<'+266' | '+27'>('+266');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
 
-  // Plan & Payment State (PayLesotho XPayments OTT Voucher & Official 16-Digit OTT Voucher)
+  // Plan & Payment State (M-Pesa, EcoCash, and 16-Digit OTT Voucher)
   const enabledPlans = currentConfig.plans.filter((p) => p.enabled !== false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     () => enabledPlans[0]?.id || currentConfig.plans[0]?.id || 'hs_1d'
   );
-  const [voucherAmountLsl, setVoucherAmountLsl] = useState<number>(
-    () => enabledPlans[0]?.price || currentConfig.plans[0]?.price || 10
-  );
-  const [customAmountInput, setCustomAmountInput] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<'paylesotho' | 'ottvoucher'>('paylesotho');
-  const [payLesothoChannel, setPayLesothoChannel] = useState<'ecocash' | 'mpesa' | 'card'>('ecocash');
+  const [payLesothoChannel, setPayLesothoChannel] = useState<'mpesa' | 'ecocash'>('mpesa');
   const [ottPin, setOttPin] = useState('');
-  const [voucherCode, setVoucherCode] = useState('');
-  const [voucherError, setVoucherError] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [phoneFormatError, setPhoneFormatError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
-  // Post-Payment Issued OTT Voucher Copy -> Redeem State (PayLesotho M-Pesa / EcoCash / Card)
+  // Post-Payment Issued OTT Voucher Copy -> Redeem State (M-Pesa / EcoCash USSD Push)
   const [issuedOttVoucherPin, setIssuedOttVoucherPin] = useState<string | null>(null);
   const [issuedOttVoucherAmount, setIssuedOttVoucherAmount] = useState<number | null>(null);
   const [issuedOttVoucherRef, setIssuedOttVoucherRef] = useState<string | null>(null);
@@ -223,9 +222,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     if (isFreeAccessAllowed && portalStep !== 'identification') {
       setPortalStep('identification');
     } else if (!isFreeAccessAllowed && portalStep === 'identification') {
-      setPortalStep(isVoucherAllowed ? 'voucher' : 'plan');
+      setPortalStep('plan');
     }
-  }, [isFreeAccessAllowed, isVoucherAllowed, portalStep]);
+  }, [isFreeAccessAllowed, portalStep]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -236,6 +235,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       const origUrl = params.get('user_url') || params.get('link_orig');
       const scopeParam = params.get('scope') as VerticalType | null;
       const stepParam = params.get('step');
+      const reasonParam = params.get('reason');
 
       if (mac && !mac.includes('$(')) setClientMac(mac);
       if (ip && !ip.includes('$(')) setClientIp(ip);
@@ -247,25 +247,21 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       if (scopeParam && DEFAULT_SCOPE_CONFIGS[scopeParam]) {
         setActiveScope(scopeParam);
       }
-      if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'video_ad' || stepParam === 'identification') {
+      if (stepParam === 'video_ad' || reasonParam === 'retrigger') {
         hasExplicitStepParamRef.current = true;
-        setPortalStep(stepParam);
-      }
-      const reasonParam = params.get('reason');
-      if (reasonParam === 'retrigger') {
-        hasExplicitStepParamRef.current = true;
-        setAdTriggerReason('retrigger');
         setPortalStep('video_ad');
+      } else if (stepParam === 'plan' || stepParam === 'voucher' || stepParam === 'identification') {
+        hasExplicitStepParamRef.current = true;
+        setPortalStep(stepParam === 'identification' ? 'identification' : 'plan');
       }
     }
   }, [routerGatewayIp]);
 
-  // Poll live splash configuration saved on the VPS server + localStorage events using digest comparison
-  // so guest phones receive admin updates in real time WITHOUT layout flashes or state resets during typing/connection
+  // Poll live splash configuration saved on the VPS server + localStorage events
   useEffect(() => {
     let mounted = true;
     const syncLocal = () => {
-      if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+      if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad' || portalStepRef.current === 'connected') return;
       const nextConfigs: Record<VerticalType, ScopePortalConfig> = {
         hotspot: loadLocalScopeConfig('hotspot'),
         village: loadLocalScopeConfig('community'),
@@ -288,7 +284,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     };
 
     const fetchConfig = () => {
-      // Never interrupt an active connection handshake, post-auth ad, or connected state with background config polls
       if (
         isConnectingRef.current ||
         portalStepRef.current === 'video_ad' ||
@@ -314,6 +309,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               if (v && typeof v === 'object') {
                 normalizedConfigs[k] = {
                   ...(v as ScopePortalConfig),
+                  freeAccessDurationMinutes: Number((v as ScopePortalConfig).freeAccessDurationMinutes) || 1440,
                   termsText: normalizeScopeTermsText((v as ScopePortalConfig).termsText)
                 };
               }
@@ -321,7 +317,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             const incomingDigest = JSON.stringify(normalizedConfigs);
             if (incomingDigest !== lastConfigDigestRef.current) {
               lastConfigDigestRef.current = incomingDigest;
-              // Cache server configs to localStorage so subsequent opens have 0ms hydration
               if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
                 Object.entries(normalizedConfigs).forEach(([k, v]) => {
                   try {
@@ -334,13 +329,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 if (!hasHydratedServerConfigRef.current) {
                   hasHydratedServerConfigRef.current = true;
                   const targetCfg = merged[activeScopeRef.current] || merged.hotspot || DEFAULT_SCOPE_CONFIGS.hotspot;
-                  if (!hasExplicitStepParamRef.current && portalStepRef.current !== 'connected') {
-                    const preferredStep = targetCfg.allowFreeAccess
-                      ? 'identification'
-                      : targetCfg.allowVoucherCode !== false
-                      ? 'voucher'
-                      : 'plan';
-                    setPortalStep(preferredStep);
+                  if (!hasExplicitStepParamRef.current && portalStepRef.current !== 'connected' && portalStepRef.current !== 'video_ad') {
+                    setPortalStep(targetCfg.allowFreeAccess ? 'identification' : 'plan');
                   }
                 }
                 return merged;
@@ -353,7 +343,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       fetch('/api/portal/video-ads')
         .then((res) => res.json())
         .then((data) => {
-          if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad') return;
+          if (!mounted || isConnectingRef.current || portalStepRef.current === 'video_ad' || portalStepRef.current === 'connected') return;
           if (data?.success && data?.sponsorAd && typeof data.sponsorAd === 'object') {
             const adDigest = JSON.stringify(data.sponsorAd);
             if (adDigest !== lastAdDigestRef.current) {
@@ -382,21 +372,24 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     };
   }, []);
 
+  // Resolve the active Picture / Video Ad campaign from Picture & Video Ads library
+  // Always resolves an ad campaign with slides if any exists so the post-auth screen can showcase a random Ad Slide picture
   const activeVideoAd: VideoAdItem | null = React.useMemo(() => {
-    if (!sponsorAdConfig.enabled) return null;
     const lib = sponsorAdConfig.videoLibrary || [];
     const normScope = activeScope === 'village' ? 'community' : activeScope;
     return (
       lib.find((v) => v.enabled && v.mediaType === 'image_carousel' && (v.targetScope === normScope || v.targetScope === activeScope)) ||
       lib.find((v) => v.enabled && v.mediaType === 'image_carousel' && v.targetScope === 'all') ||
+      lib.find((v) => v.mediaType === 'image_carousel' && Array.isArray(v.slides) && v.slides.length > 0) ||
       lib.find((v) => v.enabled && (v.targetScope === normScope || v.targetScope === activeScope)) ||
       lib.find((v) => v.enabled && v.targetScope === 'all') ||
       lib.find((v) => v.enabled) ||
+      lib[0] ||
       null
     );
   }, [sponsorAdConfig, activeScope]);
 
-  // Preload active background wallpaper and sponsor ad slides via Walled-Garden proxy so transitions have zero flicker
+  // Preload active background wallpaper and sponsor ad slides via Walled-Garden proxy
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (currentConfig.bgImage) {
@@ -421,8 +414,46 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   }, [currentConfig.bgImage, currentConfig.brandTitle, currentConfig.welcomeHeadline, activeVideoAd]);
 
-  const releaseAndCloseSplash = () => {
+  // Authorize physical MikroTik router in background via hidden iframe + beacon while user views the Ad Slide
+  const triggerBackgroundRouterAuth = () => {
+    if (routerAuthSentRef.current) return;
+    routerAuthSentRef.current = true;
     const safeDstUrl = sanitizeDestinationUrl(userOrigUrl);
+    const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
+    const authRedirectUrl = `${targetLoginUrl}?username=${encodeURIComponent(
+      routerUsernameRef.current || routerUsername || 'test'
+    )}&password=${encodeURIComponent(
+      routerPasswordRef.current || routerPassword || '123'
+    )}&dst=${encodeURIComponent(safeDstUrl)}`;
+
+    try {
+      let authIframe = document.getElementById('tc_router_auth_frame') as HTMLIFrameElement | null;
+      if (!authIframe) {
+        authIframe = document.createElement('iframe');
+        authIframe.id = 'tc_router_auth_frame';
+        authIframe.style.display = 'none';
+        authIframe.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(authIframe);
+      }
+      authIframe.src = authRedirectUrl;
+    } catch {}
+
+    try {
+      fetch(authRedirectUrl, { mode: 'no-cors' }).catch(() => {});
+    } catch {}
+
+    if (hasExplicitRouterLogin && hiddenFormRef.current) {
+      try {
+        hiddenFormRef.current.submit();
+      } catch {}
+    }
+  };
+
+  const releaseAndCloseSplash = (overrideUrl?: string) => {
+    const safeDstUrl = overrideUrl && /^https?:\/\//i.test(overrideUrl)
+      ? overrideUrl
+      : sanitizeDestinationUrl(userOrigUrl);
+
     const sessionRecord = {
       connectedAt: new Date().toISOString(),
       username: routerUsernameRef.current || routerUsername || 'test',
@@ -437,56 +468,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       } catch {}
     }
 
-    // Immediately switch portalStep to 'connected' so the sign-up screen NEVER reappears
-    portalStepRef.current = 'connected';
-    setPortalStep('connected');
+    triggerBackgroundRouterAuth();
 
-    // Authorize physical MikroTik router in background via hidden iframe + beacon
-    // so the phone's MAC address is instantly granted internet connectivity in RouterOS
-    // without triggering an iOS/Android CNA browser reload that resets the UI state
-    if (!routerAuthSentRef.current) {
-      routerAuthSentRef.current = true;
-      const targetLoginUrl = linkLoginOnly || `http://${routerGatewayIp}/login`;
-      const authRedirectUrl = `${targetLoginUrl}?username=${encodeURIComponent(
-        routerUsernameRef.current || routerUsername || 'test'
-      )}&password=${encodeURIComponent(
-        routerPasswordRef.current || routerPassword || '123'
-      )}&dst=${encodeURIComponent(safeDstUrl)}`;
-
+    // If Admin chose "Close captive portal / release to internet immediately" and no campaign override URL was requested
+    if (!overrideUrl) {
       try {
-        let authIframe = document.getElementById('tc_router_auth_frame') as HTMLIFrameElement | null;
-        if (!authIframe) {
-          authIframe = document.createElement('iframe');
-          authIframe.id = 'tc_router_auth_frame';
-          authIframe.style.display = 'none';
-          authIframe.setAttribute('aria-hidden', 'true');
-          document.body.appendChild(authIframe);
-        }
-        authIframe.src = authRedirectUrl;
+        window.close();
       } catch {}
-
       try {
-        fetch(authRedirectUrl, { mode: 'no-cors' }).catch(() => {});
+        window.open('', '_self', '');
+        window.close();
       } catch {}
-
-      // If redirected from an actual MikroTik router (?link_login_only=...), also submit the POST form or navigate so RouterOS authorizes the client MAC/IP immediately
-      if (hasExplicitRouterLogin && hiddenFormRef.current) {
-        try {
-          hiddenFormRef.current.submit();
-          return;
-        } catch {}
-      }
     }
-
-    // Direct automatic release to device:
-    // Dismiss mobile captive sheet (iOS CNA / Android) or redirect directly to destination
-    try {
-      window.close();
-    } catch {}
-    try {
-      window.open('', '_self', '');
-      window.close();
-    } catch {}
 
     setTimeout(() => {
       if (typeof window !== 'undefined') {
@@ -498,45 +491,54 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         }
         window.location.replace(safeDstUrl);
       }
-    }, 350);
+    }, 250);
   };
 
-  const startOrEnterConnectedSession = (reason: 'post_auth' | 'retrigger' = 'post_auth') => {
-    if (sponsorAdConfig.enabled && activeVideoAd) {
-      setAdTriggerReason(reason);
-      setAdElapsedSec(0);
-      setCarouselSlideIdx(0);
-      setIsAdUnlocked(true);
-      storage.recordVideoAdImpression(activeVideoAd.id);
-      setPortalStep('video_ad');
+  // Start authenticating session on router in background and immediately show a Random Ad Slide Picture
+  // (Replaces the old black "Connected — Resuming to Device" screen)
+  const startOrEnterConnectedSession = () => {
+    triggerBackgroundRouterAuth();
+
+    const slides = activeVideoAd?.slides || [];
+    if (slides.length > 0) {
+      const randomIdx =
+        sponsorAdConfig.randomizeSlides !== false
+          ? Math.floor(Math.random() * slides.length)
+          : 0;
+      setCarouselSlideIdx(randomIdx);
     } else {
-      releaseAndCloseSplash();
+      setCarouselSlideIdx(0);
     }
+
+    if (activeVideoAd) {
+      storage.recordVideoAdImpression(activeVideoAd.id);
+    }
+
+    portalStepRef.current = 'video_ad';
+    setPortalStep('video_ad');
   };
 
-  const handleCloseAdAndEnjoyInternet = (e?: React.MouseEvent) => {
+  // Handler when the guest taps the small static "Proceed to internet →" link on the Ad Slide screen
+  const handleProceedToInternetClick = (e?: React.MouseEvent, slideRedirectUrl?: string) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
+    const mode = sponsorAdConfig.proceedActionMode || 'close_portal';
+    const campaignUrl = (slideRedirectUrl || activeVideoAd?.destinationUrl || sponsorAdConfig.destinationUrl || '').trim();
+
+    if (mode === 'open_campaign_url' && campaignUrl && /^https?:\/\//i.test(campaignUrl)) {
+      if (activeVideoAd) {
+        storage.recordVideoAdClick(activeVideoAd.id);
+      }
+      releaseAndCloseSplash(campaignUrl);
+      return;
+    }
+
     releaseAndCloseSplash();
   };
 
-  // Immediately switch active login mode if Admin turns off Free Wi-Fi, Voucher, or Buy Pass in real time
-  useEffect(() => {
-    if (portalStep === 'identification' && !isFreeAccessAllowed) {
-      if (isVoucherAllowed) setPortalStep('voucher');
-      else if (isBuyPassAllowed) setPortalStep('plan');
-    } else if (portalStep === 'voucher' && !isVoucherAllowed) {
-      if (isFreeAccessAllowed) setPortalStep('identification');
-      else if (isBuyPassAllowed) setPortalStep('plan');
-    } else if ((portalStep === 'plan' || portalStep === 'payment') && !isBuyPassAllowed) {
-      if (isFreeAccessAllowed) setPortalStep('identification');
-      else if (isVoucherAllowed) setPortalStep('voucher');
-    }
-  }, [isFreeAccessAllowed, isVoucherAllowed, isBuyPassAllowed, portalStep]);
-
-  // Guest Input Validation (Strictly enforces currentConfig.collectName, collectPhone, collectEmail)
+  // Guest Input Validation
   const isFirstNameValid = !currentConfig.collectName || guestFirstName.trim().length >= 2;
   const isSurnameValid = !currentConfig.collectName || guestSurname.trim().length >= 2;
   const cleanPhoneDigits = guestPhone.replace(/\D/g, '');
@@ -553,40 +555,21 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const digits = rawVal.replace(/\D/g, '');
     if (cc === '+266') {
       if (digits.length > 0 && digits[0] !== '5' && digits[0] !== '6') {
-        setPhoneFormatError('Lesotho (+266) numbers must start with 5 or 6');
+        setPhoneFormatError('Lesotho (+266) numbers must start with 5 (M-Pesa) or 6 (EcoCash)');
         return;
       }
       setPhoneFormatError(null);
-      setGuestPhone(digits.slice(0, 8));
+      const sliced = digits.slice(0, 8);
+      setGuestPhone(sliced);
+      // Auto-select M-Pesa for 5xxxxxxx or EcoCash for 6xxxxxxx
+      if (sliced.startsWith('5')) setPayLesothoChannel('mpesa');
+      else if (sliced.startsWith('6')) setPayLesothoChannel('ecocash');
     } else {
       setPhoneFormatError(null);
       setGuestPhone(digits.slice(0, 10));
     }
   };
 
-  // Video Ad / Multi-Image Ad countdown & unlock timer when in 'video_ad' step
-  useEffect(() => {
-    if (portalStep !== 'video_ad' || !activeVideoAd) return;
-    const isCarousel = activeVideoAd.mediaType === 'image_carousel' && Array.isArray(activeVideoAd.slides) && activeVideoAd.slides.length > 0;
-    const watchMode = activeVideoAd.watchMode || 'full_video';
-    const skipTarget = Math.max(1, Number(activeVideoAd.skipAfterSec) || 5);
-    const timer = setInterval(() => {
-      setAdElapsedSec((prev) => {
-        const next = prev + 1;
-        if ((watchMode === 'skip_after_sec' || isCarousel) && next >= skipTarget) {
-          setIsAdUnlocked(true);
-        } else if (watchMode === 'full_video' && !isCarousel && next >= Math.max(adDurationSec, 15)) {
-          setIsAdUnlocked(true);
-        }
-        return next;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [portalStep, activeVideoAd, adDurationSec]);
-
-  /**
-   * Sends captured guest details, session, and payment telemetry to the Admin Controller & Supabase
-   */
   const syncGuestSessionToAdmin = async (payload: {
     mode: 'free' | 'voucher' | 'ecocash' | 'ottvoucher' | 'paylesotho';
     planName: string;
@@ -600,7 +583,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const fullGuestPhone = guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '';
     const sessionId = `sess_${payload.mode}_${Date.now()}`;
 
-    // 1. Update local storage if running on same browser
     try {
       storage.addActiveSession({
         id: sessionId,
@@ -624,7 +606,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       });
     } catch {}
 
-    // 2. Post to VPS backend so Admin Dashboard & Scoped Partner Webhooks receive the lead immediately
     try {
       await fetch('/api/portal/guest-connect', {
         method: 'POST',
@@ -657,10 +638,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     } catch {}
   };
 
-  /**
-   * Stores verified MikroTik Hotspot credentials and records active guest session state
-   * so pressing X on the sponsor ad performs a clean top-level router login and releases to internet.
-   */
   const authorizeOnMikroTikRouter = (username = 'test', password = '123') => {
     routerUsernameRef.current = username;
     routerPasswordRef.current = password;
@@ -680,17 +657,21 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Connect Free Wi-Fi (1-Tap Instant Connect — Only when Free Access Mode is enabled by Admin on Dashboard)
+  // Connect Free Wi-Fi (Enforces configured 12h, 24h, or X days Free Mode session duration)
   const handleConnectFree = async () => {
     if (!isFreeAccessAllowed || isConnecting) return;
     isConnectingRef.current = true;
     setIsConnecting(true);
     setStatusBanner('Connecting to free Wi-Fi...');
 
+    const freeDurationMins = Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440);
+    const freeDurationSecs = freeDurationMins * 60;
+    const freeBadge = formatFreeDurationBadge(freeDurationMins);
+
     await syncGuestSessionToAdmin({
       mode: 'free',
-      planName: 'Free Wi-Fi (Unlimited)',
-      durationSeconds: 0,
+      planName: `Free Wi-Fi (${freeBadge})`,
+      durationSeconds: freeDurationSecs,
       voucherCode: '',
       amount: 0,
       speedLimit: '25M/10M'
@@ -700,96 +681,25 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     setIsConnecting(false);
     isConnectingRef.current = false;
     setStatusBanner(null);
-    startOrEnterConnectedSession('post_auth');
+    startOrEnterConnectedSession();
   };
 
-  // Redeem 16-Digit OTT Voucher Code (Strictly verifies against OTT Lesotho API & Issued PayLesotho OTT Vouchers)
-  const handleRedeemVoucher = async (e: React.FormEvent) => {
+  // Step 1 -> Step 2 transition in Paid Mode
+  const handleProceedToStep2 = (e: React.FormEvent) => {
     e.preventDefault();
-    setVoucherError(null);
-
+    setPaymentError(null);
     if (!isGuestFormValid) {
-      setVoucherError('Please complete your First Name, Surname, 8-digit Lesotho mobile number (5/6), and Email first.');
+      setPaymentError('Please enter your First name, Surname, and valid 8-digit Lesotho mobile number (starts with 5 or 6).');
       return;
     }
-
     if (!isTermsSatisfied) {
-      setVoucherError('Please tick the Terms & Conditions box to proceed.');
+      setPaymentError('Please agree to the Terms and Conditions to continue.');
       return;
     }
-
-    const cleanDigits = voucherCode.replace(/\D/g, '');
-    if (cleanDigits.length !== 16) {
-      setVoucherError(`Only official 16-digit OTT Voucher PINs are accepted (${cleanDigits.length}/16 digits entered).`);
-      return;
-    }
-
-    const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
-
-    isConnectingRef.current = true;
-    setIsConnecting(true);
-    setStatusBanner('Verifying 16-digit OTT Voucher PIN...');
-
-    try {
-      const apiRes = await fetch('/api/vouchers/redeem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: cleanDigits,
-          expectedAmount: selectedPlan?.price,
-          mac: clientMac,
-          ip: clientIp,
-          scope: activeScope,
-          firstName: guestFirstName.trim(),
-          lastName: guestSurname.trim(),
-          guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' '),
-          countryCode: guestCountryCode,
-          phone: guestPhone.trim(),
-          guestPhone: guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '',
-          guestEmail: guestEmail.trim()
-        })
-      });
-      const apiData = await apiRes.json().catch(() => ({ success: false }));
-
-      if (!apiRes.ok || !apiData.success) {
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        setStatusBanner(null);
-        setVoucherError(
-          apiData.message || 'Invalid, expired, or mismatched denomination 16-digit OTT Voucher PIN.'
-        );
-        return;
-      }
-
-      const planTitle = apiData.planName || selectedPlan?.name || 'OTT Voucher Pass';
-      const durationSecs = apiData.durationSeconds || selectedPlan?.durationSeconds || 86400;
-
-      const formatted16Pin = `${cleanDigits.slice(0, 4)}-${cleanDigits.slice(4, 8)}-${cleanDigits.slice(8, 12)}-${cleanDigits.slice(12, 16)}`;
-
-      await syncGuestSessionToAdmin({
-        mode: 'ottvoucher',
-        planName: planTitle,
-        durationSeconds: durationSecs,
-        voucherCode: formatted16Pin,
-        amount: apiData.price || selectedPlan?.price || 10,
-        transactionRef: apiData.transactionRef
-      });
-
-      authorizeOnMikroTikRouter('test', '123');
-
-      setIsConnecting(false);
-      isConnectingRef.current = false;
-      setStatusBanner(null);
-      startOrEnterConnectedSession('post_auth');
-    } catch {
-      setIsConnecting(false);
-      isConnectingRef.current = false;
-      setStatusBanner(null);
-      setVoucherError('Could not verify 16-digit OTT Voucher at this time. Please try again.');
-    }
+    setPaidSubStep('package');
   };
 
-  // Step 4b: Copy Issued OTT Voucher PIN after M-Pesa / EcoCash / Card payment
+  // Copy Issued OTT Voucher PIN after M-Pesa / EcoCash USSD PIN approval
   const handleCopyIssuedOttVoucher = async () => {
     if (!issuedOttVoucherPin) return;
     await copyToClipboard(issuedOttVoucherPin);
@@ -806,12 +716,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     } catch {}
   };
 
-  // Step 5: Redeem Copied OTT Voucher PIN in Captive Portal -> Show Sponsor Ad (if enabled) -> Resume to Device
+  // Redeem Copied OTT Voucher PIN after M-Pesa / EcoCash purchase
   const handleRedeemIssuedOttVoucher = async () => {
     setPaymentError(null);
     if (!issuedOttVoucherPin) return;
     if (!hasCopiedIssuedOttVoucher) {
-      setPaymentError('Please click "Copy OTT Voucher PIN" first before redeeming your voucher.');
+      setPaymentError('Please tap "1. Copy OTT Voucher PIN" first before redeeming.');
       return;
     }
 
@@ -822,25 +732,13 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
 
     const selectedPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
-    const expectedPrice = issuedOttVoucherAmount || voucherAmountLsl || selectedPlan?.price || 10;
-    const resolvedDurationSec =
-      expectedPrice >= 250
-        ? 2592000
-        : expectedPrice >= 50
-          ? 604800
-          : expectedPrice >= 10
-            ? 86400
-            : expectedPrice >= 5
-              ? 43200
-              : 14400;
-    const resolvedPlanTitle =
-      selectedPlan && selectedPlan.price === expectedPrice
-        ? selectedPlan.name
-        : `OTT Voucher Pass (LSL ${expectedPrice})`;
+    const expectedPrice = issuedOttVoucherAmount || selectedPlan?.price || 10;
+    const resolvedDurationSec = selectedPlan?.durationSeconds || 86400;
+    const resolvedPlanTitle = selectedPlan?.name || `OTT Voucher Pass (M${expectedPrice})`;
 
     isConnectingRef.current = true;
     setIsConnecting(true);
-    setStatusBanner(`Redeeming 16-digit OTT Voucher (LSL ${expectedPrice}) & activating connectivity...`);
+    setStatusBanner(`Redeeming 16-digit OTT Voucher & activating internet...`);
 
     try {
       const response = await fetch('/api/vouchers/redeem', {
@@ -872,7 +770,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        setPaymentError(data.message || '16-Digit OTT Voucher redemption failed.');
+        setPaymentError(sanitizePortalErrorMessage(data.message || data.error, '16-Digit OTT Voucher redemption failed.'));
         return;
       }
 
@@ -895,7 +793,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setIsConnecting(false);
       isConnectingRef.current = false;
       setStatusBanner(null);
-      startOrEnterConnectedSession('post_auth');
+      startOrEnterConnectedSession();
     } catch {
       setIsConnecting(false);
       isConnectingRef.current = false;
@@ -904,18 +802,20 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Complete PayLesotho Aggregator or 16-Digit OTT Voucher Payment
+  // Step 2 Submit: M-Pesa / EcoCash USSD PIN push OR Inline 16-Digit OTT Voucher Redemption
   const handleCompletePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
 
     if (!isGuestFormValid) {
-      setPaymentError('Please complete your First Name, Surname, 8-digit Lesotho mobile number (5/6), and Email.');
+      setPaidSubStep('details');
+      setPaymentError('Please complete your details first.');
       return;
     }
 
     if (!isTermsSatisfied) {
-      setPaymentError('Please tick the Terms & Conditions box to proceed.');
+      setPaidSubStep('details');
+      setPaymentError('Please tick the Terms and Conditions box first.');
       return;
     }
 
@@ -924,21 +824,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
     if (selectedGateway === 'ottvoucher') {
       if (cleanPin.length !== 16) {
-        setPaymentError(`OTT Voucher PIN must be exactly 16 digits (${cleanPin.length}/16 digits entered).`);
+        setPaymentError(`Please enter a valid 16-digit OTT Voucher PIN (${cleanPin.length}/16 digits entered).`);
         return;
       }
-    } else {
-      if ((payLesothoChannel === 'ecocash' || payLesothoChannel === 'mpesa') && !/^[56]\d{7}$/.test(cleanPhoneDigits)) {
-        setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
-        return;
-      }
-    }
 
-    isConnectingRef.current = true;
-    setIsConnecting(true);
+      isConnectingRef.current = true;
+      setIsConnecting(true);
+      setStatusBanner(`Verifying 16-digit OTT Voucher PIN...`);
 
-    if (selectedGateway === 'ottvoucher') {
-      setStatusBanner(`Verifying 16-digit OTT Voucher PIN for M${selectedPlan?.price || 10} package...`);
       try {
         const response = await fetch('/api/vouchers/redeem', {
           method: 'POST',
@@ -946,6 +839,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           body: JSON.stringify({
             code: cleanPin,
             expectedAmount: selectedPlan?.price || 10,
+            flexibleAmount: true,
             mac: clientMac,
             ip: clientIp,
             scope: activeScope,
@@ -964,7 +858,12 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           setIsConnecting(false);
           isConnectingRef.current = false;
           setStatusBanner(null);
-          setPaymentError(data.message || '16-Digit OTT Voucher verification failed.');
+          setPaymentError(
+            sanitizePortalErrorMessage(
+              data.message || data.error,
+              'Invalid, expired, or already used 16-digit OTT Voucher PIN.'
+            )
+          );
           return;
         }
 
@@ -972,10 +871,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
         await syncGuestSessionToAdmin({
           mode: 'ottvoucher',
-          planName: selectedPlan?.name || 'Daily Pass',
-          durationSeconds: selectedPlan?.durationSeconds || 86400,
+          planName: data.planName || selectedPlan?.name || 'Daily Unlimited',
+          durationSeconds: data.durationSeconds || selectedPlan?.durationSeconds || 86400,
           voucherCode: formatted16Pin,
-          amount: selectedPlan?.price || 10,
+          amount: data.price || selectedPlan?.price || 10,
           transactionRef: data.transactionRef,
           speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
         });
@@ -984,29 +883,32 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        startOrEnterConnectedSession('post_auth');
+        startOrEnterConnectedSession();
       } catch {
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        setPaymentError('Network error connecting to OTT Voucher verification server.');
+        setPaymentError('Network error connecting to OTT Voucher verification service.');
       }
       return;
     }
 
-    // PayLesotho XPayments OTT Voucher Purchase Flow (EcoCash 63165430, Vodacom M-Pesa 62915, Card)
-    const purchaseAmount = Math.max(1, Number(voucherAmountLsl || selectedPlan?.price || 10));
-    const purchasePlanName =
-      selectedPlan && selectedPlan.price === purchaseAmount
-        ? selectedPlan.name
-        : `OTT Voucher (LSL ${purchaseAmount})`;
+    // M-Pesa / EcoCash USSD PIN Push via PayLesotho
+    if (!/^[56]\d{7}$/.test(cleanPhoneDigits)) {
+      setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+      return;
+    }
+
+    isConnectingRef.current = true;
+    setIsConnecting(true);
+
+    const purchaseAmount = Math.max(1, Number(selectedPlan?.price || 10));
+    const purchasePlanName = selectedPlan?.name || `Daily Unlimited (M${purchaseAmount})`;
 
     setStatusBanner(
-      payLesothoChannel === 'card'
-        ? 'Connecting to PayLesotho XPayments secure checkout...'
-        : payLesothoChannel === 'mpesa'
-          ? `Initiating Vodacom M-Pesa (*111#) payment (LSL ${purchaseAmount}) for ${guestCountryCode} ${guestPhone} -> Generating 16-digit OTT Voucher...`
-          : `Initiating Econet EcoCash (*199#) payment (LSL ${purchaseAmount}) for ${guestCountryCode} ${guestPhone} -> Generating 16-digit OTT Voucher...`
+      payLesothoChannel === 'mpesa'
+        ? `USSD PIN prompt sent to ${guestCountryCode} ${guestPhone} — Enter your M-Pesa PIN on your phone...`
+        : `USSD PIN prompt sent to ${guestCountryCode} ${guestPhone} — Enter your EcoCash PIN on your phone...`
     );
 
     try {
@@ -1033,7 +935,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         setIsConnecting(false);
         isConnectingRef.current = false;
         setStatusBanner(null);
-        setPaymentError(data.error || data.message || 'Payment initiation failed via PayLesotho.');
+        setPaymentError(sanitizePortalErrorMessage(data.error || data.message, 'Payment initiation failed via PayLesotho.'));
         return;
       }
 
@@ -1051,11 +953,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
 
-      setStatusBanner(data.message || 'Payment prompt sent. Waiting for subscriber approval & OTT Voucher generation...');
-
-      if (payLesothoChannel === 'card' && data.checkoutUrl) {
-        window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
-      }
+      setStatusBanner(data.message || 'USSD PIN prompt sent to your phone. Approve with your PIN to receive your 16-digit OTT Voucher...');
 
       const txId = data.transactionId;
       let attempts = 0;
@@ -1083,7 +981,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             setIsConnecting(false);
             isConnectingRef.current = false;
             setStatusBanner(null);
-            setPaymentError(pollData.errorMessage || 'Transaction was not approved within the allotted time.');
+            setPaymentError(sanitizePortalErrorMessage(pollData.errorMessage, 'Transaction was not approved within the allotted time.'));
           }
         } catch {
           if (attempts > 25) {
@@ -1102,149 +1000,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  const currencySymbol = 'M';
-
-  // Reusable Mandatory Terms & Conditions Checkbox + Hyperlink Row (Enforced when termsEnabled is ON in Dashboard)
-  const renderTermsAndConditionsRow = () => {
-    if (!isTermsRequired) return null;
-    return (
-      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] text-slate-200">
-        <input
-          type="checkbox"
-          id="portal_tc_checkbox"
-          checked={termsAccepted}
-          onChange={(e) => {
-            setTermsAccepted(e.target.checked);
-            if (e.target.checked) {
-              setVoucherError(null);
-              setPaymentError(null);
-            }
-          }}
-          style={{ accentColor }}
-          className="w-3.5 h-3.5 rounded cursor-pointer shrink-0"
-        />
-        <label htmlFor="portal_tc_checkbox" className="cursor-pointer leading-tight select-none">
-          I agree to the{' '}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setIsTermsModalOpen(true);
-            }}
-            className="text-sky-400 hover:text-sky-300 underline font-bold cursor-pointer"
-          >
-            Terms &amp; Conditions
-          </button>{' '}
-          <span className="text-[9px] text-slate-400">(T&apos;s and C&apos;s apply)</span>
-        </label>
-      </div>
-    );
-  };
-
-  // Reusable Guest Identification Fields Component (Compact for clear background visibility)
-  const renderGuestIdentificationInputs = () => {
-    if (!currentConfig.collectName && !currentConfig.collectPhone && !currentConfig.collectEmail) {
-      return null;
-    }
-
-    return (
-      <div className="space-y-1.5 pb-1 border-b border-[#232d42]">
-        {currentConfig.collectName && (
-          <div className="grid grid-cols-2 gap-1.5">
-            <div>
-              <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-                First Name <span className="text-red-400">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={guestFirstName}
-                onChange={(e) => setGuestFirstName(e.target.value)}
-                placeholder="First name"
-                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-                Surname <span className="text-red-400">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={guestSurname}
-                onChange={(e) => setGuestSurname(e.target.value)}
-                placeholder="Surname"
-                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
-              />
-            </div>
-          </div>
-        )}
-
-        {currentConfig.collectPhone && (
-          <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <label className="text-[10px] font-medium text-slate-300">
-                Mobile Number <span className="text-red-400">*</span>
-              </label>
-              {guestCountryCode === '+266' && (
-                <span className="text-[9px] font-mono text-slate-400">
-                  {cleanPhoneDigits.length}/8 digits (starts with 5 or 6)
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <select
-                value={guestCountryCode}
-                onChange={(e) => {
-                  const nextCc = e.target.value as '+266' | '+27';
-                  setGuestCountryCode(nextCc);
-                  setPhoneFormatError(null);
-                  if (nextCc === '+266') {
-                    const d = guestPhone.replace(/\D/g, '');
-                    setGuestPhone(d.length > 0 && (d[0] === '5' || d[0] === '6') ? d.slice(0, 8) : '');
-                  }
-                }}
-                className="px-2 py-1 bg-[#121829] border border-[#232d42] rounded-lg text-white text-[11px] font-mono focus:outline-none cursor-pointer shrink-0"
-              >
-                <option value="+266" className="bg-[#0b0f19] text-white">+266 (LS)</option>
-                <option value="+27" className="bg-[#0b0f19] text-white">+27 (ZA)</option>
-              </select>
-              <input
-                type="tel"
-                inputMode="numeric"
-                maxLength={guestCountryCode === '+266' ? 8 : 10}
-                required
-                value={guestPhone}
-                onChange={(e) => handleGuestPhoneChange(e.target.value, guestCountryCode)}
-                placeholder={guestCountryCode === '+266' ? '5xxxxxxx / 6xxxxxxx (8 digits)' : '07xxxxxxxx'}
-                className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] font-mono focus:outline-none"
-              />
-            </div>
-            {phoneFormatError && (
-              <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
-            )}
-          </div>
-        )}
-
-        {currentConfig.collectEmail && (
-          <div>
-            <label className="text-[10px] font-medium text-slate-300 block mb-0.5">
-              Email Address <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="email"
-              required
-              value={guestEmail}
-              onChange={(e) => setGuestEmail(e.target.value)}
-              placeholder="name@example.com"
-              className="w-full px-2.5 py-1 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-[11px] focus:outline-none"
-            />
-          </div>
-        )}
-      </div>
-    );
-  };
+  const selectedPlanObj = enabledPlans.find((p) => p.id === selectedPlanId) || enabledPlans[0] || currentConfig.plans[0];
 
   return (
     <div className="portal-isolated-theme min-h-screen bg-[#05070c] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden">
@@ -1269,22 +1025,22 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           onClick={() => setIsTermsModalOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-[#0f1422] border border-white/20 p-4 shadow-2xl space-y-3 text-left"
+            className="w-full max-w-sm rounded-2xl bg-white text-slate-900 border border-slate-200 p-4 shadow-2xl space-y-3 text-left"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <h3 className="text-xs font-black text-white uppercase tracking-wider">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">
                 Terms &amp; Conditions (T&apos;s &amp; C&apos;s)
               </h3>
               <button
                 type="button"
                 onClick={() => setIsTermsModalOpen(false)}
-                className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                className="text-xs text-slate-500 hover:text-slate-900 cursor-pointer"
               >
                 ✕
               </button>
             </div>
-            <div className="max-h-56 overflow-y-auto text-[11px] text-slate-300 leading-relaxed bg-black/40 p-3 rounded-xl border border-white/10 whitespace-pre-wrap">
+            <div className="max-h-56 overflow-y-auto text-[11px] text-slate-700 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200 whitespace-pre-wrap">
               {normalizeScopeTermsText(currentConfig.termsText) || OFFICIAL_SESOTHO_TERMS_TEXT}
             </div>
             <div className="flex items-center gap-2 pt-1">
@@ -1292,18 +1048,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                 type="button"
                 onClick={() => {
                   setTermsAccepted(true);
-                  setVoucherError(null);
                   setPaymentError(null);
                   setIsTermsModalOpen(false);
                 }}
-                className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+                style={{ backgroundColor: accentColor }}
+                className="flex-1 py-2 text-white font-bold text-xs rounded-xl cursor-pointer transition-opacity hover:opacity-95"
               >
                 Agree &amp; Continue
               </button>
               <button
                 type="button"
                 onClick={() => setIsTermsModalOpen(false)}
-                className="px-3 py-2 bg-white/10 hover:bg-white/15 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer transition-colors"
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl cursor-pointer transition-colors"
               >
                 Close
               </button>
@@ -1313,32 +1069,28 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* FULL-SCREEN EDGE-TO-EDGE AD (100vw x 100vh) — Sliding Pictures/Video */}
+      {/* POST-AUTH / AUTHENTICATING AD SLIDE ARTWORK SHOWCASE              */}
+      {/* Replaces "Connected — Resuming to Device" with a random picture   */}
+      {/* from Picture & Video Ads + small static "Proceed to internet →"   */}
       {/* ================================================================= */}
-      {portalStep === 'video_ad' && activeVideoAd && (() => {
-        const isCarousel =
-          activeVideoAd.mediaType === 'image_carousel' &&
-          Array.isArray(activeVideoAd.slides) &&
-          activeVideoAd.slides.length > 0;
-        const slides = activeVideoAd.slides || [];
-        const currentSlide = slides[carouselSlideIdx] || slides[0];
+      {(portalStep === 'video_ad' || portalStep === 'connected') && (() => {
+        const slides = activeVideoAd?.slides && activeVideoAd.slides.length > 0
+          ? activeVideoAd.slides
+          : [
+              {
+                id: 'fallback_1',
+                imageUrl: currentConfig.bgImage || '/wallpapers/tconnect-summer.svg',
+                caption: currentConfig.welcomeHeadline || 'T-Connect High-Speed Wi-Fi',
+                redirectUrl: sponsorAdConfig.destinationUrl || ''
+              }
+            ];
+        const isCarousel = !activeVideoAd || activeVideoAd.mediaType === 'image_carousel' || slides.length > 0;
+        const safeIdx = carouselSlideIdx % slides.length;
+        const currentSlide = slides[safeIdx] || slides[0];
 
         return (
           <div
-            className="fixed inset-0 z-50 w-screen h-screen bg-black overflow-hidden select-none cursor-pointer"
-            onClick={() => {
-              if (touchDraggedRef.current) {
-                touchDraggedRef.current = false;
-                return;
-              }
-              const targetUrl = isCarousel
-                ? currentSlide?.redirectUrl || activeVideoAd.destinationUrl
-                : activeVideoAd.destinationUrl;
-              if (targetUrl) {
-                storage.recordVideoAdClick(activeVideoAd.id);
-                window.open(targetUrl, '_blank', 'noopener,noreferrer');
-              }
-            }}
+            className="fixed inset-0 z-50 w-screen h-screen bg-black flex flex-col justify-between overflow-hidden select-none"
             onTouchStart={(e) => {
               touchDraggedRef.current = false;
               if (e.touches && e.touches[0]) {
@@ -1359,846 +1111,572 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               }
             }}
           >
-            {/* Horizontal Sliding Picture Track OR Full-Screen Video */}
-            {isCarousel ? (
-              <div
-                className="flex w-full h-full transition-transform duration-300 ease-out"
-                style={{
-                  transform: `translateX(-${carouselSlideIdx * 100}%)`
-                }}
-              >
-                {slides.map((sl, idx) => (
-                  <div key={sl.id || idx} className="w-screen h-screen shrink-0 relative bg-black">
-                    <img
-                      src={resolveWalledGardenImageUrl(
-                        sl.imageUrl || activeVideoAd.videoUrl,
-                        sl.caption || activeVideoAd.title,
-                        activeVideoAd.sponsorName
-                      )}
-                      onError={(e) => {
-                        e.currentTarget.onerror = null;
-                        e.currentTarget.src = buildInlineFallbackSlideDataUri(
-                          sl.caption || activeVideoAd.title,
-                          activeVideoAd.sponsorName
-                        );
-                      }}
-                      alt=""
-                      className="w-screen h-screen object-cover block bg-black"
-                      draggable={false}
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <video
-                ref={videoRef}
-                src={activeVideoAd.videoUrl}
-                playsInline
-                autoPlay
-                muted={isVideoMuted}
-                onLoadedMetadata={(e) => {
-                  const dur = e.currentTarget.duration;
-                  if (dur && !isNaN(dur) && isFinite(dur)) {
-                    setAdDurationSec(Math.ceil(dur));
-                  }
-                }}
-                onEnded={() => setIsAdUnlocked(true)}
-                onError={() => setIsAdUnlocked(true)}
-                className="w-screen h-screen object-cover block bg-black"
-              />
-            )}
+            {/* Full Artwork Viewport (Unobstructed picture from Ad Slides) */}
+            <div className="relative flex-1 w-screen h-[calc(100vh-38px)] bg-black flex items-center justify-center overflow-hidden">
+              {activeVideoAd && activeVideoAd.mediaType === 'video' && activeVideoAd.videoUrl ? (
+                <>
+                  <video
+                    ref={videoRef}
+                    src={activeVideoAd.videoUrl}
+                    playsInline
+                    autoPlay
+                    muted={isVideoMuted}
+                    className="w-full h-full object-contain block bg-black"
+                  />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsVideoMuted((prev) => {
+                        const next = !prev;
+                        if (videoRef.current) videoRef.current.muted = next;
+                        return next;
+                      });
+                    }}
+                    className="absolute top-3 right-3 z-50 px-2.5 py-1 rounded-full bg-black/70 border border-white/20 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    {isVideoMuted ? <VolumeX className="w-3 h-3 text-amber-400" /> : <Volume2 className="w-3 h-3 text-emerald-400" />}
+                    <span>{isVideoMuted ? 'Unmute' : 'Sound'}</span>
+                  </button>
+                </>
+              ) : (
+                <img
+                  src={resolveWalledGardenImageUrl(
+                    currentSlide?.imageUrl || activeVideoAd?.videoUrl || currentConfig.bgImage,
+                    currentSlide?.caption || activeVideoAd?.title || currentConfig.brandTitle,
+                    activeVideoAd?.sponsorName || 'T-Connect'
+                  )}
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                      currentSlide?.caption || activeVideoAd?.title || 'T-Connect Hotspot',
+                      activeVideoAd?.sponsorName || 'Starlink Powered Wi-Fi'
+                    );
+                  }}
+                  alt={currentSlide?.caption || 'Sponsor Ad'}
+                  className="w-full h-full object-contain block bg-black"
+                  draggable={false}
+                />
+              )}
 
-            {/* Top-Left Sponsor Info & Slide Hint */}
-            <div
-              className="fixed top-4 left-4 z-50 flex items-center gap-2 px-3.5 py-2 rounded-full bg-black/75 backdrop-blur-md border border-white/25 text-white text-xs font-bold shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <span className="truncate max-w-[180px] sm:max-w-xs">
-                {activeVideoAd.sponsorName || 'T-Connect Partner Offer'}
-              </span>
-              {isCarousel && slides.length > 1 && (
-                <span className="text-[10px] text-amber-300 font-mono pl-1 border-l border-white/20">
-                  Slide {carouselSlideIdx + 1}/{slides.length}
-                </span>
+              {/* Subtle Left/Right arrows only if multiple slides exist */}
+              {slides.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
+                    }}
+                    aria-label="Previous picture"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-40 w-8 h-8 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
+                    }}
+                    aria-label="Next picture"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-40 w-8 h-8 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </>
               )}
             </div>
 
-            {/* Top-Right Immediate X Close Button (Releases straight to connectivity) */}
-            <div
-              className="fixed top-4 right-4 z-50 flex items-center gap-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                type="button"
-                onClick={handleCloseAdAndEnjoyInternet}
-                aria-label="Close ad and enjoy connectivity"
-                title="Close ad and use internet"
-                className="w-11 h-11 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95"
-              >
-                <X className="w-6 h-6 stroke-[2.5]" />
-              </button>
-            </div>
-
-            {/* Left & Right Slide Arrows for Multi-Picture Series */}
-            {isCarousel && slides.length > 1 && (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
-                  }}
-                  aria-label="Previous picture"
-                  className="fixed left-3 top-1/2 -translate-y-1/2 z-50 w-11 h-11 rounded-full bg-black/75 hover:bg-black/90 border border-white/35 text-white flex items-center justify-center shadow-2xl cursor-pointer active:scale-95"
-                >
-                  <ChevronLeft className="w-6 h-6" />
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
-                  }}
-                  aria-label="Next picture"
-                  className="fixed right-3 top-1/2 -translate-y-1/2 z-50 w-11 h-11 rounded-full bg-black/75 hover:bg-black/90 border border-white/35 text-white flex items-center justify-center shadow-2xl cursor-pointer active:scale-95"
-                >
-                  <ChevronRight className="w-6 h-6" />
-                </button>
-              </>
-            )}
-
-            {/* Bottom Controls: Pagination Dots + Slide Hint for Pictures OR Audio Mute for Video */}
-            {isCarousel && slides.length > 0 ? (
-              <div
-                className="fixed bottom-5 inset-x-4 z-50 flex flex-col items-center gap-2"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/80 backdrop-blur-md border border-white/25 shadow-2xl">
-                  {slides.map((sl, idx) => (
-                    <button
-                      key={sl.id || idx}
-                      type="button"
-                      onClick={() => setCarouselSlideIdx(idx)}
-                      className={`h-2.5 rounded-full transition-all cursor-pointer ${
-                        idx === carouselSlideIdx ? 'w-7 bg-[#f05e17]' : 'w-2.5 bg-white/45 hover:bg-white/80'
-                      }`}
-                      aria-label={`View picture ${idx + 1}`}
-                    />
-                  ))}
-                  <span className="text-[11px] text-slate-200 font-mono font-bold ml-1.5">
-                    Swipe or tap arrows &rarr;
-                  </span>
-                </div>
+            {/* Ultra-Compact 38px Bottom Bar with Small Static "Proceed to internet →" Link */}
+            <div className="h-[38px] w-screen bg-black/95 border-t border-white/15 px-3.5 flex items-center justify-between shrink-0 z-50">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-[10px] text-slate-400 truncate">
+                  {currentSlide?.caption || activeVideoAd?.sponsorName || 'Wi-Fi Authenticated'}
+                </span>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsVideoMuted((prev) => {
-                    const next = !prev;
-                    if (videoRef.current) videoRef.current.muted = next;
-                    return next;
-                  });
-                }}
-                className="fixed bottom-4 left-4 z-50 px-3.5 py-2 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              <a
+                href={sanitizeDestinationUrl(userOrigUrl)}
+                onClick={(e) => handleProceedToInternetClick(e, currentSlide?.redirectUrl)}
+                className="text-[11px] font-semibold text-white/95 hover:text-white underline underline-offset-2 flex items-center gap-1 shrink-0 cursor-pointer"
               >
-                {isVideoMuted ? <VolumeX className="w-3.5 h-3.5 text-amber-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
-                <span>{isVideoMuted ? 'Unmute' : 'Sound On'}</span>
-              </button>
-            )}
+                <span>Proceed to internet</span>
+                <span>&rarr;</span>
+              </a>
+            </div>
           </div>
         );
       })()}
 
-      {/* Pure Full-Viewport Splash Page Container — Hidden completely during Ad or Connected view to guarantee zero background text bleed */}
+      {/* ================================================================= */}
+      {/* FULL-VIEWPORT SPLASH PAGE CONTAINER                               */}
+      {/* ================================================================= */}
       {portalStep !== 'video_ad' && portalStep !== 'connected' && (
-      <main
-        className="flex-1 min-h-screen relative flex flex-col justify-between items-center bg-cover bg-center transition-all duration-500 overflow-hidden"
-        style={{
-          backgroundImage: `url(${resolveWalledGardenImageUrl(
-            currentConfig.bgImage,
-            currentConfig.brandTitle,
-            currentConfig.welcomeHeadline
-          )})`
-        }}
-      >
-        {/* Configured Darken Overlay (0% when Free Access Mode is ON so the custom hotspot artwork is 100% clear) */}
-        <div
-          className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-          style={{ opacity: isFreeAccessAllowed ? 0 : (currentConfig.bgDarken ?? 35) / 100 }}
-        />
-
-        {/* ================================================================= */}
-        {/* PURE FREE ACCESS MODE: Single Repositionable "Login for free"     */}
-        {/* Button Floating Over Wallpaper (Only when toggled ON in Dashboard)*/}
-        {/* ================================================================= */}
-        {isFreeAccessAllowed ? (
+        <main
+          className="flex-1 min-h-screen relative flex flex-col justify-end items-center bg-cover bg-center transition-all duration-500 overflow-hidden"
+          style={{
+            backgroundImage: `url(${resolveWalledGardenImageUrl(
+              currentConfig.bgImage,
+              currentConfig.brandTitle,
+              currentConfig.welcomeHeadline
+            )})`
+          }}
+        >
+          {/* Minimal or Zero Darken Overlay so Background Wallpaper is maximally visible */}
           <div
-            className="absolute z-20 w-[86%] max-w-[360px]"
-            style={{
-              left: `${currentConfig.freeButtonX ?? 50}%`,
-              top: `${currentConfig.freeButtonY ?? 88}%`,
-              transform: 'translate(-50%, -50%)'
-            }}
-          >
-            {statusBanner && (
-              <div className="mb-2.5 p-2 rounded-lg bg-black/80 backdrop-blur-md border border-white/25 text-xs text-white flex items-center justify-center gap-2 shadow-xl">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#f05e17] shrink-0" />
-                <span>{statusBanner}</span>
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={handleConnectFree}
-              disabled={isConnecting}
-              style={{ backgroundColor: accentColor || '#f05e17' }}
-              className="w-full py-3.5 px-6 text-white font-normal text-lg sm:text-xl tracking-wide rounded-[4px] shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition-transform active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center justify-center text-center"
+            className="absolute inset-0 bg-black pointer-events-none transition-opacity"
+            style={{ opacity: isFreeAccessAllowed ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
+          />
+
+          {/* ================================================================= */}
+          {/* PURE FREE ACCESS MODE: Single Repositionable "Login for free"     */}
+          {/* Button Floating Over Wallpaper                                    */}
+          {/* ================================================================= */}
+          {isFreeAccessAllowed ? (
+            <div
+              className="absolute z-20 w-[86%] max-w-[360px]"
+              style={{
+                left: `${currentConfig.freeButtonX ?? 50}%`,
+                top: `${currentConfig.freeButtonY ?? 88}%`,
+                transform: 'translate(-50%, -50%)'
+              }}
             >
-              {isConnecting ? 'Connecting...' : (currentConfig.freeButtonText?.trim() || 'Login for free')}
-            </button>
-          </div>
-        ) : (
-        <>
-        {/* Top Brand & Welcome Headline (Shown only in Paid / Voucher Mode) */}
-        <div className="relative z-10 text-center max-w-sm w-full pt-4 pb-2 px-4">
-          {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
-            <div className="text-[11px] font-semibold text-white/95 tracking-wide mb-0.5 drop-shadow">
-              {[currentConfig.brandTitle?.trim(), currentConfig.tagline?.trim()].filter(Boolean).join(' · ')}
-            </div>
-          )}
-          {currentConfig.welcomeHeadline?.trim() && (
-            <h1 className="text-base sm:text-lg font-black text-white tracking-tight drop-shadow-lg leading-tight">
-              {currentConfig.welcomeHeadline}
-            </h1>
-          )}
-        </div>
-
-        {/* Slim Docked Bottom Sheet Captive Portal Box (Shown only when Free Access Mode is OFF) */}
-        <div className="relative z-10 w-full max-w-sm sm:max-w-md mt-auto mb-0 px-2 sm:px-3">
-          {statusBanner && (
-            <div className="mb-2 p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-200 flex items-center gap-2 shadow-lg">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
-              <span>{statusBanner}</span>
-            </div>
-          )}
-
-          {/* ================================================================= */}
-          {/* DYNAMIC MODE QUICK TABS HELPER (Voucher / Buy Pass)               */}
-          {/* ================================================================= */}
-          {(() => {
-            const enabledModesCount =
-              (isVoucherAllowed ? 1 : 0) +
-              (isBuyPassAllowed ? 1 : 0);
-
-            const renderModeQuickTabs = (activeTab: 'identification' | 'voucher' | 'plan') => {
-              if (enabledModesCount <= 1) return null;
-              return (
-                <div className="grid grid-cols-2 gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[10px]">
-                  {isVoucherAllowed && (
-                    <button
-                      type="button"
-                      onClick={() => setPortalStep('voucher')}
-                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
-                        activeTab === 'voucher'
-                          ? 'bg-[#f05e17] text-white shadow'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      <Ticket className={`w-3 h-3 ${activeTab === 'voucher' ? 'text-white' : 'text-emerald-400'}`} />
-                      <span>Voucher</span>
-                    </button>
-                  )}
-                  {isBuyPassAllowed && (
-                    <button
-                      type="button"
-                      onClick={() => setPortalStep('plan')}
-                      className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
-                        activeTab === 'plan'
-                          ? 'bg-[#f05e17] text-white shadow'
-                          : 'text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      <Sparkles className={`w-3 h-3 ${activeTab === 'plan' ? 'text-white' : 'text-amber-400'}`} />
-                      <span>Buy Pass</span>
-                    </button>
-                  )}
+              {statusBanner && (
+                <div className="mb-2.5 p-2 rounded-lg bg-black/80 backdrop-blur-md border border-white/25 text-xs text-white flex items-center justify-center gap-2 shadow-xl">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#f05e17] shrink-0" />
+                  <span>{statusBanner}</span>
                 </div>
-              );
-            };
+              )}
+              <button
+                type="button"
+                onClick={handleConnectFree}
+                disabled={isConnecting}
+                style={{ backgroundColor: accentColor || '#f05e17' }}
+                className="w-full py-3.5 px-6 text-white font-normal text-lg sm:text-xl tracking-wide rounded-[4px] shadow-[0_10px_28px_rgba(0,0,0,0.45)] transition-transform active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center justify-center text-center"
+              >
+                {isConnecting ? 'Connecting...' : (currentConfig.freeButtonText?.trim() || 'Login for free')}
+              </button>
+            </div>
+          ) : (
+            /* ================================================================= */
+            /* COMPACT LIGHT-THEMED 2-STEP PAID CARD DOCKED AT THE BOTTOM        */
+            /* Top 58%-62% of screen is 100% open to showcase the wallpaper      */
+            /* No "Voucher | Buy Pass" tabs — Paid Mode is the default           */
+            /* ================================================================= */
+            <div className="relative z-10 w-full max-w-[400px] mt-auto mb-0 px-2.5 pb-2.5 pt-2">
+              <div className="bg-white/95 backdrop-blur-md text-slate-900 rounded-2xl p-3.5 shadow-[0_16px_42px_rgba(0,0,0,0.38)] border border-white/90">
+                {statusBanner && (
+                  <div className="mb-2.5 p-2 rounded-xl bg-amber-50 border border-amber-300 text-[11px] text-amber-900 font-semibold flex items-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#f05e17] shrink-0" />
+                    <span>{statusBanner}</span>
+                  </div>
+                )}
 
-            return (
-              <>
-                {/* ================================================================= */}
-                {/* STEP 2: 16-DIGIT OTT VOUCHER CODE LOGIN (Only when Voucher is ON) */}
-                {/* ================================================================= */}
-                {portalStep === 'voucher' && isVoucherAllowed && (
-                  <form
-                    onSubmit={handleRedeemVoucher}
-                    className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
-                  >
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-
-                    {renderModeQuickTabs('voucher')}
-
-                    {renderGuestIdentificationInputs()}
-
-                    <div>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <label className="text-[10px] font-medium text-slate-300">
-                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
-                        </label>
-                        <span className="text-[9px] font-mono text-emerald-400 font-bold tabular-nums">
-                          {voucherCode.replace(/\D/g, '').length}/16 digits
-                        </span>
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={19}
-                        value={voucherCode}
-                        onChange={(e) => {
-                          const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                          const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
-                          setVoucherCode(formatted);
-                          setVoucherError(null);
-                        }}
-                        placeholder="1234 5678 9012 3456 (16-digit OTT PIN)"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tracking-widest uppercase focus:outline-none"
-                      />
-                      {voucherError && (
-                        <div className="mt-1 p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                          <span>{voucherError}</span>
-                        </div>
-                      )}
+                {paidSubStep === 'details' ? (
+                  /* ========================================================= */
+                  /* STEP 1: ENTER YOUR DETAILS                                */
+                  /* ========================================================= */
+                  <form onSubmit={handleProceedToStep2} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-[15px] font-extrabold text-slate-900 tracking-tight">
+                        Enter your details
+                      </h2>
+                      <span className="text-[10px] font-semibold text-slate-400">
+                        Step 1 of 2
+                      </span>
                     </div>
 
-                    {renderTermsAndConditionsRow()}
+                    {currentConfig.collectName && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                            First name <span className="text-[#f05e17]">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={guestFirstName}
+                            onChange={(e) => {
+                              setGuestFirstName(e.target.value);
+                              setPaymentError(null);
+                            }}
+                            placeholder="First name"
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                            Surname <span className="text-[#f05e17]">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={guestSurname}
+                            onChange={(e) => {
+                              setGuestSurname(e.target.value);
+                              setPaymentError(null);
+                            }}
+                            placeholder="Surname"
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {currentConfig.collectPhone && (
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <label className="text-[10px] font-bold text-slate-600">
+                            Mobile number <span className="text-[#f05e17]">*</span>
+                          </label>
+                          <span className="text-[9px] font-mono text-slate-400">
+                            {cleanPhoneDigits.length}/8 digits (5 = M-Pesa, 6 = EcoCash)
+                          </span>
+                        </div>
+                        <div className="flex items-center rounded-lg border border-slate-300 focus-within:border-[#f05e17] bg-white overflow-hidden">
+                          <select
+                            value={guestCountryCode}
+                            onChange={(e) => {
+                              const nextCc = e.target.value as '+266' | '+27';
+                              setGuestCountryCode(nextCc);
+                              setPhoneFormatError(null);
+                            }}
+                            className="px-2 py-1.5 bg-slate-100 border-r border-slate-300 text-slate-800 text-xs font-bold focus:outline-none cursor-pointer shrink-0"
+                          >
+                            <option value="+266">+266</option>
+                            <option value="+27">+27</option>
+                          </select>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            maxLength={guestCountryCode === '+266' ? 8 : 10}
+                            required
+                            value={guestPhone}
+                            onChange={(e) => {
+                              handleGuestPhoneChange(e.target.value, guestCountryCode);
+                              setPaymentError(null);
+                            }}
+                            placeholder="5xxxxxxx or 6xxxxxxx"
+                            className="w-full px-2.5 py-1.5 bg-white text-slate-900 text-xs font-mono placeholder:text-slate-400 focus:outline-none"
+                          />
+                        </div>
+                        {phoneFormatError && (
+                          <p className="text-[9px] text-amber-700 font-semibold mt-0.5">{phoneFormatError}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {currentConfig.collectEmail && (
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                          Email address
+                        </label>
+                        <input
+                          type="email"
+                          value={guestEmail}
+                          onChange={(e) => {
+                            setGuestEmail(e.target.value);
+                            setPaymentError(null);
+                          }}
+                          placeholder="name@example.com"
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
+                        />
+                      </div>
+                    )}
+
+                    {isTermsRequired && (
+                      <div className="flex items-center gap-2 pt-0.5 text-[11px] text-slate-600">
+                        <input
+                          type="checkbox"
+                          id="portal_tc_step1"
+                          checked={termsAccepted}
+                          onChange={(e) => {
+                            setTermsAccepted(e.target.checked);
+                            if (e.target.checked) setPaymentError(null);
+                          }}
+                          style={{ accentColor }}
+                          className="w-3.5 h-3.5 rounded cursor-pointer shrink-0"
+                        />
+                        <label htmlFor="portal_tc_step1" className="cursor-pointer leading-tight select-none">
+                          I agree to the{' '}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsTermsModalOpen(true);
+                            }}
+                            className="text-slate-900 underline font-bold cursor-pointer"
+                          >
+                            Terms and Conditions
+                          </button>
+                        </label>
+                      </div>
+                    )}
+
+                    {paymentError && (
+                      <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[10px] font-medium flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <span>{paymentError}</span>
+                      </div>
+                    )}
 
                     <button
                       type="submit"
-                      disabled={!isTermsSatisfied || !isGuestFormValid || isConnecting || voucherCode.replace(/\D/g, '').length !== 16}
-                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      style={{ backgroundColor: accentColor }}
+                      className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      <span>{isConnecting ? 'Verifying 16-Digit OTT Voucher...' : 'Redeem OTT Voucher & Connect \u2192'}</span>
+                      <span>Continue</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </form>
-                )}
+                ) : (
+                  /* ========================================================= */
+                  /* STEP 2: CHOOSE A PACKAGE & PAY WITH                       */
+                  /* ========================================================= */
+                  <form onSubmit={handleCompletePayment} className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-[15px] font-extrabold text-slate-900 tracking-tight">
+                        Choose a package
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaidSubStep('details');
+                          setPaymentError(null);
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 border border-slate-200 text-[10px] font-bold text-slate-600 cursor-pointer"
+                      >
+                        &larr; Details
+                      </button>
+                    </div>
 
-                {/* ================================================================= */}
-                {/* STEP 3: PLAN SELECTION + DETAILS (Only when Buy Pass Mode is ON)  */}
-                {/* ================================================================= */}
-                {portalStep === 'plan' && isBuyPassAllowed && (
-                  <div className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left">
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-
-                    {renderModeQuickTabs('plan')}
-
-                    {renderGuestIdentificationInputs()}
-
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
-                      {enabledPlans.map((plan) => {
-                        const isSelected = selectedPlanId === plan.id;
+                    {/* 3 Side-by-Side Package Cards */}
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {enabledPlans.slice(0, 3).map((plan) => {
+                        const isSelected = plan.id === selectedPlanObj?.id;
                         return (
-                          <label
+                          <button
                             key={plan.id}
+                            type="button"
                             onClick={() => {
                               setSelectedPlanId(plan.id);
-                              setVoucherAmountLsl(plan.price);
-                              setCustomAmountInput('');
+                              setPaymentError(null);
                             }}
-                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                            className={`p-2 rounded-xl text-center transition-all cursor-pointer border ${
                               isSelected
-                                ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                                ? 'border-2 border-[#f05e17] bg-[#fffaf5] shadow-sm'
+                                : 'border-slate-200 bg-white hover:border-slate-300'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                checked={isSelected}
-                                onChange={() => {
-                                  setSelectedPlanId(plan.id);
-                                  setVoucherAmountLsl(plan.price);
-                                  setCustomAmountInput('');
-                                }}
-                                className="accent-[#f05e17]"
-                              />
-                              <div>
-                                <div className="text-[11px] font-bold flex items-center gap-1">
-                                  <span>{plan.name}</span>
-                                  {plan.isPopular && (
-                                    <span className="text-[9px] text-amber-400 font-medium">
-                                      · Popular
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-mono tabular-nums">
-                                  {plan.durationLabel}
-                                </div>
-                              </div>
+                            <div className="text-sm font-black text-slate-900 leading-tight">
+                              M{plan.price}
                             </div>
-                            <div className="text-xs font-black font-mono tabular-nums text-amber-400">
-                              LSL {plan.price}
+                            <div className="text-[9.5px] font-semibold text-slate-500 leading-tight mt-0.5 line-clamp-2">
+                              {plan.name}
                             </div>
-                          </label>
+                          </button>
                         );
                       })}
                     </div>
 
-                    {renderTermsAndConditionsRow()}
-
-                    <button
-                      type="button"
-                      disabled={!isTermsSatisfied || !isGuestFormValid}
-                      onClick={() => {
-                        const selPlan = enabledPlans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
-                        if (selPlan) setVoucherAmountLsl(selPlan.price);
-                        setPaymentError(null);
-                        setIssuedOttVoucherPin(null);
-                        setHasCopiedIssuedOttVoucher(false);
-                        setPortalStep('payment');
-                      }}
-                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <span>⚡ Buy OTT Voucher (PayLesotho EcoCash / M-Pesa)</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-
-          {/* ================================================================= */}
-          {/* STEP 4 & 5: PAYLESOTHO PAYMENT -> COPY OTT VOUCHER -> REDEEM      */}
-          {/* ================================================================= */}
-          {portalStep === 'payment' && (
-            <form
-              onSubmit={handleCompletePayment}
-              className="rounded-t-2xl rounded-b-none p-3 sm:p-3.5 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
-            >
-              <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-
-              <div className="flex items-center justify-between border-b border-[#232d42] pb-1.5">
-                <div className="flex items-center gap-2">
-                  <ProviderLogo provider="paylesotho" className="w-14 h-5 shrink-0" />
-                  <span className="text-[11px] font-bold text-white font-mono uppercase">
-                    {issuedOttVoucherPin ? 'Copy & Redeem OTT Voucher' : 'PayLesotho Checkout'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentError(null);
-                    setIssuedOttVoucherPin(null);
-                    setHasCopiedIssuedOttVoucher(false);
-                    setPortalStep('plan');
-                  }}
-                  className="text-[10px] text-slate-400 hover:text-white cursor-pointer font-mono"
-                >
-                  &larr; Plans
-                </button>
-              </div>
-
-              {issuedOttVoucherPin ? (
-                /* ============================================================= */
-                /* STEP 4b & 5: COPY ISSUED OTT VOUCHER -> PASTE & REDEEM        */
-                /* ============================================================= */
-                <div className="space-y-2.5 pt-1">
-                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-emerald-300 uppercase font-mono">
-                        ✓ OTT Voucher Generated (LSL {issuedOttVoucherAmount})
-                      </span>
-                      <span className="text-[9px] font-mono text-emerald-200 bg-emerald-500/20 px-1.5 py-0.5 rounded">
-                        16-Digit PIN Ready
-                      </span>
-                    </div>
-
-                    <div className="p-2.5 rounded-lg bg-black/80 border border-emerald-400/50 text-center font-mono text-sm font-black tracking-widest text-emerald-400 select-all">
-                      {issuedOttVoucherPin.replace(/\D/g, '').match(/.{1,4}/g)?.join(' ') || issuedOttVoucherPin}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleCopyIssuedOttVoucher}
-                        className={`py-1.5 px-2.5 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          hasCopiedIssuedOttVoucher
-                            ? 'bg-emerald-500/25 border border-emerald-400 text-emerald-200'
-                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow'
-                        }`}
-                      >
-                        {hasCopiedIssuedOttVoucher ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-300" />
-                            <span>PIN Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>1. Copy Voucher PIN</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!hasCopiedIssuedOttVoucher) {
-                            await handleCopyIssuedOttVoucher();
-                          }
-                          const formatted =
-                            issuedOttVoucherPin.replace(/\D/g, '').slice(0, 16).match(/.{1,4}/g)?.join(' ') ||
-                            issuedOttVoucherPin;
-                          setRedeemIssuedPinInput(formatted);
-                        }}
-                        className="py-1.5 px-2.5 rounded-lg font-bold text-[11px] bg-[#161d31] hover:bg-[#1f2942] border border-emerald-500/40 text-emerald-300 flex items-center justify-center gap-1 transition-all cursor-pointer"
-                      >
-                        <span>2. Paste to Redeem</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <label className="text-[10px] font-medium text-slate-300">
-                        Paste 16-Digit OTT Voucher PIN to Connect (LSL {issuedOttVoucherAmount})
-                      </label>
-                      <span className="text-[9px] font-mono text-emerald-400">
-                        {redeemIssuedPinInput.replace(/\D/g, '').length}/16 digits
-                      </span>
-                    </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={19}
-                      value={redeemIssuedPinInput}
-                      onChange={(e) => {
-                        const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                        const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
-                        setRedeemIssuedPinInput(formatted);
-                        if (onlyDigits.length === 16 && !hasCopiedIssuedOttVoucher) {
-                          setHasCopiedIssuedOttVoucher(true);
-                          fetch('/api/gateways/paylesotho/ott-voucher/mark-copied', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ pin: issuedOttVoucherPin })
-                          }).catch(() => {});
-                        }
-                        setPaymentError(null);
-                      }}
-                      placeholder="Paste 16-digit OTT PIN here (e.g. 1234 5678 9012 3456)"
-                      className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
-                    />
-                  </div>
-
-                  {paymentError && (
-                    <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                      <span>{paymentError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleRedeemIssuedOttVoucher}
-                    disabled={!hasCopiedIssuedOttVoucher || isConnecting || redeemIssuedPinInput.replace(/\D/g, '').length !== 16}
-                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isConnecting ? 'Redeeming OTT Voucher...' : 'Redeem OTT Voucher & Connect \u2192'}</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/* Mode Switcher: Buy Your OTT Voucher (xpayments.paylesotho.co.ls) vs Have OTT Voucher */}
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      key="paylesotho"
-                      type="button"
-                      onClick={() => {
-                        setSelectedGateway('paylesotho');
-                        setPaymentError(null);
-                      }}
-                      className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        selectedGateway === 'paylesotho'
-                          ? 'bg-emerald-500/20 border-emerald-500 text-white shadow'
-                          : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <ProviderLogo provider="paylesotho" className="w-12 h-4 shrink-0" />
-                      <span className="text-[10px] font-bold truncate">Buy OTT Voucher</span>
-                    </button>
-
-                    <button
-                      key="ottvoucher"
-                      type="button"
-                      onClick={() => {
-                        setSelectedGateway('ottvoucher');
-                        setPaymentError(null);
-                      }}
-                      className={`py-1.5 px-2 rounded-lg border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                        selectedGateway === 'ottvoucher'
-                          ? 'bg-[#f05e17]/20 border-[#f05e17] text-white shadow'
-                          : 'bg-[#121829] border-[#232d42] text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <ProviderLogo provider="ottvoucher" className="w-5 h-4 shrink-0" />
-                      <span className="text-[10px] font-bold truncate">Redeem 16-Digit PIN</span>
-                    </button>
-                  </div>
-
-                  {selectedGateway === 'paylesotho' ? (
-                    <div className="space-y-2">
-                      {/* Lesotho Only Notice & Compact 4-Step Guide (matches xpayments.paylesotho.co.ls) */}
-                      <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[9px] text-amber-200 flex items-center justify-between gap-2">
-                        <span>
-                          <strong>Lesotho Only:</strong> M-Pesa (5xxxxxxx) &amp; EcoCash (6xxxxxxx) generate an instant 16-digit OTT Voucher.
-                        </span>
-                        <span className="text-emerald-300 font-mono font-bold shrink-0">LSL {voucherAmountLsl}</span>
+                    {/* Pay with: M-Pesa, EcoCash, and 16-Digit OTT Voucher with Authentic Brand Logos */}
+                    <div>
+                      <div className="text-xs font-extrabold text-slate-900 mb-1.5">
+                        Pay with
                       </div>
-
-                      {/* 1. Voucher Amount (LSL) Selector Pills + Custom Amount Input */}
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-200 block mb-1">
-                          1. Voucher Amount (LSL)
-                        </label>
-                        <div className="grid grid-cols-6 gap-1 mb-1.5">
-                          {[2, 5, 10, 20, 50, 100].map((amt) => {
-                            const isPicked = voucherAmountLsl === amt && !customAmountInput;
-                            return (
-                              <button
-                                key={amt}
-                                type="button"
-                                onClick={() => {
-                                  setVoucherAmountLsl(amt);
-                                  setCustomAmountInput('');
-                                  const matchingPlan = enabledPlans.find((p) => p.price === amt);
-                                  if (matchingPlan) setSelectedPlanId(matchingPlan.id);
-                                }}
-                                className={`py-1 px-1 rounded border text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                                  isPicked
-                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
-                                    : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-emerald-500/50'
-                                }`}
-                              >
-                                LSL {amt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="flex items-center rounded-lg bg-[#121829] border border-[#232d42] overflow-hidden">
-                          <span className="px-2.5 py-1 bg-[#161d31] text-[10px] font-mono font-bold text-slate-300 border-r border-[#232d42]">
-                            LSL
+                      <div className="space-y-1.5">
+                        {/* M-Pesa Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedGateway('paylesotho');
+                            setPayLesothoChannel('mpesa');
+                            setPaymentError(null);
+                          }}
+                          className={`w-full px-2.5 py-1.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                            selectedGateway === 'paylesotho' && payLesothoChannel === 'mpesa'
+                              ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <MPesaLogo className="h-5" />
+                            <span className="text-xs font-bold text-slate-900">M-Pesa</span>
+                          </div>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedGateway === 'paylesotho' && payLesothoChannel === 'mpesa'
+                                ? 'border-[#f05e17]'
+                                : 'border-slate-300'
+                            }`}
+                          >
+                            {selectedGateway === 'paylesotho' && payLesothoChannel === 'mpesa' && (
+                              <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                            )}
                           </span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={5000}
-                            value={customAmountInput}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setCustomAmountInput(val);
-                              const num = Number(val);
-                              if (!isNaN(num) && num > 0) {
-                                setVoucherAmountLsl(num);
-                              }
-                            }}
-                            placeholder={`Or enter custom amount (Selected: LSL ${voucherAmountLsl})`}
-                            className="w-full px-2.5 py-1 bg-transparent text-white text-[11px] font-mono focus:outline-none"
-                          />
-                        </div>
-                      </div>
+                        </button>
 
-                      {/* 2. Payment Method Selector (EcoCash & Vodacom M-Pesa) */}
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-200 block mb-1">
-                          2. Payment Method
-                        </label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPayLesothoChannel('ecocash');
-                              setPaymentError(null);
-                            }}
-                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2 ${
-                              payLesothoChannel === 'ecocash'
-                                ? 'bg-emerald-500/15 border-emerald-500 text-white shadow'
-                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                        {/* EcoCash Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedGateway('paylesotho');
+                            setPayLesothoChannel('ecocash');
+                            setPaymentError(null);
+                          }}
+                          className={`w-full px-2.5 py-1.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                            selectedGateway === 'paylesotho' && payLesothoChannel === 'ecocash'
+                              ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <EcoCashLogo className="h-5" />
+                            <span className="text-xs font-bold text-slate-900">EcoCash</span>
+                          </div>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedGateway === 'paylesotho' && payLesothoChannel === 'ecocash'
+                                ? 'border-[#f05e17]'
+                                : 'border-slate-300'
                             }`}
                           >
-                            <input
-                              type="radio"
-                              checked={payLesothoChannel === 'ecocash'}
-                              onChange={() => setPayLesothoChannel('ecocash')}
-                              className="accent-emerald-500 shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-extrabold text-blue-400 leading-tight">EcoCash</div>
-                              <div className="text-[8.5px] text-slate-400 truncate">Pay with EcoCash Mobile Money</div>
-                            </div>
-                          </button>
+                            {selectedGateway === 'paylesotho' && payLesothoChannel === 'ecocash' && (
+                              <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                            )}
+                          </span>
+                        </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPayLesothoChannel('mpesa');
-                              setPaymentError(null);
-                            }}
-                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2 ${
-                              payLesothoChannel === 'mpesa'
-                                ? 'bg-emerald-500/15 border-emerald-500 text-white shadow'
-                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-white/25'
+                        {/* 16-Digit OTT Voucher Option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedGateway('ottvoucher');
+                            setPaymentError(null);
+                          }}
+                          className={`w-full px-2.5 py-1.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                            selectedGateway === 'ottvoucher'
+                              ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <OttVoucherLogo className="h-5" />
+                            <span className="text-xs font-bold text-slate-900">16-Digit OTT Voucher</span>
+                          </div>
+                          <span
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              selectedGateway === 'ottvoucher'
+                                ? 'border-[#f05e17]'
+                                : 'border-slate-300'
                             }`}
                           >
-                            <input
-                              type="radio"
-                              checked={payLesothoChannel === 'mpesa'}
-                              onChange={() => setPayLesothoChannel('mpesa')}
-                              className="accent-emerald-500 shrink-0"
-                            />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-extrabold text-rose-400 leading-tight">Vodacom M-Pesa</div>
-                              <div className="text-[8.5px] text-slate-400 truncate">Pay with M-Pesa</div>
-                            </div>
-                          </button>
-                        </div>
+                            {selectedGateway === 'ottvoucher' && (
+                              <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                            )}
+                          </span>
+                        </button>
                       </div>
+                    </div>
 
-                      {/* 3. Mobile Number Input */}
-                      <div>
+                    {/* Inline 16-Digit OTT Voucher PIN Input when 16-Digit OTT Voucher is chosen */}
+                    {selectedGateway === 'ottvoucher' && (
+                      <div className="pt-0.5">
                         <div className="flex items-center justify-between mb-0.5">
-                          <label className="text-[10px] font-bold text-slate-200">
-                            3. {payLesothoChannel === 'mpesa' ? 'M-Pesa' : 'EcoCash'} Mobile Number <span className="text-red-400">*</span>
+                          <label className="text-[10px] font-bold text-slate-600">
+                            16-Digit OTT Voucher PIN <span className="text-[#f05e17]">*</span>
                           </label>
-                          <span className="text-[9px] font-mono text-slate-400">
-                            {payLesothoChannel === 'mpesa' ? 'Must start with 5 (e.g. 5XXXXXXX)' : 'Must start with 6 (e.g. 6XXXXXXX)'}
+                          <span className="text-[10px] font-mono font-bold text-emerald-600">
+                            {ottPin.replace(/\D/g, '').length}/16 digits
                           </span>
                         </div>
                         <input
-                          type="tel"
+                          type="text"
                           inputMode="numeric"
-                          maxLength={8}
-                          required
-                          value={guestPhone}
+                          maxLength={19}
+                          value={ottPin}
                           onChange={(e) => {
-                            handleGuestPhoneChange(e.target.value, '+266');
+                            const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                            const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
+                            setOttPin(formatted);
                             setPaymentError(null);
                           }}
-                          placeholder={payLesothoChannel === 'mpesa' ? 'e.g., 5XXXXXXX' : 'e.g., 6XXXXXXX'}
-                          className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-emerald-400 rounded-lg text-white text-xs font-mono tabular-nums focus:outline-none"
+                          placeholder="1234 5678 9012 3456"
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-xl text-slate-900 text-xs font-mono font-bold tracking-widest text-center focus:outline-none"
                         />
-                        {phoneFormatError && (
-                          <p className="text-[9px] text-amber-400 font-mono mt-0.5">{phoneFormatError}</p>
-                        )}
                       </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <label className="text-[10px] font-medium text-slate-300">
-                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
-                        </label>
-                        <span className="text-[10px] font-mono tabular-nums text-emerald-400 font-bold">
-                          {ottPin.replace(/\D/g, '').length}/16 digits
+                    )}
+
+                    {/* Issued 16-Digit OTT Voucher Box after M-Pesa / EcoCash USSD PIN Approval */}
+                    {issuedOttVoucherPin && selectedGateway === 'paylesotho' && (
+                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            OTT Voucher Issued (M{issuedOttVoucherAmount || selectedPlanObj?.price || 10})
+                          </span>
+                          <span className="text-[9px] font-mono text-emerald-700">
+                            {hasCopiedIssuedOttVoucher ? 'Copied ✓' : 'Step 1: Copy PIN'}
+                          </span>
+                        </div>
+                        <div className="p-2 rounded-lg bg-white border border-emerald-300 text-center font-mono text-xs font-black tracking-widest text-slate-900 select-all">
+                          {issuedOttVoucherPin.replace(/\D/g, '').slice(0, 16).match(/.{1,4}/g)?.join(' - ')}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleCopyIssuedOttVoucher}
+                            className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            {hasCopiedIssuedOttVoucher ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{hasCopiedIssuedOttVoucher ? 'PIN Copied' : '1. Copy PIN'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRedeemIssuedOttVoucher}
+                            disabled={!hasCopiedIssuedOttVoucher || isConnecting}
+                            style={{ backgroundColor: accentColor }}
+                            className="py-1.5 px-2 rounded-lg text-white font-bold text-[10px] disabled:opacity-50 flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <span>2. Connect &rarr;</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {paymentError && (
+                      <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[10px] font-medium flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <span>{paymentError}</span>
+                      </div>
+                    )}
+
+                    {!issuedOttVoucherPin && (
+                      <button
+                        type="submit"
+                        disabled={isConnecting}
+                        style={{ backgroundColor: accentColor }}
+                        className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <span>
+                          {isConnecting
+                            ? selectedGateway === 'ottvoucher'
+                              ? 'Verifying OTT Voucher...'
+                              : 'Waiting for USSD PIN on phone...'
+                            : selectedGateway === 'ottvoucher'
+                            ? 'Redeem OTT Voucher & Connect \u2192'
+                            : `Proceed with ${selectedPlanObj?.name || 'Daily Unlimited'} \u2192`}
                         </span>
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={19}
-                        required
-                        value={ottPin}
-                        onChange={(e) => {
-                          const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                          const formatted = onlyDigits.match(/.{1,4}/g)?.join(' ') || '';
-                          setOttPin(formatted);
-                          setPaymentError(null);
-                        }}
-                        placeholder="1234 5678 9012 3456"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] focus:border-[#f05e17] rounded-lg text-white text-xs font-mono tabular-nums tracking-widest focus:outline-none"
-                      />
-                      <p className="text-[9px] text-slate-400 font-mono mt-0.5">
-                        Paste your 16-digit OTT Voucher PIN to redeem and unlock Wi-Fi.
-                      </p>
-                    </div>
-                  )}
-
-                  {renderTermsAndConditionsRow()}
-
-                  {paymentError && (
-                    <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-200 text-[10px] flex items-start gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                      <span>{paymentError}</span>
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={
-                      !isTermsSatisfied ||
-                      !isGuestFormValid ||
-                      isConnecting ||
-                      (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16) ||
-                      (selectedGateway === 'paylesotho' &&
-                        payLesothoChannel !== 'card' &&
-                        !/^[56]\d{7}$/.test(cleanPhoneDigits))
-                    }
-                    className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-current" />
-                    <span>
-                      {isConnecting
-                        ? 'Generating OTT Voucher via PayLesotho...'
-                        : selectedGateway === 'ottvoucher'
-                        ? 'Redeem 16-Digit OTT Voucher & Connect \u2192'
-                        : `Buy Voucher (LSL ${voucherAmountLsl})`}
-                    </span>
-                  </button>
-                </>
-              )}
-            </form>
+                      </button>
+                    )}
+                  </form>
+                )}
+              </div>
+            </div>
           )}
-        </div>
-        </>
-        )}
-      </main>
-      )}
-
-      {/* ================================================================= */}
-      {/* FULL-PAGE EDGE-TO-EDGE CONNECTED DASHBOARD                        */}
-      {/* Rendered cleanly when user closes the ad or connects to Wi-Fi     */}
-      {/* Zero background bleed, zero sign-up reset loop                   */}
-      {/* ================================================================= */}
-      {/* ================================================================= */}
-      {/* AUTOMATIC CONNECTION RELEASE — RESUME TO DEVICE                  */}
-      {/* Instant redirection & window close; no "You're online!" screen    */}
-      {/* ================================================================= */}
-      {portalStep === 'connected' && (
-        <div className="fixed inset-0 z-50 bg-[#05070c] flex flex-col justify-center items-center px-4 py-8 text-center text-white">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mb-4 shadow-lg">
-            <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
-          </div>
-          <div className="text-sm font-bold text-white mb-1">
-            Connected — Resuming to Device
-          </div>
-          <p className="text-xs text-slate-400 max-w-xs mb-6">
-            Your high-speed Starlink Wi-Fi is active. You are now free to use your phone and apps.
-          </p>
-          <a
-            href={sanitizeDestinationUrl(userOrigUrl)}
-            onClick={() => releaseAndCloseSplash()}
-            className="text-xs font-mono text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
-          >
-            Tap here if your browser does not close automatically &rarr;
-          </a>
-        </div>
+        </main>
       )}
     </div>
   );

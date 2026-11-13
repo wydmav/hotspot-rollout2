@@ -578,12 +578,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       }))
     : defaultPlans;
 
-  // Never redirect to google.com! If Sponsor Ad Slides are ON, show the ad slide carousel then auto-close; if OFF, auto-close immediately.
-  const videoAdsEnabled = Boolean(serverStore.sponsorAd?.enabled);
+  // Post-authentication always shows a random Ad Slide picture with a small static "Proceed to Internet" link
+  const freeAccessDurationMinutes = Math.max(60, Number(cfg.freeAccessDurationMinutes) || 1440);
+  const freeAccessDurationSeconds = freeAccessDurationMinutes * 60;
   const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
-  const postAuthDst = videoAdsEnabled
-    ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
-    : cnaCloseUrl;
+  const postAuthDst = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
 
   const firstPlan = plans[0] || defaultPlans[0];
   const firstPlanNameClean = String(firstPlan.name || 'Daily Pass').replace(/'/g, '');
@@ -666,66 +665,20 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     flex: 1;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-end;
     align-items: center;
-    padding: 14px 0 0;
+    padding: 0;
     width: 100%;
     max-width: 430px;
     margin: 0 auto;
-  }
-  .brand-header {
-    width: 100%;
-    padding: 8px 18px 6px;
-    text-align: center;
-  }
-  .brand-row {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    background: rgba(255, 255, 255, 0.88);
-    backdrop-filter: blur(10px);
-    padding: 7px 16px;
-    border-radius: 999px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-    margin-bottom: 8px;
-  }
-  .brand-main {
-    font-size: 13px;
-    font-weight: 900;
-    letter-spacing: 1.2px;
-    color: #0f172a;
-  }
-  .brand-divider {
-    width: 1px;
-    height: 18px;
-    background: #cbd5e1;
-  }
-  .brand-sub {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.8px;
-    color: #334155;
-    text-transform: uppercase;
-  }
-  .hero-headline {
-    font-size: 20px;
-    font-weight: 900;
-    letter-spacing: -0.4px;
-    color: #ffffff;
-    text-shadow: 0 3px 14px rgba(0,0,0,0.65);
-    line-height: 1.15;
-  }
-  .hero-headline span {
-    color: ${accentColor};
   }
   .light-card {
     width: 100%;
     background: rgba(255, 255, 255, 0.96);
     backdrop-filter: blur(16px);
     border-top: 4px solid ${accentColor};
-    border-radius: 28px 28px 0 0;
-    padding: 18px 18px 20px;
+    border-radius: 26px 26px 0 0;
+    padding: 14px 16px 16px;
     box-shadow: 0 -14px 44px rgba(15, 23, 42, 0.38);
     margin-top: auto;
     color: #0f172a;
@@ -1069,62 +1022,48 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </form>
   </div>
   ` : `
-  <div class="brand-header">
-    <div class="brand-row">
-      <span class="brand-main">${brandTitle || 'T-CONNECT'}</span>
-      <span class="brand-divider"></span>
-      <span class="brand-sub">${tagline || 'STARLINK HOTSPOT'}</span>
-    </div>
-    ${welcomeHeadline ? `<div class="hero-headline">${welcomeHeadline}</div>` : ''}
-  </div>
-
   <div class="light-card">
     <div id="errBox" class="err-box"></div>
 
-    <!-- STEP 1: ENTER YOUR DETAILS (Clean light card, no "02" prefix badge) -->
+    <!-- STEP 1: ENTER YOUR DETAILS (Compact bottom card so background wallpaper is maximally visible) -->
     <div id="step1_details" class="sec active">
-      <div class="step-title-row">
-        <h2 class="step-title">Enter your details</h2>
+      <div class="step-title-row" style="margin-bottom:8px;">
+        <h2 class="step-title" style="font-size:17px;">Enter your details</h2>
       </div>
 
-      <div class="field">
-        <label class="lbl" for="guestFirstName">First name</label>
-        <input class="inp" type="text" id="guestFirstName" placeholder="e.g. Thabo" autocomplete="given-name" />
-      </div>
-
-      <div class="field">
-        <label class="lbl" for="guestLastName">Surname</label>
-        <input class="inp" type="text" id="guestLastName" placeholder="e.g. Mokoena" autocomplete="family-name" />
-      </div>
-
-      <div class="field">
-        <label class="lbl" for="guestMobile">Mobile number</label>
-        <div class="phone-pill">
-          <span class="phone-prefix">+266</span>
-          <input class="phone-inp" type="tel" inputmode="numeric" maxlength="8" id="guestMobile" placeholder="5xxxxxxx or 6xxxxxxx" oninput="handleStep1PhoneInput(this)" autocomplete="tel-national" />
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div class="field" style="margin-bottom:0;">
+          <label class="lbl" for="guestFirstName">First name</label>
+          <input class="inp" style="padding:8px 12px;font-size:12px;" type="text" id="guestFirstName" placeholder="First name" autocomplete="given-name" />
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label class="lbl" for="guestLastName">Surname</label>
+          <input class="inp" style="padding:8px 12px;font-size:12px;" type="text" id="guestLastName" placeholder="Surname" autocomplete="family-name" />
         </div>
       </div>
 
-      <div class="field">
-        <label class="lbl" for="guestEmail">Email (optional)</label>
-        <input class="inp" type="email" id="guestEmail" placeholder="name@example.com" autocomplete="email" />
+      <div class="field" style="margin-bottom:8px;">
+        <label class="lbl" for="guestMobile">Mobile number</label>
+        <div class="phone-pill">
+          <span class="phone-prefix" style="padding:8px 10px 8px 12px;font-size:12px;">+266</span>
+          <input class="phone-inp" style="padding:8px 12px;font-size:12px;" type="tel" inputmode="numeric" maxlength="8" id="guestMobile" placeholder="5xxxxxxx or 6xxxxxxx" oninput="handleStep1PhoneInput(this)" autocomplete="tel-national" />
+        </div>
       </div>
 
-      <button type="button" id="step1ContinueBtn" class="btn-orange" onclick="proceedToStep2()">
+      <div class="field" style="margin-bottom:10px;">
+        <label class="lbl" for="guestEmail">Email (optional)</label>
+        <input class="inp" style="padding:8px 12px;font-size:12px;" type="email" id="guestEmail" placeholder="name@example.com" autocomplete="email" />
+      </div>
+
+      <button type="button" id="step1ContinueBtn" class="btn-orange" style="min-height:40px;padding:10px 16px;font-size:13px;" onclick="proceedToStep2()">
         Continue &rarr;
       </button>
-
-      <div style="margin-top:10px;text-align:center;">
-        <button type="button" onclick="jumpToDirectOttRedeem()" style="border:none;background:transparent;color:#0f172a;font-size:11px;font-weight:800;text-decoration:underline;cursor:pointer;">
-          Already have a 16-Digit OTT Voucher PIN? Redeem here &rarr;
-        </button>
-      </div>
     </div>
 
     <!-- STEP 2: CHOOSE A PACKAGE & PAY WITH M-PESA / ECOCASH / 16-DIGIT OTT VOUCHER -->
     <div id="step2_package" class="sec">
-      <div class="step-title-row">
-        <h2 class="step-title">Choose a package</h2>
+      <div class="step-title-row" style="margin-bottom:8px;">
+        <h2 class="step-title" style="font-size:17px;">Choose a package</h2>
         <button type="button" class="step-back-btn" onclick="backToStep1()">&larr; Details</button>
       </div>
 
@@ -1133,31 +1072,53 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
 
-        <div class="pkg-grid">
+        <div class="pkg-grid" style="margin-bottom:10px;">
           ${plansCardsHtml}
         </div>
 
-        <div class="pay-with-heading">Pay with</div>
-        <div class="pay-methods">
-          <div class="pay-row active" id="gwRow_mpesa" onclick="selectGw('mpesa')">
+        <div class="pay-with-heading" style="font-size:15px;margin-bottom:6px;">Pay with</div>
+        <div class="pay-methods" style="gap:6px;margin-bottom:9px;">
+          <div class="pay-row active" id="gwRow_mpesa" onclick="selectGw('mpesa')" style="padding:7px 12px;">
             <div class="pay-row-left">
-              <span class="pay-badge badge-mpesa">M-PESA</span>
+              <svg width="28" height="24" viewBox="0 0 64 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+                <rect x="18" y="6" width="24" height="44" rx="5" fill="#FFFFFF" stroke="#28B446" stroke-width="3.5"/>
+                <line x1="27" y1="11" x2="33" y2="11" stroke="#28B446" stroke-width="2.2" stroke-linecap="round"/>
+                <circle cx="30" cy="44.5" r="1.8" fill="#28B446"/>
+                <rect x="21.5" y="15" width="17" height="25" rx="1.5" fill="#E8F8EC"/>
+                <path d="M14 25 C22 19, 36 19, 48 26 L44 33 C34 27, 23 27, 14 31 Z" fill="#E60000"/>
+              </svg>
               <span class="pay-row-title">M-Pesa</span>
             </div>
             <span class="pay-radio"></span>
           </div>
 
-          <div class="pay-row" id="gwRow_ecocash" onclick="selectGw('ecocash')">
+          <div class="pay-row" id="gwRow_ecocash" onclick="selectGw('ecocash')" style="padding:7px 12px;">
             <div class="pay-row-left">
-              <span class="pay-badge badge-ecocash">EcoCash</span>
+              <svg width="56" height="22" viewBox="0 0 240 76" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+                <rect width="240" height="76" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+                <text x="16" y="48" font-family="system-ui,-apple-system,sans-serif" font-weight="900" font-size="38" letter-spacing="-0.8">
+                  <tspan fill="#032B82">Eco</tspan><tspan fill="#E21A22">Cash</tspan>
+                </text>
+                <path d="M22 58 Q120 70 218 54" stroke="#E21A22" stroke-width="4" fill="none" stroke-linecap="round"/>
+              </svg>
               <span class="pay-row-title">EcoCash</span>
             </div>
             <span class="pay-radio"></span>
           </div>
 
-          <div class="pay-row" id="gwRow_ottvoucher" onclick="selectGw('ottvoucher')">
+          <div class="pay-row" id="gwRow_ottvoucher" onclick="selectGw('ottvoucher')" style="padding:7px 12px;">
             <div class="pay-row-left">
-              <span class="pay-badge badge-ott">OTT PIN</span>
+              <svg width="56" height="22" viewBox="0 0 240 76" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+                <rect width="240" height="76" rx="10" fill="#090E1D" stroke="#1E293B" stroke-width="1.2"/>
+                <g transform="translate(14, 11)">
+                  <circle cx="27" cy="27" r="23.5" fill="none" stroke="#2CDB52" stroke-width="5"/>
+                  <path d="M 12 18.5 L 42 18.5" stroke="#2CDB52" stroke-width="4.2" stroke-linecap="round"/>
+                  <path d="M 23 21 L 19 41" stroke="#2CDB52" stroke-width="4.5" stroke-linecap="round"/>
+                  <path d="M 32 21 L 28 41" stroke="#2CDB52" stroke-width="4.5" stroke-linecap="round"/>
+                  <text x="64" y="33" font-family="system-ui,-apple-system,sans-serif" font-weight="900" font-size="28" fill="#FFFFFF">OTT</text>
+                  <text x="65" y="48" font-family="system-ui,-apple-system,sans-serif" font-weight="800" font-size="10.5" fill="#FFFFFF" letter-spacing="3">VOUCHER</text>
+                </g>
+              </svg>
               <span class="pay-row-title">16-Digit OTT Voucher</span>
             </div>
             <span class="pay-radio"></span>
@@ -1478,7 +1439,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Access', durationSeconds: 7200 }))
+        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Access', durationSeconds: ${freeAccessDurationSeconds} }))
       }).catch(function(){});
     } catch (err) {}
     return true;
@@ -1705,41 +1666,39 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
   res.send(html);
 });
 
-// Native Captive Portal Auto-Close endpoint (Never redirects to google.com; closes the OS Captive Portal sheet so the user keeps using their device)
-app.get('/api/portal/cna-close', (_req: Request, res: Response) => {
+// Native Captive Portal Auto-Close endpoint (Closes the OS Captive Portal sheet so the user keeps using their device)
+app.get('/api/portal/cna-close', (req: Request, res: Response) => {
+  const dest = String(req.query.dest || '').trim();
+  const safeDest = /^https?:\/\//i.test(dest) ? dest : '';
   const closeHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Connected — T-Connect Wi-Fi</title>
+<title>T-Connect Wi-Fi Active</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
-  body{min-height:100vh;background:#f8fafc;color:#0f172a;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
-  .card{max-width:360px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid #f05e17;border-radius:24px;padding:28px 22px;box-shadow:0 20px 50px rgba(15,23,42,0.12)}
-  .badge{width:54px;height:54px;border-radius:999px;background:#ecfdf5;border:2px solid #10b981;color:#059669;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;margin:0 auto 14px}
-  h1{font-size:20px;font-weight:900;margin-bottom:8px;color:#0f172a}
-  p{font-size:13px;color:#475569;margin-bottom:18px;line-height:1.5;font-weight:500}
-  .btn{display:block;width:100%;padding:12px 16px;border-radius:999px;border:none;background:#f05e17;color:#fff;font-weight:900;font-size:14px;cursor:pointer}
+  body{min-height:100vh;background:#050811;color:#fff;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
+  .btn{display:inline-block;padding:8px 18px;border-radius:999px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.12);color:#fff;font-weight:700;font-size:12px;cursor:pointer;text-decoration:none}
 </style>
 <script>
   function dismissCaptiveSheet() {
+    var d = '${safeDest.replace(/'/g, "\\'")}';
+    if (d) {
+      window.location.replace(d);
+      return;
+    }
     try { window.close(); } catch (e) {}
     try { window.open('', '_self', ''); window.close(); } catch (e) {}
     try { if (window.history && window.history.length > 1) window.history.back(); } catch (e) {}
   }
   window.addEventListener('load', function() {
-    setTimeout(dismissCaptiveSheet, 150);
+    setTimeout(dismissCaptiveSheet, 80);
   });
 </script>
 </head>
 <body>
-  <div class="card">
-    <div class="badge">&#10003;</div>
-    <h1>You're Connected!</h1>
-    <p>Your T-Connect Wi-Fi session is active. You can close this window and continue using your device.</p>
-    <button type="button" class="btn" onclick="dismissCaptiveSheet()">Done &mdash; Close Window</button>
-  </div>
+  <button type="button" class="btn" onclick="dismissCaptiveSheet()">Proceed to Internet &rarr;</button>
 </body>
 </html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1750,14 +1709,16 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
   const baseUrl = resolveControllerBaseUrl(host, protocol);
   const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
-  const enabled = Boolean(sponsorCfg.enabled);
+  const proceedActionMode = sponsorCfg.proceedActionMode || 'close_portal';
+  const randomizeSlides = sponsorCfg.randomizeSlides !== false;
+
   const defaultLib = [
     {
       id: 'carousel_tconnect_offers',
       title: 'T-Connect & Partner Picture Series (3 Slides)',
       sponsorName: 'T-Connect Lesotho Partners',
       headline: 'Slide Through Exclusive Partner Deals',
-      description: 'Slide right or left to view every picture, tap any picture to visit the partner offer, or tap X to close.',
+      description: 'Slide right or left to view every picture, or tap Proceed to Internet below.',
       videoUrl: '',
       destinationUrl: 'https://tconnect.co.ls',
       mediaType: 'image_carousel',
@@ -1799,16 +1760,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
     lib.find((v: any) => v.enabled) ||
     defaultLib[0];
 
-  if (!enabled || !chosenAd) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title><script>try{window.close();}catch(e){}try{window.open('','_self','');window.close();}catch(e){}window.location.replace('${cnaCloseUrl}');</script></head><body style="background:#f8fafc"></body></html>`;
-  }
-
-  let videoSrc = String(chosenAd.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
-  if (videoSrc.startsWith('/')) {
-    videoSrc = `${baseUrl}${videoSrc}`;
-  }
-  const mediaType = chosenAd.mediaType || (Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0 ? 'image_carousel' : 'video');
-  const rawSlides = Array.isArray(chosenAd.slides) && chosenAd.slides.length > 0
+  const rawSlides = Array.isArray(chosenAd?.slides) && chosenAd.slides.length > 0
     ? chosenAd.slides.map((s: any) => ({
         imageUrl: resolveServerWalledGardenMediaUrl(
           String(s.imageUrl || ''),
@@ -1816,11 +1768,20 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
           chosenAd.sponsorName || 'T-Connect Partner',
           String(s.caption || chosenAd.headline || '')
         ),
-        redirectUrl: String(s.redirectUrl || chosenAd.destinationUrl || 'https://www.google.com'),
+        redirectUrl: String(s.redirectUrl || chosenAd.destinationUrl || ''),
         caption: String(s.caption || '')
       }))
-    : [];
-  const defaultDest = String(chosenAd.destinationUrl || 'https://www.google.com');
+    : defaultLib[0].slides.map((s: any) => ({
+        imageUrl: resolveServerWalledGardenMediaUrl(s.imageUrl, baseUrl, 'T-Connect Partner', s.caption),
+        redirectUrl: s.redirectUrl,
+        caption: s.caption
+      }));
+
+  // Pick a random slide on every post-auth load so the guest sees a random uploaded ad picture while authenticating
+  const initialIdx = randomizeSlides && rawSlides.length > 1
+    ? Math.floor(Math.random() * rawSlides.length)
+    : 0;
+  const defaultDest = String(chosenAd?.destinationUrl || '');
 
   const slidesTrackHtml = rawSlides.map((s: any, idx: number) => `
     <div class="slide-frame" data-idx="${idx}">
@@ -1828,123 +1789,63 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
     </div>
   `).join('');
 
-  const dotsHtml = rawSlides.map((_s: any, idx: number) => `
-    <button type="button" class="dot-btn ${idx === 0 ? 'active' : ''}" id="dot_${idx}" onclick="goToSlide(${idx}, event)"></button>
-  `).join('');
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>${chosenAd.sponsorName || 'Sponsor'} — T-Connect Ad</title>
+<title>${chosenAd?.sponsorName || 'T-Connect Hotspot'}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;user-select:none}
-  html,body{width:100vw;height:100vh;overflow:hidden;background:#000;color:#fff}
-  .ad-stage{position:fixed;inset:0;width:100vw;height:100vh;background:#000;overflow:hidden;cursor:pointer}
-  .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.32s ease-out}
-  .slide-frame{width:100vw;height:100vh;flex-shrink:0;position:relative;background:#000}
-  video,.slide-img{width:100vw;height:100vh;object-fit:cover;display:block;background:#000}
-  .slide-caption{position:absolute;bottom:76px;left:16px;right:16px;margin:0 auto;max-width:420px;background:rgba(0,0,0,0.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.2);padding:10px 16px;border-radius:16px;color:#fff;font-size:13px;font-weight:700;text-align:center}
-  .top-left-pill{position:fixed;top:16px;left:16px;z-index:50;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:rgba(0,0,0,0.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.25);font-size:12px;font-weight:800;color:#fff}
-  .top-right-close{position:fixed;top:16px;right:16px;z-index:60}
-  .btn-close-x{width:44px;height:44px;border-radius:999px;border:2px solid rgba(255,255,255,0.55);background:rgba(0,0,0,0.85);color:#fff;font-size:20px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 28px rgba(0,0,0,0.75);transition:all 0.15s}
-  .btn-close-x:hover,.btn-close-x:active{background:#e11d48;border-color:#fff;transform:scale(0.96)}
-  .arrow-btn{position:fixed;top:50%;transform:translateY(-50%);z-index:50;width:44px;height:44px;border-radius:999px;background:rgba(0,0,0,0.75);border:1px solid rgba(255,255,255,0.35);color:#fff;font-size:20px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center}
-  .arrow-left{left:12px}
-  .arrow-right{right:12px}
-  .bottom-dots{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(0,0,0,0.8);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.25)}
-  .dot-btn{height:10px;width:10px;border-radius:999px;border:none;background:rgba(255,255,255,0.45);cursor:pointer;transition:all 0.2s}
-  .dot-btn.active{width:28px;background:#f05e17}
-  .mute-pill{position:fixed;bottom:16px;left:16px;z-index:50;background:rgba(0,0,0,0.75);backdrop-filter:blur(10px);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:999px;padding:8px 14px;font-size:11px;font-weight:700;cursor:pointer}
+  html,body{width:100vw;height:100vh;overflow:hidden;background:#050811;color:#fff}
+  .ad-stage{position:fixed;inset:0;bottom:38px;width:100vw;height:calc(100vh - 38px);background:#050811;overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.3s ease-out}
+  .slide-frame{width:100vw;height:100%;flex-shrink:0;position:relative;background:#050811;display:flex;align-items:center;justify-content:center}
+  .slide-img{width:100%;height:100%;object-fit:contain;display:block;background:#050811}
+  .bottom-proceed-bar{position:fixed;left:0;right:0;bottom:0;height:38px;z-index:60;background:#050811;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;padding:0 14px}
+  .proceed-static-link{border:none;background:transparent;color:#f8fafc;font-size:11px;font-weight:700;letter-spacing:0.2px;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:4px 10px}
 </style>
 </head>
 <body>
-<div class="ad-stage" id="adStage" onclick="handleAdClick(event)">
-  ${mediaType === 'image_carousel' && rawSlides.length > 0
-    ? `<div class="carousel-track" id="carouselTrack">${slidesTrackHtml}</div>`
-    : `<video id="adVideo" src="${videoSrc}" playsinline autoplay muted controlsList="nodownload nofullscreen"></video>`}
+<div class="ad-stage" id="adStage" onclick="handleAdImageClick(event)">
+  <div class="carousel-track" id="carouselTrack" style="transform:translateX(-${initialIdx * 100}%)">${slidesTrackHtml}</div>
 </div>
 
-<div class="top-left-pill" onclick="event.stopPropagation()">
-  <span style="width:8px;height:8px;border-radius:999px;background:#34d399;display:inline-block"></span>
-  <span>${chosenAd.sponsorName || 'T-Connect Partner Offer'}</span>
-  ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `<span id="slideCounter" style="color:#fbbf24;font-family:monospace;padding-left:6px;border-left:1px solid rgba(255,255,255,0.25)">Slide 1/${rawSlides.length}</span>` : ''}
+<div class="bottom-proceed-bar">
+  <button type="button" id="proceedInternetBtn" class="proceed-static-link" onclick="handleProceedToInternet(event)">
+    Proceed to internet &rarr;
+  </button>
 </div>
-
-<div class="top-right-close" onclick="event.stopPropagation()">
-  <button type="button" id="closeAdBtn" class="btn-close-x" title="Close Ad and Enjoy Connectivity" onclick="releaseToInternet(event)">&#10005;</button>
-</div>
-
-${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
-<button type="button" class="arrow-btn arrow-left" onclick="prevSlide(event)">&#8249;</button>
-<button type="button" class="arrow-btn arrow-right" onclick="nextSlide(event)">&#8250;</button>
-<div class="bottom-dots" onclick="event.stopPropagation()">
-  ${dotsHtml}
-  <span style="font-size:11px;color:#e2e8f0;font-family:monospace;font-weight:700;margin-left:4px">Swipe or tap arrows &rarr;</span>
-</div>
-` : mediaType === 'video' ? `
-<button type="button" class="mute-pill" id="muteBtn" onclick="toggleAudio(event)">Unmute Audio</button>
-` : ''}
 
 <script>
-  var vid = document.getElementById('adVideo');
-  var muteBtn = document.getElementById('muteBtn');
-  var mediaType = '${mediaType}';
   var slides = ${JSON.stringify(rawSlides)};
-  var slideIdx = 0;
+  var slideIdx = ${initialIdx};
   var defaultDest = '${defaultDest.replace(/'/g, "\\'")}';
+  var proceedMode = '${proceedActionMode}';
+  var cnaCloseUrl = '${cnaCloseUrl}';
   var touchStartX = 0;
   var touchDragged = false;
-
-  function handleAdClick(e) {
-    if (touchDragged) {
-      touchDragged = false;
-      return;
-    }
-    var targetUrl = defaultDest;
-    if (mediaType === 'image_carousel' && slides.length > 0 && slides[slideIdx] && slides[slideIdx].redirectUrl) {
-      targetUrl = slides[slideIdx].redirectUrl;
-    }
-    if (targetUrl) {
-      window.location.href = targetUrl;
-    }
-  }
 
   function renderSlide() {
     if (!slides.length) return;
     var track = document.getElementById('carouselTrack');
-    var ctr = document.getElementById('slideCounter');
     if (track) track.style.transform = 'translateX(-' + (slideIdx * 100) + '%)';
-    if (ctr) ctr.textContent = 'Slide ' + (slideIdx + 1) + '/' + slides.length;
-    for (var i = 0; i < slides.length; i++) {
-      var d = document.getElementById('dot_' + i);
-      if (d) d.className = 'dot-btn' + (i === slideIdx ? ' active' : '');
-    }
   }
 
-  function goToSlide(idx, e) {
-    if (e) e.stopPropagation();
-    slideIdx = idx;
-    renderSlide();
-  }
-
-  function nextSlide(e) {
-    if (e) e.stopPropagation();
+  function nextSlide() {
     if (!slides.length) return;
     slideIdx = (slideIdx + 1) % slides.length;
     renderSlide();
   }
 
-  function prevSlide(e) {
-    if (e) e.stopPropagation();
+  function prevSlide() {
     if (!slides.length) return;
     slideIdx = (slideIdx - 1 + slides.length) % slides.length;
     renderSlide();
   }
 
   var stage = document.getElementById('adStage');
-  if (stage && mediaType === 'image_carousel') {
+  if (stage) {
     stage.addEventListener('touchstart', function(e) {
       touchDragged = false;
       if (e.touches && e.touches[0]) touchStartX = e.touches[0].clientX;
@@ -1960,29 +1861,40 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
     }, { passive: true });
   }
 
-  function toggleAudio(e) {
-    if (e) e.stopPropagation();
-    if (!vid) return;
-    vid.muted = !vid.muted;
-    if (muteBtn) muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
+  function getActiveCampaignUrl() {
+    if (slides.length > 0 && slides[slideIdx] && slides[slideIdx].redirectUrl) {
+      return slides[slideIdx].redirectUrl;
+    }
+    return defaultDest || '';
   }
 
-  function releaseToInternet(e) {
+  function handleAdImageClick(e) {
+    if (touchDragged) {
+      touchDragged = false;
+      return;
+    }
+    var url = getActiveCampaignUrl();
+    if (url && /^https?:\\/\\//i.test(url)) {
+      window.location.href = url;
+    }
+  }
+
+  function handleProceedToInternet(e) {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    var closeTarget = '${cnaCloseUrl}';
+    var campaignUrl = getActiveCampaignUrl();
+    if (proceedMode === 'open_campaign_url' && campaignUrl && /^https?:\\/\\//i.test(campaignUrl)) {
+      window.location.href = campaignUrl;
+      return;
+    }
     try { window.close(); } catch (err) {}
     try { window.open('', '_self', ''); window.close(); } catch (err) {}
     if (window.top && window.top !== window.self) {
-      try { window.top.location.replace(closeTarget); return; } catch (err) {}
+      try { window.top.location.replace(cnaCloseUrl); return; } catch (err) {}
     }
-    window.location.replace(closeTarget);
-  }
-
-  if (vid) {
-    vid.play().catch(function() {});
+    window.location.replace(cnaCloseUrl);
   }
 </script>
 </body>
@@ -1990,51 +1902,14 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
 }
 
 // MikroTik alogin.html (Served immediately after /login succeeds on the router):
-// Only shows Sponsor Ad Carousel when the Sponsor Ad toggle is ON; otherwise auto-closes the captive portal window immediately.
+// Renders the random Ad Slide picture showcase with the small static "Proceed to internet ->" link.
 app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const scope = (req.query.scope as string) || 'hotspot';
-  const baseUrl = resolveControllerBaseUrl(host, protocol);
-  const videoAdsEnabled = Boolean(serverStore.sponsorAd?.enabled);
-  const adUrl = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
-  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
-  const defaultTarget = videoAdsEnabled ? adUrl : cnaCloseUrl;
-
-  const releaseHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="0; url=${defaultTarget}">
-<title>Connected — T-Connect Hotspot</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
-  body{min-height:100vh;background:#f8fafc;color:#0f172a;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
-  .card{max-width:360px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid #f05e17;border-radius:24px;padding:24px;box-shadow:0 20px 50px rgba(15,23,42,0.12)}
-  .badge{width:48px;height:48px;border-radius:999px;background:#ecfdf5;border:2px solid #10b981;color:#059669;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 12px}
-  h1{font-size:18px;font-weight:900;margin-bottom:6px;color:#0f172a}
-  p{font-size:12px;color:#475569;margin-bottom:16px;line-height:1.4}
-  .btn{display:block;width:100%;padding:12px 16px;border-radius:999px;background:#f05e17;color:#fff;font-weight:800;font-size:13px;text-decoration:none}
-</style>
-<script>
-  (function() {
-    var target = '${defaultTarget}';
-    window.location.replace(target);
-  })();
-</script>
-</head>
-<body>
-  <div class="card">
-    <div class="badge">&#10003;</div>
-    <h1>Connected to T-Connect Hotspot</h1>
-    <p>${videoAdsEnabled ? 'Loading partner showcase...' : 'Closing captive portal...'}</p>
-    <a class="btn" href="${defaultTarget}">Continue &rarr;</a>
-  </div>
-</body>
-</html>`;
+  const html = compileVideoAdHtml(host, protocol, scope, 'post_auth');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(releaseHtml);
+  res.send(html);
 });
 
 app.get('/api/portal/video-ad.html', (req: Request, res: Response) => {
@@ -4703,10 +4578,16 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     });
   }
 
+  const rawUpstreamMsg = String(ottCheck.upstreamMessage || '').trim();
+  const cleanUpstreamMsg =
+    !rawUpstreamMsg || /<html|<!doctype|403 forbidden|502 bad gateway|microsoft-azure/i.test(rawUpstreamMsg)
+      ? 'Invalid or unrecognized 16-digit OTT Voucher PIN. Please check the digits and try again.'
+      : rawUpstreamMsg.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
   return res.status(400).json({
     success: false,
     reason: 'INVALID_OTT_PIN',
-    message: ottCheck.upstreamMessage || 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho API (api.ottlesotho.com).'
+    message: cleanUpstreamMsg
   });
 });
 
@@ -4790,10 +4671,9 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
 
   if (existingIdx >= 0) {
     const existing = serverStore.guestEvents[existingIdx];
-    const isFree = existing.mode === 'free' || existing.voucherCode === 'FREE-PASS';
-    const startMs = new Date(existing.capturedAt).getTime();
+    const startMs = new Date(existing.startedAt || existing.capturedAt).getTime();
     const durSec = Number(existing.durationSeconds) || 86400;
-    const isUnexpired = isFree || (Date.now() - startMs < durSec * 1000);
+    const isUnexpired = Date.now() - startMs < durSec * 1000;
 
     if (isUnexpired) {
       // Roaming Handover: update site name & lastSeen while preserving session tenure
@@ -4813,9 +4693,21 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   }
 
   const routerCtx = resolveAdoptedRouterForLead(body);
+  const allPortalCfgs = loadSavedPortalConfigs();
+  const scopeCfg = allPortalCfgs[routerCtx.scope] || allPortalCfgs['hotspot'] || {};
+  const configuredFreeDurationMins = Math.max(60, Number(scopeCfg.freeAccessDurationMinutes) || 1440);
+  const resolvedDurationSec =
+    body.mode === 'free'
+      ? Number(body.durationSeconds) || configuredFreeDurationMins * 60
+      : Number(body.durationSeconds) || 86400;
+  const expiresIso = new Date(Date.now() + resolvedDurationSec * 1000).toISOString();
+
   const entry = {
     id: body.id || `guest_${Date.now()}`,
     ...body,
+    durationSeconds: resolvedDurationSec,
+    startedAt: nowIso,
+    expiresAt: expiresIso,
     scope: routerCtx.scope,
     routerId: routerCtx.routerId,
     routerName: routerCtx.routerName,
@@ -4847,7 +4739,7 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
       client_mac: entry.mac || 'AUTO',
       client_ip: entry.ip || '10.10.0.1',
       device_type: entry.deviceType || 'Mobile',
-      duration_minutes: entry.mode === 'free' ? 0 : Math.round((Number(entry.durationSeconds) || 86400) / 60),
+      duration_minutes: Math.round(resolvedDurationSec / 60),
       status: 'active',
       captured_at: nowIso
     },

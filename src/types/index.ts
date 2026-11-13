@@ -361,6 +361,8 @@ export interface SponsorAdConfig {
   watchMode?: 'full_video' | 'skip_after_sec';
   retriggerEveryHours?: number; // default 3 hours
   retriggerEveryGb?: number; // default 2 GB
+  randomizeSlides?: boolean; // default true
+  proceedActionMode?: 'close_portal' | 'open_campaign_url'; // default 'close_portal'
   videoLibrary?: VideoAdItem[];
 }
 

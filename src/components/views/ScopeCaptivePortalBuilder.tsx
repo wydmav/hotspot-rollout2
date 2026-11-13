@@ -39,7 +39,7 @@ import {
   X
 } from 'lucide-react';
 import { VerticalType, ScopePortalConfig, ScopePlan, GatewayProvider, RouterDevice, CaptivePortalLead } from '../../types';
-import { ProviderLogo } from '../common/BrandLogos';
+import { ProviderLogo, MPesaLogo, EcoCashLogo, OttVoucherLogo } from '../common/BrandLogos';
 import { storage } from '../../services/storage';
 import { RouterOSRenderer } from '../../services/routerosRenderer';
 import { TenantGroupsModal } from './TenantGroupsModal';
@@ -47,12 +47,27 @@ import { CaptivePortalLeadsView } from './CaptivePortalLeadsView';
 import { validateEmailAddress } from '../../hooks/useConnectFreeValidation';
 
 export const formatDuration = (mins: number) => {
-  if (mins >= 1440) return '24 Hours (1 Day)';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
+  const safeMins = Math.max(60, Number(mins) || 1440);
+  if (safeMins === 720) return '12 Hours';
+  if (safeMins === 1440) return '24 Hours (1 Day)';
+  if (safeMins % 1440 === 0) {
+    const d = safeMins / 1440;
+    return `${d} ${d === 1 ? 'Day' : 'Days'}`;
+  }
+  const h = Math.floor(safeMins / 60);
+  const m = safeMins % 60;
   if (h > 0 && m > 0) return `${h}h ${m}m`;
   if (h > 0) return `${h} ${h === 1 ? 'Hour' : 'Hours'}`;
   return `${m} Minutes`;
+};
+
+const sanitizeEmulatorError = (raw: unknown, fallback: string): string => {
+  const str = typeof raw === 'string' ? raw.trim() : '';
+  if (!str) return fallback;
+  if (/<html|<head|<body|<title|403 Forbidden|Microsoft-Azure-Application-Gateway/i.test(str)) {
+    return 'Unable to verify 16-digit OTT Voucher PIN (upstream gateway returned 403 Forbidden or invalid PIN). Please check your 16-digit PIN.';
+  }
+  return str.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() || fallback;
 };
 
 export const OFFICIAL_SESOTHO_TERMS_TEXT = `Amohela Liphelo Tsa Tšebetso
@@ -985,15 +1000,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const enterPostAuthAdOrUsage = (_isFreeFlow = false) => {
     const sponsorCfg = storage.getSponsorAdConfig();
     const ad = storage.resolveVideoAdForScope(selectedScope);
-    if (sponsorCfg.enabled && ad) {
-      setPreviewAdSlideIdx(0);
+    const slides = ad?.slides || [];
+    const randIdx =
+      slides.length > 0 && sponsorCfg.randomizeSlides !== false
+        ? Math.floor(Math.random() * slides.length)
+        : 0;
+    setPreviewAdSlideIdx(randIdx);
+    if (ad) {
       storage.recordVideoAdImpression(ad.id);
-      setPreviewStep('video_ad');
-    } else {
-      setSavedToast('Authenticated! Captive portal auto-closed so the user can continue using their device.');
-      setTimeout(() => setSavedToast(null), 3500);
-      setPreviewStep('usage');
     }
+    setPreviewStep('video_ad');
   };
 
   // Compute active global speed & burst limits for RouterOS rate-limit + global ON/OFF toggle
@@ -1237,8 +1253,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
   // Toggle strictly between FREE MODE (true) and PAID MODE (false) and push to all routers in real time
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
+    const freeDurationMins = Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440);
     handleUpdateCurrent({
       allowFreeAccess: enableFree,
+      freeAccessDurationMinutes: freeDurationMins,
       allowVoucherCode: true,
       allowOnlinePayment: true,
       freeButtonX: currentConfig.freeButtonX ?? 50,
@@ -1259,7 +1277,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
     storage.setRouterAccessPolicy('all', {
       accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
-      freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+      freeDurationMinutes: freeDurationMins,
       freeRateLimit: computedGlobalRateLimit
     });
     try {
@@ -1269,7 +1287,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         body: JSON.stringify({
           vertical: 'all',
           accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
-          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          freeDurationMinutes: freeDurationMins,
           freeRateLimit: computedGlobalRateLimit,
           speedCapsEnabled,
           dhcpRange,
@@ -1281,8 +1299,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       });
       setSavedToast(
         enableFree
-          ? 'FREE MODE ACTIVE! Splash page shows 1-tap "Login for free" -> Straight to the internet (no ad carousel).'
-          : 'PAID MODE ACTIVE! Splash page shows 16-Digit OTT Voucher & PayLesotho Buy Pass -> Sponsor Ad -> Internet.'
+          ? `FREE MODE ACTIVE (${formatDuration(freeDurationMins)} per guest)! Synced live to routers.`
+          : 'PAID MODE ACTIVE! Compact 2-step card with M-Pesa, EcoCash & 16-Digit OTT Voucher synced live.'
       );
       setTimeout(() => setSavedToast(null), 4000);
     } catch {
@@ -1705,7 +1723,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
         if (!res.ok || !data.success) {
           setPaymentError(
-            data.message || 'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho API (api.ottlesotho.com).'
+            sanitizeEmulatorError(
+              data.message || data.error,
+              'Invalid 16-digit OTT Voucher PIN: Rejected by OTT Lesotho API (api.ottlesotho.com).'
+            )
           );
           return;
         }
@@ -2048,9 +2069,61 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   </button>
                 </div>
 
-                {/* FREE ACCESS MODE BUTTON REPOSITIONING (X/Y SLIDERS + DRAG-AND-DROP + LABEL) */}
+                {/* FREE ACCESS MODE DURATION (12H, 24H, OR CUSTOM DAYS) + BUTTON REPOSITIONING */}
                 {isFreeModeActive && (
                   <div className="p-3.5 rounded-xl bg-[#121829] border border-[#f05e17]/50 space-y-3">
+                    {/* Free Mode Per-Guest Session Duration Selector (12 Hours, 24 Hours, or Custom Days) */}
+                    <div className="pb-3 border-b border-[#1b233a] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="font-extrabold text-emerald-400 text-xs flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Free Mode Session Duration (12 Hours, 24 Hours, or Custom Days)</span>
+                        </span>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Enforced on MikroTik (<code className="text-emerald-300">tc-free-trial</code> profile <code className="text-amber-300">session-timeout={RouterOSRenderer.formatRouterOsDuration(currentConfig.freeAccessDurationMinutes || 1440)}</code>) and guest sessions.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { label: '12 Hours', mins: 720 },
+                          { label: '24 Hours (1 Day)', mins: 1440 },
+                          { label: '3 Days', mins: 4320 },
+                          { label: '7 Days', mins: 10080 }
+                        ].map((opt) => {
+                          const activeMins = Number(currentConfig.freeAccessDurationMinutes) || 1440;
+                          const isSelected = activeMins === opt.mins;
+                          return (
+                            <button
+                              key={opt.mins}
+                              type="button"
+                              onClick={() => handleUpdateCurrent({ freeAccessDurationMinutes: opt.mins })}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
+                                  : 'bg-[#0b0f19] text-slate-300 border-[#232d42] hover:text-white'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                        <div className="flex items-center gap-1 bg-[#0b0f19] px-2 py-0.5 rounded-lg border border-[#232d42]">
+                          <span className="text-[9px] text-slate-400 font-bold">Days:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={365}
+                            value={Math.max(1, Math.round((Number(currentConfig.freeAccessDurationMinutes) || 1440) / 1440))}
+                            onChange={(e) => {
+                              const days = Math.max(1, Math.min(365, Number(e.target.value) || 1));
+                              handleUpdateCurrent({ freeAccessDurationMinutes: days * 1440 });
+                            }}
+                            className="w-11 px-1 py-0.5 bg-[#161d31] border border-[#232d42] rounded text-emerald-400 font-bold text-[10px] text-center focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <span className="font-extrabold text-white text-xs flex items-center gap-1.5">
@@ -2795,7 +2868,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         <span>Free Wi-Fi Session Policy:</span>
                       </span>
                       <span className="text-emerald-300 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/30">
-                        Unlimited Forever (No Time Limit)
+                        {formatDuration(currentConfig.freeAccessDurationMinutes || 1440)} per Guest
                       </span>
                     </div>
                   )}
@@ -3165,17 +3238,24 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         <div className="lg:col-span-5 flex flex-col items-center">
           {/* Emulator Top Controls */}
           <div className="w-full flex flex-wrap items-center justify-between gap-2 mb-2 bg-[#0a0e17] p-2.5 rounded-xl border border-[#1b233a] font-mono text-xs">
-            {/* Step Selector */}
+            {/* Step Selector (No separate "Voucher" or "Buy Pass" tab — Paid Mode is the default 2-step flow) */}
             <div className="flex flex-wrap items-center gap-1">
               {([
-                ...(isFreeModeActive ? (['identification'] as const) : []),
-                ...(isVoucherModeActive ? (['voucher'] as const) : []),
-                ...(isBuyPassModeActive ? (['plan', 'payment'] as const) : []),
-                'video_ad'
+                ...(isFreeModeActive
+                  ? (['identification', 'video_ad'] as const)
+                  : (['voucher', 'plan', 'video_ad'] as const))
               ] as const).map((step) => (
                 <button
                   key={step}
-                  onClick={() => setPreviewStep(step)}
+                  onClick={() => {
+                    if (step === 'video_ad') {
+                      const slides = activePreviewAd?.slides || [];
+                      if (slides.length > 0) {
+                        setPreviewAdSlideIdx(Math.floor(Math.random() * slides.length));
+                      }
+                    }
+                    setPreviewStep(step);
+                  }}
                   className={`px-2 py-1 rounded text-[10px] font-bold transition-colors cursor-pointer ${
                     previewStep === step
                       ? 'bg-[#f05e17] text-white'
@@ -3183,13 +3263,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   }`}
                 >
                   {step === 'identification'
-                    ? 'Free Wi-Fi'
+                    ? 'Free Mode'
                     : step === 'voucher'
-                    ? 'Voucher'
+                    ? 'Step 1: Details'
                     : step === 'plan'
-                    ? 'Buy Pass'
-                    : step === 'payment'
-                    ? 'Pay'
+                    ? 'Step 2: Package & Pay'
                     : '🎬 Ad Slide'}
                 </button>
               ))}
@@ -3308,31 +3386,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 backgroundImage: `url(${effectivePreviewBg})`,
               }}
             >
-              {/* Darken Overlay — 0% unobstructed by default when Free Access Mode is ON unless admin explicitly darkens */}
+              {/* Minimal or Zero Darken Overlay so Background Wallpaper is maximally visible */}
               <div
                 className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-                style={{ opacity: isFreeModeActive && previewStep === 'identification' ? 0 : currentConfig.bgDarken / 100 }}
+                style={{ opacity: isFreeModeActive ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
               />
-
-              {/* Scope Header: Hidden when Free Access Mode is ON (Identification step) so only the clean "Login for free" button shows over the wallpaper */}
-              {!(isFreeModeActive && previewStep === 'identification') &&
-              (currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim() || currentConfig.welcomeHeadline?.trim()) ? (
-                <div className="relative z-10 text-center pt-2">
-                  {(currentConfig.brandTitle?.trim() || currentConfig.tagline?.trim()) && (
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-black/60 backdrop-blur-md rounded-full border border-white/20 mb-1.5">
-                      <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeMeta.color }} />
-                      <span className="text-[10px] font-bold text-white font-mono">
-                        {[currentConfig.brandTitle?.trim(), currentConfig.tagline?.trim()].filter(Boolean).join(' · ')}
-                      </span>
-                    </div>
-                  )}
-                  {currentConfig.welcomeHeadline?.trim() && (
-                    <h3 className="text-xl font-black text-white tracking-tight drop-shadow-md leading-tight">
-                      {currentConfig.welcomeHeadline}
-                    </h3>
-                  )}
-                </div>
-              ) : null}
 
               {/* PURE 1-TAP "LOGIN FOR FREE" BUTTON FLOATING OVER WALLPAPER (When Free Access Mode is ON) */}
               {isFreeModeActive && previewStep === 'identification' && (
@@ -3381,13 +3439,21 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 </div>
               )}
 
-              {/* FULL-SCREEN POST-CONNECT SLIDING PICTURE AD OVERLAY IN EMULATOR */}
-              {previewStep === 'video_ad' && activePreviewAd && (() => {
-                const isCarousel =
-                  activePreviewAd.mediaType === 'image_carousel' &&
-                  Array.isArray(activePreviewAd.slides) &&
-                  activePreviewAd.slides.length > 0;
-                const slides = activePreviewAd.slides || [];
+              {/* FULL-SCREEN POST-AUTH RANDOM PICTURE AD SHOWCASE IN EMULATOR */}
+              {(previewStep === 'video_ad' || previewStep === 'usage') && (() => {
+                const slides =
+                  activePreviewAd?.slides && activePreviewAd.slides.length > 0
+                    ? activePreviewAd.slides
+                    : [
+                        {
+                          id: 'fallback_slide',
+                          imageUrl: effectivePreviewBg,
+                          caption: currentConfig.welcomeHeadline || 'T-Connect Hotspot',
+                          redirectUrl: ''
+                        }
+                      ];
+                const safeIdx = previewAdSlideIdx % slides.length;
+                const currentSlide = slides[safeIdx] || slides[0];
                 return (
                   <div
                     className="absolute inset-0 z-30 bg-black overflow-hidden select-none flex flex-col justify-between"
@@ -3395,7 +3461,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       previewTouchStartXRef.current = e.touches[0]?.clientX || 0;
                     }}
                     onTouchEnd={(e) => {
-                      if (!isCarousel || slides.length <= 1) return;
+                      if (slides.length <= 1) return;
                       const diff = (e.changedTouches[0]?.clientX || 0) - previewTouchStartXRef.current;
                       if (Math.abs(diff) > 30) {
                         if (diff < 0) setPreviewAdSlideIdx((prev) => (prev + 1) % slides.length);
@@ -3403,117 +3469,89 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       }
                     }}
                   >
-                    {isCarousel ? (
-                      <div
-                        className="flex w-full h-full transition-transform duration-300 ease-out"
-                        style={{ transform: `translateX(-${previewAdSlideIdx * 100}%)` }}
-                      >
-                        {slides.map((sl, idx) => (
-                          <div key={sl.id || idx} className="w-full h-full shrink-0 relative bg-black">
-                            <img
-                              src={resolveWalledGardenImageUrl(
-                                sl.imageUrl,
-                                sl.caption || activePreviewAd.title,
-                                activePreviewAd.sponsorName
-                              )}
-                              onError={(e) => {
-                                e.currentTarget.onerror = null;
-                                e.currentTarget.src = buildInlineFallbackSlideDataUri(
-                                  sl.caption || activePreviewAd.title,
-                                  activePreviewAd.sponsorName
-                                );
-                              }}
-                              alt={sl.caption || activePreviewAd.title}
-                              className="w-full h-full object-cover"
-                            />
-                            {sl.caption && (
-                              <div className="absolute bottom-14 inset-x-3 z-20 flex justify-center">
-                                <div className="px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/20 text-white text-[10px] font-bold text-center">
-                                  {sl.caption}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <video
-                        src={activePreviewAd.videoUrl}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover"
-                      />
-                    )}
+                    <div className="relative flex-1 w-full bg-black flex items-center justify-center overflow-hidden">
+                      {activePreviewAd && activePreviewAd.mediaType === 'video' && activePreviewAd.videoUrl ? (
+                        <video
+                          src={activePreviewAd.videoUrl}
+                          autoPlay
+                          playsInline
+                          muted
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <img
+                          src={resolveWalledGardenImageUrl(
+                            currentSlide?.imageUrl,
+                            currentSlide?.caption || activePreviewAd?.title,
+                            activePreviewAd?.sponsorName
+                          )}
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = buildInlineFallbackSlideDataUri(
+                              currentSlide?.caption || activePreviewAd?.title || 'T-Connect Hotspot',
+                              activePreviewAd?.sponsorName || 'Starlink Powered Wi-Fi'
+                            );
+                          }}
+                          alt={currentSlide?.caption || 'Ad Slide'}
+                          className="w-full h-full object-contain"
+                        />
+                      )}
 
-                    {/* Top Bar: Sponsor + Immediate X Close Button */}
-                    <div className="absolute top-3 inset-x-3 z-30 flex items-center justify-between gap-2">
-                      <div className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md border border-white/25 text-white text-[10px] font-bold flex items-center gap-1.5 truncate">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                        <span className="truncate">{activePreviewAd.sponsorName}</span>
+                      {slides.length > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAdSlideIdx((prev) => (prev - 1 + slides.length) % slides.length)}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAdSlideIdx((prev) => (prev + 1) % slides.length)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Ultra-Compact 36px Bottom Bar with Small Static "Proceed to internet →" Link */}
+                    <div className="h-9 w-full bg-black/95 border-t border-white/15 px-3 flex items-center justify-between shrink-0 z-30">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <span className="text-[9.5px] text-slate-400 truncate">
+                          {currentSlide?.caption || activePreviewAd?.sponsorName || 'Wi-Fi Authenticated'}
+                        </span>
                       </div>
                       <button
                         type="button"
                         onClick={() => {
-                          setSavedToast('Ad closed — device is now online and enjoying full internet connectivity!');
+                          const sponsorCfg = storage.getSponsorAdConfig();
+                          const mode = sponsorCfg.proceedActionMode || 'close_portal';
+                          setSavedToast(
+                            mode === 'open_campaign_url'
+                              ? 'Proceed to internet tapped -> Opened sponsor campaign URL & released to internet!'
+                              : 'Proceed to internet tapped -> Closed captive portal & released straight to internet!'
+                          );
                           setTimeout(() => setSavedToast(null), 3500);
-                          setPreviewStep('usage');
+                          setPreviewStep(isFreeModeActive ? 'identification' : 'voucher');
                         }}
-                        title="Close ad immediately and enjoy connectivity"
-                        className="w-9 h-9 rounded-full bg-black/85 hover:bg-rose-600 text-white border-2 border-white/50 shadow-xl flex items-center justify-center cursor-pointer transition-all"
+                        className="text-[10.5px] font-semibold text-white/95 hover:text-white underline underline-offset-2 flex items-center gap-1 shrink-0 cursor-pointer"
                       >
-                        <X className="w-4 h-4 stroke-[2.5]" />
+                        <span>Proceed to internet</span>
+                        <span>&rarr;</span>
                       </button>
                     </div>
-
-                    {/* Left & Right Arrows for Sliding Pictures */}
-                    {isCarousel && slides.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setPreviewAdSlideIdx((prev) => (prev - 1 + slides.length) % slides.length)}
-                          className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-black/75 hover:bg-black border border-white/30 text-white flex items-center justify-center cursor-pointer"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPreviewAdSlideIdx((prev) => (prev + 1) % slides.length)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-black/75 hover:bg-black border border-white/30 text-white flex items-center justify-center cursor-pointer"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-
-                    {/* Bottom Slide Dots */}
-                    {isCarousel && slides.length > 1 && (
-                      <div className="absolute bottom-3 inset-x-3 z-30 flex justify-center">
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/80 border border-white/20">
-                          {slides.map((sl, idx) => (
-                            <button
-                              key={sl.id || idx}
-                              type="button"
-                              onClick={() => setPreviewAdSlideIdx(idx)}
-                              className={`h-2 rounded-full transition-all cursor-pointer ${
-                                idx === previewAdSlideIdx ? 'w-5 bg-[#f05e17]' : 'w-2 bg-white/45'
-                              }`}
-                            />
-                          ))}
-                          <span className="text-[9px] text-slate-300 font-mono ml-1">
-                            {previewAdSlideIdx + 1}/{slides.length}
-                          </span>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
 
-              {/* Light & Fun 2-Step Docked Portal Card (Matches uploaded reference photos in Paid Mode) */}
-              {!(isFreeModeActive && previewStep === 'identification') && (
-              <div className="relative z-10 w-full mt-auto mb-0">
-                {/* STEP 1: ENTER YOUR DETAILS (Clean Light Card — No "02" prefix badge) */}
+              {/* Compact Light 2-Step Docked Portal Card (Maximizes Background Visibility, No "Voucher" Tab) */}
+              {!(isFreeModeActive && previewStep === 'identification') && previewStep !== 'video_ad' && previewStep !== 'usage' && (
+              <div className="relative z-10 w-full mt-auto mb-0 pb-2">
+                {/* STEP 1: ENTER YOUR DETAILS (Compact 2-Column First Name & Surname) */}
                 {(previewStep === 'voucher' || (!isFreeModeActive && previewStep === 'identification')) && (
                   <form
                     onSubmit={(e) => {
@@ -3538,60 +3576,63 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       }
                       setPreviewStep('plan');
                     }}
-                    className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 shadow-2xl space-y-2.5 text-left text-slate-900"
-                    style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
+                    className="rounded-2xl p-3.5 bg-white/95 backdrop-blur-md shadow-2xl space-y-2 text-left text-slate-900 border border-white/90"
                   >
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-black text-slate-900 tracking-tight">
+                      <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">
                         Enter your details
                       </h3>
+                      <span className="text-[9.5px] font-semibold text-slate-400">
+                        Step 1 of 2
+                      </span>
                     </div>
 
                     {previewVoucherError && (
-                      <div className="p-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-[10px] font-bold">
+                      <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold">
                         {previewVoucherError}
                       </div>
                     )}
 
-                    <div className="space-y-2">
-                      <div>
-                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
-                          First name
-                        </label>
-                        <input
-                          type="text"
-                          value={guestFirstName}
-                          onChange={(e) => {
-                            setGuestFirstName(e.target.value);
-                            setPreviewVoucherError(null);
-                          }}
-                          placeholder="e.g. Thabo"
-                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
-                        />
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div>
+                          <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                            First name <span className="text-[#f05e17]">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={guestFirstName}
+                            onChange={(e) => {
+                              setGuestFirstName(e.target.value);
+                              setPreviewVoucherError(null);
+                            }}
+                            placeholder="First name"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-[11px] font-medium focus:outline-none focus:border-[#f05e17]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                            Surname <span className="text-[#f05e17]">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={guestSurname}
+                            onChange={(e) => {
+                              setGuestSurname(e.target.value);
+                              setPreviewVoucherError(null);
+                            }}
+                            placeholder="Surname"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-[11px] font-medium focus:outline-none focus:border-[#f05e17]"
+                          />
+                        </div>
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
-                          Surname
+                        <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                          Mobile number <span className="text-[#f05e17]">*</span>
                         </label>
-                        <input
-                          type="text"
-                          value={guestSurname}
-                          onChange={(e) => {
-                            setGuestSurname(e.target.value);
-                            setPreviewVoucherError(null);
-                          }}
-                          placeholder="e.g. Mokoena"
-                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
-                          Mobile number
-                        </label>
-                        <div className="flex items-center rounded-full border border-slate-300 bg-white overflow-hidden focus-within:border-[#f05e17]">
-                          <span className="px-3 py-2 bg-slate-50 border-r border-slate-300 text-slate-900 text-xs font-extrabold select-none">
+                        <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:border-[#f05e17]">
+                          <span className="px-2.5 py-1.5 bg-slate-100 border-r border-slate-300 text-slate-900 text-[11px] font-bold select-none">
                             +266
                           </span>
                           <input
@@ -3604,49 +3645,34 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setPreviewVoucherError(null);
                             }}
                             placeholder="5xxxxxxx or 6xxxxxxx"
-                            className="flex-1 px-3 py-2 bg-transparent text-slate-900 text-xs font-bold focus:outline-none"
+                            className="flex-1 px-2.5 py-1.5 bg-transparent text-slate-900 text-[11px] font-mono focus:outline-none"
                           />
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
-                          Email (optional)
-                        </label>
-                        <input
-                          type="email"
-                          value={guestEmail}
-                          onChange={(e) => setGuestEmail(e.target.value)}
-                          placeholder="name@example.com"
-                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
-                        />
-                      </div>
+                      {currentConfig.collectEmail && (
+                        <div>
+                          <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                            Email (optional)
+                          </label>
+                          <input
+                            type="email"
+                            value={guestEmail}
+                            onChange={(e) => setGuestEmail(e.target.value)}
+                            placeholder="name@example.com"
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-[11px] font-medium focus:outline-none focus:border-[#f05e17]"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     <button
                       type="submit"
                       style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                      className="w-full py-2.5 text-white font-black text-xs rounded-full shadow-lg cursor-pointer hover:brightness-105 transition-all"
+                      className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 transition-all"
                     >
                       Continue &rarr;
                     </button>
-
-                    <div className="text-center pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPreviewVoucherError(null);
-                          if (!selectedPlanId && currentConfig.plans.length > 0) {
-                            setSelectedPlanId(currentConfig.plans[0].id);
-                          }
-                          setPreviewPayMethod('ottvoucher');
-                          setPreviewStep('plan');
-                        }}
-                        className="text-[10px] font-extrabold text-slate-700 underline hover:text-[#f05e17] cursor-pointer"
-                      >
-                        Already have a 16-Digit OTT Voucher PIN? Redeem here &rarr;
-                      </button>
-                    </div>
                   </form>
                 )}
 
@@ -3656,11 +3682,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                   const chosenPlan = enabledPlans.find((p) => p.id === selectedPlanId) || enabledPlans[0] || currentConfig.plans[0];
                   return (
                     <div
-                      className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 shadow-2xl space-y-2.5 text-left text-slate-900"
-                      style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
+                      className="rounded-2xl p-3.5 bg-white/95 backdrop-blur-md shadow-2xl space-y-2 text-left text-slate-900 border border-white/90"
                     >
                       <div className="flex items-center justify-between">
-                        <h3 className="text-base font-black text-slate-900 tracking-tight">
+                        <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">
                           Choose a package
                         </h3>
                         <button
@@ -3671,15 +3696,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             setPreviewIssuedOttPin('');
                             setPreviewStep('voucher');
                           }}
-                          className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-extrabold cursor-pointer"
+                          className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
                         >
                           &larr; Details
                         </button>
                       </div>
 
-                      {/* 3 Side-by-Side Package Cards (M10 Daily, M60 Weekly, M280 Monthly) */}
-                      <div className="grid grid-cols-3 gap-2">
-                        {enabledPlans.map((plan) => {
+                      {/* 3 Side-by-Side Package Cards */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {enabledPlans.slice(0, 3).map((plan) => {
                           const isSelected = chosenPlan?.id === plan.id;
                           const shortLabel = plan.name.toLowerCase().includes('daily')
                             ? 'Daily Unlimited'
@@ -3696,16 +3721,16 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                 setSelectedPlanId(plan.id);
                                 setPaymentError(null);
                               }}
-                              className={`p-2.5 rounded-2xl border-2 text-center cursor-pointer transition-all ${
+                              className={`p-2 rounded-xl border text-center cursor-pointer transition-all ${
                                 isSelected
-                                  ? 'bg-white border-[#f05e17] shadow-md'
-                                  : 'bg-slate-100 border-slate-200 hover:border-slate-300'
+                                  ? 'bg-[#fffaf5] border-2 border-[#f05e17] shadow-sm'
+                                  : 'bg-white border-slate-200 hover:border-slate-300'
                               }`}
                             >
-                              <div className="text-base font-black text-slate-900 leading-tight">
+                              <div className="text-sm font-black text-slate-900 leading-tight">
                                 {currency}{plan.price}
                               </div>
-                              <div className="text-[10px] font-bold text-slate-700 leading-tight mt-0.5">
+                              <div className="text-[9.5px] font-semibold text-slate-600 leading-tight mt-0.5">
                                 {shortLabel}
                               </div>
                             </button>
@@ -3713,13 +3738,13 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         })}
                       </div>
 
-                      {/* Pay with (M-Pesa, EcoCash, 16-Digit OTT Voucher — no Bank Card) */}
-                      <div className="space-y-1.5">
-                        <div className="text-sm font-black text-slate-900">
+                      {/* Pay with (Authentic M-Pesa, EcoCash, and 16-Digit OTT Voucher Logos) */}
+                      <div className="space-y-1">
+                        <div className="text-xs font-extrabold text-slate-900">
                           Pay with
                         </div>
 
-                        <div className="space-y-1.5">
+                        <div className="space-y-1">
                           <button
                             type="button"
                             onClick={() => {
@@ -3728,21 +3753,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setPreviewUssdSent(false);
                               setPaymentError(null);
                             }}
-                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl border cursor-pointer transition-all ${
                               previewPayMethod === 'mpesa'
-                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
-                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                                ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                                : 'border-slate-200 bg-white hover:bg-slate-50'
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-black">
-                                M-PESA
-                              </span>
-                              <span className="text-xs font-extrabold text-slate-900">M-Pesa</span>
+                              <MPesaLogo className="h-5" />
+                              <span className="text-xs font-bold text-slate-900">M-Pesa</span>
                             </div>
                             <span
                               className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                                previewPayMethod === 'mpesa' ? 'border-[#f05e17]' : 'border-slate-400'
+                                previewPayMethod === 'mpesa' ? 'border-[#f05e17]' : 'border-slate-300'
                               }`}
                             >
                               {previewPayMethod === 'mpesa' && (
@@ -3759,21 +3782,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setPreviewUssdSent(false);
                               setPaymentError(null);
                             }}
-                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl border cursor-pointer transition-all ${
                               previewPayMethod === 'ecocash'
-                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
-                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                                ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                                : 'border-slate-200 bg-white hover:bg-slate-50'
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300 text-[9px] font-black">
-                                EcoCash
-                              </span>
-                              <span className="text-xs font-extrabold text-slate-900">EcoCash</span>
+                              <EcoCashLogo className="h-5" />
+                              <span className="text-xs font-bold text-slate-900">EcoCash</span>
                             </div>
                             <span
                               className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                                previewPayMethod === 'ecocash' ? 'border-[#f05e17]' : 'border-slate-400'
+                                previewPayMethod === 'ecocash' ? 'border-[#f05e17]' : 'border-slate-300'
                               }`}
                             >
                               {previewPayMethod === 'ecocash' && (
@@ -3790,21 +3811,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setPreviewUssdSent(false);
                               setPaymentError(null);
                             }}
-                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl border cursor-pointer transition-all ${
                               previewPayMethod === 'ottvoucher'
-                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
-                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                                ? 'border-2 border-[#f05e17] bg-[#fffaf5]'
+                                : 'border-slate-200 bg-white hover:bg-slate-50'
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-black">
-                                OTT PIN
-                              </span>
-                              <span className="text-xs font-extrabold text-slate-900">16-Digit OTT Voucher</span>
+                              <OttVoucherLogo className="h-5" />
+                              <span className="text-xs font-bold text-slate-900">16-Digit OTT Voucher</span>
                             </div>
                             <span
                               className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                                previewPayMethod === 'ottvoucher' ? 'border-[#f05e17]' : 'border-slate-400'
+                                previewPayMethod === 'ottvoucher' ? 'border-[#f05e17]' : 'border-slate-300'
                               }`}
                             >
                               {previewPayMethod === 'ottvoucher' && (
@@ -3815,10 +3834,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </div>
                       </div>
 
-                      {/* Phone Number or 16-Digit OTT Voucher Input */}
-                      {previewPayMethod === 'ottvoucher' ? (
+                      {/* Inline 16-Digit OTT Voucher PIN Input when 16-Digit OTT Voucher is chosen */}
+                      {previewPayMethod === 'ottvoucher' && (
                         <div>
-                          <div className="flex justify-between items-center text-[10px] font-extrabold text-slate-700 mb-0.5">
+                          <div className="flex justify-between items-center text-[10px] font-bold text-slate-600 mb-0.5">
                             <span>16-Digit OTT Voucher PIN *</span>
                             <span className="text-emerald-700 font-mono">{ottPin.replace(/\D/g, '').length}/16 digits</span>
                           </div>
@@ -3834,53 +3853,30 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               setPaymentError(null);
                             }}
                             placeholder="1234 5678 9012 3456"
-                            className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center font-black tracking-wider focus:outline-none focus:border-[#f05e17]"
+                            className="w-full px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center font-bold tracking-wider focus:outline-none focus:border-[#f05e17]"
                           />
-                        </div>
-                      ) : (
-                        <div>
-                          <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
-                            {previewPayMethod === 'ecocash' ? 'EcoCash Number (+266) *' : 'Vodacom M-Pesa Number (+266) *'}
-                          </label>
-                          <div className="flex items-center rounded-full border border-slate-300 bg-white overflow-hidden focus-within:border-[#f05e17]">
-                            <span className="px-3 py-1.5 bg-slate-50 border-r border-slate-300 text-slate-900 text-xs font-extrabold">
-                              +266
-                            </span>
-                            <input
-                              type="tel"
-                              inputMode="numeric"
-                              maxLength={8}
-                              value={guestPhone}
-                              onChange={(e) => {
-                                setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 8));
-                                setPaymentError(null);
-                              }}
-                              placeholder={previewPayMethod === 'ecocash' ? '6xxxxxxx (8 digits)' : '5xxxxxxx (8 digits)'}
-                              className="flex-1 px-3 py-1.5 bg-transparent text-slate-900 font-mono text-xs font-bold focus:outline-none"
-                            />
-                          </div>
                         </div>
                       )}
 
                       {/* USSD PIN Prompt Box */}
                       {previewUssdSent && !previewIssuedOttPin && (
-                        <div className="p-2.5 rounded-2xl bg-orange-50 border-2 border-[#f05e17] text-left space-y-1.5">
-                          <div className="text-[11px] font-black text-orange-900">
+                        <div className="p-2 rounded-xl bg-orange-50 border border-[#f05e17] text-left space-y-1">
+                          <div className="text-[10.5px] font-black text-orange-900">
                             USSD PIN Prompt Sent to +266 {guestPhone || '58000000'}
                           </div>
-                          <p className="text-[10px] text-slate-700 font-semibold leading-snug">
-                            Check your phone and enter your <strong>{previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN</strong> to approve <strong>{currency}{chosenPlan.price} ({chosenPlan.name})</strong>.
+                          <p className="text-[9.5px] text-slate-700 font-semibold leading-snug">
+                            Enter your <strong>{previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN</strong> on your phone to approve <strong>{currency}{chosenPlan.price} ({chosenPlan.name})</strong>.
                           </p>
                         </div>
                       )}
 
                       {/* Issued 16-Digit OTT Voucher Box after USSD PIN approval */}
                       {previewIssuedOttPin && (
-                        <div className="p-2.5 rounded-2xl bg-emerald-50 border-2 border-emerald-500 text-center space-y-1.5">
-                          <div className="text-[10px] font-black text-emerald-800 uppercase">
+                        <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-400 text-center space-y-1.5">
+                          <div className="text-[9.5px] font-black text-emerald-800 uppercase">
                             Payment Approved &mdash; Copy Your 16-Digit OTT Voucher
                           </div>
-                          <div className="font-mono text-xs font-black text-slate-900 bg-white py-1.5 px-2 rounded-xl border border-emerald-300 tracking-widest">
+                          <div className="font-mono text-xs font-black text-slate-900 bg-white py-1 px-2 rounded-lg border border-emerald-300 tracking-widest">
                             {(previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' ')}
                           </div>
                           <div className="grid grid-cols-2 gap-1.5">
@@ -3890,9 +3886,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                 setPreviewCopiedOtt(true);
                                 setOttPin((previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' '));
                               }}
-                              className="py-1.5 px-2 rounded-full bg-[#f05e17] text-white font-extrabold text-[10px] cursor-pointer"
+                              className="py-1 px-2 rounded-lg bg-[#f05e17] text-white font-extrabold text-[10px] cursor-pointer"
                             >
-                              {previewCopiedOtt ? '✓ Copied PIN' : 'Copy OTT PIN'}
+                              {previewCopiedOtt ? '✓ Copied PIN' : '1. Copy PIN'}
                             </button>
                             <button
                               type="button"
@@ -3901,17 +3897,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                 setPreviewIssuedOttPin('');
                                 enterPostAuthAdOrUsage(false);
                               }}
-                              className="py-1.5 px-2 rounded-full bg-emerald-600 text-white font-extrabold text-[10px] cursor-pointer"
+                              className="py-1 px-2 rounded-lg bg-emerald-600 text-white font-extrabold text-[10px] cursor-pointer"
                             >
-                              Authenticate &amp; Connect &rarr;
+                              2. Connect &rarr;
                             </button>
                           </div>
                         </div>
                       )}
 
                       {paymentError && (
-                        <div className="p-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-[10px] font-bold text-center">
-                          {paymentError}
+                        <div className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold text-center">
+                          {sanitizeEmulatorError(paymentError, 'Verification failed.')}
                         </div>
                       )}
 
@@ -3962,7 +3958,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                   }
                                 }, 1500);
                               } else {
-                                setPaymentError(data?.message || 'Unable to initiate USSD PIN push.');
+                                setPaymentError(sanitizeEmulatorError(data?.message, 'Unable to initiate USSD PIN push.'));
                                 setPreviewUssdSent(false);
                               }
                             } catch {
@@ -3973,47 +3969,18 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           }}
                           disabled={isVerifyingPayment}
                           style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                          className="w-full py-2.5 text-white font-black text-xs rounded-full shadow-lg cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
+                          className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
                         >
                           {isVerifyingPayment
                             ? `Sending ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} USSD PIN Prompt...`
                             : previewPayMethod === 'ottvoucher'
                             ? 'Redeem OTT Voucher & Connect →'
-                            : `Proceed with ${chosenPlan.name} (${currency}${chosenPlan.price}) →`}
+                            : `Proceed with ${chosenPlan.name} →`}
                         </button>
                       )}
                     </div>
                   );
                 })()}
-
-                {/* STEP 3: CONNECTED — NATIVE CAPTIVE PORTAL AUTO-CLOSE (NO GOOGLE.COM REDIRECT) */}
-                {previewStep === 'usage' && (
-                  <div className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 border-emerald-500 shadow-2xl space-y-2.5 text-center text-slate-900">
-                    <div className="w-10 h-10 rounded-full bg-emerald-100 border-2 border-emerald-500 text-emerald-700 flex items-center justify-center mx-auto">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-black text-slate-900">
-                        You&apos;re Connected!
-                      </div>
-                      <p className="text-[10px] text-slate-600 font-semibold mt-0.5 leading-snug">
-                        Captive portal window auto-closes so the guest continues using their phone seamlessly (cross-hotspot package roaming active in background).
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewUssdSent(false);
-                        setPreviewIssuedOttPin('');
-                        setPreviewStep(isFreeModeActive ? 'identification' : 'voucher');
-                      }}
-                      style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                      className="w-full py-2 text-white font-black text-xs rounded-full shadow cursor-pointer"
-                    >
-                      Done &mdash; Reset Emulator Preview
-                    </button>
-                  </div>
-                )}
               </div>
               )}
 

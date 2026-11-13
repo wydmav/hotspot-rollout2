@@ -155,21 +155,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ configs: configsPayload })
       });
-      if (patch.allowFreeAccess !== undefined) {
-        const nextPolicyMode = patch.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY';
+      if (patch.allowFreeAccess !== undefined || patch.freeAccessDurationMinutes !== undefined) {
+        const nextAllowFree = patch.allowFreeAccess ?? portalConfig.allowFreeAccess;
+        const nextDurationMins = Math.max(60, Number(patch.freeAccessDurationMinutes ?? portalConfig.freeAccessDurationMinutes) || 1440);
+        const nextPolicyMode = nextAllowFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
         await fetch('/api/devices/fleet/access-policy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             vertical: selectedVertical === 'all' ? undefined : selectedVertical,
             accessMode: nextPolicyMode,
-            freeDurationMinutes: 0,
+            freeDurationMinutes: nextDurationMins,
             freeRateLimit: '25M/10M'
           })
         });
         storage.setRouterAccessPolicy('all', {
           accessMode: nextPolicyMode,
-          freeDurationMinutes: 0,
+          freeDurationMinutes: nextDurationMins,
           freeRateLimit: '25M/10M'
         });
       }
@@ -390,7 +392,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       : 'bg-slate-800 text-slate-400 border border-slate-700'
                   }`}
                 >
-                  {portalConfig.allowFreeAccess ? 'ACTIVE — 1-TAP FREE LOGIN ON' : 'OFF — PAID / VOUCHER MODE ONLY'}
+                  {portalConfig.allowFreeAccess ? 'ACTIVE — 1-TAP FREE LOGIN ON' : 'OFF — PAID MODE ACTIVE'}
                 </span>
                 {freeModeSyncToast && (
                   <span className="text-[11px] font-mono text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded">
@@ -400,8 +402,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <p className="text-xs text-slate-300 mt-1">
                 {portalConfig.allowFreeAccess
-                  ? `Showing ONLY the clean orange "${portalConfig.freeButtonText || 'Login for free'}" button over your hotspot wallpaper (positioned at X: ${portalConfig.freeButtonX ?? 50}%, Y: ${portalConfig.freeButtonY ?? 88}%).`
-                  : 'Free Wi-Fi is currently disabled. Guests must enter a 16-digit OTT Voucher PIN or purchase a pass.'}
+                  ? `Showing ONLY the clean "${portalConfig.freeButtonText || 'Login for free'}" button over your hotspot wallpaper. Each guest receives ${
+                      (portalConfig.freeAccessDurationMinutes || 1440) === 720
+                        ? '12 Hours'
+                        : (portalConfig.freeAccessDurationMinutes || 1440) === 1440
+                        ? '24 Hours'
+                        : `${Math.round((portalConfig.freeAccessDurationMinutes || 1440) / 1440)} Days`
+                    } of Free Wi-Fi.`
+                  : 'Free Wi-Fi is currently OFF. Guests see the compact 2-step Paid Mode card (M-Pesa, EcoCash & 16-Digit OTT Voucher).'}
               </p>
             </div>
           </div>
@@ -415,7 +423,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   { allowFreeAccess: nextState },
                   nextState
                     ? 'Free Access ("Login for free") enabled across portal & routers'
-                    : 'Free Access disabled — reverted to Paid/Voucher mode'
+                    : 'Free Access disabled — reverted to Paid Mode'
                 );
               }}
               className={`px-4 py-2.5 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 shadow-md ${
@@ -441,9 +449,63 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Repositioning Sliders, Button Color & Presets (Visible right on Dashboard when Free Access Mode is ON) */}
+        {/* Repositioning Sliders, Session Duration (12h/24h/X Days), Button Color & Presets */}
         {portalConfig.allowFreeAccess && (
           <div className="mt-4 pt-3.5 border-t border-white/10 space-y-3">
+            {/* Free Mode Per-Guest Session Duration Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-white/10">
+              <span className="text-[11px] font-mono font-bold text-emerald-400">
+                Free Mode Session Duration (12h, 24h, or Custom Days):
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { label: '12 Hours', mins: 720 },
+                  { label: '24 Hours (1 Day)', mins: 1440 },
+                  { label: '3 Days', mins: 4320 },
+                  { label: '7 Days', mins: 10080 }
+                ].map((opt) => {
+                  const activeMins = Number(portalConfig.freeAccessDurationMinutes) || 1440;
+                  const isPicked = activeMins === opt.mins;
+                  return (
+                    <button
+                      key={opt.mins}
+                      type="button"
+                      onClick={() =>
+                        applyDashboardFreeAccessPatch(
+                          { freeAccessDurationMinutes: opt.mins },
+                          `Free Mode session limit set to ${opt.label} per guest`
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-extrabold border cursor-pointer transition-all ${
+                        isPicked
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
+                          : 'bg-[#161d31] text-slate-300 border-[#232d42] hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+                <div className="flex items-center gap-1 bg-[#161d31] px-2 py-0.5 rounded-lg border border-[#232d42]">
+                  <span className="text-[10px] font-mono text-slate-400">Days:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={Math.max(1, Math.round((Number(portalConfig.freeAccessDurationMinutes) || 1440) / 1440))}
+                    onChange={(e) => {
+                      const d = Math.max(1, Math.min(365, Number(e.target.value) || 1));
+                      applyDashboardFreeAccessPatch(
+                        { freeAccessDurationMinutes: d * 1440 },
+                        `Free Mode session limit set to ${d} ${d === 1 ? 'Day' : 'Days'} per guest`
+                      );
+                    }}
+                    className="w-12 px-1 py-0.5 bg-[#0b0f19] border border-[#232d42] rounded text-emerald-400 font-mono font-bold text-[10px] text-center focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-mono text-slate-400 mr-1">Quick Position:</span>

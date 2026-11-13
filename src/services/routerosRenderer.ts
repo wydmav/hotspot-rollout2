@@ -229,6 +229,15 @@ export class RouterOSRenderer {
    * 2. Toggle Speed Caps & Bursts ON (enforcing Simple Queues & Hotspot rate-limits) or OFF (uncapped 0/0 everywhere)
    * 3. Deploy the instant On-Router Splash Page (Free Mode goes straight to internet without carousel; Paid Mode shows carousel)
    */
+  static formatRouterOsDuration(minutes?: number): string {
+    const mins = Math.max(60, Number(minutes) || 1440);
+    if (mins % 1440 === 0) {
+      return `${Math.round(mins / 1440)}d`;
+    }
+    const hrs = Math.max(1, Math.round(mins / 60));
+    return `${hrs}h`;
+  }
+
   static buildSplashPageFileCommands(
     portalBaseUrl: string,
     allowFreeAccess: boolean = true,
@@ -238,7 +247,8 @@ export class RouterOSRenderer {
     dhcpRange: string = RouterOSRenderer.FULL_SUBNET_DHCP_RANGE,
     freeButtonColor: string = '#f05e17',
     freeButtonTextColor: string = '#ffffff',
-    sponsorAdsEnabled: boolean = false
+    sponsorAdsEnabled: boolean = true,
+    freeAccessDurationMinutes: number = 1440
   ): string {
     const rawBase = portalBaseUrl.replace(/\/+$/, '');
     const cleanBaseUrl = (rawBase.includes('localhost') || rawBase.includes('127.0.0.1') || rawBase.includes('.run.app'))
@@ -251,19 +261,19 @@ export class RouterOSRenderer {
     const safeRateLimit = speedCapsEnabled
       ? RouterOSRenderer.escapeRouterOSString(rateParts.fullRateLimit)
       : '';
+    const rosFreeTimeout = RouterOSRenderer.formatRouterOsDuration(freeAccessDurationMinutes);
     const postAuthAdUrl = `${cleanBaseUrl}/api/portal/video-ad.html\\?scope=${safeScope}&reason=post_auth`;
-    const cnaCloseUrl = `${cleanBaseUrl}/api/portal/cna-close\\?scope=${safeScope}`;
-    const targetPostLoginUrl = sponsorAdsEnabled ? postAuthAdUrl : cnaCloseUrl;
+    const targetPostLoginUrl = postAuthAdUrl;
     const bgUrl = `${cleanBaseUrl}/api/portal/media-proxy\\?scope=${safeScope}`;
     const safeBtnBg = freeButtonColor || '#f05e17';
     const safeBtnFg = freeButtonTextColor || '#ffffff';
 
     const directFreeLoginHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'><title>T-Connect Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#071324 url('${bgUrl}') center/cover no-repeat;color:#fff;position:relative}.wrap{position:fixed;z-index:25;left:50%;top:88%;transform:translate(-50%,-50%);width:86%;max-width:360px}.btn{width:100%;padding:14px 20px;border-radius:10px;border:none;background:${safeBtnBg};color:${safeBtnFg};font-size:19px;font-weight:700;letter-spacing:0.3px;cursor:pointer;box-shadow:0 10px 28px rgba(0,0,0,0.45);text-align:center}</style><script>function tcFree(){try{fetch('${cleanBaseUrl}/api/portal/guest-connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'free',mac:'\$(mac)',ip:'\$(ip)',scope:'${safeScope}'})}).catch(function(){})}catch(e){}}</script></head><body><div class='wrap'><form action='\$(link-login-only)' method='post' onsubmit='tcFree()'><input type='hidden' name='username' value='T-TRIAL'><input type='hidden' name='password' value='123'><input type='hidden' name='dst' value='${targetPostLoginUrl}'><button type='submit' class='btn'>Login for free</button></form></div></body></html>`;
 
-    const directPaidVoucherHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'><title>T-Connect Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#071324 url('${bgUrl}') center/cover no-repeat;color:#0f172a;display:flex;flex-direction:column;justify-content:space-between}.hero{text-align:center;padding:18px 12px;color:#fff}.hero h1{font-size:18px;font-weight:900;text-shadow:0 2px 10px #000}.card{width:100%;max-width:420px;margin:auto auto 0;background:rgba(255,255,255,0.96);border-radius:26px 26px 0 0;padding:18px 16px 20px;box-shadow:0 -12px 40px rgba(0,0,0,0.45)}.h2{font-size:18px;font-weight:900;color:#0f172a;margin-bottom:10px}.lbl{display:block;font-size:11px;font-weight:700;color:#334155;margin-bottom:4px}.inp{width:100%;padding:10px 14px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-size:13px;margin-bottom:9px;outline:none}.btn{width:100%;padding:12px 16px;border-radius:999px;border:none;background:#f05e17;color:#fff;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(240,94,23,0.35)}</style></head><body><div class='hero'><h1>T-CONNECT HOTSPOT</h1></div><div class='card'><div class='h2'>Enter your details</div><form action='\$(link-login-only)' method='post'><input type='hidden' name='username' value='test'><input type='hidden' name='password' value='123'><input type='hidden' name='dst' value='${targetPostLoginUrl}'><label class='lbl'>16-Digit OTT Voucher PIN or +266 Mobile</label><input class='inp' type='text' inputmode='numeric' maxlength='19' id='vc' placeholder='1234 5678 9012 3456' required><button type='submit' class='btn'>Continue &rarr;</button></form></div></body></html>`;
+    const directPaidVoucherHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'><title>T-Connect Hotspot</title><style>*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}body{min-height:100vh;background:#071324 url('${bgUrl}') center/cover no-repeat;color:#0f172a;display:flex;flex-direction:column;justify-content:flex-end}.card{width:100%;max-width:420px;margin:auto auto 0;background:rgba(255,255,255,0.96);border-radius:24px 24px 0 0;padding:14px 16px 18px;box-shadow:0 -12px 40px rgba(0,0,0,0.45)}.h2{font-size:16px;font-weight:900;color:#0f172a;margin-bottom:8px}.lbl{display:block;font-size:11px;font-weight:700;color:#334155;margin-bottom:3px}.inp{width:100%;padding:9px 13px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-size:12px;margin-bottom:8px;outline:none}.btn{width:100%;padding:11px 16px;border-radius:999px;border:none;background:#f05e17;color:#fff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(240,94,23,0.35)}</style></head><body><div class='card'><div class='h2'>Enter your details</div><form action='\$(link-login-only)' method='post'><input type='hidden' name='username' value='test'><input type='hidden' name='password' value='123'><input type='hidden' name='dst' value='${targetPostLoginUrl}'><label class='lbl'>16-Digit OTT Voucher PIN or +266 Mobile</label><input class='inp' type='text' inputmode='numeric' maxlength='19' id='vc' placeholder='1234 5678 9012 3456' required><button type='submit' class='btn'>Continue &rarr;</button></form></div></body></html>`;
 
     const directSplashHtml = allowFreeAccess ? directFreeLoginHtml : directPaidVoucherHtml;
-    const directAloginHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='0; url=${targetPostLoginUrl}'><title>Connected - T-Connect Hotspot</title><script>window.location.replace('${targetPostLoginUrl}');</script></head><body style='background:#f8fafc;color:#0f172a;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center'><div><h2>Connected to T-Connect Hotspot</h2><p style='margin-top:8px;font-size:13px;color:#475569'>You can now close this window and continue using your device.</p></div></body></html>`;
+    const directAloginHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='0; url=${targetPostLoginUrl}'><title>T-Connect Hotspot</title><script>window.location.replace('${targetPostLoginUrl}');</script></head><body style='background:#050811;margin:0'></body></html>`;
 
     const speedQueueCommands = speedCapsEnabled
       ? [
@@ -299,13 +309,13 @@ export class RouterOSRenderer {
       `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap use-radius=no } on-error={}`,
       `:do { :if ([:len [/ip hotspot find interface="bridgeLocal"]] = 0) do={ /ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } else={ /ip hotspot set [find interface="bridgeLocal"] profile="tc-hotspot-profile" address-pool="tc-hotspot-pool" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } } on-error={}`,
       `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-free-trial"]] = 0) do={ /ip hotspot user profile add name="tc-free-trial" rate-limit="${safeRateLimit}" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-free-trial"] rate-limit="${safeRateLimit}" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } } on-error={}`,
       `:do { /ip hotspot user profile set [find default=yes] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
-      `:do { /ip hotspot user profile set [find] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
       speedQueueCommands,
       `# 5. Provision Hotspot Auth Users In-Place (Never drops connected sessions!)`,
       `:do { :if ([:len [/ip hotspot user find name="test"]] = 0) do={ /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } else={ /ip hotspot user set [find name="test"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`,
       allowFreeAccess
-        ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Opt-In Auth User" } else={ /ip hotspot user set [find name="T-TRIAL"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`
+        ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" profile="tc-free-trial" comment="T-Connect Free Opt-In Auth User (${rosFreeTimeout})" } else={ /ip hotspot user set [find name="T-TRIAL"] password="123" profile="tc-free-trial" disabled=no } } on-error={}`
         : `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}; :do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
       `# 6. Ensure OTT Lesotho, PayLesotho & Controller Walled Garden entries exist (and remove OS probe bypasses)`,
       `:do { /ip hotspot walled-garden remove [find dst-host~"apple" or dst-host~"gstatic" or dst-host~"google" or dst-host~"msft" or dst-host~"firefox" or dst-host~"connectivitycheck"] } on-error={}`,

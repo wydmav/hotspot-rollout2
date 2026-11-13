@@ -99,6 +99,33 @@ export const EcoCashLogo: React.FC<{ className?: string; variant?: 'card' | 'tra
   </svg>
 );
 
+/**
+ * Official-style M-Pesa Logo matching the green phone outline + red SIM wave/card emblem
+ * from the T-Connect Hotspot reference design.
+ */
+export const MPesaLogo: React.FC<{ className?: string; variant?: 'card' | 'transparent' }> = ({
+  className = 'w-8 h-7',
+  variant = 'transparent'
+}) => (
+  <svg viewBox="0 0 64 56" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    {variant === 'card' && (
+      <rect width="64" height="56" rx="10" fill="#FFFFFF" stroke="#E2E8F0" strokeWidth="1.2" />
+    )}
+    {/* Green Smartphone Body */}
+    <rect x="18" y="6" width="24" height="44" rx="5" fill="#FFFFFF" stroke="#28B446" strokeWidth="3.5" />
+    {/* Top Speaker & Bottom Home Dot */}
+    <line x1="27" y1="11" x2="33" y2="11" stroke="#28B446" strokeWidth="2.2" strokeLinecap="round" />
+    <circle cx="30" cy="44.5" r="1.8" fill="#28B446" />
+    {/* Inner Green Screen Accent */}
+    <rect x="21.5" y="15" width="17" height="25" rx="1.5" fill="#E8F8EC" />
+    {/* Red M-Pesa Curved SIM / Wave Emblem */}
+    <path
+      d="M14 25 C22 19, 36 19, 48 26 L44 33 C34 27, 23 27, 14 31 Z"
+      fill="#E60000"
+    />
+  </svg>
+);
+
 export const PAYLESOTHO_LOGO_SRC = '/assets/aistudio/images_e91c64e4.jpeg';
 
 export const PayLesothoLogo: React.FC<{ className?: string; variant?: 'card' | 'transparent' }> = ({ 
@@ -129,17 +156,19 @@ export const MikroTikLogo: React.FC<{ className?: string }> = ({ className = 'w-
   </svg>
 );
 
-export const ProviderLogo: React.FC<{ provider: GatewayProvider; className?: string; variant?: 'card' | 'transparent' }> = ({ 
+export const ProviderLogo: React.FC<{ provider: GatewayProvider | 'mpesa'; className?: string; variant?: 'card' | 'transparent' }> = ({ 
   provider, 
   className,
   variant = 'card'
 }) => {
   switch (provider) {
-    case 'paylesotho':
+    case 'mpesa':
+      return <MPesaLogo className={className} variant={variant} />;
     case 'ecocash':
-      return <PayLesothoLogo className={className} variant={variant} />;
+      return <EcoCashLogo className={className} variant={variant} />;
     case 'ottvoucher':
       return <OttVoucherLogo className={className} variant={variant} />;
+    case 'paylesotho':
     default:
       return <PayLesothoLogo className={className} variant={variant} />;
   }
