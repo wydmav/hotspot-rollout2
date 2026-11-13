@@ -1090,7 +1090,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
         return (
           <div
-            className="fixed inset-0 z-50 w-screen h-screen bg-black flex flex-col justify-between overflow-hidden select-none"
+            className="fixed inset-0 z-50 w-screen h-[100dvh] max-h-[100dvh] bg-[#050811] flex flex-col justify-between overflow-hidden select-none"
             onTouchStart={(e) => {
               touchDraggedRef.current = false;
               if (e.touches && e.touches[0]) {
@@ -1111,8 +1111,30 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               }
             }}
           >
-            {/* Full Artwork Viewport (Unobstructed picture from Ad Slides) */}
-            <div className="relative flex-1 w-screen h-[calc(100vh-38px)] bg-black flex items-center justify-center overflow-hidden">
+            {/* iOS-Safe Top Header Bar with Instant "Proceed to internet →" Pill Button */}
+            <div
+              style={{ paddingTop: 'max(10px, env(safe-area-inset-top, 10px))' }}
+              className="w-full bg-[#050811]/95 border-b border-white/15 px-3.5 pb-2.5 flex items-center justify-between gap-2 shrink-0 z-50"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                <span className="text-xs font-bold text-slate-100 truncate">
+                  {currentSlide?.caption || activeVideoAd?.sponsorName || 'Wi-Fi Connected'}
+                </span>
+              </div>
+              <a
+                href={sanitizeDestinationUrl(userOrigUrl)}
+                onClick={(e) => handleProceedToInternetClick(e, currentSlide?.redirectUrl)}
+                style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                className="min-h-[38px] px-3.5 py-2 rounded-full bg-[#f05e17] hover:bg-[#d94e0f] active:scale-95 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shrink-0 cursor-pointer shadow-lg border border-white/20 no-underline"
+              >
+                <span>Proceed to internet</span>
+                <span>&rarr;</span>
+              </a>
+            </div>
+
+            {/* Fitted Center Artwork Viewport (100% of picture fits cleanly inside screen without cropping) */}
+            <div className="relative flex-1 min-h-0 w-full bg-[#050811] flex items-center justify-center p-2 overflow-hidden">
               {activeVideoAd && activeVideoAd.mediaType === 'video' && activeVideoAd.videoUrl ? (
                 <>
                   <video
@@ -1121,7 +1143,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     playsInline
                     autoPlay
                     muted={isVideoMuted}
-                    className="w-full h-full object-contain block bg-black"
+                    className="max-w-full max-h-full w-auto h-auto object-contain block rounded-lg bg-black"
                   />
                   <button
                     type="button"
@@ -1154,7 +1176,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     );
                   }}
                   alt={currentSlide?.caption || 'Sponsor Ad'}
-                  className="w-full h-full object-contain block bg-black"
+                  className="max-w-full max-h-full w-auto h-auto object-contain block rounded-lg bg-[#050811] m-auto"
                   draggable={false}
                 />
               )}
@@ -1169,7 +1191,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       setCarouselSlideIdx((prev) => (prev - 1 + slides.length) % slides.length);
                     }}
                     aria-label="Previous picture"
-                    className="absolute left-2 top-1/2 -translate-y-1/2 z-40 w-8 h-8 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-40 w-9 h-9 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 text-white flex items-center justify-center cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -1180,7 +1202,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       setCarouselSlideIdx((prev) => (prev + 1) % slides.length);
                     }}
                     aria-label="Next picture"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 z-40 w-8 h-8 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white flex items-center justify-center cursor-pointer"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-40 w-9 h-9 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 text-white flex items-center justify-center cursor-pointer"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -1188,18 +1210,16 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
               )}
             </div>
 
-            {/* Ultra-Compact 38px Bottom Bar with Small Static "Proceed to internet →" Link */}
-            <div className="h-[38px] w-screen bg-black/95 border-t border-white/15 px-3.5 flex items-center justify-between shrink-0 z-50">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                <span className="text-[10px] text-slate-400 truncate">
-                  {currentSlide?.caption || activeVideoAd?.sponsorName || 'Wi-Fi Authenticated'}
-                </span>
-              </div>
+            {/* Raised iOS-Safe Bottom Bar with Large 46px Touch Target "Proceed to internet →" Button */}
+            <div
+              style={{ paddingBottom: 'max(20px, calc(env(safe-area-inset-bottom, 14px) + 10px))' }}
+              className="w-full bg-[#050811]/95 border-t border-white/15 px-4 pt-2.5 flex items-center justify-center shrink-0 z-50"
+            >
               <a
                 href={sanitizeDestinationUrl(userOrigUrl)}
                 onClick={(e) => handleProceedToInternetClick(e, currentSlide?.redirectUrl)}
-                className="text-[11px] font-semibold text-white/95 hover:text-white underline underline-offset-2 flex items-center gap-1 shrink-0 cursor-pointer"
+                style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                className="w-full max-w-[360px] min-h-[46px] px-5 py-2.5 rounded-xl bg-[#f05e17] hover:bg-[#d94e0f] active:scale-[0.98] text-white text-sm font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg border border-white/20 no-underline"
               >
                 <span>Proceed to internet</span>
                 <span>&rarr;</span>

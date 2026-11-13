@@ -1981,7 +1981,11 @@ class StorageService {
             lastHeartbeatTimestamp: match.lastHeartbeatTimestamp || r.lastHeartbeatTimestamp,
             missedHeartbeats: match.missedHeartbeats,
             offlineSince: match.offlineSince,
-            offlineReason: match.offlineReason
+            offlineReason: match.offlineReason,
+            activeSessions: effectiveStatus === 'offline' ? 0 : r.activeSessions,
+            cpuLoad: effectiveStatus === 'offline' ? 0 : r.cpuLoad,
+            memoryUsage: effectiveStatus === 'offline' ? 0 : r.memoryUsage,
+            uptime: effectiveStatus === 'offline' ? '0m' : r.uptime
           };
         }
       }
@@ -1989,7 +1993,12 @@ class StorageService {
     });
 
     if (changed) {
-      this.saveState();
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        } catch {}
+      }
+      this.notify();
     }
   }
 

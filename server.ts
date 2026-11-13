@@ -5,8 +5,24 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { RouterOSRenderer } from './src/services/routerosRenderer.js';
-import { WALLED_GARDEN_DOMAINS } from './src/services/storage.js';
 import { emailService } from './src/services/emailService.js';
+
+const WALLED_GARDEN_DOMAINS = [
+  'api.paylesotho.co.ls',
+  'xpayments.paylesotho.co.ls',
+  'paylesotho.co.ls',
+  'api.ottlesotho.com',
+  'test-api.ottlesotho.com',
+  'portal.ottlesotho.com',
+  'ottlesotho.com',
+  'api.ottvoucher.com',
+  'ottvoucher.com',
+  'callpay.com',
+  'vouchers.ott-mobile.com',
+  'api.ecocash.co.ls',
+  'ecocash.co.ls',
+  'econet.co.ls'
+];
 
 dotenv.config();
 process.env.DISABLE_HMR = 'true';
@@ -1669,36 +1685,45 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
 // Native Captive Portal Auto-Close endpoint (Closes the OS Captive Portal sheet so the user keeps using their device)
 app.get('/api/portal/cna-close', (req: Request, res: Response) => {
   const dest = String(req.query.dest || '').trim();
-  const safeDest = /^https?:\/\//i.test(dest) ? dest : '';
+  const safeDest = /^https?:\/\//i.test(dest) ? dest : 'http://captive.apple.com/hotspot-detect.html';
   const closeHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>T-Connect Wi-Fi Active</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>Success</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
-  body{min-height:100vh;background:#050811;color:#fff;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
-  .btn{display:inline-block;padding:8px 18px;border-radius:999px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.12);color:#fff;font-weight:700;font-size:12px;cursor:pointer;text-decoration:none}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100vh;height:100dvh;background:#050811;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;overflow:hidden}
+  .card{max-width:340px;width:100%;background:#0f172a;border:1px solid rgba(255,255,255,0.14);border-radius:20px;padding:24px 20px;box-shadow:0 20px 50px rgba(0,0,0,0.6)}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:12px;font-weight:700;margin-bottom:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#10b981}
+  h1{font-size:18px;font-weight:800;margin-bottom:6px;color:#fff}
+  p{font-size:13px;color:#94a3b8;line-height:1.45;margin-bottom:18px}
+  .btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 20px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-weight:800;font-size:15px;cursor:pointer;text-decoration:none;touch-action:manipulation;box-shadow:0 8px 20px rgba(240,94,23,0.35)}
+  .btn:active{transform:scale(0.98);background:#d94e0f}
 </style>
 <script>
   function dismissCaptiveSheet() {
     var d = '${safeDest.replace(/'/g, "\\'")}';
-    if (d) {
-      window.location.replace(d);
-      return;
-    }
     try { window.close(); } catch (e) {}
     try { window.open('', '_self', ''); window.close(); } catch (e) {}
-    try { if (window.history && window.history.length > 1) window.history.back(); } catch (e) {}
+    if (d) {
+      window.location.href = d;
+    }
   }
   window.addEventListener('load', function() {
-    setTimeout(dismissCaptiveSheet, 80);
+    setTimeout(dismissCaptiveSheet, 120);
   });
 </script>
 </head>
 <body>
-  <button type="button" class="btn" onclick="dismissCaptiveSheet()">Proceed to Internet &rarr;</button>
+  <div class="card">
+    <div class="badge"><span class="dot"></span> Wi-Fi Connected</div>
+    <h1>You are now online</h1>
+    <p>Tap below or tap <strong>Done</strong> in the top corner to start browsing.</p>
+    <a href="${safeDest}" class="btn" onclick="dismissCaptiveSheet()">Proceed to internet &rarr;</a>
+  </div>
 </body>
 </html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1707,7 +1732,7 @@ app.get('/api/portal/cna-close', (req: Request, res: Response) => {
 
 function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _reason = 'post_auth'): string {
   const baseUrl = resolveControllerBaseUrl(host, protocol);
-  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
+  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}&dest=${encodeURIComponent('https://www.google.com')}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
   const proceedActionMode = sponsorCfg.proceedActionMode || 'close_portal';
   const randomizeSlides = sponsorCfg.randomizeSlides !== false;
@@ -1793,28 +1818,49 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>${chosenAd?.sponsorName || 'T-Connect Hotspot'}</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;user-select:none}
-  html,body{width:100vw;height:100vh;overflow:hidden;background:#050811;color:#fff}
-  .ad-stage{position:fixed;inset:0;bottom:38px;width:100vw;height:calc(100vh - 38px);background:#050811;overflow:hidden;display:flex;align-items:center;justify-content:center}
-  .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.3s ease-out}
-  .slide-frame{width:100vw;height:100%;flex-shrink:0;position:relative;background:#050811;display:flex;align-items:center;justify-content:center}
-  .slide-img{width:100%;height:100%;object-fit:contain;display:block;background:#050811}
-  .bottom-proceed-bar{position:fixed;left:0;right:0;bottom:0;height:38px;z-index:60;background:#050811;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;padding:0 14px}
-  .proceed-static-link{border:none;background:transparent;color:#f8fafc;font-size:11px;font-weight:700;letter-spacing:0.2px;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:4px 10px}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100vh;height:100dvh;overflow:hidden;background:#050811;color:#fff}
+  .viewport-shell{display:flex;flex-direction:column;justify-content:space-between;width:100%;height:100vh;height:100dvh;overflow:hidden;background:#050811}
+  .top-safe-bar{flex-shrink:0;z-index:80;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(10px,env(safe-area-inset-top,10px)) 14px 10px 14px;background:rgba(5,8,17,0.94);border-bottom:1px solid rgba(255,255,255,0.12)}
+  .status-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0}
+  .top-proceed-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:38px;padding:8px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.25);background:#f05e17;color:#ffffff;font-size:12px;font-weight:800;text-decoration:none;cursor:pointer;touch-action:manipulation;flex-shrink:0;box-shadow:0 4px 14px rgba(240,94,23,0.4)}
+  .top-proceed-btn:active{transform:scale(0.97);background:#d94e0f}
+  .ad-stage{position:relative;flex:1;min-height:0;width:100%;background:#050811;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:8px}
+  .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.28s ease-out}
+  .slide-frame{width:100%;height:100%;flex-shrink:0;position:relative;background:#050811;display:flex;align-items:center;justify-content:center;padding:4px}
+  .slide-img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;border-radius:10px;background:#050811;margin:auto}
+  .bottom-proceed-bar{flex-shrink:0;z-index:80;background:rgba(5,8,17,0.96);border-top:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;padding:10px 16px max(20px,calc(env(safe-area-inset-bottom,14px) + 10px)) 16px}
+  .proceed-bottom-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;max-width:360px;min-height:46px;padding:11px 20px;border-radius:14px;border:1px solid rgba(255,255,255,0.22);background:#f05e17;color:#ffffff;font-size:14px;font-weight:800;letter-spacing:0.2px;text-decoration:none;cursor:pointer;touch-action:manipulation;box-shadow:0 8px 24px rgba(240,94,23,0.35)}
+  .proceed-bottom-btn:active{transform:scale(0.98);background:#d94e0f}
 </style>
 </head>
 <body>
-<div class="ad-stage" id="adStage" onclick="handleAdImageClick(event)">
-  <div class="carousel-track" id="carouselTrack" style="transform:translateX(-${initialIdx * 100}%)">${slidesTrackHtml}</div>
-</div>
+<div class="viewport-shell">
+  <div class="top-safe-bar">
+    <div class="status-pill">
+      <span class="status-dot"></span>
+      <span>Wi-Fi Connected</span>
+    </div>
+    <a href="${cnaCloseUrl}" id="topProceedInternetBtn" class="top-proceed-btn" onclick="return handleProceedToInternet(event)">
+      <span>Proceed to internet</span>
+      <span>&rarr;</span>
+    </a>
+  </div>
 
-<div class="bottom-proceed-bar">
-  <button type="button" id="proceedInternetBtn" class="proceed-static-link" onclick="handleProceedToInternet(event)">
-    Proceed to internet &rarr;
-  </button>
+  <div class="ad-stage" id="adStage" onclick="handleAdImageClick(event)">
+    <div class="carousel-track" id="carouselTrack" style="transform:translateX(-${initialIdx * 100}%)">${slidesTrackHtml}</div>
+  </div>
+
+  <div class="bottom-proceed-bar">
+    <a href="${cnaCloseUrl}" id="proceedInternetBtn" class="proceed-bottom-btn" onclick="return handleProceedToInternet(event)">
+      <span>Proceed to internet</span>
+      <span>&rarr;</span>
+    </a>
+  </div>
 </div>
 
 <script>
@@ -1887,14 +1933,15 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
     var campaignUrl = getActiveCampaignUrl();
     if (proceedMode === 'open_campaign_url' && campaignUrl && /^https?:\\/\\//i.test(campaignUrl)) {
       window.location.href = campaignUrl;
-      return;
+      return false;
     }
     try { window.close(); } catch (err) {}
     try { window.open('', '_self', ''); window.close(); } catch (err) {}
     if (window.top && window.top !== window.self) {
-      try { window.top.location.replace(cnaCloseUrl); return; } catch (err) {}
+      try { window.top.location.href = cnaCloseUrl; return false; } catch (err) {}
     }
-    window.location.replace(cnaCloseUrl);
+    window.location.href = cnaCloseUrl;
+    return false;
   }
 </script>
 </body>
@@ -5923,7 +5970,19 @@ interface MonitoredRouter {
   policyLastSyncedAt?: string;
 }
 
-const REAL_HEARTBEAT_TIMEOUT_MS = 60_000; // Confirmed Phase 0 Decision: 60s real heartbeat timeout (3-4 missed 15s beats)
+const REAL_HEARTBEAT_TIMEOUT_MS = 30_000; // 30s real heartbeat timeout (2 missed 15s heartbeats)
+
+function formatOfflineElapsedLabel(elapsedSec: number): string {
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return 'Offline';
+  if (elapsedSec < 60) return `Offline (${elapsedSec}s ago)`;
+  const mins = Math.floor(elapsedSec / 60);
+  const secs = elapsedSec % 60;
+  if (mins < 60) return `Offline (${mins}m ${secs}s ago)`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `Offline (${hrs}h ${remMins}m ago)`;
+}
+
 const monitoredRouters = new Map<string, MonitoredRouter>();
 const routerWireGuardIpAllocations = new Map<string, string>();
 let nextWireGuardOctetOffset = 10; // Starts at 10.99.1.10
@@ -6130,17 +6189,22 @@ function persistMonitoredRoutersToStore() {
 }
 
 // Hydrate persisted routers from disk on server startup.
-// Routers that have been adopted stay online so both live MikroTik and in-app adoption remain persistently online.
+// Routers must send real 15s heartbeats within REAL_HEARTBEAT_TIMEOUT_MS (30s) to remain online.
 if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   const bootNow = Date.now();
   serverStore.routers.forEach((r: any) => {
     if (!r || !r.id || isPhantomTestRouter(r.id, r.name)) return;
-    const realHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
-    const hasBeenAdoptedBefore = Boolean(r.adoptedAt || r.keepAliveAdopted || r.status === 'online' || realHb > 0);
-    const isCurrentlyOnline = r.status !== 'offline' && hasBeenAdoptedBefore;
+    const savedRealHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
+    const hasBeenAdoptedBefore = Boolean(r.adoptedAt || r.keepAliveAdopted || r.status === 'online' || r.status === 'offline' || savedRealHb > 0);
+    // Give previously-online routers a fresh 30s boot grace window to deliver their next 15s heartbeat;
+    // if unplugged, they will automatically flip to offline 30s after server startup.
+    const effectiveRealHb = r.status === 'online'
+      ? (savedRealHb > 0 && bootNow - savedRealHb <= REAL_HEARTBEAT_TIMEOUT_MS ? savedRealHb : bootNow)
+      : savedRealHb;
+    const isCurrentlyOnline = r.status === 'online' && effectiveRealHb > 0 && (bootNow - effectiveRealHb <= REAL_HEARTBEAT_TIMEOUT_MS);
     const initialStatus: 'online' | 'offline' | 'pending_adoption' = isCurrentlyOnline
       ? 'online'
-      : r.status === 'offline'
+      : hasBeenAdoptedBefore
         ? 'offline'
         : 'pending_adoption';
     const assignedWgIp = allocateRouterWireGuardIp(r.id, r.wireguardIp);
@@ -6158,7 +6222,7 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       status: initialStatus,
       keepAliveAdopted: isCurrentlyOnline,
       adoptedAt: hasBeenAdoptedBefore ? (r.adoptedAt || new Date(bootNow).toISOString().replace('T', ' ').slice(0, 19)) : undefined,
-      lastRealHeartbeatAt: isCurrentlyOnline ? (realHb || bootNow) : (realHb || undefined),
+      lastRealHeartbeatAt: effectiveRealHb || undefined,
       publicWanIp: r.publicWanIp || '127.0.0.1',
       wireguardIp: assignedWgIp,
       lastHeartbeat: isCurrentlyOnline
@@ -6166,15 +6230,15 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
         : initialStatus === 'offline'
           ? 'Offline'
           : 'Never',
-      lastHeartbeatTimestamp: isCurrentlyOnline ? bootNow : (realHb || r.lastHeartbeatTimestamp || 0),
+      lastHeartbeatTimestamp: isCurrentlyOnline ? bootNow : (effectiveRealHb || r.lastHeartbeatTimestamp || 0),
       uptime: isCurrentlyOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
       cpuLoad: isCurrentlyOnline ? (r.cpuLoad || 3) : 0,
       memoryUsage: isCurrentlyOnline ? (r.memoryUsage || 20) : 0,
       activeSessions: isCurrentlyOnline ? (r.activeSessions || 0) : 0,
-      missedBeats: isCurrentlyOnline ? 0 : (initialStatus === 'offline' ? 4 : 0),
+      missedBeats: isCurrentlyOnline ? 0 : (initialStatus === 'offline' ? 2 : 0),
       offlineSince: initialStatus === 'offline' ? (r.offlineSince || new Date(bootNow).toISOString()) : undefined,
       offlineReason: initialStatus === 'offline'
-        ? (r.offlineReason || 'Deadman Watchdog: Router marked offline')
+        ? (r.offlineReason || 'Deadman Watchdog: Router unplugged / missed 2 heartbeats (30s timeout)')
         : undefined,
       webfigPort: r.webfigPort || 80,
       winboxPort: r.winboxPort || 8291
@@ -6182,30 +6246,45 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   });
 }
 
-// Background Watchdog Sentinel: runs every 5 seconds
+// Background Watchdog Sentinel: runs every 5 seconds and enforces strict 30-second (2 missed 15s beats) timeout
 setInterval(async () => {
   const now = Date.now();
   let mutated = false;
   for (const [, router] of monitoredRouters.entries()) {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
+    const elapsedSec = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
+    const hasBeenAdopted = Boolean(router.adoptedAt || router.keepAliveAdopted || router.status === 'online' || router.status === 'offline' || realHb > 0);
+    const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
 
-    if (router.keepAliveAdopted || router.status === 'online' || (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS)) {
-      const elapsedSec = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.max(0, Math.round(elapsedMs / 1000)) : 2;
+    if (isTrulyOnline) {
       if (router.status !== 'online' || !router.keepAliveAdopted) {
         mutated = true;
       }
       router.status = 'online';
       router.keepAliveAdopted = true;
       router.lastHeartbeat = elapsedSec <= 5 ? 'Just now' : `${elapsedSec}s ago`;
-      router.lastHeartbeatTimestamp = now;
-      router.missedBeats = 0;
+      router.lastHeartbeatTimestamp = realHb;
+      router.missedBeats = Math.floor(elapsedSec / 15);
       router.offlineSince = undefined;
       router.offlineReason = undefined;
-    } else if (router.status === 'offline') {
+    } else if (hasBeenAdopted) {
+      // Unplugged or silent for > 30 seconds (2 missed 15s heartbeats) -> Mark OFFLINE immediately
+      const missedCount = Math.max(2, realHb > 0 ? Math.floor(elapsedSec / 15) : 2);
+      if (router.status !== 'offline' || router.keepAliveAdopted) {
+        mutated = true;
+        router.offlineSince = router.offlineSince || new Date(realHb > 0 ? realHb + REAL_HEARTBEAT_TIMEOUT_MS : now).toISOString();
+        console.warn(`[Deadman Watchdog] Router ${router.name} (${router.id}) marked OFFLINE after ${elapsedSec}s without heartbeat (${missedCount} missed 15s beats).`);
+      }
+      router.status = 'offline';
       router.keepAliveAdopted = false;
-      router.missedBeats = Math.max(3, router.missedBeats || 3);
-      router.lastHeartbeat = 'Offline';
+      router.activeSessions = 0;
+      router.cpuLoad = 0;
+      router.memoryUsage = 0;
+      router.uptime = '0m';
+      router.missedBeats = missedCount;
+      router.lastHeartbeat = realHb > 0 ? formatOfflineElapsedLabel(elapsedSec) : 'Offline (30s+ ago)';
+      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${realHb > 0 ? `${elapsedSec}s` : '30s+'} without heartbeat, ${missedCount} missed beats)`;
     } else {
       // Never adopted yet
       if (router.status !== 'pending_adoption') {
@@ -6221,7 +6300,7 @@ setInterval(async () => {
   }
 }, 5000);
 
-// Client UI Router Sync endpoint
+// Client UI Router Sync endpoint (Syncs metadata/inventory without overriding server-authoritative heartbeat status)
 app.post('/api/devices/sync', (req: Request, res: Response) => {
   const { routers, replaceAll } = req.body || {};
   if (Array.isArray(routers)) {
@@ -6240,26 +6319,24 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
     validRouters.forEach((r: any) => {
       if (!r || !r.id) return;
       const existing = monitoredRouters.get(r.id);
-      const realHb = existing?.lastRealHeartbeatAt || (typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0);
-      const isAdoptedOnline =
-        r.status === 'online' ||
-        existing?.status === 'online' ||
-        Boolean(existing?.keepAliveAdopted) ||
-        Boolean(r.keepAliveAdopted) ||
-        (realHb > 0 && (now - realHb <= REAL_HEARTBEAT_TIMEOUT_MS));
-      const hasBeenAdopted = Boolean(isAdoptedOnline || existing?.adoptedAt || r.adoptedAt || realHb > 0);
-      const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isAdoptedOnline
-        ? 'online'
-        : r.status === 'offline' || existing?.status === 'offline'
-          ? 'offline'
-          : 'pending_adoption';
       const assignedWgIp = allocateRouterWireGuardIp(r.id, existing?.wireguardIp || r.wireguardIp);
-      const resolvedAdoptedAt = hasBeenAdopted
-        ? (existing?.adoptedAt || r.adoptedAt || new Date(now).toISOString().replace('T', ' ').slice(0, 19))
-        : undefined;
 
       if (!existing) {
         changed = true;
+        const incomingHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
+        // If newly synced from client as online, give a single 30s grace window from now so if unplugged it goes offline in 30s
+        const effectiveRealHb = incomingHb > 0 ? incomingHb : (r.status === 'online' ? now : 0);
+        const isTrulyOnline = effectiveRealHb > 0 && (now - effectiveRealHb <= REAL_HEARTBEAT_TIMEOUT_MS);
+        const hasBeenAdopted = Boolean(isTrulyOnline || r.adoptedAt || r.status === 'online' || r.status === 'offline');
+        const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isTrulyOnline
+          ? 'online'
+          : hasBeenAdopted
+            ? 'offline'
+            : 'pending_adoption';
+        const resolvedAdoptedAt = hasBeenAdopted
+          ? (r.adoptedAt || new Date(now).toISOString().replace('T', ' ').slice(0, 19))
+          : undefined;
+
         monitoredRouters.set(r.id, {
           id: r.id,
           name: r.name || `MikroTik-${r.id.slice(-6)}`,
@@ -6284,26 +6361,27 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           freeDurationMinutes: r.freeDurationMinutes ?? 30,
           freeRateLimit: r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
           freeDailyQuotaMb: r.freeDailyQuotaMb ?? 500,
-          keepAliveAdopted: isAdoptedOnline,
+          keepAliveAdopted: isTrulyOnline,
           status: resolvedStatus,
           publicWanIp: r.publicWanIp || '127.0.0.1',
           wireguardIp: assignedWgIp,
-          lastHeartbeat: isAdoptedOnline ? 'Just now' : (resolvedStatus === 'offline' ? 'Offline' : 'Never'),
-          lastHeartbeatTimestamp: isAdoptedOnline ? now : (realHb || 0),
-          lastRealHeartbeatAt: isAdoptedOnline ? (realHb || now) : (realHb || undefined),
-          uptime: isAdoptedOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
-          cpuLoad: isAdoptedOnline ? (r.cpuLoad || 3) : 0,
-          memoryUsage: isAdoptedOnline ? (r.memoryUsage || 20) : 0,
-          activeSessions: isAdoptedOnline ? (r.activeSessions || 0) : 0,
-          missedBeats: isAdoptedOnline ? 0 : (resolvedStatus === 'offline' ? 4 : 0),
+          lastHeartbeat: isTrulyOnline ? 'Just now' : (resolvedStatus === 'offline' ? 'Offline' : 'Never'),
+          lastHeartbeatTimestamp: isTrulyOnline ? effectiveRealHb : (effectiveRealHb || 0),
+          lastRealHeartbeatAt: effectiveRealHb || undefined,
+          uptime: isTrulyOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
+          cpuLoad: isTrulyOnline ? (r.cpuLoad || 3) : 0,
+          memoryUsage: isTrulyOnline ? (r.memoryUsage || 20) : 0,
+          activeSessions: isTrulyOnline ? (r.activeSessions || 0) : 0,
+          missedBeats: isTrulyOnline ? 0 : (resolvedStatus === 'offline' ? 2 : 0),
           offlineSince: resolvedStatus === 'offline' ? (r.offlineSince || new Date(now).toISOString()) : undefined,
           offlineReason: resolvedStatus === 'offline'
-            ? (r.offlineReason || 'Deadman Watchdog: Router offline')
+            ? (r.offlineReason || 'Deadman Watchdog: Router offline (30s timeout)')
             : undefined,
           webfigPort: r.webfigPort || 80,
           winboxPort: r.winboxPort || 8291
         });
       } else {
+        // Update metadata only — NEVER let stale browser state overwrite server-authoritative heartbeat status!
         existing.name = r.name || existing.name;
         existing.siteName = r.siteName || existing.siteName;
         existing.vertical = r.vertical || existing.vertical || 'hotspot';
@@ -6321,18 +6399,8 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         existing.wireguardIp = assignedWgIp;
         if (r.accessMode) existing.accessMode = r.accessMode;
         if (typeof r.freeModeEnabled === 'boolean') existing.freeModeEnabled = r.freeModeEnabled;
-        existing.status = resolvedStatus;
-        existing.keepAliveAdopted = isAdoptedOnline;
-        if (isAdoptedOnline) {
-          existing.adoptedAt = resolvedAdoptedAt;
-          existing.token = undefined;
-          existing.lastHeartbeat = 'Just now';
-          existing.lastHeartbeatTimestamp = now;
-          existing.lastRealHeartbeatAt = existing.lastRealHeartbeatAt || now;
-          existing.missedBeats = 0;
-          existing.offlineSince = undefined;
-          existing.offlineReason = undefined;
-        }
+        if (typeof r.freeDurationMinutes === 'number') existing.freeDurationMinutes = r.freeDurationMinutes;
+        if (r.freeRateLimit) existing.freeRateLimit = r.freeRateLimit;
         changed = true;
       }
     });
@@ -6356,35 +6424,36 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   for (const router of monitoredRouters.values()) {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
-    const isTrulyOnline =
-      Boolean(router.keepAliveAdopted) ||
-      router.status === 'online' ||
-      (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS);
+    const elapsedSec = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
+    const hasBeenAdopted = Boolean(router.adoptedAt || router.keepAliveAdopted || router.status === 'online' || router.status === 'offline' || realHb > 0);
+    const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
 
     if (isTrulyOnline) {
-      const sec = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.max(0, Math.round(elapsedMs / 1000)) : 2;
       router.status = 'online';
       router.keepAliveAdopted = true;
-      router.lastHeartbeat = sec <= 5 ? 'Just now' : `${sec}s ago`;
-      router.missedBeats = 0;
+      router.lastHeartbeat = elapsedSec <= 5 ? 'Just now' : `${elapsedSec}s ago`;
+      router.missedBeats = Math.floor(elapsedSec / 15);
       router.offlineSince = undefined;
       router.offlineReason = undefined;
-    } else if (router.status === 'offline') {
+    } else if (hasBeenAdopted) {
+      const missedCount = Math.max(2, realHb > 0 ? Math.floor(elapsedSec / 15) : 2);
+      router.status = 'offline';
       router.keepAliveAdopted = false;
-      router.lastHeartbeat = 'Offline';
       router.activeSessions = 0;
-      router.missedBeats = Math.max(3, router.missedBeats || 4);
-      router.offlineSince = router.offlineSince || new Date(now).toISOString();
-      router.offlineReason = router.offlineReason || 'Deadman Watchdog: Router marked offline';
+      router.cpuLoad = 0;
+      router.memoryUsage = 0;
+      router.uptime = '0m';
+      router.missedBeats = missedCount;
+      router.lastHeartbeat = realHb > 0 ? formatOfflineElapsedLabel(elapsedSec) : 'Offline (30s+ ago)';
+      router.offlineSince = router.offlineSince || new Date(realHb > 0 ? realHb + REAL_HEARTBEAT_TIMEOUT_MS : now).toISOString();
+      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${realHb > 0 ? `${elapsedSec}s` : '30s+'} without heartbeat, ${missedCount} missed beats)`;
     } else {
       router.status = 'pending_adoption';
       router.keepAliveAdopted = false;
       router.missedBeats = 0;
     }
 
-    const elapsedSeconds = isTrulyOnline
-      ? (realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS ? Math.round(elapsedMs / 1000) : 2)
-      : (realHb > 0 ? Math.round(elapsedMs / 1000) : 999);
+    const elapsedSeconds = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
     list.push({
       ...router,
       id: router.id,
@@ -6403,6 +6472,7 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
       macAddress: router.macAddress || 'D4:01:C3:AA:BB:CC',
       firmware: router.firmware || '7.15.2',
       status: router.status,
+      keepAliveAdopted: router.keepAliveAdopted,
       publicWanIp: router.publicWanIp,
       wireguardIp: router.wireguardIp,
       lastHeartbeat: router.lastHeartbeat,
@@ -6426,7 +6496,7 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   res.json({
     watchdogActive: true,
     checkIntervalMs: 5000,
-    deadmanThresholdSeconds: 60,
+    deadmanThresholdSeconds: 30,
     monitoredRoutersCount: monitoredRouters.size,
     routers: list,
     recentAlerts: emailService.getAlertLogs().slice(0, 10),
@@ -9904,22 +9974,28 @@ app.post('/api/admin/reset-production', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 async function startServer() {
   const distPath = path.resolve(__dirname, 'dist');
-  const hasDist = fs.existsSync(path.resolve(distPath, 'index.html'));
+  const distIndex = path.resolve(distPath, 'index.html');
+  const rootIndex = path.resolve(__dirname, 'index.html');
+  const hasDist = fs.existsSync(distIndex);
 
   let viteMiddleware: any = null;
-  let resolveViteReady: () => void;
-  const viteReadyPromise = new Promise<void>((resolve) => {
-    resolveViteReady = resolve;
-  });
 
-  // Delegate non-API requests to Vite middleware once ready
-  app.use(async (req, res, next) => {
-    if (!isProd || !hasDist) {
-      if (!viteMiddleware) {
-        await viteReadyPromise;
+  if (hasDist) {
+    app.use(express.static(distPath, { index: false }));
+  }
+
+  // Delegate non-API requests to Vite middleware once ready; while Vite is warming up,
+  // respond immediately to startup health/readiness probes so port 3000 never blocks.
+  app.use((req, res, next) => {
+    if (viteMiddleware) {
+      return viteMiddleware(req, res, next);
+    }
+    if (!isProd && (req.path === '/' || req.path === '/index.html')) {
+      if (hasDist) {
+        return res.sendFile(distIndex);
       }
-      if (viteMiddleware) {
-        return viteMiddleware(req, res, next);
+      if (fs.existsSync(rootIndex)) {
+        return res.sendFile(rootIndex);
       }
     }
     next();
@@ -9938,13 +10014,6 @@ async function startServer() {
   server.on('error', (err: any) => {
     if (err.code === 'EADDRINUSE') {
       console.error(`\n❌ [PORT CONFLICT] Port ${PORT} is already in use by another process.`);
-      console.error(`To fix this on your Linux VPS:`);
-      console.error(`  Option A: Kill the existing process occupying port ${PORT}:`);
-      console.error(`    sudo fuser -k ${PORT}/tcp`);
-      console.error(`    # OR`);
-      console.error(`    sudo kill -9 $(sudo lsof -t -i:${PORT})\n`);
-      console.error(`  Option B: Launch on an alternative port:`);
-      console.error(`    PORT=3001 npm run start\n`);
     } else {
       console.error('Server error:', err);
     }
@@ -9952,11 +10021,6 @@ async function startServer() {
   });
 
   if (!isProd || !hasDist) {
-    if (isProd && !hasDist) {
-      console.warn(`\n⚠️  [NOTICE] Production mode active, but 'dist/index.html' was not found.`);
-      console.warn(`   Automatically mounting Vite dynamic compiler so the app loads immediately.`);
-      console.warn(`   To generate pre-compiled static assets, run 'npm run build'.\n`);
-    }
     // Development mode / dynamic fallback: attach Vite middleware for instant JSX compilation
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -9968,13 +10032,11 @@ async function startServer() {
       appType: 'spa'
     });
     viteMiddleware = vite.middlewares;
-    resolveViteReady!();
   } else {
-    resolveViteReady!();
     // Production mode: serve built static bundle
     app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(distIndex);
     });
   }
 }

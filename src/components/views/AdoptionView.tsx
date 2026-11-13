@@ -1416,12 +1416,25 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
                       );
                     })()}
 
-                    {isOffline && (
-                      <p className="text-[10px] text-rose-400 font-mono mt-0.5 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                        Starlink / WAN Cable Disconnected
+                    {isOffline ? (
+                      <p className="text-[10px] text-rose-400 font-mono mt-1 flex items-center justify-between gap-1 bg-rose-950/40 border border-rose-500/30 px-2 py-0.5 rounded">
+                        <span className="flex items-center gap-1 truncate">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping shrink-0" />
+                          <span className="truncate font-bold">{router.lastHeartbeat || 'Offline'}</span>
+                        </span>
+                        <span className="text-[9px] text-rose-300 shrink-0">
+                          {Math.max(2, router.missedHeartbeats || 2)} missed beats
+                        </span>
                       </p>
-                    )}
+                    ) : isOnline ? (
+                      <p className="text-[10px] text-emerald-400/90 font-mono mt-1 flex items-center justify-between gap-1">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <span>Heartbeat: {router.lastHeartbeat || 'Just now'}</span>
+                        </span>
+                        <span className="text-[9px] text-slate-400">15s pulse · 30s watchdog</span>
+                      </p>
+                    ) : null}
 
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mt-2 pt-2 border-t border-[#232d42]">
                       <div className="flex items-center gap-1.5">

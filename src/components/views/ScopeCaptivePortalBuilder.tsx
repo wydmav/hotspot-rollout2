@@ -3454,9 +3454,20 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       ];
                 const safeIdx = previewAdSlideIdx % slides.length;
                 const currentSlide = slides[safeIdx] || slides[0];
+                const handlePreviewProceed = () => {
+                  const sponsorCfg = storage.getSponsorAdConfig();
+                  const mode = sponsorCfg.proceedActionMode || 'close_portal';
+                  setSavedToast(
+                    mode === 'open_campaign_url'
+                      ? 'Proceed to internet tapped -> Opened sponsor campaign URL & released to internet!'
+                      : 'Proceed to internet tapped -> Closed captive portal & released straight to internet!'
+                  );
+                  setTimeout(() => setSavedToast(null), 3500);
+                  setPreviewStep(isFreeModeActive ? 'identification' : 'voucher');
+                };
                 return (
                   <div
-                    className="absolute inset-0 z-30 bg-black overflow-hidden select-none flex flex-col justify-between"
+                    className="absolute inset-0 z-30 bg-[#050811] overflow-hidden select-none flex flex-col justify-between"
                     onTouchStart={(e) => {
                       previewTouchStartXRef.current = e.touches[0]?.clientX || 0;
                     }}
@@ -3469,14 +3480,33 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       }
                     }}
                   >
-                    <div className="relative flex-1 w-full bg-black flex items-center justify-center overflow-hidden">
+                    {/* iOS-Safe Top Bar with Instant "Proceed to internet →" Pill Button */}
+                    <div className="w-full bg-[#050811]/95 border-b border-white/15 px-3 py-2 flex items-center justify-between gap-2 shrink-0 z-30">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <span className="text-[10px] font-bold text-slate-200 truncate">
+                          {currentSlide?.caption || activePreviewAd?.sponsorName || 'Wi-Fi Connected'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handlePreviewProceed}
+                        className="px-2.5 py-1 rounded-full bg-[#f05e17] hover:bg-[#d94e0f] text-white text-[10px] font-extrabold flex items-center gap-1 shrink-0 cursor-pointer shadow"
+                      >
+                        <span>Proceed to internet</span>
+                        <span>&rarr;</span>
+                      </button>
+                    </div>
+
+                    {/* Fitted Center Artwork Stage */}
+                    <div className="relative flex-1 min-h-0 w-full bg-[#050811] flex items-center justify-center p-2 overflow-hidden">
                       {activePreviewAd && activePreviewAd.mediaType === 'video' && activePreviewAd.videoUrl ? (
                         <video
                           src={activePreviewAd.videoUrl}
                           autoPlay
                           playsInline
                           muted
-                          className="w-full h-full object-contain"
+                          className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg"
                         />
                       ) : (
                         <img
@@ -3493,7 +3523,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                             );
                           }}
                           alt={currentSlide?.caption || 'Ad Slide'}
-                          className="w-full h-full object-contain"
+                          className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg m-auto"
                         />
                       )}
 
@@ -3517,28 +3547,12 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       )}
                     </div>
 
-                    {/* Ultra-Compact 36px Bottom Bar with Small Static "Proceed to internet →" Link */}
-                    <div className="h-9 w-full bg-black/95 border-t border-white/15 px-3 flex items-center justify-between shrink-0 z-30">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                        <span className="text-[9.5px] text-slate-400 truncate">
-                          {currentSlide?.caption || activePreviewAd?.sponsorName || 'Wi-Fi Authenticated'}
-                        </span>
-                      </div>
+                    {/* Raised iOS-Safe Bottom Bar with Full-Width "Proceed to internet →" Button */}
+                    <div className="w-full bg-[#050811]/95 border-t border-white/15 px-3 pt-2 pb-4 flex items-center justify-center shrink-0 z-30">
                       <button
                         type="button"
-                        onClick={() => {
-                          const sponsorCfg = storage.getSponsorAdConfig();
-                          const mode = sponsorCfg.proceedActionMode || 'close_portal';
-                          setSavedToast(
-                            mode === 'open_campaign_url'
-                              ? 'Proceed to internet tapped -> Opened sponsor campaign URL & released to internet!'
-                              : 'Proceed to internet tapped -> Closed captive portal & released straight to internet!'
-                          );
-                          setTimeout(() => setSavedToast(null), 3500);
-                          setPreviewStep(isFreeModeActive ? 'identification' : 'voucher');
-                        }}
-                        className="text-[10.5px] font-semibold text-white/95 hover:text-white underline underline-offset-2 flex items-center gap-1 shrink-0 cursor-pointer"
+                        onClick={handlePreviewProceed}
+                        className="w-full py-2 px-4 rounded-xl bg-[#f05e17] hover:bg-[#d94e0f] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-lg border border-white/20"
                       >
                         <span>Proceed to internet</span>
                         <span>&rarr;</span>
