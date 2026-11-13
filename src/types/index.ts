@@ -512,6 +512,8 @@ export interface ScopePortalConfig {
   freeButtonX?: number; // 0 - 100 horizontal % (default 50)
   freeButtonY?: number; // 5 - 95 vertical % (default 88 at bottom)
   freeButtonText?: string; // default "Login for free"
+  freeButtonColor?: string; // default "#f05e17"
+  freeButtonTextColor?: string; // default "#ffffff"
   allowVoucherCode: boolean;
   allowOnlinePayment: boolean;
   // Global RouterOS Speed & Burst Capping (Mbps) + Global ON/OFF Toggle & DHCP Capacity Range

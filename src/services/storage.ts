@@ -113,8 +113,8 @@ export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   }
 ];
 
-// Updated storage key for 100% clean production zero-state (v8 — PayLesotho Live Bearer Token & OTT-only)
-const STORAGE_KEY = 'tconnect_controller_clean_state_v8';
+// Updated storage key for 100% clean production zero-state (v9 — Real-time active sessions, roaming & live reset)
+const STORAGE_KEY = 'tconnect_controller_clean_state_v9';
 
 export const STARTER_PLANS: HotspotPlan[] = [
   {
@@ -935,12 +935,35 @@ class StorageService {
     let mutated = false;
 
     if (Array.isArray(events)) {
+      const nowMs = Date.now();
+      // Prune any expired sessions so the dashboard only reflects currently active users
+      const beforeCount = this.state.activeSessions.length;
+      this.state.activeSessions = this.state.activeSessions.filter((s) => {
+        const expMs = new Date(s.expiresAt).getTime();
+        if (!isNaN(expMs) && expMs <= nowMs) return false;
+        if (s.authMode === 'free' || s.voucherCode === 'FREE-PASS') {
+          const startedMs = new Date(s.startedAt).getTime();
+          if (!isNaN(startedMs) && nowMs - startedMs > 2 * 3600 * 1000) return false;
+        }
+        return true;
+      });
+      if (this.state.activeSessions.length !== beforeCount) {
+        mutated = true;
+      }
+
       for (const ev of events) {
         if (!ev || !ev.id) continue;
         const evMac = String(ev.mac || ev.clientMac || '').trim().toLowerCase();
         const evPhoneDigits = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
         const evSite = ev.siteName || 'T-Connect Hotspot';
         const evRouter = ev.routerName || 'MIKROTIK-TC';
+        const isFreeMode = ev.mode === 'free' || ev.voucherCode === 'FREE-PASS';
+        const sessionDurationSec = isFreeMode ? 7200 : (Number(ev.durationSeconds) || 86400);
+        const startedIso = ev.startedAt || ev.capturedAt || new Date().toISOString();
+        const startedMs = new Date(startedIso).getTime();
+        const expiresIso = ev.expiresAt || new Date((isNaN(startedMs) ? nowMs : startedMs) + sessionDurationSec * 1000).toISOString();
+        const expiresMs = new Date(expiresIso).getTime();
+        const isStillActive = isNaN(expiresMs) || expiresMs > nowMs;
 
         // Check for existing active session by ID, MAC, or Phone (Cross-Hotspot Roaming)
         const existingSession = this.state.activeSessions.find((s) => {
@@ -953,65 +976,68 @@ class StorageService {
         });
 
         if (existingSession) {
-          const isFree = existingSession.authMode === 'free' || existingSession.voucherCode === 'FREE-PASS';
           const expTime = new Date(existingSession.expiresAt).getTime();
-          const notExpired = isFree || isNaN(expTime) || expTime > Date.now();
+          const notExpired = isNaN(expTime) || expTime > nowMs;
 
           if (notExpired) {
-            // Handover / Roaming: update current site & router, preserve remaining package duration
-            if (existingSession.siteName !== evSite) {
-              const previous = existingSession.roamedSites || [existingSession.siteName];
-              if (!previous.includes(evSite)) {
-                existingSession.roamedSites = [...previous, evSite];
-              }
+            const incomingRoamed: string[] = Array.isArray(ev.roamedSites) ? ev.roamedSites : [evSite];
+            const mergedRoamed = Array.from(new Set([...(existingSession.roamedSites || [existingSession.siteName]), ...incomingRoamed].filter(Boolean)));
+            if (existingSession.siteName !== evSite || mergedRoamed.length !== (existingSession.roamedSites || []).length) {
+              existingSession.roamedSites = mergedRoamed;
               existingSession.siteName = evSite;
               existingSession.routerName = evRouter;
-              existingSession.lastSeenAt = new Date().toISOString();
+              existingSession.lastSeenAt = ev.lastSeenAt || new Date().toISOString();
               mutated = true;
-
-              this.logAudit({
-                actor: existingSession.guestName || evMac,
-                role: 'Subscriber',
-                action: 'roaming.handover',
-                target: evSite,
-                details: `Device ${evMac} roamed from ${previous[previous.length - 1]} to ${evSite}. Session continued seamlessly.`
-              });
             }
             continue;
           }
         }
 
-        const isFreeMode = ev.mode === 'free' || ev.voucherCode === 'FREE-PASS';
-        const sessionDurationSec = isFreeMode ? 0 : (ev.durationSeconds || 86400);
+        if (isStillActive) {
+          const remainingSec = Math.max(0, Math.floor(((isNaN(expiresMs) ? nowMs + sessionDurationSec * 1000 : expiresMs) - nowMs) / 1000));
+          const newSession: ActiveSession = {
+            id: ev.id,
+            voucherCode: ev.voucherCode || (isFreeMode ? 'FREE-PASS' : 'PAID-PASS'),
+            clientMac: ev.mac || ev.clientMac || 'Unknown-MAC',
+            clientIp: ev.ip || ev.clientIp || '10.10.0.x',
+            deviceType: ev.deviceType || 'Guest Device',
+            siteName: evSite,
+            vertical: ev.scope || ev.vertical || 'hotspot',
+            routerName: evRouter,
+            planName: ev.planName || (isFreeMode ? 'Free Wi-Fi Access' : 'Hotspot Pass'),
+            startedAt: startedIso,
+            expiresAt: expiresIso,
+            remainingSeconds: remainingSec,
+            bytesDown: 0,
+            bytesUp: 0,
+            speedLimit: ev.speedLimit || '25M/10M',
+            guestName: ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User',
+            guestPhone: ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '',
+            guestEmail: ev.email || ev.guestEmail || '',
+            authMode: isFreeMode ? 'free' : (ev.mode || 'voucher'),
+            isUnlimitedForever: false,
+            roamedSites: Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites : [evSite],
+            lastSeenAt: ev.lastSeenAt || new Date().toISOString()
+          };
+          this.state.activeSessions.unshift(newSession);
+          mutated = true;
+        }
 
-        const newSession: ActiveSession = {
-          id: ev.id,
-          voucherCode: ev.voucherCode || (isFreeMode ? 'FREE-PASS' : 'PAID-PASS'),
+        const leadGuestName = ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User';
+        const leadGuestPhone = ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '';
+        const leadGuestEmail = ev.email || ev.guestEmail || '';
+        const newSession = {
+          guestName: leadGuestName,
+          guestPhone: leadGuestPhone,
+          guestEmail: leadGuestEmail,
+          startedAt: startedIso,
+          routerName: evRouter,
+          siteName: evSite,
+          vertical: (ev.scope || ev.vertical || 'hotspot') as VerticalType,
           clientMac: ev.mac || ev.clientMac || 'Unknown-MAC',
           clientIp: ev.ip || ev.clientIp || '10.10.0.x',
-          deviceType: ev.deviceType || 'Guest Device',
-          siteName: evSite,
-          vertical: ev.scope || ev.vertical || 'hotspot',
-          routerName: evRouter,
-          planName: ev.planName || (isFreeMode ? 'Free Wi-Fi (Unlimited)' : 'Hotspot Pass'),
-          startedAt: ev.capturedAt || new Date().toISOString(),
-          expiresAt: isFreeMode
-            ? new Date(Date.now() + 3650 * 86400 * 1000).toISOString()
-            : new Date(Date.now() + sessionDurationSec * 1000).toISOString(),
-          remainingSeconds: sessionDurationSec,
-          bytesDown: 0,
-          bytesUp: 0,
-          speedLimit: ev.speedLimit || '25M/10M',
-          guestName: ev.guestName || [ev.firstName, ev.lastName].filter(Boolean).join(' ') || 'Guest User',
-          guestPhone: ev.guestPhone || [ev.countryCode, ev.phone].filter(Boolean).join(' ') || '',
-          guestEmail: ev.email || ev.guestEmail || '',
-          authMode: isFreeMode ? 'free' : (ev.mode || 'voucher'),
-          isUnlimitedForever: isFreeMode,
-          roamedSites: [evSite],
-          lastSeenAt: new Date().toISOString()
+          deviceType: ev.deviceType || 'Guest Device'
         };
-        this.state.activeSessions.unshift(newSession);
-        mutated = true;
 
         // Also record in captiveLeads if guest contact info was provided
         if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
@@ -1069,6 +1095,30 @@ class StorageService {
 
   ingestServerGuestEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>) {
     this.ingestServerPortalEvents(events, serverTransactions);
+  }
+
+  async resetAllLiveData(): Promise<void> {
+    try {
+      await fetch('/api/admin/reset-live-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'dashboard-ui' })
+      });
+    } catch {}
+    this.state.activeSessions = [];
+    this.state.captiveLeads = [];
+    this.state.transactions = [];
+    this.state.connectionAttempts = [];
+    this.state.routers = this.state.routers.map((r) => ({
+      ...r,
+      activeSessions: 0
+    }));
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      } catch {}
+    }
+    this.notify();
   }
 
   syncGatewaysAndVouchersWithServer() {

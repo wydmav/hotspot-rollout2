@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "reset-production": "bash scripts/reset-production.sh"
+    "reset-production": "bash scripts/reset-production.sh",
+    "reset-live-data": "node scripts/reset-live-data.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

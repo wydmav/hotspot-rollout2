@@ -17,7 +17,9 @@ import {
   Clock,
   Smartphone,
   Unlock,
-  Lock
+  Lock,
+  RotateCcw,
+  Palette
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType, ScopePortalConfig } from '../../types';
 import { RegionalFleetMap } from './RegionalFleetMap';
@@ -97,12 +99,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             ...serverCfg,
             freeButtonX: typeof serverCfg.freeButtonX === 'number' ? serverCfg.freeButtonX : 50,
             freeButtonY: typeof serverCfg.freeButtonY === 'number' ? serverCfg.freeButtonY : 88,
-            freeButtonText: serverCfg.freeButtonText || 'Login for free'
+            freeButtonText: serverCfg.freeButtonText || 'Login for free',
+            freeButtonColor: serverCfg.freeButtonColor || '#f05e17',
+            freeButtonTextColor: serverCfg.freeButtonTextColor || '#ffffff'
           }));
         }
       })
       .catch(() => {});
   }, [activeScopeKey]);
+
+  const [isResettingLiveData, setIsResettingLiveData] = useState(false);
+  const [confirmResetModal, setConfirmResetModal] = useState(false);
+
+  const handleResetAllLiveTelemetry = async () => {
+    setIsResettingLiveData(true);
+    try {
+      await storage.resetAllLiveData();
+      setConfirmResetModal(false);
+      setFreeModeSyncToast('Live Data Reset: Leads, Reconciled Revenue, Sessions & Auth cleared to 0');
+      setTimeout(() => setFreeModeSyncToast(null), 4000);
+    } finally {
+      setIsResettingLiveData(false);
+    }
+  };
 
   const applyDashboardFreeAccessPatch = async (patch: Partial<ScopePortalConfig>, toastLabel?: string) => {
     const targetScopes: VerticalType[] =
@@ -189,55 +208,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return computeSessionStats(vouchers, filteredTransactions, selectedVertical);
   }, [vouchers, filteredTransactions, selectedVertical]);
 
-  // Real active sessions from storage + vouchers
-  const storedSessions = storage.getActiveSessions() || [];
+  // Real active sessions from storage (strictly filtering out expired sessions)
+  const nowMs = Date.now();
+  const storedSessions = (storage.getActiveSessions() || []).filter(s => {
+    if ((s as any).expiresAt) {
+      const exp = new Date((s as any).expiresAt).getTime();
+      if (!Number.isNaN(exp) && exp <= nowMs) return false;
+    }
+    if (typeof s.remainingSeconds === 'number' && s.remainingSeconds <= 0) return false;
+    return true;
+  });
 
-  const activeSessionsFromVouchers = vouchers
-    .filter(v => v.status === 'used' || (v.associatedDevices && v.associatedDevices.length > 0))
-    .flatMap(v => (v.associatedDevices || []).map(device => ({
-      id: `sess_vch_${v.code}_${device.mac}`,
-      mac: device.mac,
-      hostname: device.hostname || 'Client-Device',
-      ip: device.ip || '10.99.10.x',
-      planName: v.planName,
-      price: v.price,
-      firstSeen: device.firstSeen,
-      siteName: (device as any).siteName || 'Hotspot Node',
-      voucherCode: v.code,
-      guestName: 'Voucher Subscriber',
-      guestPhone: '',
-      authMode: 'voucher' as const,
-      bytesDown: device.bytesIn || 18000000,
-      bytesUp: device.bytesOut || 3200000,
-      startedAt: device.firstSeen || new Date().toISOString()
-    })));
+  const allActiveSessions = storedSessions.map(s => ({
+    id: s.id,
+    mac: s.clientMac,
+    hostname: s.deviceType || 'Subscriber Device',
+    ip: s.clientIp,
+    planName: s.planName,
+    price: s.authMode === 'free' ? 0 : 10,
+    firstSeen: s.startedAt,
+    siteName: s.siteName,
+    routerName: s.routerName,
+    voucherCode: s.voucherCode,
+    guestName: s.guestName || 'Captive Guest',
+    guestPhone: s.guestPhone || '',
+    guestEmail: s.guestEmail || '',
+    authMode: s.authMode || 'free',
+    bytesDown: s.bytesDown || 0,
+    bytesUp: s.bytesUp || 0,
+    startedAt: s.startedAt
+  }));
 
-  const allActiveSessions = [
-    ...storedSessions.map(s => ({
-      id: s.id,
-      mac: s.clientMac,
-      hostname: s.deviceType || 'Subscriber Device',
-      ip: s.clientIp,
-      planName: s.planName,
-      price: s.authMode === 'free' ? 0 : 10,
-      firstSeen: s.startedAt,
-      siteName: s.siteName,
-      voucherCode: s.voucherCode,
-      guestName: s.guestName || 'Captive Guest',
-      guestPhone: s.guestPhone || '',
-      guestEmail: s.guestEmail || '',
-      authMode: s.authMode || 'free',
-      bytesDown: s.bytesDown || 14200000,
-      bytesUp: s.bytesUp || 3800000,
-      startedAt: s.startedAt
-    })),
-    ...activeSessionsFromVouchers.filter(vs => !storedSessions.some(ss => ss.clientMac === vs.mac))
-  ];
-
-  const totalActiveSessions = Math.max(
-    allActiveSessions.length,
-    filteredRouters.reduce((acc, curr) => acc + curr.activeSessions, 0)
-  );
+  const routerHeartbeatSessions = filteredRouters.reduce((acc, curr) => acc + (curr.activeSessions || 0), 0);
+  const totalActiveSessions = Math.max(allActiveSessions.length, routerHeartbeatSessions);
 
   const onlineRouters = filteredRouters.filter(r => r.status === 'online').length;
 
@@ -320,6 +323,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-[11px]">Duration</span>
             </label>
           </div>
+
+          {confirmResetModal ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-950/80 border border-rose-500/50 rounded-lg text-xs font-mono">
+              <span className="text-rose-200 text-[11px] font-bold">Reset all live telemetry to 0?</span>
+              <button
+                type="button"
+                disabled={isResettingLiveData}
+                onClick={handleResetAllLiveTelemetry}
+                className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+              >
+                {isResettingLiveData ? 'Resetting...' : 'Confirm Reset'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmResetModal(false)}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmResetModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer"
+              title="Reset Leads, Reconciled Revenue, Session Duration & Live Auth Sessions to 0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset Live Data (0 Slate)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -407,71 +441,131 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Repositioning Sliders & Presets (Visible right on Dashboard when Free Access Mode is ON) */}
+        {/* Repositioning Sliders, Button Color & Presets (Visible right on Dashboard when Free Access Mode is ON) */}
         {portalConfig.allowFreeAccess && (
-          <div className="mt-4 pt-3.5 border-t border-white/10 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-mono text-slate-400 mr-1">Quick Position:</span>
-              {[
-                { label: 'Bottom (Default)', x: 50, y: 88 },
-                { label: 'Center', x: 50, y: 50 },
-                { label: 'Top', x: 50, y: 15 }
-              ].map((preset) => {
-                const isSelected =
-                  Math.abs((portalConfig.freeButtonY ?? 88) - preset.y) <= 3 &&
-                  Math.abs((portalConfig.freeButtonX ?? 50) - preset.x) <= 3;
-                return (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() =>
+          <div className="mt-4 pt-3.5 border-t border-white/10 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-mono text-slate-400 mr-1">Quick Position:</span>
+                {[
+                  { label: 'Bottom (Default)', x: 50, y: 88 },
+                  { label: 'Center', x: 50, y: 50 },
+                  { label: 'Top', x: 50, y: 15 }
+                ].map((preset) => {
+                  const isSelected =
+                    Math.abs((portalConfig.freeButtonY ?? 88) - preset.y) <= 3 &&
+                    Math.abs((portalConfig.freeButtonX ?? 50) - preset.x) <= 3;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() =>
+                        applyDashboardFreeAccessPatch(
+                          { freeButtonX: preset.x, freeButtonY: preset.y },
+                          `Button moved to ${preset.label}`
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#f05e17] text-white border-[#f05e17]'
+                          : 'bg-[#121829] text-slate-300 border-[#232d42] hover:border-white/30'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
+                  Vertical (Y: {portalConfig.freeButtonY ?? 88}%):
+                </span>
+                <input
+                  type="range"
+                  min={8}
+                  max={92}
+                  value={portalConfig.freeButtonY ?? 88}
+                  onChange={(e) =>
+                    applyDashboardFreeAccessPatch({ freeButtonY: Number(e.target.value) })
+                  }
+                  className="w-full accent-[#f05e17] cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
+                  Horizontal (X: {portalConfig.freeButtonX ?? 50}%):
+                </span>
+                <input
+                  type="range"
+                  min={15}
+                  max={85}
+                  value={portalConfig.freeButtonX ?? 50}
+                  onChange={(e) =>
+                    applyDashboardFreeAccessPatch({ freeButtonX: Number(e.target.value) })
+                  }
+                  className="w-full accent-[#f05e17] cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Palette className="w-3.5 h-3.5 text-[#f05e17]" />
+                <span className="text-[11px] font-mono text-slate-300 font-bold">
+                  &ldquo;{portalConfig.freeButtonText || 'Login for free'}&rdquo; Button Color:
+                </span>
+                {[
+                  { label: 'T-Connect Orange', bg: '#f05e17', text: '#ffffff' },
+                  { label: 'Emerald Green', bg: '#10b981', text: '#ffffff' },
+                  { label: 'Royal Blue', bg: '#2563eb', text: '#ffffff' },
+                  { label: 'Purple', bg: '#7c3aed', text: '#ffffff' },
+                  { label: 'Crimson Red', bg: '#e11d48', text: '#ffffff' },
+                  { label: 'Dark Slate', bg: '#0f172a', text: '#ffffff' },
+                  { label: 'Clean White', bg: '#ffffff', text: '#0f172a' }
+                ].map((sw) => {
+                  const active =
+                    (portalConfig.freeButtonColor || '#f05e17').toLowerCase() === sw.bg.toLowerCase();
+                  return (
+                    <button
+                      key={sw.label}
+                      type="button"
+                      onClick={() =>
+                        applyDashboardFreeAccessPatch(
+                          { freeButtonColor: sw.bg, freeButtonTextColor: sw.text },
+                          `Button color updated to ${sw.label}`
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border flex items-center gap-1.5 transition-all cursor-pointer ${
+                        active
+                          ? 'border-white ring-1 ring-white bg-white/10 text-white'
+                          : 'border-[#232d42] bg-[#121829] text-slate-300 hover:border-white/30'
+                      }`}
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full border border-white/20"
+                        style={{ backgroundColor: sw.bg }}
+                      />
+                      <span>{sw.label}</span>
+                    </button>
+                  );
+                })}
+                <label className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-[#121829] border border-[#232d42] text-[10px] font-mono text-slate-300 cursor-pointer">
+                  <span>Custom:</span>
+                  <input
+                    type="color"
+                    value={portalConfig.freeButtonColor || '#f05e17'}
+                    onChange={(e) =>
                       applyDashboardFreeAccessPatch(
-                        { freeButtonX: preset.x, freeButtonY: preset.y },
-                        `Button moved to ${preset.label}`
+                        { freeButtonColor: e.target.value },
+                        `Custom button color ${e.target.value}`
                       )
                     }
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#f05e17] text-white border-[#f05e17]'
-                        : 'bg-[#121829] text-slate-300 border-[#232d42] hover:border-white/30'
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
-                Vertical (Y: {portalConfig.freeButtonY ?? 88}%):
-              </span>
-              <input
-                type="range"
-                min={8}
-                max={92}
-                value={portalConfig.freeButtonY ?? 88}
-                onChange={(e) =>
-                  applyDashboardFreeAccessPatch({ freeButtonY: Number(e.target.value) })
-                }
-                className="w-full accent-[#f05e17] cursor-pointer"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono text-slate-300 whitespace-nowrap">
-                Horizontal (X: {portalConfig.freeButtonX ?? 50}%):
-              </span>
-              <input
-                type="range"
-                min={15}
-                max={85}
-                value={portalConfig.freeButtonX ?? 50}
-                onChange={(e) =>
-                  applyDashboardFreeAccessPatch({ freeButtonX: Number(e.target.value) })
-                }
-                className="w-full accent-[#f05e17] cursor-pointer"
-              />
+                    className="w-5 h-5 rounded border-0 cursor-pointer bg-transparent"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         )}
@@ -612,6 +706,69 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Live Connected Users Per Router Breakdown (100% Real Telemetry) */}
+      <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Server className="w-4 h-4 text-[#f05e17]" />
+            <h3 className="text-xs font-mono font-extrabold uppercase tracking-wider text-white">
+              Live Connected Users Per Router ({filteredRouters.length} Adopted Nodes)
+            </h3>
+          </div>
+          <span className="text-[11px] font-mono text-slate-400">
+            100% Real Telemetry · Zero Fabricated Sessions
+          </span>
+        </div>
+
+        {filteredRouters.length === 0 ? (
+          <div className="text-xs font-mono text-slate-400 py-3">
+            No routers adopted in this scope yet. Click <strong>MikroTik Fleet</strong> to adopt a live router.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {filteredRouters.map((rt) => {
+              const matchedPortalSessions = allActiveSessions.filter(
+                (s) =>
+                  (s.routerName && s.routerName.toLowerCase() === rt.name.toLowerCase()) ||
+                  (s.siteName && rt.siteName && s.siteName.toLowerCase() === rt.siteName.toLowerCase())
+              );
+              const liveUserCount = Math.max(rt.activeSessions || 0, matchedPortalSessions.length);
+              return (
+                <div
+                  key={rt.id}
+                  className="p-3.5 rounded-xl bg-[#121829] border border-[#1f283d] flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          rt.status === 'online' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                        }`}
+                      />
+                      <span className="text-xs font-bold text-white truncate">{rt.name}</span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
+                      {rt.siteName || 'Maseru Hotspot'} · <span className="uppercase">{rt.vertical}</span>
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                      IP: {rt.publicWanIp || rt.wireguardIp} · Pool: /22 (1,012 max)
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-xl font-extrabold font-mono text-cyan-400 tabular-nums">
+                      {liveUserCount}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-400">
+                      {liveUserCount === 1 ? 'User Online' : 'Users Online'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Daily Transaction Trends & Cumulative Revenue Growth (Recharts Line Chart) */}

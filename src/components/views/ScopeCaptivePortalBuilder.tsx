@@ -782,6 +782,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           if (parsed.freeButtonX === undefined) parsed.freeButtonX = 50;
           if (parsed.freeButtonY === undefined) parsed.freeButtonY = 88;
           if (!parsed.freeButtonText) parsed.freeButtonText = 'Login for free';
+          if (!parsed.freeButtonColor) parsed.freeButtonColor = parsed.accentColor || '#f05e17';
+          if (!parsed.freeButtonTextColor) parsed.freeButtonTextColor = '#ffffff';
           if (mutated) {
             try {
               window.localStorage.setItem(`tconnect_portal_scope_${scope}`, JSON.stringify(parsed));
@@ -838,6 +840,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   const [ottPin, setOttPin] = useState('');
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [previewPayMethod, setPreviewPayMethod] = useState<'mpesa' | 'ecocash' | 'ottvoucher'>('mpesa');
+  const [previewUssdSent, setPreviewUssdSent] = useState(false);
+  const [previewIssuedOttPin, setPreviewIssuedOttPin] = useState('');
+  const [previewCopiedOtt, setPreviewCopiedOtt] = useState(false);
   const [savedToast, setSavedToast] = useState<string | null>(null);
   
   // Real-time Connection Duration Telemetry (Stopwatch & Countdown)
@@ -976,13 +982,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     return storage.resolveVideoAdForScope(selectedScope);
   }, [selectedScope, previewStep]);
 
-  const enterPostAuthAdOrUsage = (isFreeFlow = false) => {
-    if (isFreeFlow || isFreeModeActive) {
-      setSavedToast('Connected! Free Mode authenticated -> Straight to the internet (No ad carousel).');
-      setTimeout(() => setSavedToast(null), 3500);
-      setPreviewStep('usage');
-      return;
-    }
+  const enterPostAuthAdOrUsage = (_isFreeFlow = false) => {
     const sponsorCfg = storage.getSponsorAdConfig();
     const ad = storage.resolveVideoAdForScope(selectedScope);
     if (sponsorCfg.enabled && ad) {
@@ -990,7 +990,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       storage.recordVideoAdImpression(ad.id);
       setPreviewStep('video_ad');
     } else {
-      setSavedToast('Connected! Phone authenticated & released to enjoy internet connectivity.');
+      setSavedToast('Authenticated! Captive portal auto-closed so the user can continue using their device.');
       setTimeout(() => setSavedToast(null), 3500);
       setPreviewStep('usage');
     }
@@ -2147,6 +2147,62 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           placeholder="Login for free"
                           className="w-full px-2.5 py-1 bg-[#0b0f19] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
                         />
+                      </div>
+
+                      <div className="sm:col-span-3 pt-2 border-t border-[#1b233a] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-200 font-extrabold uppercase tracking-wider block">
+                            &quot;Login for free&quot; Button Color &amp; Text Color
+                          </label>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {[
+                              { label: 'T-Connect Orange', bg: '#f05e17', fg: '#ffffff' },
+                              { label: 'Emerald Green', bg: '#10b981', fg: '#ffffff' },
+                              { label: 'Royal Blue', bg: '#2563eb', fg: '#ffffff' },
+                              { label: 'Vibrant Purple', bg: '#7c3aed', fg: '#ffffff' },
+                              { label: 'Crimson Red', bg: '#e11d48', fg: '#ffffff' },
+                              { label: 'Dark Slate', bg: '#0f172a', fg: '#ffffff' },
+                              { label: 'Clean White', bg: '#ffffff', fg: '#0f172a' }
+                            ].map((sw) => {
+                              const activeBg = (currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17').toLowerCase();
+                              const isSelected = activeBg === sw.bg.toLowerCase();
+                              return (
+                                <button
+                                  key={sw.bg}
+                                  type="button"
+                                  onClick={() => handleUpdateCurrent({ freeButtonColor: sw.bg, freeButtonTextColor: sw.fg })}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border cursor-pointer transition-all ${
+                                    isSelected ? 'border-white ring-2 ring-cyan-400/50 scale-105' : 'border-white/20 opacity-85 hover:opacity-100'
+                                  }`}
+                                  style={{ backgroundColor: sw.bg, color: sw.fg }}
+                                >
+                                  <span>{sw.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
+                            <span className="text-[10px] text-slate-300 font-bold">Button Fill:</span>
+                            <input
+                              type="color"
+                              value={currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17'}
+                              onChange={(e) => handleUpdateCurrent({ freeButtonColor: e.target.value })}
+                              className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
+                            <span className="text-[10px] text-slate-300 font-bold">Text:</span>
+                            <input
+                              type="color"
+                              value={currentConfig.freeButtonTextColor || '#ffffff'}
+                              onChange={(e) => handleUpdateCurrent({ freeButtonTextColor: e.target.value })}
+                              className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3306,8 +3362,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       }
                       handleConnectFree();
                     }}
-                    style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                    className={`w-full py-3.5 px-6 rounded-[4px] text-white text-lg font-normal tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
+                    style={{
+                      backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                      color: currentConfig.freeButtonTextColor || '#ffffff'
+                    }}
+                    className={`w-full py-3.5 px-6 rounded-xl text-lg font-extrabold tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
                       isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
                     }`}
                     title="Drag to reposition or click to test 1-tap Free Wi-Fi login"
@@ -3451,248 +3510,317 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 );
               })()}
 
-              {/* Slim Docked Bottom Sheet Captive Portal Box (Hidden when Free Access Mode is ON & on Free Wi-Fi step) */}
+              {/* Light & Fun 2-Step Docked Portal Card (Matches uploaded reference photos in Paid Mode) */}
               {!(isFreeModeActive && previewStep === 'identification') && (
               <div className="relative z-10 w-full mt-auto mb-0">
-                {/* Mode Tabs Bar inside Phone Emulator (Only when NOT in pure Free Access Mode) */}
-                {(previewStep === 'voucher' || previewStep === 'plan') && (() => {
-                  const enabledCount =
-                    (isVoucherModeActive ? 1 : 0) +
-                    (isBuyPassModeActive ? 1 : 0);
-                  if (enabledCount <= 1) return null;
-                  return (
-                    <div className="grid grid-cols-2 gap-1 bg-[#121829] p-0.5 rounded-lg border border-[#232d42] text-[9px] font-mono mb-1.5">
-                      {isVoucherModeActive && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewStep('voucher')}
-                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
-                            previewStep === 'voucher' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          <Ticket className="w-2.5 h-2.5" />
-                          <span>Voucher</span>
-                        </button>
-                      )}
-                      {isBuyPassModeActive && (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewStep('plan')}
-                          className={`py-1 rounded-md font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors ${
-                            previewStep === 'plan' ? 'bg-[#f05e17] text-white shadow' : 'text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>Buy Pass</span>
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* STEP 1B: 16-DIGIT OTT VOUCHER LOGIN IN EMULATOR */}
-                {previewStep === 'voucher' && isVoucherModeActive && (
+                {/* STEP 1: ENTER YOUR DETAILS (Clean Light Card — No "02" prefix badge) */}
+                {(previewStep === 'voucher' || (!isFreeModeActive && previewStep === 'identification')) && (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const cleanPin = previewVoucherCode.replace(/\D/g, '');
-                      if (cleanPin.length !== 16) {
-                        setPreviewVoucherError(`Please enter all 16 digits of your OTT Voucher PIN (${cleanPin.length}/16).`);
+                      const cleanPhone = guestPhone.replace(/\D/g, '');
+                      if (!guestFirstName.trim()) {
+                        setPreviewVoucherError('Please enter your first name.');
+                        return;
+                      }
+                      if (!guestSurname.trim()) {
+                        setPreviewVoucherError('Please enter your surname.');
+                        return;
+                      }
+                      if (!/^[56]\d{7}$/.test(cleanPhone)) {
+                        setPreviewVoucherError('Enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
                         return;
                       }
                       setPreviewVoucherError(null);
-                      setSessionAuthMode('paid');
-                      setSessionRemaining(86400);
-                      enterPostAuthAdOrUsage();
+                      setPreviewPayMethod(cleanPhone.startsWith('6') ? 'ecocash' : 'mpesa');
+                      if (!selectedPlanId && currentConfig.plans.length > 0) {
+                        setSelectedPlanId(currentConfig.plans[0].id);
+                      }
+                      setPreviewStep('plan');
                     }}
-                    className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-2 text-left"
+                    className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 shadow-2xl space-y-2.5 text-left text-slate-900"
+                    style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
                   >
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-                    <div>
-                      <div className="flex items-center justify-between text-[10px] font-mono mb-1">
-                        <label className="text-slate-300">
-                          16-Digit OTT Voucher PIN <span className="text-red-400">*</span>
-                        </label>
-                        <span className="text-emerald-400 font-bold">
-                          {previewVoucherCode.replace(/\D/g, '').length}/16 digits
-                        </span>
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={19}
-                        value={previewVoucherCode}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(/\D/g, '').slice(0, 16);
-                          const formatted = raw.match(/.{1,4}/g)?.join('-') || '';
-                          setPreviewVoucherCode(formatted);
-                          setPreviewVoucherError(null);
-                        }}
-                        placeholder="XXXX-XXXX-XXXX-XXXX"
-                        className="w-full px-2.5 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-emerald-400 text-xs font-mono text-center font-extrabold tracking-widest focus:outline-none focus:border-emerald-400"
-                      />
-                      {previewVoucherError && (
-                        <span className="text-[9px] text-rose-300 font-mono block mt-1">{previewVoucherError}</span>
-                      )}
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-black text-slate-900 tracking-tight">
+                        Enter your details
+                      </h3>
                     </div>
+
+                    {previewVoucherError && (
+                      <div className="p-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-[10px] font-bold">
+                        {previewVoucherError}
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
+                          First name
+                        </label>
+                        <input
+                          type="text"
+                          value={guestFirstName}
+                          onChange={(e) => {
+                            setGuestFirstName(e.target.value);
+                            setPreviewVoucherError(null);
+                          }}
+                          placeholder="e.g. Thabo"
+                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
+                          Surname
+                        </label>
+                        <input
+                          type="text"
+                          value={guestSurname}
+                          onChange={(e) => {
+                            setGuestSurname(e.target.value);
+                            setPreviewVoucherError(null);
+                          }}
+                          placeholder="e.g. Mokoena"
+                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
+                          Mobile number
+                        </label>
+                        <div className="flex items-center rounded-full border border-slate-300 bg-white overflow-hidden focus-within:border-[#f05e17]">
+                          <span className="px-3 py-2 bg-slate-50 border-r border-slate-300 text-slate-900 text-xs font-extrabold select-none">
+                            +266
+                          </span>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            maxLength={8}
+                            value={guestPhone}
+                            onChange={(e) => {
+                              setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 8));
+                              setPreviewVoucherError(null);
+                            }}
+                            placeholder="5xxxxxxx or 6xxxxxxx"
+                            className="flex-1 px-3 py-2 bg-transparent text-slate-900 text-xs font-bold focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
+                          Email (optional)
+                        </label>
+                        <input
+                          type="email"
+                          value={guestEmail}
+                          onChange={(e) => setGuestEmail(e.target.value)}
+                          placeholder="name@example.com"
+                          className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:border-[#f05e17]"
+                        />
+                      </div>
+                    </div>
+
                     <button
                       type="submit"
-                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-lg cursor-pointer"
+                      style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
+                      className="w-full py-2.5 text-white font-black text-xs rounded-full shadow-lg cursor-pointer hover:brightness-105 transition-all"
                     >
-                      Redeem 16-Digit OTT Voucher &amp; Connect &rarr;
+                      Continue &rarr;
                     </button>
+
+                    <div className="text-center pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewVoucherError(null);
+                          if (!selectedPlanId && currentConfig.plans.length > 0) {
+                            setSelectedPlanId(currentConfig.plans[0].id);
+                          }
+                          setPreviewPayMethod('ottvoucher');
+                          setPreviewStep('plan');
+                        }}
+                        className="text-[10px] font-extrabold text-slate-700 underline hover:text-[#f05e17] cursor-pointer"
+                      >
+                        Already have a 16-Digit OTT Voucher PIN? Redeem here &rarr;
+                      </button>
+                    </div>
                   </form>
                 )}
 
-                {/* STEP 2: SCOPE-SPECIFIC PLAN & PRICE SELECTION */}
-                {previewStep === 'plan' && (
-                  <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left">
-                    <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-                    <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
-                      <span className="text-[11px] font-bold text-white font-mono uppercase">
-                        Select {activeMeta.label} Pass
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewStep(isFreeModeActive ? 'identification' : 'voucher')}
-                        className="text-[9px] text-slate-400 hover:text-white font-mono cursor-pointer"
-                      >
-                        &larr; Back to Voucher
-                      </button>
-                    </div>
-
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
-                      {currentConfig.plans.filter((p) => p.enabled).map((plan) => {
-                        const isSelected = selectedPlanId === plan.id;
-                        return (
-                          <label
-                            key={plan.id}
-                            onClick={() => setSelectedPlanId(plan.id)}
-                            className={`flex items-center justify-between px-2 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                              isSelected
-                                ? 'bg-[#f05e17]/20 border-[#f05e17] text-white'
-                                : 'bg-[#121829] border-[#232d42] text-slate-300 hover:border-slate-500'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                type="radio"
-                                name="selected_plan"
-                                checked={isSelected}
-                                onChange={() => setSelectedPlanId(plan.id)}
-                                className="accent-[#f05e17] w-3 h-3"
-                              />
-                              <div>
-                                <div className="font-bold text-[11px] flex items-center gap-1">
-                                  <span>{plan.name}</span>
-                                  {plan.isPopular && (
-                                    <span className="text-[8px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
-                                      POPULAR
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[9px] text-slate-400">
-                                  {plan.durationLabel}
-                                </div>
-                              </div>
-                            </div>
-                            <span className="text-xs font-extrabold text-emerald-400 font-mono">
-                              {currency}{plan.price}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setPreviewStep('payment')}
-                      className="w-full py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold text-xs font-mono rounded-lg shadow-lg"
-                    >
-                      Proceed to Payment &rarr;
-                    </button>
-                  </div>
-                )}
-
-                {/* STEP 3: PAYMENT & PIN REDEMPTION */}
-                {previewStep === 'payment' && (() => {
-                  const chosenPlan = currentConfig.plans.find((p) => p.id === selectedPlanId) || currentConfig.plans[0];
+                {/* STEP 2: CHOOSE A PACKAGE & PAY WITH M-PESA / ECOCASH / 16-DIGIT OTT VOUCHER */}
+                {(previewStep === 'plan' || previewStep === 'payment') && (() => {
+                  const enabledPlans = currentConfig.plans.filter((p) => p.enabled);
+                  const chosenPlan = enabledPlans.find((p) => p.id === selectedPlanId) || enabledPlans[0] || currentConfig.plans[0];
                   return (
-                    <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-[#232d42] shadow-2xl space-y-1.5 text-left">
-                      <div className="w-8 h-1 bg-white/20 rounded-full mx-auto mb-1 shrink-0" />
-                      <div className="flex items-center justify-between border-b border-[#232d42] pb-1">
-                        <span className="text-[11px] font-bold text-white font-mono uppercase">
-                          Payment &amp; Voucher PIN
-                        </span>
+                    <div
+                      className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 shadow-2xl space-y-2.5 text-left text-slate-900"
+                      style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-black text-slate-900 tracking-tight">
+                          Choose a package
+                        </h3>
                         <button
-                          onClick={() => setPreviewStep('plan')}
-                          className="text-[9px] text-slate-400 hover:text-white font-mono"
+                          type="button"
+                          onClick={() => {
+                            setPaymentError(null);
+                            setPreviewUssdSent(false);
+                            setPreviewIssuedOttPin('');
+                            setPreviewStep('voucher');
+                          }}
+                          className="px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-extrabold cursor-pointer"
                         >
-                          &larr; Back
+                          &larr; Details
                         </button>
                       </div>
 
-                      {/* Selected Plan & Amount Summary */}
-                      <div className="bg-[#121829] p-2 rounded-lg border border-[#232d42] flex items-center justify-between">
+                      {/* 3 Side-by-Side Package Cards (M10 Daily, M60 Weekly, M280 Monthly) */}
+                      <div className="grid grid-cols-3 gap-2">
+                        {enabledPlans.map((plan) => {
+                          const isSelected = chosenPlan?.id === plan.id;
+                          const shortLabel = plan.name.toLowerCase().includes('daily')
+                            ? 'Daily Unlimited'
+                            : plan.name.toLowerCase().includes('weekly')
+                            ? 'Weekly Pass'
+                            : plan.name.toLowerCase().includes('monthly')
+                            ? 'Monthly Pass'
+                            : plan.name;
+                          return (
+                            <button
+                              key={plan.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedPlanId(plan.id);
+                                setPaymentError(null);
+                              }}
+                              className={`p-2.5 rounded-2xl border-2 text-center cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-white border-[#f05e17] shadow-md'
+                                  : 'bg-slate-100 border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="text-base font-black text-slate-900 leading-tight">
+                                {currency}{plan.price}
+                              </div>
+                              <div className="text-[10px] font-bold text-slate-700 leading-tight mt-0.5">
+                                {shortLabel}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Pay with (M-Pesa, EcoCash, 16-Digit OTT Voucher — no Bank Card) */}
+                      <div className="space-y-1.5">
+                        <div className="text-sm font-black text-slate-900">
+                          Pay with
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewPayMethod('mpesa');
+                              setSelectedGateway('paylesotho');
+                              setPreviewUssdSent(false);
+                              setPaymentError(null);
+                            }}
+                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                              previewPayMethod === 'mpesa'
+                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
+                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-black">
+                                M-PESA
+                              </span>
+                              <span className="text-xs font-extrabold text-slate-900">M-Pesa</span>
+                            </div>
+                            <span
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                previewPayMethod === 'mpesa' ? 'border-[#f05e17]' : 'border-slate-400'
+                              }`}
+                            >
+                              {previewPayMethod === 'mpesa' && (
+                                <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                              )}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewPayMethod('ecocash');
+                              setSelectedGateway('paylesotho');
+                              setPreviewUssdSent(false);
+                              setPaymentError(null);
+                            }}
+                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                              previewPayMethod === 'ecocash'
+                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
+                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300 text-[9px] font-black">
+                                EcoCash
+                              </span>
+                              <span className="text-xs font-extrabold text-slate-900">EcoCash</span>
+                            </div>
+                            <span
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                previewPayMethod === 'ecocash' ? 'border-[#f05e17]' : 'border-slate-400'
+                              }`}
+                            >
+                              {previewPayMethod === 'ecocash' && (
+                                <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                              )}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewPayMethod('ottvoucher');
+                              setSelectedGateway('ottvoucher');
+                              setPreviewUssdSent(false);
+                              setPaymentError(null);
+                            }}
+                            className={`w-full flex items-center justify-between px-3.5 py-2 rounded-full border cursor-pointer transition-all ${
+                              previewPayMethod === 'ottvoucher'
+                                ? 'border-[#f05e17] bg-orange-50/70 shadow-sm'
+                                : 'border-slate-300 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-black">
+                                OTT PIN
+                              </span>
+                              <span className="text-xs font-extrabold text-slate-900">16-Digit OTT Voucher</span>
+                            </div>
+                            <span
+                              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                previewPayMethod === 'ottvoucher' ? 'border-[#f05e17]' : 'border-slate-400'
+                              }`}
+                            >
+                              {previewPayMethod === 'ottvoucher' && (
+                                <span className="w-2 h-2 rounded-full bg-[#f05e17]" />
+                              )}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Phone Number or 16-Digit OTT Voucher Input */}
+                      {previewPayMethod === 'ottvoucher' ? (
                         <div>
-                          <div className="text-white font-bold text-[11px]">{chosenPlan.name}</div>
-                          <div className="text-[9px] text-slate-400 font-mono">
-                            {chosenPlan.durationLabel}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[8px] text-slate-400 uppercase font-mono">Amount Due</div>
-                          <div className="text-xs font-extrabold text-emerald-400 font-mono">
-                            {currency}{chosenPlan.price}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Payment Method Selector */}
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <label
-                          className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer ${
-                            selectedGateway === 'ottvoucher' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-[#121829] border-[#232d42]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name="gw"
-                              checked={selectedGateway === 'ottvoucher'}
-                              onChange={() => setSelectedGateway('ottvoucher')}
-                              className="accent-emerald-500 w-3 h-3"
-                            />
-                            <ProviderLogo provider="ottvoucher" className="w-14 h-4" />
-                          </div>
-                          <span className="text-[9px] font-mono text-emerald-300">PIN</span>
-                        </label>
-
-                        <label
-                          className={`flex items-center justify-between py-1.5 px-2 rounded-lg border cursor-pointer ${
-                            selectedGateway === 'paylesotho' ? 'bg-emerald-600/20 border-emerald-500' : 'bg-[#121829] border-[#232d42]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="radio"
-                              name="gw"
-                              checked={selectedGateway === 'paylesotho'}
-                              onChange={() => setSelectedGateway('paylesotho')}
-                              className="accent-emerald-500 w-3 h-3"
-                            />
-                            <ProviderLogo provider="paylesotho" className="w-14 h-4" />
-                          </div>
-                          <span className="text-[9px] font-mono text-emerald-300">PayLesotho</span>
-                        </label>
-                      </div>
-
-                      {/* Denomination Alignment Notes & PIN Input */}
-                      {selectedGateway === 'ottvoucher' ? (
-                        <div className="space-y-1 bg-[#121829] p-2 rounded-lg border border-[#232d42]">
-                          <div className="flex justify-between items-center text-[9px] font-mono text-slate-300">
-                            <span>16-Digit OTT Voucher PIN</span>
-                            <span className="text-emerald-400 font-bold">{ottPin.replace(/\D/g, '').length}/16 digits</span>
+                          <div className="flex justify-between items-center text-[10px] font-extrabold text-slate-700 mb-0.5">
+                            <span>16-Digit OTT Voucher PIN *</span>
+                            <span className="text-emerald-700 font-mono">{ottPin.replace(/\D/g, '').length}/16 digits</span>
                           </div>
                           <input
                             type="text"
@@ -3703,87 +3831,186 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
                               const formatted = digits.match(/.{1,4}/g)?.join(' ') || '';
                               setOttPin(formatted);
+                              setPaymentError(null);
                             }}
                             placeholder="1234 5678 9012 3456"
-                            className="w-full px-2 py-1 bg-black/60 border border-blue-400/50 rounded-lg text-emerald-400 font-mono text-xs text-center font-bold tracking-wider"
+                            className="w-full px-3.5 py-2 rounded-full border border-slate-300 bg-white text-slate-900 font-mono text-xs text-center font-black tracking-wider focus:outline-none focus:border-[#f05e17]"
                           />
-                          <div className="text-[8px] text-slate-400 font-mono text-center">
-                            Exact 1:1 denomination match ({currency}{chosenPlan.price})
-                          </div>
                         </div>
                       ) : (
-                        <div className="p-2 rounded-lg bg-[#121829] border border-[#232d42] text-[9px] font-mono text-emerald-200 space-y-1">
-                          <div className="flex justify-between font-bold">
-                            <span>PayLesotho (Merchant: T-Connect)</span>
-                            <span className="text-emerald-400">{currency}{chosenPlan.price}</span>
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-700 mb-0.5">
+                            {previewPayMethod === 'ecocash' ? 'EcoCash Number (+266) *' : 'Vodacom M-Pesa Number (+266) *'}
+                          </label>
+                          <div className="flex items-center rounded-full border border-slate-300 bg-white overflow-hidden focus-within:border-[#f05e17]">
+                            <span className="px-3 py-1.5 bg-slate-50 border-r border-slate-300 text-slate-900 text-xs font-extrabold">
+                              +266
+                            </span>
+                            <input
+                              type="tel"
+                              inputMode="numeric"
+                              maxLength={8}
+                              value={guestPhone}
+                              onChange={(e) => {
+                                setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 8));
+                                setPaymentError(null);
+                              }}
+                              placeholder={previewPayMethod === 'ecocash' ? '6xxxxxxx (8 digits)' : '5xxxxxxx (8 digits)'}
+                              className="flex-1 px-3 py-1.5 bg-transparent text-slate-900 font-mono text-xs font-bold focus:outline-none"
+                            />
                           </div>
-                          <p className="text-slate-300 text-[8px] leading-tight">
-                            M-Pesa (62915) / EcoCash (63165430) generates a <strong>{currency}{chosenPlan.price} 16-Digit OTT Voucher</strong> via PayLesotho. Copy &amp; redeem to connect.
+                        </div>
+                      )}
+
+                      {/* USSD PIN Prompt Box */}
+                      {previewUssdSent && !previewIssuedOttPin && (
+                        <div className="p-2.5 rounded-2xl bg-orange-50 border-2 border-[#f05e17] text-left space-y-1.5">
+                          <div className="text-[11px] font-black text-orange-900">
+                            USSD PIN Prompt Sent to +266 {guestPhone || '58000000'}
+                          </div>
+                          <p className="text-[10px] text-slate-700 font-semibold leading-snug">
+                            Check your phone and enter your <strong>{previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN</strong> to approve <strong>{currency}{chosenPlan.price} ({chosenPlan.name})</strong>.
                           </p>
                         </div>
                       )}
 
+                      {/* Issued 16-Digit OTT Voucher Box after USSD PIN approval */}
+                      {previewIssuedOttPin && (
+                        <div className="p-2.5 rounded-2xl bg-emerald-50 border-2 border-emerald-500 text-center space-y-1.5">
+                          <div className="text-[10px] font-black text-emerald-800 uppercase">
+                            Payment Approved &mdash; Copy Your 16-Digit OTT Voucher
+                          </div>
+                          <div className="font-mono text-xs font-black text-slate-900 bg-white py-1.5 px-2 rounded-xl border border-emerald-300 tracking-widest">
+                            {(previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' ')}
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewCopiedOtt(true);
+                                setOttPin((previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' '));
+                              }}
+                              className="py-1.5 px-2 rounded-full bg-[#f05e17] text-white font-extrabold text-[10px] cursor-pointer"
+                            >
+                              {previewCopiedOtt ? '✓ Copied PIN' : 'Copy OTT PIN'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPreviewUssdSent(false);
+                                setPreviewIssuedOttPin('');
+                                enterPostAuthAdOrUsage(false);
+                              }}
+                              className="py-1.5 px-2 rounded-full bg-emerald-600 text-white font-extrabold text-[10px] cursor-pointer"
+                            >
+                              Authenticate &amp; Connect &rarr;
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {paymentError && (
-                        <div className="p-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-200 text-[9px] font-mono font-bold text-center">
+                        <div className="p-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 text-[10px] font-bold text-center">
                           {paymentError}
                         </div>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={handleSimulatePayment}
-                        disabled={isVerifyingPayment || (selectedGateway === 'ottvoucher' && ottPin.replace(/\D/g, '').length !== 16)}
-                        className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs font-mono rounded-lg shadow-lg transition-colors cursor-pointer"
-                      >
-                        {isVerifyingPayment
-                          ? 'Verifying 16-Digit OTT Voucher...'
-                          : `Pay & Connect Internet (${currency}${chosenPlan.price}) →`}
-                      </button>
+                      {!previewIssuedOttPin && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (previewPayMethod === 'ottvoucher') {
+                              await handleSimulatePayment();
+                              return;
+                            }
+                            const cleanPh = guestPhone.replace(/\D/g, '');
+                            if (!/^[56]\d{7}$/.test(cleanPh)) {
+                              setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
+                              return;
+                            }
+                            setPaymentError(null);
+                            setPreviewUssdSent(true);
+                            setIsVerifyingPayment(true);
+                            try {
+                              const res = await fetch('/api/gateways/paylesotho/initiate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  firstName: guestFirstName || 'Hotspot',
+                                  lastName: guestSurname || 'Guest',
+                                  phoneNumber: cleanPh,
+                                  channel: previewPayMethod,
+                                  amount: chosenPlan.price,
+                                  planId: chosenPlan.id,
+                                  planName: chosenPlan.name,
+                                  durationSeconds: chosenPlan.durationSeconds || 86400,
+                                  currency: 'M',
+                                  scope: selectedScope
+                                })
+                              });
+                              const data = await res.json().catch(() => ({ success: false }));
+                              setIsVerifyingPayment(false);
+                              if (data && data.ottVoucherPin) {
+                                setPreviewIssuedOttPin(String(data.ottVoucherPin).replace(/\D/g, ''));
+                                setPreviewCopiedOtt(false);
+                              } else if (data && data.transactionId) {
+                                setTimeout(async () => {
+                                  const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(data.transactionId)}`);
+                                  const stData = await stRes.json().catch(() => ({}));
+                                  if (stData && stData.ottVoucherPin) {
+                                    setPreviewIssuedOttPin(String(stData.ottVoucherPin).replace(/\D/g, ''));
+                                  }
+                                }, 1500);
+                              } else {
+                                setPaymentError(data?.message || 'Unable to initiate USSD PIN push.');
+                                setPreviewUssdSent(false);
+                              }
+                            } catch {
+                              setIsVerifyingPayment(false);
+                              setPreviewUssdSent(false);
+                              setPaymentError('Network error communicating with PayLesotho gateway.');
+                            }
+                          }}
+                          disabled={isVerifyingPayment}
+                          style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
+                          className="w-full py-2.5 text-white font-black text-xs rounded-full shadow-lg cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
+                        >
+                          {isVerifyingPayment
+                            ? `Sending ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} USSD PIN Prompt...`
+                            : previewPayMethod === 'ottvoucher'
+                            ? 'Redeem OTT Voucher & Connect →'
+                            : `Proceed with ${chosenPlan.name} (${currency}${chosenPlan.price}) →`}
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
 
-                {/* STEP 4: CONNECTED & ENJOYING INTERNET CONNECTIVITY (After pressing X on Ad) */}
+                {/* STEP 3: CONNECTED — NATIVE CAPTIVE PORTAL AUTO-CLOSE (NO GOOGLE.COM REDIRECT) */}
                 {previewStep === 'usage' && (
-                  <div className="rounded-t-2xl rounded-b-none p-3 bg-[#0b0f19] border-t border-x border-b-0 border-emerald-500/40 shadow-2xl space-y-2 text-left">
-                    <div className="w-8 h-1 bg-emerald-400/40 rounded-full mx-auto mb-1 shrink-0" />
-                    <div className="flex items-center justify-between bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-2">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <div>
-                          <div className="text-[11px] font-black text-white leading-tight">
-                            You&apos;re Connected to Wi-Fi!
-                          </div>
-                          <div className="text-[9px] text-emerald-300 font-mono">
-                            {sessionAuthMode === 'free' ? 'Free Wi-Fi Session Active' : 'High-Speed Pass Active'} • Online ({sessionElapsed}s)
-                          </div>
-                        </div>
-                      </div>
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[8px] font-mono">
-                        ONLINE
-                      </span>
+                  <div className="rounded-t-[26px] rounded-b-none p-4 bg-white/95 backdrop-blur-md border-t-4 border-emerald-500 shadow-2xl space-y-2.5 text-center text-slate-900">
+                    <div className="w-10 h-10 rounded-full bg-emerald-100 border-2 border-emerald-500 text-emerald-700 flex items-center justify-center mx-auto">
+                      <CheckCircle2 className="w-5 h-5" />
                     </div>
-
-                    <a
-                      href="https://www.google.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      <span>Browse the Internet &rarr;</span>
-                    </a>
-
+                    <div>
+                      <div className="text-sm font-black text-slate-900">
+                        You&apos;re Connected!
+                      </div>
+                      <p className="text-[10px] text-slate-600 font-semibold mt-0.5 leading-snug">
+                        Captive portal window auto-closes so the guest continues using their phone seamlessly (cross-hotspot package roaming active in background).
+                      </p>
+                    </div>
                     <button
                       type="button"
-                      onClick={() =>
-                        setPreviewStep(
-                          isFreeModeActive ? 'identification' : isVoucherModeActive ? 'voucher' : 'plan'
-                        )
-                      }
-                      className="w-full py-1 text-[9px] font-mono text-slate-400 hover:text-white text-center cursor-pointer"
+                      onClick={() => {
+                        setPreviewUssdSent(false);
+                        setPreviewIssuedOttPin('');
+                        setPreviewStep(isFreeModeActive ? 'identification' : 'voucher');
+                      }}
+                      style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
+                      className="w-full py-2 text-white font-black text-xs rounded-full shadow cursor-pointer"
                     >
-                      Reset Emulator to Sign-Up View
+                      Done &mdash; Reset Emulator Preview
                     </button>
                   </div>
                 )}

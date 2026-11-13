@@ -550,56 +550,61 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const baseUrl = resolveControllerBaseUrl(host, protocol);
 
   const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
-  const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'STARLINK HIGH-SPEED';
-  const welcomeHeadline = cfg.welcomeHeadline !== undefined ? String(cfg.welcomeHeadline) : 'WHAT DO YOU CONNECT FOR?';
+  const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'HOTSPOT';
+  const welcomeHeadline = cfg.welcomeHeadline !== undefined ? String(cfg.welcomeHeadline) : 'GET CONNECTED THIS SUMMER.';
   const accentColor = cfg.accentColor || '#f05e17';
-  const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 38;
-  const glassOpacity = typeof cfg.glassOpacity === 'number' ? cfg.glassOpacity : 88;
+  const freeButtonColor = cfg.freeButtonColor || accentColor || '#f05e17';
+  const freeButtonTextColor = cfg.freeButtonTextColor || '#ffffff';
+  const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 25;
   const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
-  // Strictly Binary Modes: When Paid Mode is active (!allowFreeAccess), always enable both Voucher and Buy Pass tabs
-  const allowVoucherCode = !allowFreeAccess ? true : (cfg.allowVoucherCode !== undefined ? Boolean(cfg.allowVoucherCode) : true);
-  const allowOnlinePayment = !allowFreeAccess ? true : (cfg.allowOnlinePayment !== undefined ? Boolean(cfg.allowOnlinePayment) : true);
   const freeButtonX = typeof cfg.freeButtonX === 'number' ? cfg.freeButtonX : 50;
   const freeButtonY = typeof cfg.freeButtonY === 'number' ? cfg.freeButtonY : 88;
   const freeButtonText = cfg.freeButtonText ? String(cfg.freeButtonText).trim() : 'Login for free';
   const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
   const termsText = normalizeScopeTermsText(cfg.termsText);
 
-  const rawBgImage = cfg.bgImage || 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&w=1200&q=80';
+  const rawBgImage = cfg.bgImage || '/assets/aistudio/87A4AC3A-4C95-4CCE-B54B-5CA2518126F2_ac27e2cc.png';
   const bgImage = resolveServerWalledGardenMediaUrl(rawBgImage, baseUrl, brandTitle, welcomeHeadline);
 
   const defaultPlans = [
-    { id: 'hs_1d', name: 'Daily Pass', price: 10, durationLabel: '24 Hours', downloadSpeedMbps: 20, enabled: true },
-    { id: 'hs_7d', name: 'Weekly Pass', price: 60, durationLabel: '7 Days', downloadSpeedMbps: 25, enabled: true, isPopular: true },
-    { id: 'hs_30d', name: 'Monthly Pass', price: 280, durationLabel: '30 Days', downloadSpeedMbps: 35, enabled: true }
+    { id: 'hs_1d', name: 'Daily Unlimited', price: 10, durationLabel: 'Daily Unlimited', durationSeconds: 86400, downloadSpeedMbps: 20, enabled: true },
+    { id: 'hs_7d', name: 'Weekly Pass', price: 60, durationLabel: 'Weekly Pass', durationSeconds: 604800, downloadSpeedMbps: 25, enabled: true, isPopular: true },
+    { id: 'hs_30d', name: 'Monthly Pass', price: 280, durationLabel: 'Monthly Pass', durationSeconds: 2592000, downloadSpeedMbps: 35, enabled: true }
   ];
   const plans = Array.isArray(cfg.plans) && cfg.plans.length > 0
-    ? cfg.plans.filter((p: any) => p.enabled !== false)
+    ? cfg.plans.filter((p: any) => p.enabled !== false).map((p: any) => ({
+        ...p,
+        durationSeconds: Number(p.durationSeconds) || (Number(p.price) >= 200 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400)
+      }))
     : defaultPlans;
 
-  const badgeText = [brandTitle.trim(), tagline.trim()].filter(Boolean).join(' · ');
-  const enabledTabsCount = allowFreeAccess ? 1 : 2;
-  const defaultTab = allowFreeAccess ? 'free' : 'voucher';
-  const videoAdsEnabled = serverStore.sponsorAd?.enabled !== false;
-  // Free Mode has NO ad carousel — clicking "Login for free" connects straight to the internet!
-  const postAuthDst = allowFreeAccess
-    ? 'https://www.google.com'
-    : (videoAdsEnabled
-        ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
-        : 'https://www.google.com');
+  // Never redirect to google.com! If Sponsor Ad Slides are ON, show the ad slide carousel then auto-close; if OFF, auto-close immediately.
+  const videoAdsEnabled = Boolean(serverStore.sponsorAd?.enabled);
+  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
+  const postAuthDst = videoAdsEnabled
+    ? `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`
+    : cnaCloseUrl;
 
-  const plansHtml = plans.map((p: any, idx: number) => `
-    <label class="plan-item ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${String(p.name).replace(/'/g, '')}', this)">
-      <div class="plan-left">
-        <input type="radio" name="selected_plan" value="${p.id}" ${idx === 0 ? 'checked' : ''} />
-        <div>
-          <div class="plan-name">${p.name} ${p.isPopular ? '<span class="pop-tag">POPULAR</span>' : ''}</div>
-          <div class="plan-meta">${p.durationLabel || '24 Hours'}</div>
-        </div>
-      </div>
-      <div class="plan-price">M${p.price}</div>
-    </label>
-  `).join('');
+  const firstPlan = plans[0] || defaultPlans[0];
+  const firstPlanNameClean = String(firstPlan.name || 'Daily Pass').replace(/'/g, '');
+
+  const plansCardsHtml = plans.map((p: any, idx: number) => {
+    const cleanName = String(p.name || 'Hotspot Pass').replace(/'/g, '');
+    const durSec = Number(p.durationSeconds) || (Number(p.price) >= 200 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400);
+    const shortSub = cleanName.toLowerCase().includes('daily')
+      ? 'Daily<br/>Unlimited'
+      : cleanName.toLowerCase().includes('weekly')
+      ? 'Weekly<br/>Pass'
+      : cleanName.toLowerCase().includes('monthly')
+      ? 'Monthly<br/>Pass'
+      : cleanName;
+    return `
+      <button type="button" class="pkg-card ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${cleanName}', ${durSec}, this)">
+        <div class="pkg-price">M${p.price}</div>
+        <div class="pkg-label">${shortSub}</div>
+      </button>
+    `;
+  }).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -611,11 +616,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body {
     min-height: 100vh;
-    background-color: #05070c;
+    background-color: #0ea5e9;
     background-image: url('${bgImage}');
     background-size: cover;
-    background-position: center;
-    color: #f8fafc;
+    background-position: center top;
+    color: #0f172a;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -639,16 +644,16 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
   .btn-free-login {
     width: 100%;
-    padding: 14px 20px;
-    border-radius: 4px;
+    padding: 15px 22px;
+    border-radius: 12px;
     border: none;
-    background: ${accentColor};
-    color: #fff;
+    background: ${freeButtonColor};
+    color: ${freeButtonTextColor};
     font-size: 19px;
-    font-weight: 400;
+    font-weight: 800;
     letter-spacing: 0.3px;
     cursor: pointer;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
     text-align: center;
     transition: transform 0.15s ease;
   }
@@ -663,112 +668,341 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     flex-direction: column;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 0 0;
+    padding: 14px 0 0;
     width: 100%;
-    max-width: 420px;
+    max-width: 430px;
     margin: 0 auto;
   }
-  .hero { text-align: center; padding: 8px 12px 4px; width: 100%; }
-  .kicker {
-    color: rgba(255,255,255,0.92);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.4px;
-    margin-bottom: 4px;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-  }
-  .hero h1 { font-size: 17px; font-weight: 900; letter-spacing: -0.4px; color: #fff; text-shadow: 0 3px 14px rgba(0,0,0,0.85); line-height: 1.15; }
-  .card {
+  .brand-header {
     width: 100%;
-    background: #0b0f19;
-    border: 1px solid #232d42;
-    border-bottom: none;
-    border-radius: 16px 16px 0 0;
-    padding: 10px 14px 14px;
-    box-shadow: 0 -10px 40px rgba(0,0,0,0.85);
-    margin-top: auto;
+    padding: 8px 18px 6px;
+    text-align: center;
   }
-  .tabs {
-    display: ${enabledTabsCount <= 1 ? 'none' : 'grid'};
-    grid-template-columns: repeat(${Math.max(1, enabledTabsCount)}, 1fr);
-    gap: 5px;
-    background: rgba(0,0,0,0.45);
-    padding: 3px;
-    border-radius: 11px;
-    border: 1px solid rgba(255,255,255,0.1);
-    margin-bottom: 10px;
+  .brand-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(10px);
+    padding: 7px 16px;
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    margin-bottom: 8px;
   }
-  .tab-btn {
-    padding: 7px 4px;
-    border-radius: 8px;
-    border: none;
-    background: transparent;
-    color: #cbd5e1;
+  .brand-main {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 1.2px;
+    color: #0f172a;
+  }
+  .brand-divider {
+    width: 1px;
+    height: 18px;
+    background: #cbd5e1;
+  }
+  .brand-sub {
     font-size: 10px;
     font-weight: 800;
-    cursor: pointer;
-    transition: all 0.15s;
+    letter-spacing: 0.8px;
+    color: #334155;
+    text-transform: uppercase;
   }
-  .tab-btn.active { background: ${accentColor}; color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
+  .hero-headline {
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: -0.4px;
+    color: #ffffff;
+    text-shadow: 0 3px 14px rgba(0,0,0,0.65);
+    line-height: 1.15;
+  }
+  .hero-headline span {
+    color: ${accentColor};
+  }
+  .light-card {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(16px);
+    border-top: 4px solid ${accentColor};
+    border-radius: 28px 28px 0 0;
+    padding: 18px 18px 20px;
+    box-shadow: 0 -14px 44px rgba(15, 23, 42, 0.38);
+    margin-top: auto;
+    color: #0f172a;
+  }
+  .step-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .step-title {
+    font-size: 20px;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: -0.4px;
+  }
+  .step-back-btn {
+    border: none;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 5px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
   .sec { display: none; }
   .sec.active { display: block; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .field { margin-bottom: 8px; text-align: left; }
-  .lbl { display: block; font-size: 10px; color: #cbd5e1; margin-bottom: 3px; font-weight: 600; }
+  .field { margin-bottom: 10px; text-align: left; }
+  .lbl {
+    display: block;
+    font-size: 11px;
+    color: #1e293b;
+    margin-bottom: 4px;
+    font-weight: 800;
+  }
   .inp {
     width: 100%;
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.2);
-    background: rgba(0,0,0,0.5);
-    color: #fff;
-    font-size: 11px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1.5px solid #cbd5e1;
+    background: #ffffff;
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 600;
     outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .inp:focus { border-color: ${accentColor}; }
-  .phone-row { display: flex; gap: 5px; }
-  .cc-sel {
-    padding: 8px 6px;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.2);
-    background: rgba(0,0,0,0.6);
-    color: #fff;
+  .inp:focus {
+    border-color: ${accentColor};
+    box-shadow: 0 0 0 3px rgba(240, 94, 23, 0.15);
+  }
+  .phone-pill {
+    display: flex;
+    align-items: center;
+    border-radius: 999px;
+    border: 1.5px solid #cbd5e1;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  .phone-pill:focus-within {
+    border-color: ${accentColor};
+    box-shadow: 0 0 0 3px rgba(240, 94, 23, 0.15);
+  }
+  .phone-prefix {
+    padding: 10px 12px 10px 14px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #0f172a;
+    border-right: 1px solid #cbd5e1;
+    background: #f8fafc;
+    user-select: none;
+  }
+  .phone-inp {
+    flex: 1;
+    border: none;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+    outline: none;
+    background: transparent;
+  }
+  .btn-orange {
+    width: 100%;
+    min-height: 44px;
+    padding: 12px 16px;
+    border-radius: 999px;
+    border: none;
+    background: ${accentColor};
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 900;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(240, 94, 23, 0.32);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+  .btn-orange:active { transform: scale(0.99); }
+  .btn-orange:disabled {
+    background: #94a3b8;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .pkg-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pkg-card {
+    padding: 12px 6px;
+    border-radius: 16px;
+    border: 2px solid #e2e8f0;
+    background: #f1f5f9;
+    color: #0f172a;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .pkg-card.selected {
+    border-color: ${accentColor};
+    background: #ffffff;
+    box-shadow: 0 6px 18px rgba(240, 94, 23, 0.16);
+  }
+  .pkg-price {
+    font-size: 18px;
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 2px;
+  }
+  .pkg-label {
     font-size: 11px;
     font-weight: 700;
-    width: 74px;
-    flex-shrink: 0;
+    color: #334155;
+    line-height: 1.2;
+  }
+  .pay-with-heading {
+    font-size: 17px;
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 8px;
+    text-align: left;
+  }
+  .pay-methods {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 11px;
+  }
+  .pay-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1.5px solid #cbd5e1;
+    background: #ffffff;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .pay-row.active {
+    border-color: ${accentColor};
+    background: #fff7ed;
+    box-shadow: 0 4px 12px rgba(240, 94, 23, 0.12);
+  }
+  .pay-row-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .pay-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 900;
+  }
+  .badge-mpesa { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+  .badge-ecocash { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+  .badge-ott { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+  .pay-row-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .pay-radio {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid #94a3b8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pay-row.active .pay-radio {
+    border-color: ${accentColor};
+  }
+  .pay-row.active .pay-radio::after {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: ${accentColor};
+  }
+  .ussd-box {
+    display: none;
+    background: #fff7ed;
+    border: 2px solid ${accentColor};
+    border-radius: 18px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    text-align: left;
+  }
+  .ussd-title {
+    font-size: 12px;
+    font-weight: 900;
+    color: #c2410c;
+    margin-bottom: 4px;
+  }
+  .ussd-desc {
+    font-size: 11px;
+    color: #334155;
+    line-height: 1.4;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .ott-box {
+    display: none;
+    background: #ecfdf5;
+    border: 2px solid #10b981;
+    border-radius: 18px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .err-box {
+    background: #fef2f2;
+    border: 1.5px solid #f87171;
+    color: #b91c1c;
+    padding: 9px 12px;
+    border-radius: 14px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: none;
+    text-align: left;
   }
   .tc-row {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 9px;
-    border-radius: 10px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid rgba(255,255,255,0.12);
-    margin: 8px 0 10px;
-    font-size: 10px;
-    color: #e2e8f0;
+    gap: 8px;
+    padding: 8px 4px 2px;
+    font-size: 11px;
+    color: #475569;
     text-align: left;
   }
   .tc-row input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
     accent-color: ${accentColor};
     cursor: pointer;
     flex-shrink: 0;
   }
   .tc-link {
-    color: #38bdf8;
+    color: ${accentColor};
     text-decoration: underline;
-    font-weight: 700;
+    font-weight: 800;
     cursor: pointer;
   }
   .tc-modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.82);
-    backdrop-filter: blur(8px);
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(6px);
     z-index: 9999;
     display: none;
     align-items: center;
@@ -777,117 +1011,55 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   }
   .tc-modal {
     width: 100%;
-    max-width: 340px;
-    background: #0f1422;
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 18px;
-    padding: 16px;
-    box-shadow: 0 24px 60px rgba(0,0,0,0.85);
+    max-width: 350px;
+    background: #ffffff;
+    border-radius: 22px;
+    padding: 18px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
     text-align: left;
+    color: #0f172a;
   }
-  .tc-modal h3 { font-size: 13px; font-weight: 900; color: #fff; margin-bottom: 8px; }
+  .tc-modal h3 { font-size: 15px; font-weight: 900; color: #0f172a; margin-bottom: 8px; }
   .tc-modal-body {
     max-height: 210px;
     overflow-y: auto;
     font-size: 11px;
-    color: #cbd5e1;
+    color: #334155;
     line-height: 1.5;
-    background: rgba(0,0,0,0.45);
+    background: #f8fafc;
     padding: 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
     margin-bottom: 12px;
     white-space: pre-wrap;
   }
-  .btn-primary {
-    width: 100%;
-    min-height: 38px;
-    padding: 9px 10px;
-    border-radius: 11px;
-    border: none;
-    background: ${accentColor};
-    color: #fff;
-    font-size: 11px;
-    font-weight: 900;
-    cursor: pointer;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-    transition: all 0.2s ease;
-  }
-  .btn-primary:disabled {
-    background: #334155;
-    color: #94a3b8;
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .btn-emerald {
-    width: 100%;
-    min-height: 38px;
-    padding: 9px 10px;
-    border-radius: 11px;
-    border: none;
-    background: #10b981;
-    color: #052e16;
-    font-size: 11px;
-    font-weight: 900;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  .btn-emerald:disabled {
-    background: #334155;
-    color: #94a3b8;
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .plan-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; max-height: 155px; overflow-y: auto; }
-  .plan-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 7px 10px;
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.12);
-    background: rgba(0,0,0,0.4);
-    cursor: pointer;
-  }
-  .plan-item.selected { border-color: ${accentColor}; background: rgba(240,94,23,0.18); }
-  .plan-left { display: flex; align-items: center; gap: 7px; text-align: left; }
-  .plan-name { font-size: 11px; font-weight: 800; color: #fff; }
-  .plan-meta { font-size: 9px; color: #94a3b8; font-family: monospace; }
-  .plan-price { font-size: 12px; font-weight: 900; color: #fbbf24; font-family: monospace; }
-  .pop-tag { font-size: 9px; color: #fbbf24; margin-left: 4px; }
-  .gw-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
-  .gw-btn {
-    padding: 7px 5px;
-    border-radius: 9px;
-    border: 1px solid rgba(255,255,255,0.14);
-    background: rgba(0,0,0,0.4);
-    color: #cbd5e1;
-    font-size: 10px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .gw-btn.active { border-color: ${accentColor}; background: rgba(240,94,23,0.22); color: #fff; }
-  .err-box { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.45); color: #fecaca; padding: 8px 10px; border-radius: 10px; font-size: 10px; margin-bottom: 8px; display: none; text-align: left; }
 </style>
 </head>
 <body>
 <div class="overlay"></div>
+
+<!-- Hidden auto-roaming form for seamless cross-hotspot package continuation (no timer shown to user) -->
+<form id="roamForm" action="$(link-login-only)" method="post" style="display:none;">
+  <input type="hidden" name="username" value="test">
+  <input type="hidden" name="password" value="123">
+  <input type="hidden" name="dst" value="${postAuthDst}">
+</form>
 
 <!-- T&Cs Popup Modal -->
 <div id="termsModalBackdrop" class="tc-modal-backdrop" onclick="if(event.target===this)closeTermsModal(false)">
   <div class="tc-modal">
     <h3>Terms &amp; Conditions</h3>
     <div class="tc-modal-body">${termsText}</div>
-    <div style="display:flex;gap:6px;">
-      <button type="button" class="btn-emerald" onclick="closeTermsModal(true)">Agree &amp; Continue</button>
-      <button type="button" style="padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#cbd5e1;font-size:10px;font-weight:700;cursor:pointer;" onclick="closeTermsModal(false)">Close</button>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn-orange" onclick="closeTermsModal(true)">Agree &amp; Continue</button>
+      <button type="button" style="padding:10px 14px;border-radius:999px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;font-size:11px;font-weight:800;cursor:pointer;" onclick="closeTermsModal(false)">Close</button>
     </div>
   </div>
 </div>
 
 <main class="main-wrap">
   ${allowFreeAccess ? `
-  <!-- PURE FREE ACCESS MODE: Single Repositionable "Login for free" Button Over Wallpaper -->
+  <!-- FREE ACCESS MODE: Customizable "Login for free" Button Over Wallpaper -->
   <div class="free-only-wrap">
     <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
       <input type="hidden" name="username" value="T-TRIAL">
@@ -897,102 +1069,189 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </form>
   </div>
   ` : `
-  <div class="hero">
-    ${badgeText ? `<div class="kicker">${badgeText}</div>` : ''}
-    ${welcomeHeadline ? `<h1>${welcomeHeadline}</h1>` : ''}
+  <div class="brand-header">
+    <div class="brand-row">
+      <span class="brand-main">${brandTitle || 'T-CONNECT'}</span>
+      <span class="brand-divider"></span>
+      <span class="brand-sub">${tagline || 'STARLINK HOTSPOT'}</span>
+    </div>
+    ${welcomeHeadline ? `<div class="hero-headline">${welcomeHeadline}</div>` : ''}
   </div>
 
-  <div class="card">
+  <div class="light-card">
     <div id="errBox" class="err-box"></div>
 
-    <div class="tabs">
-      <button type="button" id="tabBtn_voucher" class="tab-btn active" onclick="switchTab('voucher')">16-Digit OTT Voucher</button>
-      <button type="button" id="tabBtn_buy" class="tab-btn" onclick="switchTab('buy')">Buy Pass (M-Pesa / EcoCash)</button>
-    </div>
+    <!-- STEP 1: ENTER YOUR DETAILS (Clean light card, no "02" prefix badge) -->
+    <div id="step1_details" class="sec active">
+      <div class="step-title-row">
+        <h2 class="step-title">Enter your details</h2>
+      </div>
 
-    <!-- TAB 1: 16-DIGIT OTT VOUCHER CODE -->
-    <div id="sec_voucher" class="sec active">
-      <form id="voucherForm" action="$(link-login-only)" method="post" onsubmit="return handleVoucherSubmit(event)">
-        <input type="hidden" name="username" value="test">
-        <input type="hidden" name="password" value="123">
-        <input type="hidden" name="dst" value="${postAuthDst}">
-        <div class="field">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <label class="lbl" style="margin-bottom:0;">16-Digit OTT Voucher PIN *</label>
-            <span id="voucherDigitCounter" style="font-size:9px;font-family:monospace;color:#34d399;font-weight:700;">0 / 16 digits</span>
-          </div>
-          <input class="inp" type="text" inputmode="numeric" maxlength="19" id="voucherInput" value="" oninput="handleVoucherInputFormat(this)" placeholder="1234 5678 9012 3456" required style="font-family:monospace;letter-spacing:1.4px;text-align:center;font-weight:800;">
+      <div class="field">
+        <label class="lbl" for="guestFirstName">First name</label>
+        <input class="inp" type="text" id="guestFirstName" placeholder="e.g. Thabo" autocomplete="given-name" />
+      </div>
+
+      <div class="field">
+        <label class="lbl" for="guestLastName">Surname</label>
+        <input class="inp" type="text" id="guestLastName" placeholder="e.g. Mokoena" autocomplete="family-name" />
+      </div>
+
+      <div class="field">
+        <label class="lbl" for="guestMobile">Mobile number</label>
+        <div class="phone-pill">
+          <span class="phone-prefix">+266</span>
+          <input class="phone-inp" type="tel" inputmode="numeric" maxlength="8" id="guestMobile" placeholder="5xxxxxxx or 6xxxxxxx" oninput="handleStep1PhoneInput(this)" autocomplete="tel-national" />
         </div>
-        <button type="submit" id="voucherSubmitBtn" class="btn-emerald">Redeem OTT Voucher &amp; Connect &rarr;</button>
-      </form>
+      </div>
+
+      <div class="field">
+        <label class="lbl" for="guestEmail">Email (optional)</label>
+        <input class="inp" type="email" id="guestEmail" placeholder="name@example.com" autocomplete="email" />
+      </div>
+
+      <button type="button" id="step1ContinueBtn" class="btn-orange" onclick="proceedToStep2()">
+        Continue &rarr;
+      </button>
+
+      <div style="margin-top:10px;text-align:center;">
+        <button type="button" onclick="jumpToDirectOttRedeem()" style="border:none;background:transparent;color:#0f172a;font-size:11px;font-weight:800;text-decoration:underline;cursor:pointer;">
+          Already have a 16-Digit OTT Voucher PIN? Redeem here &rarr;
+        </button>
+      </div>
     </div>
 
-    <!-- TAB 2: BUY SPEED PASS (PayLesotho M-Pesa / EcoCash / Bank Card / OTT PIN) -->
-    <div id="sec_buy" class="sec">
+    <!-- STEP 2: CHOOSE A PACKAGE & PAY WITH M-PESA / ECOCASH / 16-DIGIT OTT VOUCHER -->
+    <div id="step2_package" class="sec">
+      <div class="step-title-row">
+        <h2 class="step-title">Choose a package</h2>
+        <button type="button" class="step-back-btn" onclick="backToStep1()">&larr; Details</button>
+      </div>
+
       <form id="buyForm" action="$(link-login-only)" method="post" onsubmit="return handleBuySubmit(event)">
         <input type="hidden" name="username" value="test">
         <input type="hidden" name="password" value="123">
         <input type="hidden" name="dst" value="${postAuthDst}">
-        <div class="plan-list">${plansHtml}</div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;background:#090d16;border:1px solid #1e293b;border-radius:8px;padding:5px 8px;">
-          <img src="${baseUrl}/assets/aistudio/images_e91c64e4.jpeg" alt="" style="height:24px;width:92px;object-fit:contain;border-radius:4px;background:#fff;padding:1px 3px;" />
-          <span style="font-size:9px;font-family:monospace;color:#34d399;font-weight:800;">T-Connect &middot; PayLesotho</span>
+
+        <div class="pkg-grid">
+          ${plansCardsHtml}
         </div>
-        <div class="gw-grid" style="grid-template-columns:repeat(4,1fr);">
-          <button type="button" class="gw-btn active" onclick="selectGw('mpesa', this)">M-Pesa</button>
-          <button type="button" class="gw-btn" onclick="selectGw('ecocash', this)">EcoCash</button>
-          <button type="button" class="gw-btn" onclick="selectGw('card', this)">Bank/Card</button>
-          <button type="button" class="gw-btn" onclick="selectGw('ottvoucher', this)">OTT PIN</button>
-        </div>
-        <div class="field" id="payField">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <label class="lbl" id="payInputLabel" style="margin-bottom:0;">Vodacom M-Pesa Number (+266) *</label>
-            <span id="ottDigitCounter" style="font-size:9px;font-family:monospace;color:#34d399;font-weight:700;display:none;">0 / 16 digits</span>
+
+        <div class="pay-with-heading">Pay with</div>
+        <div class="pay-methods">
+          <div class="pay-row active" id="gwRow_mpesa" onclick="selectGw('mpesa')">
+            <div class="pay-row-left">
+              <span class="pay-badge badge-mpesa">M-PESA</span>
+              <span class="pay-row-title">M-Pesa</span>
+            </div>
+            <span class="pay-radio"></span>
           </div>
-          <input class="inp" type="text" inputmode="numeric" maxlength="8" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="5xxxxxxx / 6xxxxxxx (8 digits)" style="font-family:monospace;letter-spacing:1.2px;" required>
+
+          <div class="pay-row" id="gwRow_ecocash" onclick="selectGw('ecocash')">
+            <div class="pay-row-left">
+              <span class="pay-badge badge-ecocash">EcoCash</span>
+              <span class="pay-row-title">EcoCash</span>
+            </div>
+            <span class="pay-radio"></span>
+          </div>
+
+          <div class="pay-row" id="gwRow_ottvoucher" onclick="selectGw('ottvoucher')">
+            <div class="pay-row-left">
+              <span class="pay-badge badge-ott">OTT PIN</span>
+              <span class="pay-row-title">16-Digit OTT Voucher</span>
+            </div>
+            <span class="pay-radio"></span>
+          </div>
+        </div>
+
+        <div class="field" id="payField">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <label class="lbl" id="payInputLabel" style="margin-bottom:0;">Vodacom M-Pesa Number (+266) *</label>
+            <span id="ottDigitCounter" style="font-size:10px;font-family:monospace;color:#059669;font-weight:800;display:none;">0 / 16 digits</span>
+          </div>
+          <input class="inp" type="text" inputmode="numeric" maxlength="8" id="payInputVal" value="" oninput="handlePayInputFormat(this)" placeholder="5xxxxxxx (8 digits)" style="font-family:monospace;letter-spacing:1px;font-weight:800;" required>
+        </div>
+
+        <!-- Live USSD PIN Prompt Box (Shown immediately when M-Pesa / EcoCash USSD Push is sent) -->
+        <div id="ussdPinPushBox" class="ussd-box">
+          <div class="ussd-title" id="ussdPushTitle">&#128241; USSD PIN Prompt Sent to Your Phone</div>
+          <div class="ussd-desc" id="ussdPushDesc">
+            Please check your phone screen and enter your <strong>M-Pesa / EcoCash PIN</strong> to approve payment and receive your 16-Digit OTT Voucher PIN.
+          </div>
+          <button type="button" id="ussdCheckNowBtn" onclick="manualPollPayLesothoStatus()" style="width:100%;padding:9px 12px;border-radius:999px;border:1.5px solid ${accentColor};background:#ffffff;color:${accentColor};font-size:11px;font-weight:900;cursor:pointer;">
+            I've Entered My PIN &mdash; Check Payment Status
+          </button>
         </div>
 
         <!-- Post-Payment OTT Voucher Copy & Instant Redeem Box -->
-        <div id="ottCopyRedeemBox" style="display:none;background:#121829;border:1px solid #10b981;border-radius:10px;padding:10px;margin-bottom:8px;">
-          <div style="font-size:10px;color:#34d399;font-weight:800;margin-bottom:4px;">PAYMENT VERIFIED — OTT VOUCHER ISSUED</div>
-          <div id="issuedOttPinDisplay" style="font-family:monospace;font-size:14px;font-weight:900;color:#fff;letter-spacing:2px;background:#0b0f19;padding:8px;border-radius:8px;text-align:center;margin-bottom:6px;border:1px solid #232d42;"></div>
-          <button type="button" id="copyOttPinBtn" onclick="copyIssuedOttVoucher()" style="width:100%;padding:8px;border-radius:8px;border:none;background:#f05e17;color:#fff;font-size:11px;font-weight:800;cursor:pointer;margin-bottom:6px;">
-            Copy OTT Voucher PIN
+        <div id="ottCopyRedeemBox" class="ott-box">
+          <div style="font-size:11px;color:#047857;font-weight:900;margin-bottom:4px;">&#10003; PAYMENT APPROVED &mdash; YOUR 16-DIGIT OTT VOUCHER</div>
+          <div id="issuedOttPinDisplay" style="font-family:monospace;font-size:15px;font-weight:900;color:#0f172a;letter-spacing:1.8px;background:#ffffff;padding:9px;border-radius:12px;text-align:center;margin-bottom:8px;border:1.5px solid #10b981;"></div>
+          <button type="button" id="copyOttPinBtn" onclick="copyIssuedOttVoucher()" style="width:100%;padding:9px;border-radius:999px;border:none;background:${accentColor};color:#fff;font-size:12px;font-weight:900;cursor:pointer;margin-bottom:8px;">
+            Copy 16-Digit OTT Voucher PIN
           </button>
           <div id="redeemCopiedWrap">
-            <input class="inp" type="text" id="redeemCopiedPinInput" placeholder="16-digit OTT Voucher PIN" style="font-family:monospace;margin-bottom:6px;text-align:center;font-weight:800;" />
-            <button type="button" id="redeemCopiedBtn" onclick="redeemCopiedOttVoucher()" class="btn-emerald">
-              Redeem OTT Voucher &amp; Connect Now &rarr;
+            <input class="inp" type="text" id="redeemCopiedPinInput" placeholder="Paste 16-digit OTT Voucher PIN" style="font-family:monospace;margin-bottom:8px;text-align:center;font-weight:900;" />
+            <button type="button" id="redeemCopiedBtn" onclick="redeemCopiedOttVoucher()" class="btn-orange" style="background:#059669;">
+              Authenticate &amp; Connect Now &rarr;
             </button>
           </div>
         </div>
 
-        <button type="submit" id="buySubmitBtn" class="btn-emerald">Pay with PayLesotho &rarr;</button>
+        <button type="submit" id="buySubmitBtn" class="btn-orange">
+          Proceed with ${firstPlanNameClean} (M${firstPlan.price}) &rarr;
+        </button>
       </form>
     </div>
 
     ${termsEnabled ? `
-    <div class="tc-row" style="margin:8px 0 0;">
+    <div class="tc-row">
       <input type="checkbox" id="tcAcceptedBox" checked onchange="syncButtonsWithTerms()" />
       <label for="tcAcceptedBox" style="cursor:pointer;line-height:1.35;">
-        I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span> (T's &amp; C's apply)
+        I accept the <span class="tc-link" onclick="openTermsModal(event)">Terms &amp; Conditions</span>
       </label>
     </div>
     ` : ''}
-  </div><div style="height:8px"></div>
+  </div>
   `}
 </main>
 
 <script>
-  var selectedPlanPrice = ${plans[0]?.price || 10};
-  var selectedPlanName = '${String(plans[0]?.name || 'Daily Pass').replace(/'/g, '')}';
+  var selectedPlanId = '${firstPlan.id}';
+  var selectedPlanPrice = ${firstPlan.price || 10};
+  var selectedPlanName = '${firstPlanNameClean}';
+  var selectedPlanDurationSec = ${Number(firstPlan.durationSeconds) || 86400};
   var selectedGw = 'mpesa';
   var issuedOttPinRaw = '';
-  var hasCopiedIssuedOtt = true;
+  var activeTxId = '';
+  var pollTimer = null;
   var mtError = "$(error)";
   if (mtError && mtError.indexOf("$(") === -1 && mtError.trim().length > 0) {
     showErr(mtError);
   }
+
+  // Silent Cross-Hotspot Roaming Check:
+  // If this device (or saved subscriber phone) has an active Daily/Weekly/Monthly pass from ANY T-Connect hotspot,
+  // seamlessly continue their session at this location without showing any timer or charging again.
+  (function checkSeamlessRoamingOnLoad() {
+    try {
+      var savedPhone = '';
+      try { savedPhone = localStorage.getItem('tc_guest_phone') || ''; } catch (e) {}
+      var macVal = '$(mac)';
+      var cleanMac = (macVal && macVal.indexOf('$(') === -1) ? macVal : '';
+      if (!cleanMac && !savedPhone) return;
+      var q = '${baseUrl}/api/portal/check-roaming?mac=' + encodeURIComponent(cleanMac) + '&phone=' + encodeURIComponent(savedPhone) + '&scope=${encodeURIComponent(scope)}';
+      fetch(q)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d && d.roamed && d.active && !d.isUnlimited) {
+            var rf = document.getElementById('roamForm');
+            if (rf) rf.submit();
+          }
+        })
+        .catch(function(){});
+    } catch (e) {}
+  })();
 
   function showErr(msg) {
     var eb = document.getElementById('errBox');
@@ -1027,60 +1286,143 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (isTermsChecked()) showErr('');
   }
 
-  function handleVoucherInputFormat(inp) {
+  function handleStep1PhoneInput(inp) {
     if (!inp) return;
-    var raw = inp.value.replace(/\\D/g, '').slice(0, 16);
-    var groups = raw.match(/.{1,4}/g);
-    inp.value = groups ? groups.join(' ') : '';
-    var ctr = document.getElementById('voucherDigitCounter');
-    if (ctr) ctr.textContent = raw.length + ' / 16 digits';
+    var raw = inp.value.replace(/\\D/g, '').slice(0, 8);
+    inp.value = raw;
     if (raw.length > 0) showErr('');
   }
 
-  function validateGuestFields() {
+  function proceedToStep2() {
     if (!isTermsChecked()) {
-      showErr('Please tick the Terms & Conditions box to proceed.');
-      return false;
+      showErr('Please accept the Terms & Conditions to continue.');
+      return;
+    }
+    var fn = (document.getElementById('guestFirstName') ? document.getElementById('guestFirstName').value : '').trim();
+    var ln = (document.getElementById('guestLastName') ? document.getElementById('guestLastName').value : '').trim();
+    var ph = (document.getElementById('guestMobile') ? document.getElementById('guestMobile').value : '').replace(/\\D/g, '');
+    if (!fn) {
+      showErr('Please enter your first name.');
+      return;
+    }
+    if (!ln) {
+      showErr('Please enter your surname.');
+      return;
+    }
+    if (!/^[56]\\d{7}$/.test(ph)) {
+      showErr('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
+      return;
     }
     showErr('');
-    return true;
-  }
+    try {
+      localStorage.setItem('tc_guest_fn', fn);
+      localStorage.setItem('tc_guest_ln', ln);
+      localStorage.setItem('tc_guest_phone', ph);
+    } catch (e) {}
 
-  function getGuestPayload(extra) {
+    // Check if this mobile number already has an active Daily/Weekly/Monthly package across hotspots
+    fetch('${baseUrl}/api/portal/check-roaming?mac=' + encodeURIComponent('$(mac)') + '&phone=' + encodeURIComponent(ph) + '&scope=${encodeURIComponent(scope)}')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.roamed && d.active && !d.isUnlimited) {
+          var rf = document.getElementById('roamForm');
+          if (rf) { rf.submit(); return; }
+        }
+      })
+      .catch(function(){});
+
+    var s1 = document.getElementById('step1_details');
+    var s2 = document.getElementById('step2_package');
+    if (s1) s1.className = 'sec';
+    if (s2) s2.className = 'sec active';
+
+    // Auto-select M-Pesa (starts with 5) or EcoCash (starts with 6) and pre-fill phone number
+    if (ph.charAt(0) === '6') {
+      selectGw('ecocash');
+    } else {
+      selectGw('mpesa');
+    }
     var payInp = document.getElementById('payInputVal');
-    var rawPhone = (payInp && selectedGw !== 'ottvoucher') ? payInp.value.replace(/\\D/g, '') : '';
-    var base = {
-      firstName: 'Hotspot',
-      lastName: 'Guest',
-      guestName: 'Hotspot Guest',
-      countryCode: '+266',
-      phone: rawPhone,
-      guestPhone: rawPhone ? ('+266 ' + rawPhone) : '',
-      email: '',
-      mac: '$(mac)',
-      ip: '$(ip)',
-      scope: '${scope}'
-    };
-    for (var k in extra) base[k] = extra[k];
-    return base;
+    if (payInp && selectedGw !== 'ottvoucher') {
+      payInp.value = ph;
+    }
   }
 
-  function switchTab(tab) {
+  function backToStep1() {
     showErr('');
-    ['voucher', 'buy'].forEach(function(t) {
-      var btn = document.getElementById('tabBtn_' + t);
-      var sec = document.getElementById('sec_' + t);
-      if (btn) btn.className = 'tab-btn' + (t === tab ? ' active' : '');
-      if (sec) sec.className = 'sec' + (t === tab ? ' active' : '');
-    });
+    var s1 = document.getElementById('step1_details');
+    var s2 = document.getElementById('step2_package');
+    if (s2) s2.className = 'sec';
+    if (s1) s1.className = 'sec active';
   }
 
-  function selectPlan(id, price, name, el) {
+  function jumpToDirectOttRedeem() {
+    showErr('');
+    var s1 = document.getElementById('step1_details');
+    var s2 = document.getElementById('step2_package');
+    if (s1) s1.className = 'sec';
+    if (s2) s2.className = 'sec active';
+    selectGw('ottvoucher');
+  }
+
+  function updateProceedButtonLabel() {
+    var btn = document.getElementById('buySubmitBtn');
+    if (!btn) return;
+    if (selectedGw === 'ottvoucher') {
+      btn.textContent = 'Redeem OTT Voucher & Connect \\u2192';
+    } else {
+      btn.textContent = 'Proceed with ' + selectedPlanName + ' (M' + selectedPlanPrice + ') \\u2192';
+    }
+  }
+
+  function selectPlan(id, price, name, durSec, el) {
+    selectedPlanId = id;
     selectedPlanPrice = price;
     selectedPlanName = name;
-    var items = document.querySelectorAll('.plan-item');
+    selectedPlanDurationSec = durSec || 86400;
+    var items = document.querySelectorAll('.pkg-card');
     for (var i = 0; i < items.length; i++) items[i].classList.remove('selected');
     if (el) el.classList.add('selected');
+    updateProceedButtonLabel();
+  }
+
+  function selectGw(gw) {
+    showErr('');
+    selectedGw = gw;
+    ['mpesa', 'ecocash', 'ottvoucher'].forEach(function(k) {
+      var row = document.getElementById('gwRow_' + k);
+      if (row) row.className = 'pay-row' + (k === gw ? ' active' : '');
+    });
+    var lbl = document.getElementById('payInputLabel');
+    var inp = document.getElementById('payInputVal');
+    var ctr = document.getElementById('ottDigitCounter');
+    var step1Phone = (document.getElementById('guestMobile') ? document.getElementById('guestMobile').value : '').replace(/\\D/g, '');
+    if (gw === 'ottvoucher') {
+      if (lbl) lbl.textContent = '16-Digit OTT Voucher PIN *';
+      if (inp) {
+        inp.value = '';
+        inp.placeholder = '1234 5678 9012 3456';
+        inp.maxLength = 19;
+      }
+      if (ctr) { ctr.style.display = 'inline'; ctr.textContent = '0 / 16 digits'; }
+    } else if (gw === 'mpesa') {
+      if (lbl) lbl.textContent = 'Vodacom M-Pesa Number (+266) *';
+      if (inp) {
+        inp.maxLength = 8;
+        inp.placeholder = '5xxxxxxx (8 digits)';
+        inp.value = step1Phone || '';
+      }
+      if (ctr) ctr.style.display = 'none';
+    } else {
+      if (lbl) lbl.textContent = 'EcoCash Mobile Number (+266) *';
+      if (inp) {
+        inp.maxLength = 8;
+        inp.placeholder = '6xxxxxxx (8 digits)';
+        inp.value = step1Phone || '';
+      }
+      if (ctr) ctr.style.display = 'none';
+    }
+    updateProceedButtonLabel();
   }
 
   function handlePayInputFormat(inp) {
@@ -1091,6 +1433,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       inp.value = groups ? groups.join(' ') : '';
       var ctr = document.getElementById('ottDigitCounter');
       if (ctr) ctr.textContent = raw.length + ' / 16 digits';
+      if (raw.length > 0) showErr('');
     } else {
       if (raw.length > 0 && raw.charAt(0) !== '5' && raw.charAt(0) !== '6') {
         showErr('Lesotho (+266) numbers must start with 5 or 6.');
@@ -1103,42 +1446,78 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     }
   }
 
-  function selectGw(gw, el) {
-    showErr('');
-    selectedGw = gw;
-    var btns = document.querySelectorAll('.gw-btn');
-    for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
-    if (el) el.classList.add('active');
-    var lbl = document.getElementById('payInputLabel');
-    var inp = document.getElementById('payInputVal');
-    var ctr = document.getElementById('ottDigitCounter');
+  function getGuestPayload(extra) {
+    var fn = (document.getElementById('guestFirstName') ? document.getElementById('guestFirstName').value : '').trim() || 'Hotspot';
+    var ln = (document.getElementById('guestLastName') ? document.getElementById('guestLastName').value : '').trim() || 'Guest';
+    var em = (document.getElementById('guestEmail') ? document.getElementById('guestEmail').value : '').trim();
+    var step1Phone = (document.getElementById('guestMobile') ? document.getElementById('guestMobile').value : '').replace(/\\D/g, '');
+    var payInp = document.getElementById('payInputVal');
+    var payPhone = (payInp && selectedGw !== 'ottvoucher') ? payInp.value.replace(/\\D/g, '') : '';
+    var rawPhone = payPhone || step1Phone;
+    var base = {
+      firstName: fn,
+      lastName: ln,
+      guestName: (fn + ' ' + ln).trim(),
+      countryCode: '+266',
+      phone: rawPhone,
+      guestPhone: rawPhone ? ('+266 ' + rawPhone) : '',
+      email: em,
+      mac: '$(mac)',
+      ip: '$(ip)',
+      scope: '${scope}',
+      planId: selectedPlanId,
+      planName: selectedPlanName,
+      durationSeconds: selectedPlanDurationSec
+    };
+    for (var k in extra) base[k] = extra[k];
+    return base;
+  }
+
+  function handleFreeSubmit(e) {
+    try {
+      fetch('${baseUrl}/api/portal/guest-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Access', durationSeconds: 7200 }))
+      }).catch(function(){});
+    } catch (err) {}
+    return true;
+  }
+
+  function showIssuedOttVoucherBox(pinStr) {
+    issuedOttPinRaw = String(pinStr || '').replace(/\\D/g, '');
+    var ussdBox = document.getElementById('ussdPinPushBox');
+    var box = document.getElementById('ottCopyRedeemBox');
+    var disp = document.getElementById('issuedOttPinDisplay');
+    var pField = document.getElementById('payField');
+    var rInp = document.getElementById('redeemCopiedPinInput');
     var btn = document.getElementById('buySubmitBtn');
-    inp.value = '';
-    if (gw === 'ottvoucher') {
-      lbl.textContent = '16-Digit OTT Voucher PIN *';
-      inp.placeholder = '1234 5678 9012 3456';
-      inp.maxLength = 19;
-      if (ctr) { ctr.style.display = 'inline'; ctr.textContent = '0 / 16 digits'; }
-      if (btn) btn.textContent = 'Redeem OTT Voucher & Connect \\u2192';
-    } else if (gw === 'mpesa') {
-      lbl.textContent = 'Vodacom M-Pesa Number (+266) *';
-      inp.placeholder = '5xxxxxxx (8 digits)';
-      inp.maxLength = 8;
-      if (ctr) ctr.style.display = 'none';
-      if (btn) btn.textContent = 'Pay with M-Pesa (PayLesotho) \\u2192';
-    } else if (gw === 'card') {
-      lbl.textContent = 'Bank / Card Contact Number (+266) *';
-      inp.placeholder = '5xxxxxxx / 6xxxxxxx (8 digits)';
-      inp.maxLength = 8;
-      if (ctr) ctr.style.display = 'none';
-      if (btn) btn.textContent = 'Pay with Bank / Card (XPayments) \\u2192';
-    } else {
-      lbl.textContent = 'EcoCash Mobile Number (+266) *';
-      inp.placeholder = '6xxxxxxx (8 digits)';
-      inp.maxLength = 8;
-      if (ctr) ctr.style.display = 'none';
-      if (btn) btn.textContent = 'Pay with EcoCash (PayLesotho) \\u2192';
-    }
+    if (ussdBox) ussdBox.style.display = 'none';
+    if (pField) pField.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+    var formatted = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
+    if (disp) disp.textContent = formatted + ' (M' + selectedPlanPrice + ')';
+    if (rInp) rInp.value = formatted;
+    if (box) box.style.display = 'block';
+  }
+
+  function manualPollPayLesothoStatus() {
+    if (!activeTxId) return;
+    var chkBtn = document.getElementById('ussdCheckNowBtn');
+    if (chkBtn) chkBtn.textContent = 'Checking M-Pesa / EcoCash PIN confirmation...';
+    fetch('${baseUrl}/api/gateways/paylesotho/status/' + encodeURIComponent(activeTxId))
+      .then(function(r) { return r.json(); })
+      .then(function(st) {
+        if (st && st.success && st.status === 'completed' && st.ottVoucherPin) {
+          if (pollTimer) clearInterval(pollTimer);
+          showIssuedOttVoucherBox(st.ottVoucherPin);
+        } else {
+          if (chkBtn) chkBtn.textContent = 'Still awaiting PIN confirmation — Tap to Check Again';
+        }
+      })
+      .catch(function() {
+        if (chkBtn) chkBtn.textContent = "I've Entered My PIN — Check Payment Status";
+      });
   }
 
   function copyIssuedOttVoucher() {
@@ -1153,7 +1532,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       try { document.execCommand('copy'); } catch (e) {}
       document.body.removeChild(ta);
     }
-    hasCopiedIssuedOtt = true;
     fetch('${baseUrl}/api/gateways/paylesotho/ott-voucher/mark-copied', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1161,11 +1539,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     }).catch(function(){});
     var copyBtn = document.getElementById('copyOttPinBtn');
     if (copyBtn) {
-      copyBtn.textContent = '\\u2713 Copied to Clipboard!';
+      copyBtn.textContent = '\\u2713 Copied! Now Tap Authenticate & Connect Below';
       copyBtn.style.background = '#059669';
     }
-    var rWrap = document.getElementById('redeemCopiedWrap');
-    if (rWrap) rWrap.style.display = 'block';
     var rInp = document.getElementById('redeemCopiedPinInput');
     if (rInp) rInp.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
   }
@@ -1178,102 +1554,68 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       return;
     }
     var rBtn = document.getElementById('redeemCopiedBtn');
-    if (rBtn) { rBtn.disabled = true; rBtn.textContent = 'Redeeming OTT Voucher...'; }
+    if (rBtn) { rBtn.disabled = true; rBtn.textContent = 'Authenticating & Starting Session...'; }
     fetch('${baseUrl}/api/vouchers/redeem', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(getGuestPayload({
         code: pinDigits,
         expectedAmount: selectedPlanPrice,
+        planId: selectedPlanId,
         planName: selectedPlanName,
+        durationSeconds: selectedPlanDurationSec,
         flexibleAmount: true,
         mode: 'ottvoucher'
       }))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (!data || !data.success) {
-        if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Redeem OTT Voucher & Connect Now \\u2192'; }
+        if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Authenticate & Connect Now \\u2192'; }
         showErr((data && data.message) ? data.message : 'OTT Voucher verification failed.');
         return;
       }
       document.getElementById('buyForm').submit();
     }).catch(function() {
-      if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Redeem OTT Voucher & Connect Now \\u2192'; }
+      if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Authenticate & Connect Now \\u2192'; }
       showErr('Network error redeeming OTT Voucher.');
     });
   }
 
-  function handleFreeSubmit(e) {
-    try {
-      var origUrl = "$(link-orig)";
-      if (origUrl && origUrl.indexOf("$(") === -1 && origUrl.indexOf("10.10.") === -1 && origUrl.indexOf("169.58.98.92") === -1 && origUrl.indexOf("captive.apple") === -1 && origUrl.indexOf("generate_204") === -1 && /^https?:\\/\\//i.test(origUrl)) {
-        var fForm = document.getElementById('freeForm');
-        if (fForm && fForm.elements && fForm.elements['dst']) {
-          fForm.elements['dst'].value = origUrl;
-        }
-      }
-      fetch('${baseUrl}/api/portal/guest-connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi (Unlimited)', durationSeconds: 0 }))
-      }).catch(function(){});
-    } catch (err) {}
-    return true;
-  }
-
-  function handleVoucherSubmit(e) {
-    e.preventDefault();
-    if (!validateGuestFields()) return false;
-    var code = document.getElementById('voucherInput').value.replace(/\\D/g, '');
-    if (code.length !== 16) { showErr('Please enter a valid 16-digit OTT Voucher PIN.'); return false; }
-    var btn = document.getElementById('voucherSubmitBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Verifying 16-Digit OTT Voucher...'; }
-    fetch('${baseUrl}/api/vouchers/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(getGuestPayload({ code: code, mode: 'voucher' }))
-    }).then(function(r) { return r.json(); }).then(function(data) {
-      if (!data || !data.success) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Redeem OTT Voucher & Connect \\u2192'; }
-        showErr((data && data.message) ? data.message : 'Invalid or expired 16-digit OTT voucher.');
-        return;
-      }
-      document.getElementById('voucherForm').submit();
-    }).catch(function() {
-      if (btn) { btn.disabled = false; btn.textContent = 'Redeem OTT Voucher & Connect \\u2192'; }
-      showErr('Unable to verify OTT voucher code with controller.');
-    });
-    return false;
-  }
-
   function handleBuySubmit(e) {
     e.preventDefault();
-    if (!validateGuestFields()) return false;
+    if (!isTermsChecked()) {
+      showErr('Please accept the Terms & Conditions to proceed.');
+      return false;
+    }
+    showErr('');
     var val = document.getElementById('payInputVal').value.replace(/\\D/g, '');
     if (selectedGw === 'ottvoucher') {
       if (val.length !== 16) {
-        showErr('OTT Voucher PIN must be exactly 16 digits (' + val.length + '/16 digits entered).');
+        showErr('OTT Voucher PIN must be 16 digits (' + val.length + '/16 entered).');
         return false;
       }
       var btn0 = document.getElementById('buySubmitBtn');
-      if (btn0) { btn0.disabled = true; btn0.textContent = 'Verifying OTT Voucher Denomination...'; }
+      if (btn0) { btn0.disabled = true; btn0.textContent = 'Verifying 16-Digit OTT Voucher...'; }
       fetch('${baseUrl}/api/vouchers/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(getGuestPayload({
           code: val,
           expectedAmount: selectedPlanPrice,
+          planId: selectedPlanId,
           planName: selectedPlanName,
+          durationSeconds: selectedPlanDurationSec,
+          flexibleAmount: true,
           mode: 'ottvoucher'
         }))
       }).then(function(r) { return r.json(); }).then(function(data) {
         if (!data || !data.success) {
-          if (btn0) { btn0.disabled = false; btn0.textContent = 'Redeem OTT Voucher & Connect \\u2192'; }
+          if (btn0) { btn0.disabled = false; updateProceedButtonLabel(); }
           showErr((data && data.message) ? data.message : 'OTT Voucher verification failed.');
           return;
         }
         document.getElementById('buyForm').submit();
       }).catch(function() {
-        if (btn0) { btn0.disabled = false; btn0.textContent = 'Redeem OTT Voucher & Connect \\u2192'; }
+        if (btn0) { btn0.disabled = false; updateProceedButtonLabel(); }
         showErr('Network error verifying OTT voucher.');
       });
       return false;
@@ -1284,7 +1626,18 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       return false;
     }
     var btn = document.getElementById('buySubmitBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Initiating PayLesotho Payment...'; }
+    var gwLabel = selectedGw === 'ecocash' ? 'EcoCash' : 'M-Pesa';
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending ' + gwLabel + ' USSD PIN Push...'; }
+
+    // Immediately show the USSD PIN Push prompt so the user knows to enter their PIN on their handset
+    var ussdBox = document.getElementById('ussdPinPushBox');
+    var ussdTitle = document.getElementById('ussdPushTitle');
+    var ussdDesc = document.getElementById('ussdPushDesc');
+    if (ussdTitle) ussdTitle.textContent = 'USSD PIN Prompt Sent to +266 ' + val;
+    if (ussdDesc) {
+      ussdDesc.innerHTML = 'Check your phone now and enter your <strong>' + gwLabel + ' PIN</strong> to approve <strong>M' + selectedPlanPrice + ' (' + selectedPlanName + ')</strong>. Your 16-Digit OTT Voucher will appear below automatically.';
+    }
+    if (ussdBox) ussdBox.style.display = 'block';
 
     fetch('${baseUrl}/api/gateways/paylesotho/initiate', {
       method: 'POST',
@@ -1293,59 +1646,47 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         phoneNumber: val,
         channel: selectedGw,
         amount: selectedPlanPrice,
+        planId: selectedPlanId,
         planName: selectedPlanName,
+        durationSeconds: selectedPlanDurationSec,
         currency: 'M'
       }))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (!data || !data.success) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Pay with PayLesotho \\u2192'; }
-        showErr((data && data.message) ? data.message : 'PayLesotho payment initiation failed.');
+        if (ussdBox) ussdBox.style.display = 'none';
+        if (btn) { btn.disabled = false; updateProceedButtonLabel(); }
+        showErr((data && data.message) ? data.message : (gwLabel + ' USSD push initiation failed.'));
         return;
       }
+      activeTxId = data.transactionId || '';
       if (data.status === 'completed' && data.ottVoucherPin) {
-        issuedOttPinRaw = String(data.ottVoucherPin).replace(/\\D/g, '');
-        hasCopiedIssuedOtt = true;
-        var box0 = document.getElementById('ottCopyRedeemBox');
-        var disp0 = document.getElementById('issuedOttPinDisplay');
-        var pField0 = document.getElementById('payField');
-        var rInp0 = document.getElementById('redeemCopiedPinInput');
-        if (pField0) pField0.style.display = 'none';
-        if (btn) btn.style.display = 'none';
-        if (disp0) disp0.textContent = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ') + ' (M' + selectedPlanPrice + ')';
-        if (rInp0) rInp0.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
-        if (box0) box0.style.display = 'block';
+        setTimeout(function() {
+          showIssuedOttVoucherBox(data.ottVoucherPin);
+        }, 1200);
         return;
       }
-      var txId = data.transactionId;
       var attempts = 0;
-      var timer = setInterval(function() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(function() {
         attempts++;
-        fetch('${baseUrl}/api/gateways/paylesotho/status/' + encodeURIComponent(txId))
+        fetch('${baseUrl}/api/gateways/paylesotho/status/' + encodeURIComponent(activeTxId))
           .then(function(r) { return r.json(); })
           .then(function(st) {
             if (st && st.success && st.status === 'completed' && st.ottVoucherPin) {
-              clearInterval(timer);
-              issuedOttPinRaw = String(st.ottVoucherPin).replace(/\\D/g, '');
-              hasCopiedIssuedOtt = true;
-              var box = document.getElementById('ottCopyRedeemBox');
-              var disp = document.getElementById('issuedOttPinDisplay');
-              var pField = document.getElementById('payField');
-              var rInp = document.getElementById('redeemCopiedPinInput');
-              if (pField) pField.style.display = 'none';
-              if (btn) btn.style.display = 'none';
-              if (disp) disp.textContent = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ') + ' (M' + selectedPlanPrice + ')';
-              if (rInp) rInp.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
-              if (box) box.style.display = 'block';
-            } else if ((st && st.status === 'failed') || attempts > 20) {
-              clearInterval(timer);
-              if (btn) { btn.disabled = false; btn.textContent = 'Pay with PayLesotho \\u2192'; }
-              showErr('Payment was not approved in time.');
+              clearInterval(pollTimer);
+              showIssuedOttVoucherBox(st.ottVoucherPin);
+            } else if ((st && st.status === 'failed') || attempts > 30) {
+              clearInterval(pollTimer);
+              if (ussdBox) ussdBox.style.display = 'none';
+              if (btn) { btn.disabled = false; updateProceedButtonLabel(); }
+              showErr('PIN confirmation timed out or was cancelled. Please try again.');
             }
           }).catch(function(){});
-      }, 1500);
+      }, 1800);
     }).catch(function() {
-      if (btn) { btn.disabled = false; btn.textContent = 'Pay with PayLesotho \\u2192'; }
-      showErr('Network error communicating with PayLesotho.');
+      if (ussdBox) ussdBox.style.display = 'none';
+      if (btn) { btn.disabled = false; updateProceedButtonLabel(); }
+      showErr('Network error communicating with PayLesotho gateway.');
     });
     return false;
   }
@@ -1364,15 +1705,52 @@ app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
   res.send(html);
 });
 
-function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', reason = 'post_auth'): string {
-  const baseUrl = resolveControllerBaseUrl(host, protocol);
-  const allConfigs = loadSavedPortalConfigs();
-  const scopeCfg = allConfigs[scope] || allConfigs['hotspot'] || {};
-  if (Boolean(scopeCfg.allowFreeAccess)) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0; url=https://www.google.com"><title>Connected</title><script>window.location.replace('https://www.google.com');</script></head><body style="background:#000"></body></html>`;
+// Native Captive Portal Auto-Close endpoint (Never redirects to google.com; closes the OS Captive Portal sheet so the user keeps using their device)
+app.get('/api/portal/cna-close', (_req: Request, res: Response) => {
+  const closeHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Connected — T-Connect Wi-Fi</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
+  body{min-height:100vh;background:#f8fafc;color:#0f172a;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
+  .card{max-width:360px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid #f05e17;border-radius:24px;padding:28px 22px;box-shadow:0 20px 50px rgba(15,23,42,0.12)}
+  .badge{width:54px;height:54px;border-radius:999px;background:#ecfdf5;border:2px solid #10b981;color:#059669;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;margin:0 auto 14px}
+  h1{font-size:20px;font-weight:900;margin-bottom:8px;color:#0f172a}
+  p{font-size:13px;color:#475569;margin-bottom:18px;line-height:1.5;font-weight:500}
+  .btn{display:block;width:100%;padding:12px 16px;border-radius:999px;border:none;background:#f05e17;color:#fff;font-weight:900;font-size:14px;cursor:pointer}
+</style>
+<script>
+  function dismissCaptiveSheet() {
+    try { window.close(); } catch (e) {}
+    try { window.open('', '_self', ''); window.close(); } catch (e) {}
+    try { if (window.history && window.history.length > 1) window.history.back(); } catch (e) {}
   }
+  window.addEventListener('load', function() {
+    setTimeout(dismissCaptiveSheet, 150);
+  });
+</script>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">&#10003;</div>
+    <h1>You're Connected!</h1>
+    <p>Your T-Connect Wi-Fi session is active. You can close this window and continue using your device.</p>
+    <button type="button" class="btn" onclick="dismissCaptiveSheet()">Done &mdash; Close Window</button>
+  </div>
+</body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(closeHtml);
+});
+
+function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _reason = 'post_auth'): string {
+  const baseUrl = resolveControllerBaseUrl(host, protocol);
+  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
-  const enabled = sponsorCfg.enabled !== false;
+  const enabled = Boolean(sponsorCfg.enabled);
   const defaultLib = [
     {
       id: 'carousel_tconnect_offers',
@@ -1422,7 +1800,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', r
     defaultLib[0];
 
   if (!enabled || !chosenAd) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title><script>try{window.close();}catch(e){}try{window.open('','_self','');window.close();}catch(e){}window.location.replace('https://www.google.com');</script></head><body style="background:#000"></body></html>`;
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connected</title><script>try{window.close();}catch(e){}try{window.open('','_self','');window.close();}catch(e){}window.location.replace('${cnaCloseUrl}');</script></head><body style="background:#f8fafc"></body></html>`;
   }
 
   let videoSrc = String(chosenAd.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
@@ -1589,55 +1967,18 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
     if (muteBtn) muteBtn.textContent = vid.muted ? 'Unmute Audio' : 'Mute Audio';
   }
 
-  function sanitizeReleaseUrl(candidate) {
-    var raw = String(candidate || '').trim();
-    if (!raw || raw.indexOf('$(') !== -1) return 'https://www.google.com';
-    var lower = raw.toLowerCase();
-    if (
-      lower.indexOf('/portal') !== -1 ||
-      lower.indexOf('169.58.98.92') !== -1 ||
-      lower.indexOf('10.10.') !== -1 ||
-      lower.indexOf('192.168.') !== -1 ||
-      lower.indexOf('/login') !== -1 ||
-      lower.indexOf('alogin') !== -1 ||
-      lower.indexOf('hotspot-detect') !== -1 ||
-      lower.indexOf('generate_204') !== -1 ||
-      lower.indexOf('captive.apple.com') !== -1
-    ) {
-      return 'https://www.google.com';
-    }
-    return raw;
-  }
-
   function releaseToInternet(e) {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    var dst = 'https://www.google.com';
-    try {
-      var params = new URLSearchParams(window.location.search);
-      var orig = params.get('user_url') || params.get('link_orig') || params.get('dst');
-      dst = sanitizeReleaseUrl(orig);
-      var loginUrl = params.get('link_login_only');
-      if (loginUrl && loginUrl.indexOf('$(') === -1) {
-        var rUser = params.get('username') || 'T-TRIAL';
-        var rPass = params.get('password') || '123';
-        window.location.replace(
-          loginUrl +
-            '?username=' + encodeURIComponent(rUser) +
-            '&password=' + encodeURIComponent(rPass) +
-            '&dst=' + encodeURIComponent(dst)
-        );
-        return;
-      }
-    } catch (err) {}
+    var closeTarget = '${cnaCloseUrl}';
     try { window.close(); } catch (err) {}
     try { window.open('', '_self', ''); window.close(); } catch (err) {}
     if (window.top && window.top !== window.self) {
-      try { window.top.location.replace(dst); return; } catch (err) {}
+      try { window.top.location.replace(closeTarget); return; } catch (err) {}
     }
-    window.location.replace(dst);
+    window.location.replace(closeTarget);
   }
 
   if (vid) {
@@ -1649,19 +1990,16 @@ ${mediaType === 'image_carousel' && rawSlides.length > 1 ? `
 }
 
 // MikroTik alogin.html (Served immediately after /login succeeds on the router):
-// Immediately redirects the newly authenticated guest to the full-screen Sponsor Ad Carousel
-// (with the top-right X button to release to the internet), or directly to the internet if ads are disabled.
+// Only shows Sponsor Ad Carousel when the Sponsor Ad toggle is ON; otherwise auto-closes the captive portal window immediately.
 app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const scope = (req.query.scope as string) || 'hotspot';
   const baseUrl = resolveControllerBaseUrl(host, protocol);
-  const allConfigs = loadSavedPortalConfigs();
-  const scopeCfg = allConfigs[scope] || allConfigs['hotspot'] || {};
-  const isFreeMode = Boolean(scopeCfg.allowFreeAccess);
-  const videoAdsEnabled = !isFreeMode && (serverStore.sponsorAd?.enabled !== false);
+  const videoAdsEnabled = Boolean(serverStore.sponsorAd?.enabled);
   const adUrl = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
-  const defaultTarget = videoAdsEnabled ? adUrl : 'https://www.google.com';
+  const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
+  const defaultTarget = videoAdsEnabled ? adUrl : cnaCloseUrl;
 
   const releaseHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -1672,12 +2010,12 @@ app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
 <title>Connected — T-Connect Hotspot</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
-  body{min-height:100vh;background:#0b0f19;color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
-  .card{max-width:360px;width:100%;background:#121829;border:1px solid #232d42;border-radius:20px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,0.8)}
-  .badge{width:48px;height:48px;border-radius:999px;background:rgba(16,185,129,0.2);border:2px solid #10b981;color:#34d399;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 12px}
-  h1{font-size:18px;font-weight:900;margin-bottom:6px;color:#fff}
-  p{font-size:12px;color:#94a3b8;margin-bottom:16px;line-height:1.4}
-  .btn{display:block;width:100%;padding:12px 16px;border-radius:12px;background:#f05e17;color:#fff;font-weight:800;font-size:13px;text-decoration:none}
+  body{min-height:100vh;background:#f8fafc;color:#0f172a;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center}
+  .card{max-width:360px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid #f05e17;border-radius:24px;padding:24px;box-shadow:0 20px 50px rgba(15,23,42,0.12)}
+  .badge{width:48px;height:48px;border-radius:999px;background:#ecfdf5;border:2px solid #10b981;color:#059669;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;margin:0 auto 12px}
+  h1{font-size:18px;font-weight:900;margin-bottom:6px;color:#0f172a}
+  p{font-size:12px;color:#475569;margin-bottom:16px;line-height:1.4}
+  .btn{display:block;width:100%;padding:12px 16px;border-radius:999px;background:#f05e17;color:#fff;font-weight:800;font-size:13px;text-decoration:none}
 </style>
 <script>
   (function() {
@@ -1690,7 +2028,7 @@ app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
   <div class="card">
     <div class="badge">&#10003;</div>
     <h1>Connected to T-Connect Hotspot</h1>
-    <p>Loading partner showcase...</p>
+    <p>${videoAdsEnabled ? 'Loading partner showcase...' : 'Closing captive portal...'}</p>
     <a class="btn" href="${defaultTarget}">Continue &rarr;</a>
   </div>
 </body>
@@ -4226,6 +4564,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     const nowIso = new Date().toISOString();
     const txRef = ottCheck.receipt || `OTT-${Date.now()}`;
 
+    const expiresIso = new Date(Date.now() + resolvedDuration * 1000).toISOString();
     const entry = {
       id: `guest_ott_vch_${Date.now()}`,
       firstName: firstName || '',
@@ -4249,9 +4588,13 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       planId: planId || 'hs_1d',
       planName: resolvedPlanName,
       durationSeconds: resolvedDuration,
+      startedAt: nowIso,
+      expiresAt: expiresIso,
+      roamedSites: [routerCtx.siteName],
       amount: resolvedPrice,
       transactionRef: txRef,
-      capturedAt: nowIso
+      capturedAt: nowIso,
+      lastSeenAt: nowIso
     };
 
     const txRecord = {
@@ -4371,6 +4714,8 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
 app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
   const queryMac = String(req.query.mac || '').trim().toLowerCase();
   const queryPhone = String(req.query.phone || '').replace(/\D/g, '');
+  const querySite = String(req.query.site || req.query.siteName || '').trim();
+  const queryScope = String(req.query.scope || '').trim();
 
   if (!queryMac && queryPhone.length < 8) {
     return res.json({ roamed: false, active: false });
@@ -4390,14 +4735,30 @@ app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
   }
 
   const isFree = existing.mode === 'free' || existing.voucherCode === 'FREE-PASS';
-  const startMs = existing.capturedAt ? new Date(existing.capturedAt).getTime() : now;
+  const startMs = existing.startedAt
+    ? new Date(existing.startedAt).getTime()
+    : existing.capturedAt
+    ? new Date(existing.capturedAt).getTime()
+    : now;
   const durationSec = Number(existing.durationSeconds) || 86400;
   const elapsedSec = Math.floor((now - startMs) / 1000);
   const remainingSec = isFree ? 0 : Math.max(0, durationSec - elapsedSec);
-  const isActive = isFree || remainingSec > 0;
+  const isActive = isFree ? elapsedSec < 7200 : remainingSec > 0;
 
   if (!isActive) {
     return res.json({ roamed: false, active: false, expired: true });
+  }
+
+  // Record roaming handover if user moved to a new site/hotspot
+  const targetRouterCtx = resolveAdoptedRouterForLead({ scope: queryScope || existing.scope, siteName: querySite });
+  const currentLocationName = querySite || targetRouterCtx.siteName || existing.siteName || 'T-Connect Hotspot';
+  if (currentLocationName && existing.siteName !== currentLocationName) {
+    const prevSites: string[] = Array.isArray(existing.roamedSites) ? existing.roamedSites : [existing.siteName].filter(Boolean);
+    existing.roamedSites = Array.from(new Set([...prevSites, currentLocationName]));
+    existing.siteName = currentLocationName;
+    existing.routerName = targetRouterCtx.routerName || existing.routerName;
+    existing.lastSeenAt = new Date().toISOString();
+    saveServerPortalStore(serverStore);
   }
 
   return res.json({
@@ -4407,7 +4768,7 @@ app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
     remainingSeconds: remainingSec,
     elapsedSeconds: elapsedSec,
     session: existing,
-    message: `Active session recognized! Roaming seamlessly from ${existing.siteName || 'previous hotspot'}.`
+    message: `Active session recognized! Roaming seamlessly across T-Connect hotspots.`
   });
 });
 
@@ -4768,7 +5129,7 @@ function resolveDistrictForRouter(routerName = '', siteName = ''): string {
   return 'Maseru';
 }
 
-function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
+function sanitizeLeadForPartner(ev: any, _defaultCampaign = 'Sponsored Wi-Fi') {
   const routerCtx = resolveAdoptedRouterForLead(ev);
   const firstName = String(ev.firstName || '').trim() || String(ev.guestName || 'Guest').split(' ')[0] || 'Guest';
   const lastName =
@@ -4778,46 +5139,25 @@ function sanitizeLeadForPartner(ev: any, defaultCampaign = 'Sponsored Wi-Fi') {
       .slice(1)
       .join(' ')
       .trim();
-  const fullName = String(ev.guestName || `${firstName} ${lastName}`.trim() || 'Guest User');
-  const countryCode = String(ev.countryCode || '+266').trim();
-  const rawPhone = String(ev.phone || '').trim();
-  const fullPhone = String(ev.guestPhone || (rawPhone ? `${countryCode} ${rawPhone}` : '')).trim();
-  const email = String(ev.email || ev.guestEmail || '').trim();
   const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
   const hotspotPolicyScope = rawScope === 'village' ? 'community' : rawScope;
   const siteName = String(ev.siteName || routerCtx.siteName || 'T-Connect Hotspot');
-  const hotspotName = String(ev.hotspotName || ev.routerName || routerCtx.routerName || `${siteName} Starlink Hotspot`);
-  const district = String(ev.district || resolveDistrictForRouter(hotspotName, siteName));
   const optInDateTime = String(ev.optInDateTime || ev.capturedAt || new Date().toISOString());
-  const rawMode = String(ev.mode || 'free').toLowerCase();
-  const connectionMode = rawMode === 'free' ? 'free' : rawMode === 'voucher' ? 'voucher' : 'paid';
-  const sponsorCampaign = String(
-    ev.sponsorCampaign || serverStore.sponsorAd?.sponsorName || defaultCampaign
-  );
   const roamedSites = Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites : [siteName];
 
-  // Strictly return ONLY sanitized partner fields: full name, phone, email, district, hotspotName, optInDateTime
-  // (NO MAC address, router internal IP, or vouchers - mac address is strictly internal team only)
+  // Partner API Privacy Rule: External clients can ONLY see Name, Surname, and the Place Connected To
+  // (No phone number, no email, no MAC, no IP, no voucher codes)
   return {
     leadId: String(ev.id || `lead_${Date.now()}`),
+    name: firstName,
+    surname: lastName,
     firstName,
     lastName,
-    fullName,
-    countryCode,
-    phone: rawPhone,
-    fullPhone,
-    email,
-    hotspotPolicyScope,
-    hotspotName,
-    district,
+    placeConnected: siteName,
     siteName,
-    connectionMode,
-    sponsorCampaign,
-    optInDateTime,
-    optInAt: optInDateTime,
-    adoptedRouterVerified: true,
-    termsAccepted: true,
     roamedSites,
+    hotspotPolicyScope,
+    connectedAt: optInDateTime,
     capturedAt: optInDateTime
   };
 }
@@ -5143,13 +5483,11 @@ app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
     .map((ev) => sanitizeLeadForPartner(ev, partner.campaignName))
     .filter((lead) => {
       if (reqScope && lead.hotspotPolicyScope !== reqScope) return false;
-      if (reqSite && !lead.siteName.toLowerCase().includes(reqSite)) return false;
-      if (reqDistrict && !lead.district.toLowerCase().includes(reqDistrict)) return false;
-      if (reqCc && lead.countryCode !== reqCc) return false;
+      if (reqSite && !lead.placeConnected.toLowerCase().includes(reqSite)) return false;
       if (reqSince && new Date(lead.capturedAt).getTime() < reqSince) return false;
       if (reqUntil && new Date(lead.capturedAt).getTime() > reqUntil) return false;
       if (reqSearch) {
-        const hay = `${lead.fullName} ${lead.fullPhone} ${lead.email} ${lead.siteName} ${lead.district} ${lead.hotspotName}`.toLowerCase();
+        const hay = `${lead.name} ${lead.surname} ${lead.placeConnected} ${(lead.roamedSites || []).join(' ')}`.toLowerCase();
         if (!hay.includes(reqSearch)) return false;
       }
       return true;
@@ -5326,34 +5664,20 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
 
   const csvEsc = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
   const headers = [
-    'Lead ID',
-    'Full Name',
-    'Country Code',
-    'Mobile Number',
-    'Email Address',
-    'Hotspot Name',
-    'District',
-    'Site Name',
-    'Policy Scope',
-    'Connection Mode',
-    'Sponsor Campaign',
-    'Opt-In Date & Time'
+    'Name',
+    'Surname',
+    'Place Connected',
+    'Visited Locations',
+    'Connected At'
   ];
 
   const rows = leads.map((l) =>
     [
-      l.leadId,
-      l.fullName,
-      l.countryCode,
-      l.fullPhone,
-      l.email,
-      l.hotspotName,
-      l.district,
+      l.firstName,
+      l.lastName,
       l.siteName,
-      l.hotspotPolicyScope,
-      l.connectionMode,
-      l.sponsorCampaign,
-      l.optInDateTime
+      Array.isArray(l.roamedSites) ? l.roamedSites.join(' -> ') : l.siteName,
+      l.connectedAt
     ]
       .map(csvEsc)
       .join(',')
@@ -5366,6 +5690,38 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
     `attachment; filename="tconnect_partner_leads_${new Date().toISOString().slice(0, 10)}.csv"`
   );
   res.send(csvContent);
+});
+
+// -----------------------------------------------------------------------------
+// LIVE PRODUCTION RESET ENDPOINT (Resets Leads, Reconciled Revenue, Sessions & Auth)
+// -----------------------------------------------------------------------------
+app.post('/api/admin/reset-live-data', (_req: Request, res: Response) => {
+  const nowIso = new Date().toISOString();
+  serverStore.guestEvents = [];
+  serverStore.transactions = [];
+  serverStore.issuedPayLesothoOttVouchers = [];
+  serverStore.redeemedOttPins = [];
+  if (Array.isArray(serverStore.routers)) {
+    serverStore.routers = serverStore.routers.map((r: any) => ({
+      ...r,
+      activeSessions: 0
+    }));
+  }
+  if (Array.isArray(serverStore.partnerApiKeys)) {
+    serverStore.partnerApiKeys = serverStore.partnerApiKeys.map((k: any) => ({
+      ...k,
+      leadsResetAt: nowIso
+    }));
+  }
+  monitoredRouters.forEach((router) => {
+    router.activeSessions = 0;
+  });
+  saveServerPortalStore(serverStore);
+  res.json({
+    success: true,
+    resetAt: nowIso,
+    message: 'All leads, reconciled revenue, session durations, and live auth counts have been reset to 0.'
+  });
 });
 
 // -----------------------------------------------------------------------------

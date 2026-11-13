@@ -900,11 +900,11 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                   REST / JSON + CSV + HMAC-SHA256 WEBHOOKS
                 </span>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                  STRICT LEAD-ONLY ISOLATION
+                  NAME, SURNAME &amp; PLACE CONNECTED ONLY
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 font-mono mt-1">
-                Scoped Partner API keys (<code className="text-amber-300">tc_live_...</code>) expose <strong>ONLY</strong> verified guest leads for the partner&apos;s authorized hotspot policies. Hardware routers, payment gateways, vouchers, and internal settings are strictly blocked with HTTP 403.
+                Scoped Partner API keys (<code className="text-amber-300">tc_live_...</code>) expose <strong>ONLY Name, Surname, and Place Connected</strong> (<code className="text-cyan-300">name</code>, <code className="text-cyan-300">surname</code>, <code className="text-cyan-300">placeConnected</code>) in real time for the partner&apos;s authorized hotspot locations. Phone numbers, emails, MAC addresses, routers, and payment gateways are strictly stripped from Partner API responses.
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -1528,11 +1528,14 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                       </div>
                     </td>
 
-                    {/* Hotspot & Scope */}
+                    {/* Hotspot & Scope (Place Connected) */}
                     <td className="py-2.5 px-3 text-slate-300">
-                      <div className="text-white font-medium">{lead.routerName}</div>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <span>{lead.siteName}</span>
+                      <div className="text-white font-bold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#f05e17] shrink-0" />
+                        <span>{lead.siteName || 'Maseru Hotspot'}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                        <span>Node: {lead.routerName}</span>
                         <span className="px-1 py-0.2 rounded bg-slate-800 text-[9px] capitalize text-slate-300">
                           {lead.vertical}
                         </span>
