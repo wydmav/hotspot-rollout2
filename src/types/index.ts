@@ -142,6 +142,9 @@ export interface HotspotPlan {
   deviceLimit: number;
   burstDownloadMbps?: number;
   burstUploadMbps?: number;
+  burstThresholdMbps?: number;
+  burstTimeSeconds?: number;
+  sharedUsers?: number;
   fairUseThresholdMb?: number;
   fairUseDownloadMbps?: number;
   isPopular?: boolean;
@@ -160,6 +163,8 @@ export interface Voucher {
   generatedAt: string;
   expiresAt: string;
   firstUsedAt?: string;
+  siteName?: string;
+  venuePurchasedAt?: string;
   associatedDevices: Array<{
     mac: string;
     hostname: string;
@@ -179,11 +184,16 @@ export interface ActiveSession {
   clientIp: string;
   deviceType: string;
   siteName: string;
+  venuePurchasedAt?: string;
   vertical: VerticalType;
   routerName: string;
   planName: string;
+  amountPaid?: number;
   startedAt: string;
   expiresAt: string;
+  disconnectedAt?: string;
+  disconnectReason?: string;
+  status?: 'connected' | 'disconnected';
   remainingSeconds: number;
   bytesDown: number;
   bytesUp: number;
@@ -219,12 +229,13 @@ export interface CaptivePortalLead {
   status: 'active' | 'expired';
 }
 
-export type GatewayProvider = 'ottvoucher' | 'ecocash' | 'paylesotho';
+export type GatewayProvider = 'ottvoucher' | 'ecocash' | 'paylesotho' | string;
 
 export interface GatewayConfig {
   provider: GatewayProvider;
   name: string;
   subtitle: string;
+  logoUrl?: string;
   currency: string;
   isLive: boolean;
   isSandbox: boolean;
@@ -254,6 +265,7 @@ export interface GatewayConfig {
   successRate24h: number;
   avgLatencyMs: number;
   testPassedOnce: boolean;
+  syncedEverywhereAt?: string;
 }
 
 export interface PaymentTransaction {

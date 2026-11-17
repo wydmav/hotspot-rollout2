@@ -71,9 +71,9 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   const [accessMode, setAccessMode] = useState<RouterAccessMode>(
     router?.accessMode || (router?.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY')
   );
-  const [freeDurationMinutes, setFreeDurationMinutes] = useState<number>(router?.freeDurationMinutes || 30);
-  const [freeRateLimit, setFreeRateLimit] = useState<string>(router?.freeRateLimit || '10M/30M');
-  const [freeDailyQuotaMb, setFreeDailyQuotaMb] = useState<number>(router?.freeDailyQuotaMb || 500);
+  const [freeDurationMinutes, setFreeDurationMinutes] = useState<number>(router?.freeDurationMinutes || 1440);
+  const [freeRateLimit, setFreeRateLimit] = useState<string>(router?.freeRateLimit || '0/0');
+  const [freeDailyQuotaMb, setFreeDailyQuotaMb] = useState<number>(router?.freeDailyQuotaMb || 0);
   const [isPushingPolicy, setIsPushingPolicy] = useState(false);
   const [policyPushFeedback, setPolicyPushFeedback] = useState<{
     type: 'success' | 'error';
@@ -85,16 +85,16 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
 
   const freeModeActive = accessMode !== 'PAID_ONLY';
   const setFreeModeActive = (active: boolean) => {
-    const nextMode: RouterAccessMode = active ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY';
+    const nextMode: RouterAccessMode = active ? 'COMPLETELY_FREE' : 'PAID_ONLY';
     setAccessMode(nextMode);
   };
 
   useEffect(() => {
     if (router) {
-      setAccessMode(router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY'));
-      setFreeDurationMinutes(router.freeDurationMinutes || 30);
-      setFreeRateLimit(router.freeRateLimit || '10M/30M');
-      setFreeDailyQuotaMb(router.freeDailyQuotaMb || 500);
+      setAccessMode(router.accessMode || (router.freeModeEnabled ? 'COMPLETELY_FREE' : 'PAID_ONLY'));
+      setFreeDurationMinutes(router.freeDurationMinutes || 1440);
+      setFreeRateLimit(router.freeRateLimit || '0/0');
+      setFreeDailyQuotaMb(router.freeDailyQuotaMb || 0);
       setPolicyPushFeedback(null);
     }
   }, [router]);
@@ -158,6 +158,7 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
   const [cliLines, setCliLines] = useState<Array<{ id: string; type: 'input' | 'output' | 'system' | 'error'; text: string }>>([]);
   const [cliLoading, setCliLoading] = useState(false);
   const terminalBottomRef = useRef<HTMLDivElement>(null);
+  const seenSnapshotTimestampsRef = useRef<Set<string>>(new Set());
 
   // Scoped audit trail state
   const [routerAudits, setRouterAudits] = useState<AuditLogEntry[]>([]);
@@ -189,21 +190,47 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
       setSelectedTenantGroupId(router.tenantGroupId || '');
       setCustomBgInput(router.customBgUrl || '');
       setTagsInput((router.tags || []).join(', '));
+      seenSnapshotTimestampsRef.current.clear();
       // Initialize terminal welcome
       setCliLines([
         {
           id: 'init-1',
           type: 'system',
-          text: `MikroTik RouterOS 7.15.2 (stable) on ${router.name}`
+          text: `MikroTik RouterOS 7.16.2 (stable) on ${router.name} (${router.model || 'hAP ax^3'})`
         },
         {
           id: 'init-2',
           type: 'system',
-          text: `Connected via WireGuard Tunnel: ${router.wireguardIp || '10.99.1.50'}`
+          text: `Connected via Protected WireGuard Tunnel: ${router.wireguardIp || '10.99.1.50'} (MTU 1420 · MSS 1360)`
         }
       ]);
     }
   }, [router]);
+
+  // Poll hardware terminal snapshots when embedded terminal tab is open
+  useEffect(() => {
+    if (!router || !isOpen || activeTab !== 'terminal') return;
+    let active = true;
+    const pollSnapshots = async () => {
+      try {
+        const res = await fetch(`/api/devices/${router.id}/terminal-snapshots`);
+        const data = await res.json();
+        if (!active || !data?.success || !Array.isArray(data.snapshots)) return;
+        for (const snap of data.snapshots) {
+          const key = `${snap.command}:${snap.capturedAt}`;
+          if (!seenSnapshotTimestampsRef.current.has(key) && snap.output) {
+            seenSnapshotTimestampsRef.current.add(key);
+          }
+        }
+      } catch {}
+    };
+    void pollSnapshots();
+    const timer = setInterval(pollSnapshots, 3500);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [router, isOpen, activeTab]);
 
   // Load audit logs for this router
   useEffect(() => {

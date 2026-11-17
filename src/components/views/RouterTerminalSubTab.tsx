@@ -639,18 +639,20 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
     { label: 'Fiber Enterprise', down: 100, up: 50, icon: '🏢', desc: 'Full-duplex corporate tier' }
   ];
 
-  // Quick CLI presets
+  // Quick CLI presets (100% Non-Interactive & Console-Safe)
   const quickCliPresets = [
-    { label: '/system package print', cmd: '/system package print' },
-    { label: '/interface wifi print', cmd: '/interface wifi print' },
-    { label: '/interface bridge port print', cmd: '/interface bridge port print' },
-    { label: '/system resource print', cmd: '/system resource print' },
-    { label: '/ip address print', cmd: '/ip address print' },
     { label: '/interface print', cmd: '/interface print' },
-    { label: '/ip hotspot active print', cmd: '/ip hotspot active print' },
-    { label: '/ip dns cache flush', cmd: '/ip dns cache flush' },
-    { label: '/ping 1.1.1.1', cmd: '/ping 1.1.1.1 count=4' },
-    { label: '/system reboot', cmd: '/system reboot' }
+    { label: '/interface wifi print', cmd: '/interface wifi print without-paging' },
+    { label: '/interface bridge port print', cmd: '/interface bridge port print without-paging' },
+    { label: '/ip firewall mangle print', cmd: '/ip firewall mangle print without-paging' },
+    { label: '/queue simple print', cmd: '/queue simple print without-paging' },
+    { label: '/queue type print (PCQ)', cmd: '/queue type print without-paging' },
+    { label: '/system resource print', cmd: '/system resource print' },
+    { label: '/ip address print', cmd: '/ip address print without-paging' },
+    { label: '/ip hotspot active print', cmd: '/ip hotspot active print without-paging' },
+    { label: '/interface wireguard peers', cmd: '/interface wireguard peers print detail without-paging' },
+    { label: '/ping 1.1.1.1 count=4', cmd: '/ping 1.1.1.1 count=4' },
+    { label: '/tconnect fix-all (Hardened)', cmd: '/tconnect fix-all' }
   ];
 
   return (

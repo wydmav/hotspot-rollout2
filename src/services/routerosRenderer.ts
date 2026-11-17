@@ -102,15 +102,15 @@ export class RouterOSRenderer {
       `:do { /interface bridge port remove [find interface="ether1"] } on-error={}`,
       `:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}`,
       `:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|sfp"] disabled=no arp=enabled } on-error={}`,
-      `# Configure Open Wi-Fi SSID "T-Connect Hotspot" on 2.4GHz & 5GHz (RouterOS v7 wifi-qcom/wifiwave2 + legacy wireless)`,
-      `:do { /interface wifi datapath set [find] bridge="${bridgeName}" disabled=no } on-error={}`,
+      `# Configure Open Wi-Fi SSID "T-Connect Hotspot" with strict L2 Client Isolation (MTCEWE / MTCUME)`,
+      `:do { /interface wifi datapath set [find] bridge="${bridgeName}" client-isolation=yes disabled=no } on-error={ :do { /interface wifi datapath set [find] bridge="${bridgeName}" disabled=no } on-error={} }`,
       `:do { /interface wifi security set [find] authentication-types="" passphrase="" } on-error={}`,
-      `:do { /interface wifi configuration set [find] ssid="T-Connect Hotspot" mode=ap datapath.bridge="${bridgeName}" disabled=no; :do { /interface wifi configuration unset [find] security } on-error={}; :do { /interface wifi configuration unset [find] security.passphrase } on-error={} } on-error={}`,
-      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" disabled=no; :do { /interface wifi unset $w security } on-error={}; :do { /interface wifi unset $w security.passphrase } on-error={}; :do { /interface wifi unset $w security.authentication-types } on-error={} } } on-error={}`,
+      `:do { /interface wifi configuration set [find] ssid="T-Connect Hotspot" mode=ap datapath.bridge="${bridgeName}" datapath.client-isolation=yes disabled=no; :do { /interface wifi configuration unset [find] security } on-error={}; :do { /interface wifi configuration unset [find] security.passphrase } on-error={} } on-error={}`,
+      `:do { :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" datapath.client-isolation=yes disabled=no; :do { /interface wifi unset $w security } on-error={}; :do { /interface wifi unset $w security.passphrase } on-error={}; :do { /interface wifi unset $w security.authentication-types } on-error={} } } on-error={}`,
       `:do { /interface wireless security-profiles set [find default=yes] mode=none authentication-types="" } on-error={}`,
-      `:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default max-station-count=2007 disabled=no } on-error={}`,
-      `# Immediately bridge all 5+ downstream ports & Wi-Fi radios into ${bridgeName}`,
-      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={ :do { :if ([:len [/interface find name=$p]] > 0) do={ :if ([:len [/interface bridge port find interface=$p]] > 0) do={ :if ([/interface bridge port get [find interface=$p] dynamic] = false) do={ /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no } } else={ /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no } } } on-error={} }`
+      `:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default default-forwarding=no max-station-count=2007 disabled=no } on-error={}`,
+      `# Immediately bridge all 5+ downstream ports & Wi-Fi radios into ${bridgeName} with L2 bridge horizon=1 isolation`,
+      `:foreach p in={"ether2";"ether3";"ether4";"ether5";"ether6";"sfp1";"sfp-sfpplus1";"wifi1";"wifi2";"wlan1";"wlan2"} do={ :do { :if ([:len [/interface find name=$p]] > 0) do={ :if ([:len [/interface bridge port find interface=$p]] > 0) do={ :if ([/interface bridge port get [find interface=$p] dynamic] = false) do={ /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=1 disabled=no } } else={ /interface bridge port add bridge="${bridgeName}" interface=$p horizon=1 disabled=no } } } on-error={} }`
     ].join('\n');
   }
 
@@ -164,10 +164,28 @@ export class RouterOSRenderer {
   }
 
   /**
+   * Mandatory MTCINE WireGuard Tunnel Protection & TCP MSS Clamping (1360)
+   * Guarantees WireGuard management traffic (10.99.0.0/16, wg-tconnect, UDP 51820) is never blocked or fragmented.
+   */
+  static buildWireGuardProtectionAndMssCommands(): string {
+    return [
+      `# Protect WireGuard Management Tunnel & Enforce MTU 1420 + TCP MSS Clamping 1360 (MTCINE Standard)`,
+      `:do { /interface wireguard set [find name="wg-tconnect"] mtu=1420 } on-error={}`,
+      `:do { :if ([:len [/ip firewall filter find comment="tc-wg-mgmt-input"]] = 0) do={ /ip firewall filter add chain=input in-interface="wg-tconnect" action=accept place-before=0 comment="tc-wg-mgmt-input" } } on-error={ :do { /ip firewall filter add chain=input in-interface="wg-tconnect" action=accept comment="tc-wg-mgmt-input" } on-error={} }`,
+      `:do { :if ([:len [/ip firewall filter find comment="tc-wg-mgmt-fwd-src"]] = 0) do={ /ip firewall filter add chain=forward src-address=10.99.0.0/16 action=accept place-before=0 comment="tc-wg-mgmt-fwd-src" } } on-error={ :do { /ip firewall filter add chain=forward src-address=10.99.0.0/16 action=accept comment="tc-wg-mgmt-fwd-src" } on-error={} }`,
+      `:do { :if ([:len [/ip firewall filter find comment="tc-wg-mgmt-fwd-dst"]] = 0) do={ /ip firewall filter add chain=forward dst-address=10.99.0.0/16 action=accept place-before=0 comment="tc-wg-mgmt-fwd-dst" } } on-error={ :do { /ip firewall filter add chain=forward dst-address=10.99.0.0/16 action=accept comment="tc-wg-mgmt-fwd-dst" } on-error={} }`,
+      `:do { :if ([:len [/ip firewall mangle find comment="tc-wg-mss-clamp-out"]] = 0) do={ /ip firewall mangle add chain=forward out-interface="wg-tconnect" protocol=tcp tcp-flags=syn action=change-mss new-mss=1360 passthrough=yes comment="tc-wg-mss-clamp-out" } } on-error={}`,
+      `:do { :if ([:len [/ip firewall mangle find comment="tc-wg-mss-clamp-in"]] = 0) do={ /ip firewall mangle add chain=forward in-interface="wg-tconnect" protocol=tcp tcp-flags=syn action=change-mss new-mss=1360 passthrough=yes comment="tc-wg-mss-clamp-in" } } on-error={}`,
+      `:do { :if ([:len [/ip firewall mangle find comment="tc-wan-mss-clamp"]] = 0) do={ /ip firewall mangle add chain=forward out-interface="ether1" protocol=tcp tcp-flags=syn action=change-mss new-mss=1360 passthrough=yes comment="tc-wan-mss-clamp" } } on-error={}`
+    ].join('\n');
+  }
+
+  /**
    * Non-Disruptive Live High-Density Client Capacity & Speed Policy Script:
-   * Expands DHCP range to 10.10.0.10-10.10.3.254 (1,012 simultaneous users), sets shared-users=1024 on
-   * all Hotspot user profiles (fixing RouterOS v7 shared-users=1 bottleneck), sets addresses-per-mac=unlimited
-   * on the Hotspot server, and applies Speed Caps & Bursts (ON or OFF) in-place with ZERO session drops.
+   * - In FREE MODE (allowFreeAccess = true) or when speedCapsEnabled = false:
+   *   Uncapped Full Starlink Speed with FastTrack enabled and PCQ fair queuing (eliminates /22 default-small FIFO packet drops).
+   * - In PAID MODE with speedCapsEnabled = true:
+   *   Enforces per-session PCQ rate limits cleanly without choking the /22 subnet.
    */
   static buildNonDisruptiveCapacityCommands(options?: {
     dhcpRange?: string;
@@ -176,58 +194,60 @@ export class RouterOSRenderer {
     allowFreeAccess?: boolean;
   }): string {
     const dhcpRange = options?.dhcpRange || RouterOSRenderer.FULL_SUBNET_DHCP_RANGE;
-    const speedCapsEnabled = options?.speedCapsEnabled !== false;
     const allowFreeAccess = options?.allowFreeAccess ?? true;
+    // In Free Mode, use Uncapped Full Starlink Speed with FastTrack + PCQ fair queuing for maximum connectivity
+    const enforceCap = !allowFreeAccess && options?.speedCapsEnabled === true;
     const rateParts = RouterOSRenderer.parseRateLimitParts(options?.rateLimit);
-    const safeRateLimit = speedCapsEnabled
+    const safeRateLimit = enforceCap
       ? RouterOSRenderer.escapeRouterOSString(rateParts.fullRateLimit)
       : '';
 
-    const queueCommands = speedCapsEnabled
+    const queueCommands = enforceCap
       ? [
-          `# Enforce Speed & Burst Caps (${rateParts.maxLimit} Max / ${rateParts.burstLimit} Burst) in-place without dropping users`,
-          `:do { /ip firewall filter disable [find action="fasttrack-connection"] } on-error={}`,
-          `:do { /ip firewall filter remove [find action="fasttrack-connection"] } on-error={}`,
-          `:do { :if ([:len [/queue simple find name="tc-hotspot-speed-cap"]] = 0) do={ /queue simple add name="tc-hotspot-speed-cap" target=10.10.0.0/22 max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} disabled=no comment="T-Connect Global Hotspot Speed & Burst Cap" } else={ /queue simple set [find name="tc-hotspot-speed-cap"] target=10.10.0.0/22 max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} disabled=no } } on-error={}`,
-          `:do { /queue simple move [find name="tc-hotspot-speed-cap"] [:pick [/queue simple find] 0] } on-error={}`,
-          `:do { /queue simple set [find dynamic=yes] max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} } on-error={}`
+          `# Paid Mode with Per-User PCQ Rate Limit (${rateParts.maxLimit} Max / ${rateParts.burstLimit} Burst)`,
+          `:do { /queue simple remove [find name="tc-hotspot-speed-cap"] } on-error={}`,
+          `:do { /queue type set [find name="hotspot-default"] kind=pcq } on-error={}`,
+          `:do { /queue simple set [find dynamic=yes] queue=pcq-upload-default/pcq-download-default max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} } on-error={}`
         ].join('\n')
       : [
-          `# Speed Caps & Bursts OFF Everywhere: Uncap all Hotspot Profiles & Active Dynamic Queues immediately`,
+          `# Uncapped Full Starlink Speed + FastTrack Hardware Offload + PCQ Fair Queuing (MTCTCE Best Practice)`,
           `:do { /queue simple remove [find name="tc-hotspot-speed-cap"] } on-error={}`,
-          `:do { /queue simple set [find dynamic=yes] max-limit=0/0 burst-limit=0/0 burst-threshold=0/0 burst-time=0s/0s } on-error={}`
+          `:do { /queue simple set [find dynamic=yes] queue=pcq-upload-default/pcq-download-default max-limit=0/0 burst-limit=0/0 burst-threshold=0/0 burst-time=0s/0s } on-error={}`,
+          `:do { :if ([:len [/ip firewall filter find action="fasttrack-connection"]] = 0) do={ /ip firewall filter add chain=forward action=fasttrack-connection connection-state=established,related src-address=!10.99.0.0/16 dst-address=!10.99.0.0/16 comment="tc-fasttrack-starlink"; /ip firewall filter add chain=forward action=accept connection-state=established,related comment="tc-accept-est-rel" } else={ /ip firewall filter enable [find action="fasttrack-connection"] } } on-error={}`
         ].join('\n');
 
     return [
+      RouterOSRenderer.buildWireGuardProtectionAndMssCommands(),
       `# 1. Expand DHCP Pool in-place to Full /22 Range (${dhcpRange} -> 1,012 Simultaneous Users) with ZERO disruption`,
       `:do { :if ([:len [/ip pool find name="tc-hotspot-pool"]] = 0) do={ /ip pool add name="tc-hotspot-pool" ranges=${dhcpRange} } else={ /ip pool set [find name="tc-hotspot-pool"] ranges=${dhcpRange} } } on-error={}`,
       `:do { :if ([:len [/ip dhcp-server network find address="10.10.0.0/22"]] = 0) do={ /ip dhcp-server network add address=10.10.0.0/22 gateway=10.10.0.1 dns-server=10.10.0.1 comment="T-Connect Hotspot Guest Network" } else={ /ip dhcp-server network set [find address="10.10.0.0/22"] gateway=10.10.0.1 dns-server=10.10.0.1 } } on-error={}`,
       `:do { :if ([:len [/ip dhcp-server find interface="bridgeLocal"]] = 0) do={ /ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no } else={ /ip dhcp-server set [find interface="bridgeLocal"] address-pool="tc-hotspot-pool" lease-time=1h disabled=no } } on-error={}`,
       `# 2. Tune High-Concurrency DNS Cache & Wireless Station Limits for 1,000+ Concurrent Devices`,
       `:do { /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8 cache-size=8192KiB max-concurrent-queries=500 max-concurrent-tcp-sessions=100 } on-error={}`,
-      `:do { /interface wireless set [find] max-station-count=2007 } on-error={}`,
-      `# 3. Unlock Hotspot Server & User Profiles for 1,024 Simultaneous Users (In-Place Update, No Resets)`,
+      `:do { /interface wireless set [find] default-forwarding=no max-station-count=2007 } on-error={}`,
+      `# 3. Unlock Hotspot Server & User Profiles for 1,024 Simultaneous Users with PCQ Fair Queuing`,
       `:do { /ip hotspot set [find interface="bridgeLocal"] address-pool="tc-hotspot-pool" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } on-error={}`,
-      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" queue-type=pcq-upload-default/pcq-download-default shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
       `:do { /ip hotspot user profile set [find default=yes] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
       `:do { /ip hotspot user profile set [find] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
-      `# 4. Ensure Hotspot Auth Users Exist In-Place (Never removes active users)`,
+      `# 4. Ensure Hotspot Auth Users Exist In-Place (Never removes active paid users)`,
       `:do { :if ([:len [/ip hotspot user find name="test"]] = 0) do={ /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } else={ /ip hotspot user set [find name="test"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`,
       allowFreeAccess
         ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" profile="tc-speed-cap" comment="T-Connect Free Opt-In Auth User" } else={ /ip hotspot user set [find name="T-TRIAL"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`
-        : `# Free Trial Disabled in Paid Mode`,
+        : `:do { /ip hotspot user remove [find name="T-TRIAL"] } on-error={}; :do { /ip hotspot active remove [find user="T-TRIAL"] } on-error={}`,
       queueCommands,
       `# 5. Clear Only Unauthenticated Stale Host Entries (Leaves all connected users untouched!)`,
       `:do { /ip hotspot host remove [find authorized=no] } on-error={}`,
-      `:log info "T-Connect: High-density capacity (${dhcpRange}, 1024 shared-users) and speed policy (${speedCapsEnabled ? safeRateLimit : 'UNCAPPED'}) applied non-disruptively."`
+      `:log info "T-Connect: High-density capacity (${dhcpRange}, 1024 shared-users) and ${enforceCap ? safeRateLimit : 'Uncapped FastTrack + PCQ Fair Queuing'} applied non-disruptively."`
     ].join('\n');
   }
 
   /**
    * Builds RouterOS v7.16.2 compatible commands to:
-   * 1. Ensure bridgeLocal (10.10.0.1/22), Full /22 DHCP (10.10.0.10-10.10.3.254), DNS intercept, port 80 www, and tc-hotspot server are active non-disruptively
-   * 2. Toggle Speed Caps & Bursts ON (enforcing Simple Queues & Hotspot rate-limits) or OFF (uncapped 0/0 everywhere)
-   * 3. Deploy the instant On-Router Splash Page (Free Mode goes straight to internet without carousel; Paid Mode shows carousel)
+   * 1. Protect WireGuard management tunnel (10.99.0.0/16, wg-tconnect, MTU 1420, TCP MSS 1360)
+   * 2. Ensure bridgeLocal (10.10.0.1/22), Full /22 DHCP (10.10.0.10-10.10.3.254), L2 horizon isolation, DNS intercept, port 80 www, and tc-hotspot server are active
+   * 3. In Free Mode: Uncapped Full Starlink Speed + FastTrack + PCQ fair queuing (eliminates packet loss & bufferbloat)
+   * 4. In Paid Mode: Strict OTT Voucher / PayLesotho authentication + PCQ fair queuing
    */
   static formatRouterOsDuration(minutes?: number): string {
     const mins = Math.max(60, Number(minutes) || 1440);
@@ -258,7 +278,9 @@ export class RouterOSRenderer {
     const isHostIpv4 = /^\d+\.\d+\.\d+\.\d+$/.test(hostOnly);
     const safeScope = encodeURIComponent(scope || 'hotspot');
     const rateParts = RouterOSRenderer.parseRateLimitParts(rateLimit);
-    const safeRateLimit = speedCapsEnabled
+    // In Free Mode, always deliver Uncapped Full Starlink Speed with FastTrack + PCQ fair queuing!
+    const enforcePaidSpeedCap = !allowFreeAccess && speedCapsEnabled;
+    const safeRateLimit = enforcePaidSpeedCap
       ? RouterOSRenderer.escapeRouterOSString(rateParts.fullRateLimit)
       : '';
     const rosFreeTimeout = RouterOSRenderer.formatRouterOsDuration(freeAccessDurationMinutes);
@@ -275,23 +297,21 @@ export class RouterOSRenderer {
     const directSplashHtml = allowFreeAccess ? directFreeLoginHtml : directPaidVoucherHtml;
     const directAloginHtml = `<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='0; url=${targetPostLoginUrl}'><title>T-Connect Hotspot</title><script>window.location.replace('${targetPostLoginUrl}');</script></head><body style='background:#050811;margin:0'></body></html>`;
 
-    const speedQueueCommands = speedCapsEnabled
+    const speedQueueCommands = enforcePaidSpeedCap
       ? [
-          `# 4. Enforce Top-Priority Simple Queue & Dynamic Queue Caps (${rateParts.maxLimit} Max / ${rateParts.burstLimit} Burst)`,
-          `:do { /ip firewall filter disable [find action="fasttrack-connection"] } on-error={}`,
-          `:do { /ip firewall filter remove [find action="fasttrack-connection"] } on-error={}`,
-          `:do { /ip firewall mangle remove [find action="fasttrack-connection"] } on-error={}`,
-          `:do { :if ([:len [/queue simple find name="tc-hotspot-speed-cap"]] = 0) do={ /queue simple add name="tc-hotspot-speed-cap" target=10.10.0.0/22 max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} disabled=no comment="T-Connect Global Hotspot Speed & Burst Cap" } else={ /queue simple set [find name="tc-hotspot-speed-cap"] target=10.10.0.0/22 max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} disabled=no } } on-error={}`,
-          `:do { /queue simple move [find name="tc-hotspot-speed-cap"] [:pick [/queue simple find] 0] } on-error={}`,
-          `:do { /queue simple set [find dynamic=yes] max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} } on-error={}`
+          `# 4. Paid Mode Per-User PCQ Rate Limit (${rateParts.maxLimit} Max / ${rateParts.burstLimit} Burst) — Removes broken /22 FIFO queue`,
+          `:do { /queue simple remove [find name="tc-hotspot-speed-cap"] } on-error={}`,
+          `:do { /queue simple set [find dynamic=yes] queue=pcq-upload-default/pcq-download-default max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} } on-error={}`
         ].join('\n')
       : [
-          `# 4. Speed Caps & Bursts OFF Everywhere: Uncap all Hotspot Profiles & Active Dynamic Queues immediately`,
+          `# 4. Free Mode / Uncapped Starlink Speed: Remove /22 Queue Bottleneck, Enable PCQ Fair Queuing & Restore FastTrack`,
           `:do { /queue simple remove [find name="tc-hotspot-speed-cap"] } on-error={}`,
-          `:do { /queue simple set [find dynamic=yes] max-limit=0/0 burst-limit=0/0 burst-threshold=0/0 burst-time=0s/0s } on-error={}`
+          `:do { /queue simple set [find dynamic=yes] queue=pcq-upload-default/pcq-download-default max-limit=0/0 burst-limit=0/0 burst-threshold=0/0 burst-time=0s/0s } on-error={}`,
+          `:do { :if ([:len [/ip firewall filter find action="fasttrack-connection"]] = 0) do={ /ip firewall filter add chain=forward action=fasttrack-connection connection-state=established,related src-address=!10.99.0.0/16 dst-address=!10.99.0.0/16 comment="tc-fasttrack-starlink"; /ip firewall filter add chain=forward action=accept connection-state=established,related comment="tc-accept-est-rel" } else={ /ip firewall filter enable [find action="fasttrack-connection"] } } on-error={}`
         ].join('\n');
 
     return [
+      RouterOSRenderer.buildWireGuardProtectionAndMssCommands(),
       RouterOSRenderer.buildImmediateMultiPortBridgeCommands('bridgeLocal'),
       `# 1. Guarantee 10.10.0.1/22 Gateway, Full /22 DHCP Pool (${dhcpRange} -> 1,012 Users), Port 80 HTTP Service & High-Concurrency DNS on bridgeLocal`,
       `:do { :if ([:len [/ip address find address="10.10.0.1/22" interface="bridgeLocal"]] = 0) do={ /ip address add address=10.10.0.1/22 network=10.10.0.0 interface="bridgeLocal" comment="tc-hotspot-lan-gateway" } } on-error={}`,
@@ -309,10 +329,10 @@ export class RouterOSRenderer {
       `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap use-radius=no } on-error={}`,
       `:do { :if ([:len [/ip hotspot find interface="bridgeLocal"]] = 0) do={ /ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } else={ /ip hotspot set [find interface="bridgeLocal"] profile="tc-hotspot-profile" address-pool="tc-hotspot-pool" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } } on-error={}`,
       `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
-      `:do { :if ([:len [/ip hotspot user profile find name="tc-free-trial"]] = 0) do={ /ip hotspot user profile add name="tc-free-trial" rate-limit="${safeRateLimit}" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-free-trial"] rate-limit="${safeRateLimit}" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-free-trial"]] = 0) do={ /ip hotspot user profile add name="tc-free-trial" rate-limit="" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-free-trial"] rate-limit="" session-timeout=${rosFreeTimeout} shared-users=1024 add-mac-cookie=no } } on-error={}`,
       `:do { /ip hotspot user profile set [find default=yes] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
       speedQueueCommands,
-      `# 5. Provision Hotspot Auth Users In-Place (Never drops connected sessions!)`,
+      `# 5. Provision Hotspot Auth Users In-Place (Never drops connected paid sessions!)`,
       `:do { :if ([:len [/ip hotspot user find name="test"]] = 0) do={ /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } else={ /ip hotspot user set [find name="test"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`,
       allowFreeAccess
         ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" profile="tc-free-trial" comment="T-Connect Free Opt-In Auth User (${rosFreeTimeout})" } else={ /ip hotspot user set [find name="T-TRIAL"] password="123" profile="tc-free-trial" disabled=no } } on-error={}`
@@ -424,9 +444,6 @@ export class RouterOSRenderer {
       `:do { :if ([:len [/ip dhcp-server find interface="bridgeLocal"]] = 0) do={ /ip dhcp-server add name="tc-dhcp-server" interface="bridgeLocal" address-pool="tc-hotspot-pool" lease-time=1h disabled=no } else={ /ip dhcp-server set [find interface="bridgeLocal"] address-pool="tc-hotspot-pool" lease-time=1h disabled=no } } on-error={}`,
       `# Enable High-Concurrency DNS Resolver & Intercept DNS for Captive Portal Probes`,
       `:do { /ip dns set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8 cache-size=8192KiB max-concurrent-queries=500 max-concurrent-tcp-sessions=100 } on-error={}`,
-      `# Disable & Remove FastTrack so RouterOS Simple Queues and Hotspot Speed Caps are Strictly Enforced`,
-      `:do { /ip firewall filter disable [find action="fasttrack-connection"] } on-error={}`,
-      `:do { /ip firewall filter remove [find action="fasttrack-connection"] } on-error={}`,
       `:do { /ip firewall filter remove [find comment~"Fast-Fail Unauth TCP"] } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept"]] = 0) do={ /ip firewall nat add chain=dstnat in-interface="bridgeLocal" protocol=udp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept" } } on-error={}`,
       `:do { :if ([:len [/ip firewall nat find comment="tc-dns-intercept-tcp"]] = 0) do={ /ip firewall nat add chain=dstnat in-interface="bridgeLocal" protocol=tcp dst-port=53 action=redirect to-ports=53 comment="tc-dns-intercept-tcp" } } on-error={}`,
@@ -437,9 +454,9 @@ export class RouterOSRenderer {
       `:do { /ip dns static remove [find name="hotspot.tconnect.local"] } on-error={}`,
       `:do { :if ([:len [/ip hotspot profile find name="tc-hotspot-profile"]] = 0) do={ /ip hotspot profile add name="tc-hotspot-profile" hotspot-address=10.10.0.1 dns-name="" html-directory=hotspot login-by=http-chap,http-pap split-user-domain=no use-radius=no } else={ /ip hotspot profile set [find name="tc-hotspot-profile"] hotspot-address=10.10.0.1 dns-name="" login-by=http-chap,http-pap split-user-domain=no use-radius=no } } on-error={}`,
       `:do { /ip hotspot profile set [find default=yes] dns-name="" login-by=http-chap,http-pap use-radius=no } on-error={}`,
-      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
-      `:do { /ip hotspot user profile set [find default=yes] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
-      `:do { /ip hotspot user profile set [find] rate-limit="${safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
+      `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="${allowFree ? '' : safeRateLimit}" shared-users=1024 add-mac-cookie=no } else={ /ip hotspot user profile set [find name="tc-speed-cap"] rate-limit="${allowFree ? '' : safeRateLimit}" shared-users=1024 add-mac-cookie=no } } on-error={}`,
+      `:do { /ip hotspot user profile set [find default=yes] rate-limit="${allowFree ? '' : safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
+      `:do { /ip hotspot user profile set [find] rate-limit="${allowFree ? '' : safeRateLimit}" shared-users=1024 add-mac-cookie=no } on-error={}`,
       `:do { :if ([:len [/ip hotspot find interface="bridgeLocal"]] = 0) do={ /ip hotspot add name="tc-hotspot" interface="bridgeLocal" address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } else={ /ip hotspot set [find interface="bridgeLocal"] address-pool="tc-hotspot-pool" profile="tc-hotspot-profile" addresses-per-mac=unlimited idle-timeout=15m keepalive-timeout=2m disabled=no } } on-error={}`,
       `# Pre-Provisioned Hotspot Auth Users In-Place`,
       `:do { :if ([:len [/ip hotspot user find name="test"]] = 0) do={ /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } else={ /ip hotspot user set [find name="test"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`,
@@ -458,18 +475,18 @@ export class RouterOSRenderer {
 
     if (isV7) {
       scriptLines.push(
-        `# 4. WireGuard Management Tunnel (v7)`,
+        `# 4. WireGuard Management Tunnel (v7, MTU 1420)`,
         `:do { /interface wireguard remove [find name="wg-tconnect"] } on-error={}`,
         safePrivateKey 
-          ? `:do { /interface wireguard add name="wg-tconnect" listen-port=${hubWgPort} private-key="${safePrivateKey}" comment="T-Connect Management Tunnel" } on-error={ :do { /interface wireguard add name="wg-tconnect" listen-port=${hubWgPort} comment="T-Connect Management Tunnel" } on-error={} }`
-          : `:do { /interface wireguard add name="wg-tconnect" listen-port=${hubWgPort} comment="T-Connect Management Tunnel" } on-error={}`,
+          ? `:do { /interface wireguard add name="wg-tconnect" mtu=1420 listen-port=${hubWgPort} private-key="${safePrivateKey}" comment="T-Connect Management Tunnel" } on-error={ :do { /interface wireguard add name="wg-tconnect" mtu=1420 listen-port=${hubWgPort} comment="T-Connect Management Tunnel" } on-error={} }`
+          : `:do { /interface wireguard add name="wg-tconnect" mtu=1420 listen-port=${hubWgPort} comment="T-Connect Management Tunnel" } on-error={}`,
         `:do { /ip address remove [find comment="tc-wg-ip"] } on-error={}`,
         `:do { /ip address add address="${routerWgIp}/24" interface="wg-tconnect" comment="tc-wg-ip" } on-error={}`,
         `:do { /interface wireguard peers remove [find comment="tc-hub-peer"] } on-error={}`,
         safeHubPubKey
           ? `:do { /interface wireguard peers add interface="wg-tconnect" public-key="${safeHubPubKey}" endpoint-address="${cleanDomain}" endpoint-port=${hubWgPort} allowed-address="10.99.0.0/16" persistent-keepalive=25s comment="tc-hub-peer" } on-error={}`
           : `# Hub public key omitted - wireguard interface created`,
-        `/log info "T-Connect: [3/7] WireGuard tunnel configured."`,
+        `/log info "T-Connect: [3/7] WireGuard tunnel configured (MTU 1420)."`,
         ``
       );
     } else {

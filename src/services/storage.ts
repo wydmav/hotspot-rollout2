@@ -128,7 +128,7 @@ export const STARTER_PLANS: HotspotPlan[] = [
     dataCapMb: null, // Unlimited
     downloadSpeedMbps: 5.0,
     uploadSpeedMbps: 2.5,
-    deviceLimit: 2,
+    deviceLimit: 0,
     burstDownloadMbps: 10.0,
     burstUploadMbps: 5.0,
     fairUseThresholdMb: 5000,
@@ -146,7 +146,7 @@ export const STARTER_PLANS: HotspotPlan[] = [
     dataCapMb: null, // Unlimited
     downloadSpeedMbps: 6.0,
     uploadSpeedMbps: 3.0,
-    deviceLimit: 2,
+    deviceLimit: 0,
     burstDownloadMbps: 12.0,
     burstUploadMbps: 6.0,
     fairUseThresholdMb: 25000,
@@ -164,7 +164,7 @@ export const STARTER_PLANS: HotspotPlan[] = [
     dataCapMb: null, // Unlimited
     downloadSpeedMbps: 8.0,
     uploadSpeedMbps: 4.0,
-    deviceLimit: 3,
+    deviceLimit: 0,
     burstDownloadMbps: 15.0,
     burstUploadMbps: 8.0,
     fairUseThresholdMb: 100000,
@@ -719,13 +719,14 @@ class StorageService {
       const data = await res.json();
       if (data?.success && Array.isArray(data.gateways) && data.gateways.length > 0) {
         let updated = false;
-        this.state.gateways = this.state.gateways.map((localGw) => {
+        const mergedGateways = this.state.gateways.map((localGw) => {
           const srvGw = data.gateways.find((g: any) => g.provider === localGw.provider);
           if (srvGw) {
             updated = true;
             return {
               ...localGw,
               ...srvGw,
+              logoUrl: srvGw.logoUrl || localGw.logoUrl,
               apiKey: srvGw.apiKey || localGw.apiKey,
               apiPassword: srvGw.apiPassword || localGw.apiPassword,
               vendorId: srvGw.vendorId || localGw.vendorId || '1, 11',
@@ -736,6 +737,13 @@ class StorageService {
           }
           return localGw;
         });
+        data.gateways.forEach((srvGw: any) => {
+          if (srvGw && srvGw.provider && !mergedGateways.some((g) => g.provider === srvGw.provider)) {
+            mergedGateways.push(srvGw);
+            updated = true;
+          }
+        });
+        this.state.gateways = mergedGateways;
         if (updated && typeof window.localStorage !== 'undefined') {
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
           this.notify();
@@ -772,7 +780,7 @@ class StorageService {
 
           if (Array.isArray(parsed.gateways)) {
             parsed.gateways = parsed.gateways
-              .filter((g: GatewayConfig) => g.provider === 'ottvoucher' || g.provider === 'paylesotho')
+              .filter((g: GatewayConfig) => Boolean(g && g.provider))
               .map((g: GatewayConfig) => {
                 if (g.provider === 'paylesotho') {
                   g.username = 'T-Connect';
@@ -2003,14 +2011,68 @@ class StorageService {
   }
 
 
-  // Plan & Voucher Methods (Full Persistent CRUD)
+  // Plan & Voucher Methods (Full Persistent CRUD + Real-Time Global Sync Across Scopes, Portal & Routers)
   getPlans(): HotspotPlan[] {
     return Array.isArray(this.state.plans) ? this.state.plans : STARTER_PLANS;
+  }
+
+  syncAllPlansEverywhere(): void {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
+    const allPlans = this.getPlans();
+    const scopes: VerticalType[] = ['hotspot', 'community', 'village', 'park', 'bus', 'stadium'];
+    const updatedScopeConfigs: Record<string, any> = {};
+
+    scopes.forEach((sc) => {
+      try {
+        const raw = window.localStorage.getItem(`tconnect_portal_scope_${sc}`);
+        const parsed = raw ? JSON.parse(raw) : { scope: sc };
+        const scopedPlans = allPlans.filter(
+          (p) =>
+            p.vertical === sc ||
+            (sc === 'community' && p.vertical === 'village') ||
+            (sc === 'village' && p.vertical === 'community')
+        );
+        const effectivePlans = scopedPlans.length > 0 ? scopedPlans : allPlans;
+        parsed.plans = effectivePlans.map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          currency: p.currency || 'M',
+          durationLabel: p.durationLabel,
+          durationSeconds: p.durationSeconds,
+          downloadSpeedMbps: p.downloadSpeedMbps,
+          uploadSpeedMbps: p.uploadSpeedMbps,
+          burstDownloadMbps: p.burstDownloadMbps || Math.round(p.downloadSpeedMbps * 1.5),
+          deviceLimit: p.deviceLimit ?? 0,
+          enabled: true,
+          isPopular: Boolean(p.isPopular),
+          badge: p.isPopular ? 'Best Value' : p.durationLabel
+        }));
+        window.localStorage.setItem(`tconnect_portal_scope_${sc}`, JSON.stringify(parsed));
+        updatedScopeConfigs[sc] = parsed;
+      } catch {}
+    });
+
+    fetch('/api/portal/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: 'hotspot',
+        config: updatedScopeConfigs.hotspot,
+        configs: updatedScopeConfigs,
+        applyToAllRouters: true
+      })
+    }).catch(() => {});
+
+    try {
+      window.dispatchEvent(new CustomEvent('tconnect:plans-synced', { detail: { plans: allPlans } }));
+    } catch {}
   }
 
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
     const newPlan: HotspotPlan = {
       ...plan,
+      deviceLimit: plan.deviceLimit ?? 0,
       id: `plan_${Date.now()}`
     };
     this.state.plans.push(newPlan);
@@ -2020,9 +2082,10 @@ class StorageService {
       role: 'Owner',
       action: 'plan.create',
       target: newPlan.name,
-      details: `Created plan: ${newPlan.currency}${newPlan.price} for ${newPlan.durationLabel}, max ${newPlan.deviceLimit} devices.`
+      details: `Created plan: ${newPlan.currency}${newPlan.price} for ${newPlan.durationLabel} (${newPlan.deviceLimit && newPlan.deviceLimit > 0 ? `max ${newPlan.deviceLimit} devices` : 'Unlimited devices'}). Synced to Portal & Routers.`
     });
     this.saveState();
+    this.syncAllPlansEverywhere();
     return newPlan;
   }
 
@@ -2041,9 +2104,10 @@ class StorageService {
       role: 'Owner',
       action: 'plan.update',
       target: updated.name,
-      details: `Updated plan '${updated.name}' (${updated.currency}${updated.price}, ${updated.durationLabel}, ${updated.downloadSpeedMbps}M/${updated.uploadSpeedMbps}M).`
+      details: `Updated plan '${updated.name}' (${updated.currency}${updated.price}, ${updated.durationLabel}, ${updated.downloadSpeedMbps}M/${updated.uploadSpeedMbps}M) and pushed to Captive Portal & Routers in real time.`
     });
     this.saveState();
+    this.syncAllPlansEverywhere();
     return updated;
   }
 
@@ -2057,9 +2121,10 @@ class StorageService {
       role: 'Owner',
       action: 'plan.delete',
       target: target.name,
-      details: `Deleted hotspot plan '${target.name}' (${target.currency}${target.price}).`
+      details: `Deleted hotspot plan '${target.name}' (${target.currency}${target.price}) and synced everywhere.`
     });
     this.saveState();
+    this.syncAllPlansEverywhere();
     return true;
   }
 
@@ -2067,6 +2132,7 @@ class StorageService {
     this.state.plans = [...STARTER_PLANS];
     (this.state as any).plansInitialized = true;
     this.saveState();
+    this.syncAllPlansEverywhere();
     return this.state.plans;
   }
 
@@ -2238,7 +2304,7 @@ class StorageService {
       };
     }
 
-    if (voucher.associatedDevices.length >= voucher.deviceLimit) {
+    if (voucher.deviceLimit > 0 && voucher.deviceLimit < 1000 && voucher.associatedDevices.length >= voucher.deviceLimit) {
       return {
         success: false,
         reason: 'DEVICE_LIMIT_REACHED',
@@ -2484,6 +2550,60 @@ class StorageService {
       });
       this.saveState();
     }
+  }
+
+  createGateway(input: {
+    provider: string;
+    name: string;
+    subtitle?: string;
+    logoUrl?: string;
+    currency?: string;
+    endpointUrl?: string;
+    merchantId?: string;
+    apiKey?: string;
+    bearerToken?: string;
+    webhookSecret?: string;
+    webhookUrl?: string;
+    isLive?: boolean;
+  }): GatewayConfig {
+    const cleanProvider = input.provider.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || `gw_${Date.now()}`;
+    const existingIdx = this.state.gateways.findIndex((g) => g.provider === cleanProvider);
+    const created: GatewayConfig = {
+      provider: cleanProvider,
+      name: input.name.trim(),
+      subtitle: input.subtitle?.trim() || `Custom Payment Gateway (${input.endpointUrl || cleanProvider})`,
+      logoUrl: input.logoUrl?.trim() || undefined,
+      currency: input.currency || 'M',
+      isLive: false,
+      isSandbox: true,
+      status: 'testing',
+      apiKey: input.apiKey?.trim() || input.bearerToken?.trim() || '',
+      apiSecret: '',
+      bearerToken: input.bearerToken?.trim() || input.apiKey?.trim() || '',
+      endpointUrl: input.endpointUrl?.trim() || 'https://api.paylesotho.co.ls',
+      merchantId: input.merchantId?.trim() || 'MERCHANT-01',
+      webhookSecret: input.webhookSecret?.trim() || `whsec_${cleanProvider}`,
+      webhookUrl: input.webhookUrl?.trim() || `https://api.tconnect.co.ls/v1/webhooks/${cleanProvider}`,
+      successRate24h: 100,
+      avgLatencyMs: 0,
+      testPassedOnce: false
+    };
+
+    if (existingIdx >= 0) {
+      this.state.gateways[existingIdx] = { ...this.state.gateways[existingIdx], ...created };
+    } else {
+      this.state.gateways.push(created);
+    }
+
+    this.logAudit({
+      actor: 'Admin',
+      role: 'Owner',
+      action: 'gateway.create',
+      target: created.name,
+      details: `Added payment gateway '${created.name}' (Provider ID: ${created.provider}, Endpoint: ${created.endpointUrl}). Pending ping verification before global sync.`
+    });
+    this.saveState(true);
+    return created;
   }
 
   /**

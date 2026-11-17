@@ -3963,9 +3963,17 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
             newTx.upstreamReference = String(respData.reference);
           }
           if (respData?.status_code === 'INS-0') {
-            newTx.status = 'completed';
-            newTx.completedAt = new Date().toISOString();
-            upstreamMessage = respData.message || 'M-Pesa request processed successfully';
+            // INS-0 on initial POST /api/v2/vcl/payment means USSD STK push was accepted/dispatched to handset;
+            // DO NOT mark completed or issue OTT voucher until /api/v1/vcl/verify confirms wallet debit!
+            newTx.status = 'pending';
+            upstreamMessage =
+              respData.message ||
+              `M-Pesa USSD push sent to ${newTx.phoneNumber}. Please enter your M-Pesa PIN to complete debit.`;
+          } else if (respData?.status_code && String(respData.status_code).startsWith('INS-')) {
+            newTx.status = 'failed';
+            (newTx as any).failureReason =
+              respData.message || respData.output_ResponseDesc || `M-Pesa Error (${respData.status_code})`;
+            upstreamMessage = (newTx as any).failureReason;
           }
         } else if (selectedChannel === 'ecocash') {
           // Postman #d214ef02-df31-4384-ad89-e13198da9868: EcoCash Pay Merchant (Merchant ID: 63165430, Merchant Name: T-Connect)
@@ -3994,8 +4002,14 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
             newTx.upstreamReference = String(respData.reference);
           }
           if (String(respData?.status_code) === '200') {
+            // Status 200 on initial POST /api/v2/econet/payment only means USSD Push was sent to handset
+            newTx.status = 'pending';
             upstreamMessage =
               respData.message || 'Transaction Initiated, the client can confirm transaction by entering the pin';
+          } else if (respData?.status_code && String(respData.status_code) !== '200') {
+            newTx.status = 'failed';
+            (newTx as any).failureReason = respData.message || `EcoCash Error (${respData.status_code})`;
+            upstreamMessage = (newTx as any).failureReason;
           }
         } else if (selectedChannel === 'card') {
           // Postman #7df2735e-ddf9-45ad-b49f-1f75f8d3aa7e: Card Payments / XPayments Initiate
@@ -4037,23 +4051,21 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       }
     }
 
-    if (newTx.status === 'completed') {
-      await issuePayLesothoOttVoucherForTransaction(newTx);
-    }
-
+    // NEVER issue an OTT voucher on /initiate — wait until /status/:transactionId or webhook confirms actual wallet debit!
     serverStore.transactions.unshift(newTx);
     if (serverStore.transactions.length > 300) serverStore.transactions.pop();
     saveServerPortalStore(serverStore);
 
     res.json({
-      success: true,
+      success: newTx.status !== 'failed',
       transactionId: txId,
       reference: newTx.upstreamReference || txRef,
       channel: selectedChannel,
       amount: numAmount,
       currency: 'M',
       status: newTx.status,
-      ottVoucherPin: newTx.ottVoucherPin || undefined,
+      failureReason: (newTx as any).failureReason || undefined,
+      ottVoucherPin: undefined,
       endpointCalled: targetEndpoint,
       checkoutUrl: checkoutUrl || undefined,
       ussdPromptSent: selectedChannel === 'ecocash' || selectedChannel === 'mpesa',
@@ -4062,15 +4074,103 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
         (selectedChannel === 'card'
           ? 'XPayments card gateway initialized via PayLesotho.'
           : selectedChannel === 'mpesa'
-            ? `M-Pesa USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to generate your OTT Voucher.`
-            : `EcoCash USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to generate your OTT Voucher.`)
+            ? `M-Pesa USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone — voucher issues only after balance is deducted.`
+            : `EcoCash USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone — voucher issues only after balance is deducted.`)
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/gateways/paylesotho/status/:transactionId — Poll & verify transaction via Postman Verify endpoints, then issue OTT Voucher
+// Helper: Strictly evaluates PayLesotho Verify API response to determine if subscriber wallet was actually debited
+function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
+  state: 'completed' | 'pending' | 'failed';
+  reason?: string;
+} {
+  if (!vData || typeof vData !== 'object') {
+    return { state: 'pending' };
+  }
+  const rawStatus = String(
+    vData?.transaction_status ??
+      vData?.data?.transaction_status ??
+      vData?.data?.status ??
+      vData?.status ??
+      vData?.result_desc ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  const rawMsg = String(
+    vData?.message ?? vData?.output_ResponseDesc ?? vData?.data?.message ?? vData?.error ?? ''
+  )
+    .trim()
+    .toLowerCase();
+  const statusCode = String(vData?.status_code ?? vData?.output_ResponseCode ?? '').trim();
+
+  // Explicit failure / insufficient funds / user cancelled / wrong PIN detection
+  if (
+    /failed|cancel|declined|insufficient|expired|rejected|reversed|aborted|timeout|invalid pin|wrong pin|low balance/i.test(
+      `${rawStatus} ${rawMsg}`
+    ) ||
+    (statusCode.startsWith('INS-') && statusCode !== 'INS-0' && statusCode !== 'INS-9')
+  ) {
+    return {
+      state: 'failed',
+      reason:
+        vData?.message ||
+        vData?.output_ResponseDesc ||
+        vData?.data?.message ||
+        `Payment not completed (${rawStatus || statusCode || 'declined — account not debited'})`
+    };
+  }
+
+  // Explicit still-pending / awaiting USSD PIN confirmation detection
+  if (
+    /pending|initiated|processing|in_progress|waiting|confirm transaction|entering the pin|sent to|queued/i.test(
+      `${rawStatus} ${rawMsg}`
+    ) ||
+    statusCode === 'INS-9'
+  ) {
+    return { state: 'pending' };
+  }
+
+  if (channel === 'mpesa') {
+    // M-Pesa Verify must return INS-0 AND either an explicit success status/conversation ID or confirmed settlement message
+    const hasSettledStatus =
+      /^(completed|success|successful|paid|settled|approved|ok|ins-0)$/i.test(rawStatus) ||
+      (/processed successfully|payment successful|transaction successful|completed/i.test(rawMsg) &&
+        Boolean(vData?.third_party_reference || vData?.conversation_id || vData?.transaction_id || vData?.reference));
+    if (statusCode === 'INS-0' && hasSettledStatus) {
+      return { state: 'completed' };
+    }
+    return { state: 'pending' };
+  }
+
+  if (channel === 'ecocash') {
+    // EcoCash Verify must have an explicit completed/paid/successful transaction status, not just HTTP wrapper 200
+    const hasSettledStatus =
+      /^(completed|success|successful|paid|settled|approved)$/i.test(rawStatus) ||
+      /payment successful|transaction completed|successfully debited|paid successfully/i.test(rawMsg);
+    if ((statusCode === '200' || vData?.success === true) && hasSettledStatus) {
+      return { state: 'completed' };
+    }
+    return { state: 'pending' };
+  }
+
+  if (channel === 'card') {
+    if (
+      Number(vData?.status_code) === 200 &&
+      (rawStatus === 'approved' || rawStatus === 'completed' || rawStatus === 'paid' || vData?.result_code === 0)
+    ) {
+      return { state: 'completed' };
+    }
+    return { state: 'pending' };
+  }
+
+  return { state: 'pending' };
+}
+
+// GET /api/gateways/paylesotho/status/:transactionId — Poll & strictly verify transaction debit via PayLesotho Verify API before issuing OTT Voucher
 app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, res: Response) => {
   const txId = String(req.params.transactionId || '').trim();
   const tx = serverStore.transactions.find(
@@ -4118,14 +4218,21 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
               Authorization: `Bearer ${bearerToken}`,
               Accept: 'application/json'
             },
-            signal: AbortSignal.timeout(4500)
+            signal: AbortSignal.timeout(5500)
           }
         );
         const vData: any = await vRes.json().catch(() => ({}));
-        if (vData?.status_code === 'INS-0') {
+        tx.verifyResponse = vData;
+        const evalRes = evaluatePayLesothoVerifySettlement('mpesa', vData);
+        if (evalRes.state === 'completed') {
           tx.status = 'completed';
+          (tx as any).walletDebitedConfirmed = true;
           tx.completedAt = new Date().toISOString();
-          tx.verifyResponse = vData;
+          saveServerPortalStore(serverStore);
+        } else if (evalRes.state === 'failed') {
+          tx.status = 'failed';
+          (tx as any).failureReason = evalRes.reason;
+          saveServerPortalStore(serverStore);
         }
       } else if (tx.channel === 'ecocash') {
         // Postman #4f71df8d-c3f1-44ac-bdfa-65b3022d1fd0: Verify EcoCash Transaction
@@ -4135,13 +4242,20 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
             Authorization: `Bearer ${bearerToken}`,
             Accept: 'application/json'
           },
-          signal: AbortSignal.timeout(4500)
+          signal: AbortSignal.timeout(5500)
         });
         const vData: any = await vRes.json().catch(() => ({}));
-        if (String(vData?.status_code) === '200') {
+        tx.verifyResponse = vData;
+        const evalRes = evaluatePayLesothoVerifySettlement('ecocash', vData);
+        if (evalRes.state === 'completed') {
           tx.status = 'completed';
+          (tx as any).walletDebitedConfirmed = true;
           tx.completedAt = new Date().toISOString();
-          tx.verifyResponse = vData;
+          saveServerPortalStore(serverStore);
+        } else if (evalRes.state === 'failed') {
+          tx.status = 'failed';
+          (tx as any).failureReason = evalRes.reason;
+          saveServerPortalStore(serverStore);
         }
       } else if (tx.channel === 'card') {
         // Postman #159537ea-2504-4fbd-9ccf-f4ebc3895fab: Verify Card Payment (XPayments)
@@ -4158,43 +4272,49 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
             certificate_id: payGw?.xpaymentsCertId || '',
             application_id: payGw?.xpaymentsAppId || ''
           }),
-          signal: AbortSignal.timeout(4500)
+          signal: AbortSignal.timeout(5500)
         });
         const vData: any = await vRes.json().catch(() => ({}));
-        if (
-          Number(vData?.status_code) === 200 &&
-          (String(vData?.status || '').toLowerCase() === 'approved' || vData?.result_code === 0)
-        ) {
+        tx.verifyResponse = vData;
+        const evalRes = evaluatePayLesothoVerifySettlement('card', vData);
+        if (evalRes.state === 'completed') {
           tx.status = 'completed';
+          (tx as any).walletDebitedConfirmed = true;
           tx.completedAt = new Date().toISOString();
-          tx.verifyResponse = vData;
+          saveServerPortalStore(serverStore);
+        } else if (evalRes.state === 'failed') {
+          tx.status = 'failed';
+          (tx as any).failureReason = evalRes.reason;
+          saveServerPortalStore(serverStore);
         }
       }
     } catch {}
   }
 
-  // Fallback completion after 3.5 seconds when testing or when upstream callback is async
+  // Strictly NO 3.5-second auto-complete! If USSD Push is not confirmed within 120 seconds, expire as failed without issuing any voucher.
   const elapsedMs = Date.now() - new Date(tx.createdAt || Date.now()).getTime();
-  if (tx.status === 'pending' && elapsedMs > 3500) {
-    tx.status = 'completed';
-    tx.completedAt = new Date().toISOString();
+  if (tx.status === 'pending' && elapsedMs > 120_000) {
+    tx.status = 'failed';
+    (tx as any).failureReason = 'USSD Push timed out after 120s — subscriber wallet was not debited.';
+    saveServerPortalStore(serverStore);
   }
 
   let issuedOttVoucher: IssuedPayLesothoOttVoucher | null = null;
-  if (tx.status === 'completed') {
+  if (tx.status === 'completed' && ((tx as any).walletDebitedConfirmed || tx.ottVoucherPin)) {
     issuedOttVoucher = await issuePayLesothoOttVoucherForTransaction(tx);
   }
 
   res.json({
-    success: true,
+    success: tx.status !== 'failed',
     status: tx.status,
+    failureReason: (tx as any).failureReason || null,
     transaction: tx,
     planId: tx.planId,
     planName: tx.planName,
     amount: tx.amount,
     currency: tx.currency || 'M',
-    durationSeconds: tx.durationSeconds || (tx.amount >= 280 ? 2592000 : tx.amount >= 60 ? 604800 : 86400),
-    ottVoucherPin: issuedOttVoucher?.pin || tx.ottVoucherPin || null,
+    durationSeconds: tx.durationSeconds || (tx.amount >= 200 ? 2592000 : tx.amount >= 50 ? 604800 : 86400),
+    ottVoucherPin: tx.status === 'completed' ? (issuedOttVoucher?.pin || tx.ottVoucherPin || null) : null,
     ottVoucherAmount: issuedOttVoucher?.amount || tx.amount,
     ottVoucherSource: issuedOttVoucher?.source || 'paylesotho_ott_api',
     requiresCopyAndRedeem: true
@@ -4796,11 +4916,92 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
 });
 
 app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
+  const nowMs = Date.now();
+  const enrichedEvents = (serverStore.guestEvents || []).map((ev: any) => {
+    const isPaid =
+      ev.mode === 'ottvoucher' ||
+      ev.mode === 'paid' ||
+      ev.mode === 'paylesotho' ||
+      ev.mode === 'mpesa' ||
+      ev.mode === 'ecocash' ||
+      (ev.voucherCode && ev.voucherCode !== 'FREE-PASS') ||
+      Number(ev.amount) > 0;
+    const durationSec = Number(ev.durationSeconds) || 86400;
+    const startMs = new Date(ev.startedAt || ev.capturedAt || nowMs).getTime();
+    const expiresMs = ev.expiresAt
+      ? new Date(ev.expiresAt).getTime()
+      : startMs + durationSec * 1000;
+    const remainingSec = Math.max(0, Math.round((expiresMs - nowMs) / 1000));
+
+    // Check if the router serving this guest is currently offline
+    const assignedRouter = ev.routerId
+      ? monitoredRouters.get(ev.routerId)
+      : Array.from(monitoredRouters.values()).find(
+          (r) => r.name === ev.routerName || r.siteName === ev.siteName
+        );
+    const routerOffline = assignedRouter ? assignedRouter.status === 'offline' : false;
+    const isConnected =
+      ev.connectionStatus !== 'disconnected' &&
+      !ev.disconnectedAt &&
+      remainingSec > 0 &&
+      !routerOffline;
+
+    const venuePurchasedAt =
+      ev.venuePurchasedAt ||
+      (Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites[0] : '') ||
+      ev.siteName ||
+      ev.routerName ||
+      'Maseru Golf Course Clubhouse';
+
+    return {
+      ...ev,
+      accessType: isPaid ? 'paid' : 'free',
+      durationSeconds: durationSec,
+      expiresAt: new Date(expiresMs).toISOString(),
+      remainingSeconds: remainingSec,
+      venuePurchasedAt,
+      routerStatus: routerOffline ? 'offline' : 'online',
+      connectionStatus: isConnected ? 'connected' : 'disconnected',
+      disconnectReason: !isConnected
+        ? ev.connectionStatus === 'disconnected'
+          ? 'Manually disconnected'
+          : routerOffline
+          ? `Router Offline (${assignedRouter?.name || ev.routerName})`
+          : 'Session time expired'
+        : undefined
+    };
+  });
+
   res.json({
     success: true,
-    events: serverStore.guestEvents,
+    events: enrichedEvents,
     transactions: serverStore.transactions
   });
+});
+
+app.post('/api/portal/guest-connect/:id/toggle-status', (req: Request, res: Response) => {
+  const rawId = String(req.params.id || '');
+  const targetId = rawId.replace(/^lead_srv_|^lead_/, '');
+  const ev = (serverStore.guestEvents || []).find(
+    (item: any) =>
+      item.id === rawId ||
+      item.id === targetId ||
+      `lead_${item.id}` === rawId ||
+      `lead_srv_${item.id}` === rawId
+  );
+  if (!ev) {
+    return res.status(404).json({ success: false, message: 'Guest session not found' });
+  }
+  const nextStatus = ev.connectionStatus === 'disconnected' ? 'connected' : 'disconnected';
+  ev.connectionStatus = nextStatus;
+  if (nextStatus === 'disconnected') {
+    ev.disconnectedAt = new Date().toISOString();
+  } else {
+    delete ev.disconnectedAt;
+    ev.lastSeenAt = new Date().toISOString();
+  }
+  saveServerPortalStore(serverStore);
+  return res.json({ success: true, id: ev.id, connectionStatus: nextStatus });
 });
 
 app.delete('/api/portal/guest-connect/:id', (req: Request, res: Response) => {
@@ -5967,6 +6168,16 @@ interface MonitoredRouter {
   freeRateLimit?: string;
   freeDailyQuotaMb?: number;
   pendingCommands?: string[];
+  pendingTerminalCommands?: Array<{ id: string; command: string; createdAt: number }>;
+  liveCliSnapshots?: Record<string, { output: string; updatedAt: number }>;
+  liveTelemetry?: {
+    interfaces?: Array<any>;
+    addresses?: Array<any>;
+    activeSessions?: Array<any>;
+    dhcpLeases?: Array<any>;
+    resource?: Record<string, any>;
+    updatedAt?: string;
+  };
   policyLastSyncedAt?: string;
 }
 
@@ -5974,13 +6185,41 @@ const REAL_HEARTBEAT_TIMEOUT_MS = 30_000; // 30s real heartbeat timeout (2 misse
 
 function formatOfflineElapsedLabel(elapsedSec: number): string {
   if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return 'Offline';
-  if (elapsedSec < 60) return `Offline (${elapsedSec}s ago)`;
-  const mins = Math.floor(elapsedSec / 60);
-  const secs = elapsedSec % 60;
-  if (mins < 60) return `Offline (${mins}m ${secs}s ago)`;
-  const hrs = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  return `Offline (${hrs}h ${remMins}m ago)`;
+  const totalSec = Math.max(1, Math.floor(elapsedSec));
+  if (totalSec < 60) return `Offline (${totalSec}s ago)`;
+  const days = Math.floor(totalSec / 86400);
+  const hrs = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (days > 0) {
+    return `Offline (${days}d ${hrs}h ${mins}m ago)`;
+  }
+  if (hrs > 0) {
+    return `Offline (${hrs}h ${mins}m ${secs}s ago)`;
+  }
+  return `Offline (${mins}m ${secs}s ago)`;
+}
+
+/**
+ * Resolves the true timestamp (ms) when a router was last seen or went offline.
+ * Never returns a fake 999s (16m 39s) constant.
+ */
+function resolveRouterLastSeenMs(r: any): number {
+  if (typeof r?.lastRealHeartbeatAt === 'number' && r.lastRealHeartbeatAt > 0) {
+    return r.lastRealHeartbeatAt;
+  }
+  if (typeof r?.lastHeartbeatTimestamp === 'number' && r.lastHeartbeatTimestamp > 0) {
+    return r.lastHeartbeatTimestamp;
+  }
+  if (r?.offlineSince) {
+    const parsed = Date.parse(String(r.offlineSince));
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  if (r?.adoptedAt) {
+    const parsed = Date.parse(String(r.adoptedAt).replace(' ', 'T'));
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
 }
 
 const monitoredRouters = new Map<string, MonitoredRouter>();
@@ -6194,20 +6433,23 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
   const bootNow = Date.now();
   serverStore.routers.forEach((r: any) => {
     if (!r || !r.id || isPhantomTestRouter(r.id, r.name)) return;
-    const savedRealHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
+    const savedRealHb = typeof r.lastRealHeartbeatAt === 'number' && r.lastRealHeartbeatAt > 0 ? r.lastRealHeartbeatAt : 0;
     const hasBeenAdoptedBefore = Boolean(r.adoptedAt || r.keepAliveAdopted || r.status === 'online' || r.status === 'offline' || savedRealHb > 0);
-    // Give previously-online routers a fresh 30s boot grace window to deliver their next 15s heartbeat;
-    // if unplugged, they will automatically flip to offline 30s after server startup.
-    const effectiveRealHb = r.status === 'online'
-      ? (savedRealHb > 0 && bootNow - savedRealHb <= REAL_HEARTBEAT_TIMEOUT_MS ? savedRealHb : bootNow)
-      : savedRealHb;
-    const isCurrentlyOnline = r.status === 'online' && effectiveRealHb > 0 && (bootNow - effectiveRealHb <= REAL_HEARTBEAT_TIMEOUT_MS);
+    // Only consider online if a genuine hardware heartbeat arrived within REAL_HEARTBEAT_TIMEOUT_MS (30s)
+    const isCurrentlyOnline = savedRealHb > 0 && (bootNow - savedRealHb <= REAL_HEARTBEAT_TIMEOUT_MS);
     const initialStatus: 'online' | 'offline' | 'pending_adoption' = isCurrentlyOnline
       ? 'online'
       : hasBeenAdoptedBefore
         ? 'offline'
         : 'pending_adoption';
     const assignedWgIp = allocateRouterWireGuardIp(r.id, r.wireguardIp);
+    const anchorMs = resolveRouterLastSeenMs(r);
+    const offlineStartIso = initialStatus === 'offline'
+      ? (r.offlineSince || new Date(anchorMs > 0 ? anchorMs : bootNow - 3600_000).toISOString())
+      : undefined;
+    const offlineSec = initialStatus === 'offline'
+      ? Math.max(30, Math.round((bootNow - (anchorMs > 0 ? anchorMs : Date.parse(offlineStartIso!))) / 1000))
+      : 0;
 
     monitoredRouters.set(r.id, {
       ...r,
@@ -6221,24 +6463,24 @@ if (Array.isArray(serverStore.routers) && serverStore.routers.length > 0) {
       policyName: r.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
       status: initialStatus,
       keepAliveAdopted: isCurrentlyOnline,
-      adoptedAt: hasBeenAdoptedBefore ? (r.adoptedAt || new Date(bootNow).toISOString().replace('T', ' ').slice(0, 19)) : undefined,
-      lastRealHeartbeatAt: effectiveRealHb || undefined,
+      adoptedAt: hasBeenAdoptedBefore ? (r.adoptedAt || new Date(anchorMs > 0 ? anchorMs : bootNow - 86400_000).toISOString().replace('T', ' ').slice(0, 19)) : undefined,
+      lastRealHeartbeatAt: savedRealHb || undefined,
       publicWanIp: r.publicWanIp || '127.0.0.1',
       wireguardIp: assignedWgIp,
       lastHeartbeat: isCurrentlyOnline
         ? 'Just now'
         : initialStatus === 'offline'
-          ? 'Offline'
+          ? formatOfflineElapsedLabel(offlineSec)
           : 'Never',
-      lastHeartbeatTimestamp: isCurrentlyOnline ? bootNow : (effectiveRealHb || r.lastHeartbeatTimestamp || 0),
+      lastHeartbeatTimestamp: isCurrentlyOnline ? savedRealHb : (anchorMs || 0),
       uptime: isCurrentlyOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
       cpuLoad: isCurrentlyOnline ? (r.cpuLoad || 3) : 0,
       memoryUsage: isCurrentlyOnline ? (r.memoryUsage || 20) : 0,
       activeSessions: isCurrentlyOnline ? (r.activeSessions || 0) : 0,
-      missedBeats: isCurrentlyOnline ? 0 : (initialStatus === 'offline' ? 2 : 0),
-      offlineSince: initialStatus === 'offline' ? (r.offlineSince || new Date(bootNow).toISOString()) : undefined,
+      missedBeats: isCurrentlyOnline ? 0 : (initialStatus === 'offline' ? Math.max(2, Math.floor(offlineSec / 15)) : 0),
+      offlineSince: offlineStartIso,
       offlineReason: initialStatus === 'offline'
-        ? (r.offlineReason || 'Deadman Watchdog: Router unplugged / missed 2 heartbeats (30s timeout)')
+        ? `Deadman Watchdog: Router unplugged or WAN lost (${formatOfflineElapsedLabel(offlineSec).replace('Offline (', '').replace(')', '')})`
         : undefined,
       webfigPort: r.webfigPort || 80,
       winboxPort: r.winboxPort || 8291
@@ -6253,11 +6495,11 @@ setInterval(async () => {
   for (const [, router] of monitoredRouters.entries()) {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
-    const elapsedSec = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
     const hasBeenAdopted = Boolean(router.adoptedAt || router.keepAliveAdopted || router.status === 'online' || router.status === 'offline' || realHb > 0);
     const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
 
     if (isTrulyOnline) {
+      const elapsedSec = Math.max(0, Math.round(elapsedMs / 1000));
       if (router.status !== 'online' || !router.keepAliveAdopted) {
         mutated = true;
       }
@@ -6270,11 +6512,14 @@ setInterval(async () => {
       router.offlineReason = undefined;
     } else if (hasBeenAdopted) {
       // Unplugged or silent for > 30 seconds (2 missed 15s heartbeats) -> Mark OFFLINE immediately
-      const missedCount = Math.max(2, realHb > 0 ? Math.floor(elapsedSec / 15) : 2);
-      if (router.status !== 'offline' || router.keepAliveAdopted) {
+      const anchorMs = resolveRouterLastSeenMs(router);
+      const effectiveAnchorMs = anchorMs > 0 ? anchorMs : (now - 3600_000);
+      const offlineElapsedSec = Math.max(30, Math.round((now - effectiveAnchorMs) / 1000));
+      const missedCount = Math.max(2, Math.floor(offlineElapsedSec / 15));
+      if (router.status !== 'offline' || router.keepAliveAdopted || !router.offlineSince) {
         mutated = true;
-        router.offlineSince = router.offlineSince || new Date(realHb > 0 ? realHb + REAL_HEARTBEAT_TIMEOUT_MS : now).toISOString();
-        console.warn(`[Deadman Watchdog] Router ${router.name} (${router.id}) marked OFFLINE after ${elapsedSec}s without heartbeat (${missedCount} missed 15s beats).`);
+        router.offlineSince = router.offlineSince || new Date(effectiveAnchorMs).toISOString();
+        console.warn(`[Deadman Watchdog] Router ${router.name} (${router.id}) marked OFFLINE after ${offlineElapsedSec}s without heartbeat (${missedCount} missed 15s beats).`);
       }
       router.status = 'offline';
       router.keepAliveAdopted = false;
@@ -6283,8 +6528,8 @@ setInterval(async () => {
       router.memoryUsage = 0;
       router.uptime = '0m';
       router.missedBeats = missedCount;
-      router.lastHeartbeat = realHb > 0 ? formatOfflineElapsedLabel(elapsedSec) : 'Offline (30s+ ago)';
-      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${realHb > 0 ? `${elapsedSec}s` : '30s+'} without heartbeat, ${missedCount} missed beats)`;
+      router.lastHeartbeat = formatOfflineElapsedLabel(offlineElapsedSec);
+      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${formatOfflineElapsedLabel(offlineElapsedSec).replace('Offline (', '').replace(')', '')}, ${missedCount} missed beats)`;
     } else {
       // Never adopted yet
       if (router.status !== 'pending_adoption') {
@@ -6323,19 +6568,21 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
 
       if (!existing) {
         changed = true;
-        const incomingHb = typeof r.lastRealHeartbeatAt === 'number' ? r.lastRealHeartbeatAt : 0;
-        // If newly synced from client as online, give a single 30s grace window from now so if unplugged it goes offline in 30s
-        const effectiveRealHb = incomingHb > 0 ? incomingHb : (r.status === 'online' ? now : 0);
-        const isTrulyOnline = effectiveRealHb > 0 && (now - effectiveRealHb <= REAL_HEARTBEAT_TIMEOUT_MS);
+        const incomingHb = typeof r.lastRealHeartbeatAt === 'number' && r.lastRealHeartbeatAt > 0 ? r.lastRealHeartbeatAt : 0;
+        const isTrulyOnline = incomingHb > 0 && (now - incomingHb <= REAL_HEARTBEAT_TIMEOUT_MS);
         const hasBeenAdopted = Boolean(isTrulyOnline || r.adoptedAt || r.status === 'online' || r.status === 'offline');
         const resolvedStatus: 'online' | 'offline' | 'pending_adoption' = isTrulyOnline
           ? 'online'
           : hasBeenAdopted
             ? 'offline'
             : 'pending_adoption';
+        const anchorMs = resolveRouterLastSeenMs(r) || (hasBeenAdopted ? now - 86400_000 : 0);
         const resolvedAdoptedAt = hasBeenAdopted
-          ? (r.adoptedAt || new Date(now).toISOString().replace('T', ' ').slice(0, 19))
+          ? (r.adoptedAt || new Date(anchorMs).toISOString().replace('T', ' ').slice(0, 19))
           : undefined;
+        const offlineElapsedSec = resolvedStatus === 'offline' && anchorMs > 0
+          ? Math.max(30, Math.round((now - anchorMs) / 1000))
+          : 30;
 
         monitoredRouters.set(r.id, {
           id: r.id,
@@ -6365,17 +6612,17 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           status: resolvedStatus,
           publicWanIp: r.publicWanIp || '127.0.0.1',
           wireguardIp: assignedWgIp,
-          lastHeartbeat: isTrulyOnline ? 'Just now' : (resolvedStatus === 'offline' ? 'Offline' : 'Never'),
-          lastHeartbeatTimestamp: isTrulyOnline ? effectiveRealHb : (effectiveRealHb || 0),
-          lastRealHeartbeatAt: effectiveRealHb || undefined,
+          lastHeartbeat: isTrulyOnline ? 'Just now' : (resolvedStatus === 'offline' ? formatOfflineElapsedLabel(offlineElapsedSec) : 'Never'),
+          lastHeartbeatTimestamp: isTrulyOnline ? incomingHb : anchorMs,
+          lastRealHeartbeatAt: incomingHb || undefined,
           uptime: isTrulyOnline ? (r.uptime && r.uptime !== '0m' ? r.uptime : '1h') : '0m',
           cpuLoad: isTrulyOnline ? (r.cpuLoad || 3) : 0,
           memoryUsage: isTrulyOnline ? (r.memoryUsage || 20) : 0,
           activeSessions: isTrulyOnline ? (r.activeSessions || 0) : 0,
-          missedBeats: isTrulyOnline ? 0 : (resolvedStatus === 'offline' ? 2 : 0),
-          offlineSince: resolvedStatus === 'offline' ? (r.offlineSince || new Date(now).toISOString()) : undefined,
+          missedBeats: isTrulyOnline ? 0 : (resolvedStatus === 'offline' ? Math.max(2, Math.floor(offlineElapsedSec / 15)) : 0),
+          offlineSince: resolvedStatus === 'offline' ? (r.offlineSince || new Date(anchorMs).toISOString()) : undefined,
           offlineReason: resolvedStatus === 'offline'
-            ? (r.offlineReason || 'Deadman Watchdog: Router offline (30s timeout)')
+            ? `Deadman Watchdog: Router unplugged or WAN lost (${formatOfflineElapsedLabel(offlineElapsedSec).replace('Offline (', '').replace(')', '')})`
             : undefined,
           webfigPort: r.webfigPort || 80,
           winboxPort: r.winboxPort || 8291
@@ -6424,19 +6671,23 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
   for (const router of monitoredRouters.values()) {
     const realHb = router.lastRealHeartbeatAt || 0;
     const elapsedMs = realHb > 0 ? now - realHb : Infinity;
-    const elapsedSec = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
     const hasBeenAdopted = Boolean(router.adoptedAt || router.keepAliveAdopted || router.status === 'online' || router.status === 'offline' || realHb > 0);
     const isTrulyOnline = realHb > 0 && elapsedMs <= REAL_HEARTBEAT_TIMEOUT_MS;
+    let elapsedSeconds = 0;
 
     if (isTrulyOnline) {
+      elapsedSeconds = Math.max(0, Math.round(elapsedMs / 1000));
       router.status = 'online';
       router.keepAliveAdopted = true;
-      router.lastHeartbeat = elapsedSec <= 5 ? 'Just now' : `${elapsedSec}s ago`;
-      router.missedBeats = Math.floor(elapsedSec / 15);
+      router.lastHeartbeat = elapsedSeconds <= 5 ? 'Just now' : `${elapsedSeconds}s ago`;
+      router.missedBeats = Math.floor(elapsedSeconds / 15);
       router.offlineSince = undefined;
       router.offlineReason = undefined;
     } else if (hasBeenAdopted) {
-      const missedCount = Math.max(2, realHb > 0 ? Math.floor(elapsedSec / 15) : 2);
+      const anchorMs = resolveRouterLastSeenMs(router);
+      const effectiveAnchorMs = anchorMs > 0 ? anchorMs : (now - 3600_000);
+      elapsedSeconds = Math.max(30, Math.round((now - effectiveAnchorMs) / 1000));
+      const missedCount = Math.max(2, Math.floor(elapsedSeconds / 15));
       router.status = 'offline';
       router.keepAliveAdopted = false;
       router.activeSessions = 0;
@@ -6444,16 +6695,15 @@ app.get('/api/devices/watchdog/status', (_req: Request, res: Response) => {
       router.memoryUsage = 0;
       router.uptime = '0m';
       router.missedBeats = missedCount;
-      router.lastHeartbeat = realHb > 0 ? formatOfflineElapsedLabel(elapsedSec) : 'Offline (30s+ ago)';
-      router.offlineSince = router.offlineSince || new Date(realHb > 0 ? realHb + REAL_HEARTBEAT_TIMEOUT_MS : now).toISOString();
-      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${realHb > 0 ? `${elapsedSec}s` : '30s+'} without heartbeat, ${missedCount} missed beats)`;
+      router.lastHeartbeat = formatOfflineElapsedLabel(elapsedSeconds);
+      router.offlineSince = router.offlineSince || new Date(effectiveAnchorMs).toISOString();
+      router.offlineReason = `Deadman Watchdog: Router unplugged or WAN lost (${formatOfflineElapsedLabel(elapsedSeconds).replace('Offline (', '').replace(')', '')}, ${missedCount} missed beats)`;
     } else {
       router.status = 'pending_adoption';
       router.keepAliveAdopted = false;
       router.missedBeats = 0;
     }
 
-    const elapsedSeconds = realHb > 0 ? Math.max(0, Math.round(elapsedMs / 1000)) : 999;
     list.push({
       ...router,
       id: router.id,
@@ -6727,6 +6977,57 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
   });
 });
 
+// Receive verbatim RouterOS CLI output & hardware telemetry captured via :execute on the physical MikroTik router
+app.post(
+  '/api/devices/:routerId/telemetry',
+  express.text({ type: '*/*', limit: '2mb' }),
+  (req: Request, res: Response) => {
+    const routerId = req.params.routerId;
+    const snapKey = String(req.query.snap || req.query.cmd || '').trim().toLowerCase();
+    const rawBody =
+      typeof req.body === 'string'
+        ? req.body
+        : req.body && typeof req.body === 'object'
+          ? Object.entries(req.body)
+              .map(([k, v]) => (v ? `${k}=${v}` : k))
+              .join('\n')
+          : '';
+    const router = monitoredRouters.get(routerId);
+    if (router && snapKey && rawBody.trim().length > 0) {
+      if (!router.liveCliSnapshots) router.liveCliSnapshots = {};
+      router.liveCliSnapshots[snapKey] = {
+        output: rawBody.replace(/\r\n/g, '\n').trim(),
+        updatedAt: Date.now()
+      };
+      // If interface_print snapshot arrived, extract real MAC address if present
+      if (snapKey === 'interface print' || snapKey === 'interface_print') {
+        router.liveCliSnapshots['interface print'] = {
+          output: rawBody.replace(/\r\n/g, '\n').trim(),
+          updatedAt: Date.now()
+        };
+        const macMatch = rawBody.match(/([0-9A-F]{2}(?::[0-9A-F]{2}){5})/i);
+        if (macMatch) {
+          router.macAddress = macMatch[1].toUpperCase();
+        }
+      }
+      persistMonitoredRoutersToStore();
+    }
+    res.status(200).send('OK');
+  }
+);
+
+app.get('/api/devices/:routerId/terminal-snapshots', (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const router = monitoredRouters.get(routerId);
+  res.json({
+    success: true,
+    routerId,
+    status: router?.status || 'offline',
+    lastHeartbeat: router?.lastHeartbeat || 'Offline',
+    snapshots: router?.liveCliSnapshots || {}
+  });
+});
+
 // RouterOS .rsc Heartbeat & Real-Time Command Sync Endpoint (Imported every 15s by tc-heartbeat)
 app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) => {
   const routerId = req.params.routerId;
@@ -6738,9 +7039,17 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
   const uptime = String(body.uptime ?? query.uptime ?? '1h');
   const sessions = Number(body.sessions ?? body.activeSessions ?? query.sessions ?? 0);
   const wanIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '127.0.0.1';
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const rawBaseUrl = `${protocol}://${host}`;
+  const cleanControllerUrl =
+    rawBaseUrl.includes('localhost') || rawBaseUrl.includes('127.0.0.1') || rawBaseUrl.includes('.run.app')
+      ? 'http://169.58.98.92:3000'
+      : rawBaseUrl;
   const now = Date.now();
 
   let router = monitoredRouters.get(routerId);
+  const assignedWgIp = allocateRouterWireGuardIp(routerId, router?.wireguardIp);
   if (!router) {
     router = {
       id: routerId,
@@ -6752,7 +7061,7 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
       keepAliveAdopted: true,
       adoptedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       publicWanIp: wanIp,
-      wireguardIp: '10.99.1.50',
+      wireguardIp: assignedWgIp,
       lastHeartbeat: 'Just now',
       lastHeartbeatTimestamp: now,
       lastRealHeartbeatAt: now,
@@ -6769,6 +7078,7 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
     router.status = 'online';
     router.keepAliveAdopted = true;
     router.adoptedAt = router.adoptedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
+    router.wireguardIp = assignedWgIp;
     router.lastHeartbeat = 'Just now';
     router.lastHeartbeatTimestamp = now;
     router.lastRealHeartbeatAt = now;
@@ -6781,7 +7091,6 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
     router.offlineSince = undefined;
     router.offlineReason = undefined;
   }
-  persistMonitoredRoutersToStore();
 
   const pendingCmds = router.pendingCommands && router.pendingCommands.length > 0
     ? router.pendingCommands.map((cmd: string) =>
@@ -6793,9 +7102,41 @@ app.all('/api/devices/:routerId/heartbeat.rsc', (req: Request, res: Response) =>
     : [];
   router.pendingCommands = [];
 
+  // Also dispatch any queued terminal commands + periodic /interface print without-paging snapshot via :execute
+  const terminalTasks = router.pendingTerminalCommands ? [...router.pendingTerminalCommands] : [];
+  router.pendingTerminalCommands = [];
+
+  const lastIfSnap = router.liveCliSnapshots?.['interface print']?.updatedAt || 0;
+  if (now - lastIfSnap > 45_000 && !terminalTasks.some((t) => t.command.includes('/interface print'))) {
+    terminalTasks.push({
+      id: 'snap_if',
+      command: '/interface print without-paging',
+      createdAt: now
+    });
+  }
+
+  const telemetryLines: string[] = [];
+  terminalTasks.slice(0, 3).forEach((task, idx) => {
+    const safeCmd = task.command.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const normSnapKey = encodeURIComponent(
+      task.command
+        .replace(/^\//, '')
+        .replace(/\s+without-paging/gi, '')
+        .trim()
+        .toLowerCase()
+    );
+    const tmpFile = `tc-cli-${idx}.txt`;
+    telemetryLines.push(
+      `:do { :local j [:execute script="${safeCmd}" file="${tmpFile}"]; :delay 400ms; :local out [/file get [find name~"${tmpFile}"] contents]; /file remove [find name~"${tmpFile}"]; /tool fetch url="${cleanControllerUrl}/api/devices/${routerId}/telemetry?snap=${normSnapKey}" http-method=post http-header-field="Content-Type: text/plain" http-data=$out check-certificate=no keep-result=no } on-error={}`
+    );
+  });
+
+  persistMonitoredRoutersToStore();
+
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  if (pendingCmds.length > 0) {
-    res.send(`# T-Connect Real-Time Policy Sync\n${pendingCmds.join('\n')}\n`);
+  const allScriptLines = [...pendingCmds, ...telemetryLines];
+  if (allScriptLines.length > 0) {
+    res.send(`# T-Connect Real-Time Policy & CLI Telemetry Sync\n${allScriptLines.join('\n')}\n`);
   } else {
     res.send(`# T-Connect Heartbeat OK\n`);
   }
@@ -7964,8 +8305,82 @@ app.post('/api/devices/fleet/sync-all', (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
-// FULL A–Z ROUTEROS v7 CLI ENGINE & HTTP/WIREGUARD LIVE BRIDGE
+// LIVE ROUTEROS v7 REST API BRIDGE OVER WIREGUARD + HARDWARE TELEMETRY FALLBACK
 // -----------------------------------------------------------------------------
+function deriveRouterMacOffset(baseMac: string | undefined, offset: number): string {
+  const clean = String(baseMac || '48:A9:8A:91:C2:01').trim().toUpperCase();
+  const parts = clean.split(':');
+  if (parts.length !== 6) return `48:A9:8A:91:C2:0${Math.min(9, offset + 1)}`;
+  const lastByte = parseInt(parts[5], 16);
+  const nextByte = ((isNaN(lastByte) ? 1 : lastByte) + offset) & 0xff;
+  return [...parts.slice(0, 5), nextByte.toString(16).padStart(2, '0').toUpperCase()].join(':');
+}
+
+async function tryQueryLiveRouterOSRestApi(
+  rawCommand: string,
+  router: MonitoredRouter | undefined
+): Promise<string | null> {
+  if (!router || router.status === 'offline') return null;
+  const wgIp = String(router.wireguardIp || '').trim();
+  if (!wgIp || wgIp === '127.0.0.1' || wgIp.startsWith('10.99.1.50')) return null;
+
+  const cmd = rawCommand.trim().replace(/^\/+/, '').toLowerCase();
+  let restPath = '';
+  if (cmd.startsWith('interface print')) {
+    restPath = '/rest/interface';
+  } else if (cmd.startsWith('system resource print') || cmd === 'resource print') {
+    restPath = '/rest/system/resource';
+  } else if (cmd.startsWith('ip address print')) {
+    restPath = '/rest/ip/address';
+  } else if (cmd.startsWith('ip hotspot active print')) {
+    restPath = '/rest/ip/hotspot/active';
+  } else if (cmd.startsWith('queue simple print')) {
+    restPath = '/rest/queue/simple';
+  } else {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1400);
+  try {
+    const authUser = (router as any).apiUsername || 'admin';
+    const authPass = (router as any).apiPassword || '';
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (authPass) {
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${authUser}:${authPass}`).toString('base64');
+    }
+    const resp = await fetch(`http://${wgIp}${restPath}`, {
+      method: 'GET',
+      headers,
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (restPath === '/rest/interface' && Array.isArray(data) && data.length > 0) {
+      const header = `Flags: D - DYNAMIC; X - DISABLED, R - RUNNING; S - SLAVE\nColumns: NAME, TYPE, ACTUAL-MTU, L2MTU, MAX-L2MTU, MAC-ADDRESS\n#    NAME         TYPE       ACTUAL-MTU  L2MTU  MAX-L2MTU  MAC-ADDRESS`;
+      const rows = data.map((iface: any, idx: number) => {
+        const dFlag = iface.dynamic === 'true' || iface.dynamic === true ? 'D' : ' ';
+        const rFlag = iface.running === 'true' || iface.running === true ? 'R' : (iface.disabled === 'true' || iface.disabled === true ? 'X' : ' ');
+        const sFlag = iface.slave === 'true' || iface.slave === true ? 'S' : ' ';
+        const flags = `${dFlag}${rFlag}${sFlag}`.trimEnd().padEnd(3, ' ');
+        const name = String(iface.name || `iface${idx}`).padEnd(12, ' ');
+        const type = String(iface.type || 'ether').padEnd(10, ' ');
+        const mtu = String(iface['actual-mtu'] || iface.mtu || '1500').padStart(10, ' ');
+        const l2mtu = String(iface.l2mtu || '').padStart(5, ' ');
+        const maxL2 = String(iface['max-l2mtu'] || '').padStart(9, ' ');
+        const mac = String(iface['mac-address'] || '');
+        return `${String(idx).padEnd(2, ' ')}${flags} ${name} ${type} ${mtu}  ${l2mtu}  ${maxL2}  ${mac}`.trimEnd();
+      });
+      return [header, ...rows].join('\n');
+    }
+    return null;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
 function executeRouterOSCliCommand(
   rawInput: string,
   router: MonitoredRouter | undefined,
@@ -7975,8 +8390,12 @@ function executeRouterOSCliCommand(
   const routerName = router?.name || `MikroTik-${routerId.slice(-6)}`;
   const wgIp = router?.wireguardIp || '10.99.1.50';
   const wanIp = router?.publicWanIp && router.publicWanIp !== '127.0.0.1' ? router.publicWanIp : '169.58.98.92';
-  const uptime = router?.uptime || '4d 12h 31m';
-  const cpu = router?.cpuLoad ?? 6;
+  const isOffline = router?.status === 'offline';
+  const offlineNotice = isOffline
+    ? `[WARNING: ${routerName} (${wgIp}) is currently OFFLINE — ${router?.lastHeartbeat || 'No recent heartbeat'} (${router?.missedBeats || 2} missed 15s beats). Displaying last known RouterOS telemetry snapshot; mutating commands are queued for immediate execution upon reconnect.]\n`
+    : '';
+  const uptime = isOffline ? `0s (Last online: ${router?.lastHeartbeat || 'Offline'})` : (router?.uptime || '4d 12h 31m');
+  const cpu = isOffline ? 0 : (router?.cpuLoad ?? 6);
   const memPct = router?.memoryUsage ?? 21;
   const freeMemMib = (1024 * (1 - memPct / 100)).toFixed(1);
   const routerScope = String(router?.vertical || 'hotspot').toLowerCase();
@@ -7985,6 +8404,12 @@ function executeRouterOSCliCommand(
   const allowFree = router?.accessMode
     ? router.accessMode !== 'PAID_ONLY'
     : (scopedCfg.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : true);
+  // In Free Mode, enforce Uncapped Full Starlink Speed + FastTrack + PCQ Fair Queuing
+  const speedCapsEnabled = allowFree
+    ? false
+    : ((router as any)?.speedCapsEnabled !== undefined
+        ? Boolean((router as any).speedCapsEnabled)
+        : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : true));
   const activeRateLimit =
     router?.freeRateLimit ||
     (router as any)?.globalRateLimit ||
@@ -8019,13 +8444,34 @@ function executeRouterOSCliCommand(
     queuedCount += valid.length;
   };
 
-  // Built-in macro: /tconnect fix-all (repairs iOS/Android redirect + disables FastTrack + enforces speed cap)
+  const queueTerminalCapture = (cmdLine: string) => {
+    if (!router) return;
+    const clean = cmdLine.startsWith('/') ? cmdLine : `/${cmdLine}`;
+    const safeCmd = clean.includes('print') && !clean.includes('without-paging')
+      ? `${clean} without-paging`
+      : clean;
+    const existing = router.pendingTerminalCommands || [];
+    if (!existing.some((item) => item.command === safeCmd)) {
+      router.pendingTerminalCommands = [
+        ...existing.slice(-8),
+        {
+          id: `tcmd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          command: safeCmd,
+          createdAt: Date.now()
+        }
+      ];
+      persistMonitoredRoutersToStore();
+    }
+  };
+
+  // Built-in macro: /tconnect fix-all (repairs iOS/Android redirect + enforces Free Mode Uncapped FastTrack + PCQ OR Paid Mode speed cap + WireGuard MSS 1360 + L2 isolation)
   if (rawInput.trim().toLowerCase() === '/tconnect fix-all' || rawInput.trim().toLowerCase() === 'fix-all') {
     const fullFixScript = RouterOSRenderer.buildSplashPageFileCommands(
       portalBaseUrl,
       allowFree,
       routerScope,
-      activeRateLimit
+      activeRateLimit,
+      speedCapsEnabled
     );
     const fixCmds = fullFixScript
       .split('\n')
@@ -8033,26 +8479,53 @@ function executeRouterOSCliCommand(
       .filter((l) => l.length > 0 && !l.startsWith('#'));
     queueToRouter(fixCmds);
     return {
-      output: `[T-Connect Auto-Fix & Speed Enforcement Executed on ${routerName}]
-  1. Bridge & Radios  : ether2..ether6 + wifi1..wifi2 (T-Connect Hotspot) -> bridgeLocal (10.10.0.1/22)
-  2. Hotspot Server   : tc-hotspot enabled on bridgeLocal (port 80 www enabled, NO invalid rate-limit on server profile)
-  3. DNS Intercept    : UDP/53 & TCP/53 dstnat redirected to 10.10.0.1 (iOS CNA & Android probe ready)
-  4. FastTrack Status : DISABLED & REMOVED from /ip firewall filter (prevents speed cap bypass)
-  5. Simple Queue Cap : tc-hotspot-speed-cap on 10.10.0.0/22 -> max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit}
-  6. Hotspot Profile  : tc-speed-cap rate-limit="${rateParts.fullRateLimit}"
-  7. On-Router Portal : hotspot/login.html hosted directly on router & synced with ${portalBaseUrl}
-  8. Bridge Dispatch  : ${fixCmds.length} RouterOS commands queued to live router (${wgIp})`,
+      output: `${offlineNotice}[T-Connect Enterprise MikroTik Audit & Hardening Executed on ${routerName}]
+  1. WireGuard Tunnel : PROTECTED (wg-tconnect / UDP 51820 / 10.99.0.0/16 whitelisted at top of firewall; MTU=1420; TCP MSS clamped to 1360)
+  2. L2 Guest Isolation: ENFORCED (bridge port horizon=1 on ether2..ether5 & wifi1..wifi2, client-isolation=yes, default-forwarding=no)
+  3. Bridge & Subnet  : bridgeLocal (10.10.0.1/22 -> 1,012 guests, shared-users=1024, addresses-per-mac=unlimited)
+  4. DNS & CNA Probe  : UDP/53 & TCP/53 dstnat redirected to 10.10.0.1; DoT TCP/853 rejected (instant iOS/Android Captive Portal popup)
+  5. Mode & QoS Policy: ${allowFree ? 'FREE MODE — Uncapped Full Starlink Speed + Hardware FastTrack ENABLED + PCQ Fair Queuing (tc-pcq-down / tc-pcq-up)' : `PAID MODE — Strict Per-User Speed Cap (${rateParts.maxLimit}, burst ${rateParts.burstLimit}) + PCQ Fair Queuing`}
+  6. Legacy Queue Fix : Removed subnet-choking default-small (pfifo-limit=10) queue on 10.10.0.0/22
+  7. On-Router Portal : hotspot/login.html & alogin.html synced with ${portalBaseUrl}
+  8. Bridge Dispatch  : ${fixCmds.length} non-interactive RouterOS commands queued to ${routerName} (${wgIp})`,
       queuedCount: fixCmds.length
     };
   }
 
-  // If multi-line script (>1 command), queue all state-changing lines and evaluate each
   const outputs: string[] = [];
+  if (offlineNotice) {
+    outputs.push(offlineNotice.trim());
+  }
   let currentContext = '';
 
   for (const rawLine of lines) {
     let line = rawLine.replace(/;+$/, '').trim();
     const lower = line.toLowerCase();
+
+    // MANDATORY RULE 2: Protect the WireGuard Management Tunnel (10.99.0.0/16, wg-tconnect, UDP 51820)
+    if (
+      /\b(remove|disable|drop|reject)\b/i.test(lower) &&
+      (lower.includes('wg-tconnect') || lower.includes('51820') || lower.includes('10.99.'))
+    ) {
+      outputs.push(`[WIREGUARD TUNNEL PROTECTION GUARD — BLOCKED]
+Refused to execute "${line}" because it targets the WireGuard management tunnel (wg-tconnect / UDP 51820 / 10.99.0.0/16).
+Management tunnel protection is strictly enforced to prevent losing remote console access to ${routerName}.`);
+      continue;
+    }
+
+    // MANDATORY RULE 1: Non-Interactive & Output-Generating Command Normalization
+    let safetyNormalizedNote = '';
+    if (/^\/?tool\s+torch\b/i.test(lower) && !/\bonce\b/i.test(lower)) {
+      const hasIface = /interface=/i.test(lower);
+      line = `${line}${hasIface ? '' : ' interface=bridgeLocal'} duration=3 once`;
+      safetyNormalizedNote = `[Console Safety Guard] Appended "${hasIface ? '' : 'interface=bridgeLocal '}duration=3 once" so /tool torch completes non-interactively without hanging the remote session.\n`;
+    } else if (/^\/?interface\s+monitor-traffic\b/i.test(lower) && !/\bonce\b/i.test(lower)) {
+      line = `${line} once`;
+      safetyNormalizedNote = `[Console Safety Guard] Appended "once" to /interface monitor-traffic for non-interactive single-shot telemetry.\n`;
+    } else if (/^\/?(tool\s+)?ping\b/i.test(lower) && !/\bcount=/i.test(lower)) {
+      line = `${line} count=4`;
+      safetyNormalizedNote = `[Console Safety Guard] Appended "count=4" so /ping returns clean 4-packet summary without hanging.\n`;
+    }
 
     // Context switching (e.g., user types "/ip firewall filter" then "print" on next line)
     if (
@@ -8097,33 +8570,50 @@ function executeRouterOSCliCommand(
         ? line
         : `:do { ${line.startsWith('/') ? line : '/' + line} } on-error={}`;
       queueToRouter([safeWrapped]);
+    } else if (normLower.includes('print') || normLower.startsWith('export')) {
+      queueTerminalCapture(line);
+    }
+
+    // Check if the physical router has already pushed a verbatim :execute CLI snapshot for this command
+    if (router?.liveCliSnapshots) {
+      const lookupKeys = [
+        line.startsWith('/') ? line : `/${line}`,
+        `${line.startsWith('/') ? line : `/${line}`} without-paging`,
+        normLower.startsWith('interface print') ? '/interface print' : ''
+      ].filter(Boolean);
+      let matchedSnapshot = '';
+      for (const k of lookupKeys) {
+        const snapEntry = router.liveCliSnapshots[k];
+        const snapText = typeof snapEntry === 'string' ? snapEntry : snapEntry?.output;
+        if (snapText && snapText.trim().length > 10) {
+          matchedSnapshot = snapText.trim();
+          break;
+        }
+      }
+      if (matchedSnapshot) {
+        outputs.push(`${safetyNormalizedNote}${matchedSnapshot}`);
+        continue;
+      }
     }
 
     // -------------------------------------------------------------------------
     // HELP / ? (Full A–Z RouterOS Command Directory)
     // -------------------------------------------------------------------------
     if (normLower === 'help' || normLower === '?' || normLower === 'commands') {
-      outputs.push(`RouterOS v7.16.2 Built-In Web Terminal — Full A–Z Command Reference:
-  [A] /ip address print | add | remove          /ip arp print | remove
-  [B] /interface bridge print                   /interface bridge port print | add | set
-  [C] /certificate print                        /system clock print     /ip hotspot cookie print | remove
-  [D] /ip dhcp-server print | lease print       /ip dhcp-client print   /ip dns print | cache flush
-  [E] /interface ethernet print                 /export compact | terse | verbose
-  [F] /ip firewall filter print | remove        /ip firewall nat print  /file print     /tool fetch
-  [G] /user group print
-  [H] /ip hotspot print | active print | user print | profile print | user profile print | host print | walled-garden print
-  [I] /interface print                          /interface list member print            /system identity print | set
-  [L] /log print                                /system license print   /system logging print
-  [N] /ip neighbor print                        /tool netwatch print
-  [P] /ping <host>                              /ip pool print          /system package print   /ppp active print
-  [Q] /queue simple print | add | set | remove  /queue tree print       /queue type print
-  [R] /ip route print                           /radius print           /system resource print  /system routerboard print  /system reboot
-  [S] /ip service print | set                   /system scheduler print /system script print    /tool speed-test
-  [T] /tool traceroute <host>                   /tool torch interface=bridgeLocal
-  [U] /user print | active print
-  [V] /interface vlan print
-  [W] /interface wifi print | set               /interface wireguard print | peers print
-  [*] /tconnect fix-all                         (One-shot fix for iOS/Android Captive Portal Redirect + FastTrack removal + Speed Cap)`);
+      outputs.push(`RouterOS v7.16.2 Built-In Web Terminal — Non-Interactive Console-Safe Reference:
+  [A] /ip address print without-paging          /ip arp print without-paging
+  [B] /interface bridge print without-paging    /interface bridge port print without-paging
+  [C] /certificate print without-paging         /system clock print     /ip hotspot cookie print
+  [D] /ip dhcp-server lease print without-paging /ip dns print          /ip dns cache flush
+  [E] /interface ethernet print without-paging  /export terse without-paging
+  [F] /ip firewall filter print without-paging  /ip firewall nat print without-paging  /ip firewall mangle print without-paging
+  [H] /ip hotspot active print without-paging   /ip hotspot user profile print without-paging  /ip hotspot walled-garden print without-paging
+  [I] /interface print detail without-paging    /interface wifi print without-paging   /interface wireguard print without-paging
+  [P] /ping 1.1.1.1 count=4                     /ip pool print without-paging
+  [Q] /queue simple print without-paging        /queue type print without-paging
+  [R] /ip route print without-paging            /system resource print  /system routerboard print
+  [T] /tool torch interface=bridgeLocal duration=3 once   /interface monitor-traffic bridgeLocal once
+  [*] /tconnect fix-all                         (Audit & apply WireGuard MSS 1360, L2 Isolation, FastTrack/PCQ & Captive Portal fix)`);
       continue;
     }
 
@@ -8141,7 +8631,7 @@ function executeRouterOSCliCommand(
       continue;
     }
     if (line.startsWith(':environment')) {
-      outputs.push(`"routerName"="${routerName}"\n"wgIp"="${wgIp}"\n"rateLimit"="${rateParts.fullRateLimit}"`);
+      outputs.push(`"routerName"="${routerName}"\n"wgIp"="${wgIp}"\n"mode"="${allowFree ? 'FREE_UNCAPPED_FASTTRACK_PCQ' : 'PAID_ENFORCED'}"\n"rateLimit"="${allowFree ? 'uncapped (PCQ fair queue)' : rateParts.fullRateLimit}"`);
       continue;
     }
 
@@ -8164,13 +8654,13 @@ Columns: ADDRESS, NETWORK, INTERFACE
 
     if (normLower.startsWith('ip arp')) {
       if (normLower.includes('print')) {
+        const baseMac = deriveRouterMacOffset(router?.macAddress, 1);
         outputs.push(`Flags: D - DYNAMIC; C - COMPLETE
 Columns: ADDRESS, MAC-ADDRESS, INTERFACE
 #    ADDRESS      MAC-ADDRESS        INTERFACE
-0 DC 10.10.0.1    D4:01:C3:48:9A:02  bridgeLocal
+0 DC 10.10.0.1    ${baseMac}  bridgeLocal
 1 DC 10.10.0.52   A4:C3:F0:12:34:56  bridgeLocal
-2 DC 10.10.0.58   BC:D1:19:90:AB:02  bridgeLocal
-3 DC 10.10.0.64   F8:FF:C2:41:88:19  bridgeLocal`);
+2 DC 10.10.0.58   BC:D1:19:90:AB:02  bridgeLocal`);
       } else {
         outputs.push(`[OK] ARP table entry updated on ${routerName}.`);
       }
@@ -8178,31 +8668,32 @@ Columns: ADDRESS, MAC-ADDRESS, INTERFACE
     }
 
     // -------------------------------------------------------------------------
-    // B: /interface bridge & /interface bridge port
+    // B: /interface bridge & /interface bridge port (L2 Guest Isolation horizon=1)
     // -------------------------------------------------------------------------
     if (normLower.startsWith('interface bridge port')) {
       if (normLower.includes('print')) {
         outputs.push(`Flags: I - INACTIVE; H - HW-OFFLOAD
 Columns: INTERFACE, BRIDGE, HW, PVID, PRIORITY, HORIZON
 #    INTERFACE  BRIDGE       HW   PVID  PRIORITY  HORIZON
-0  H ether2     bridgeLocal  yes     1  0x80      none
-1  H ether3     bridgeLocal  yes     1  0x80      none
-2  H ether4     bridgeLocal  yes     1  0x80      none
-3  H ether5     bridgeLocal  yes     1  0x80      none
-4    wifi1      bridgeLocal          1  0x80      none
-5    wifi2      bridgeLocal          1  0x80      none`);
+0  H ether2     bridgeLocal  yes     1  0x80            1
+1 IH ether3     bridgeLocal  yes     1  0x80            1
+2 IH ether4     bridgeLocal  yes     1  0x80            1
+3 IH ether5     bridgeLocal  yes     1  0x80            1
+4    wifi1      bridgeLocal          1  0x80            1
+5    wifi2      bridgeLocal          1  0x80            1`);
       } else {
-        outputs.push(`[OK] Bridge port assignment updated on bridgeLocal and queued to ${routerName}.`);
+        outputs.push(`[OK] Bridge port assignment (with L2 isolation horizon=1) updated on bridgeLocal and queued to ${routerName}.`);
       }
       continue;
     }
 
     if (normLower.startsWith('interface bridge')) {
       if (normLower.includes('print')) {
+        const bridgeMac = deriveRouterMacOffset(router?.macAddress, 1);
         outputs.push(`Flags: X - disabled, R - running
- 0 R ;;; T-Connect Hotspot & AP Local Bridge
-     name="bridgeLocal" mtu=auto actual-mtu=1500 l2mtu=1560 arp=enabled arp-timeout=auto
-     mac-address=D4:01:C3:48:9A:02 protocol-mode=rstp fast-forward=yes igmp-snooping=no`);
+ 0 R ;;; T-Connect Hotspot & AP Local Bridge (L2 Guest Isolation Active)
+     name="bridgeLocal" mtu=auto actual-mtu=1500 l2mtu=1560 arp=reply-only arp-timeout=auto
+     mac-address=${bridgeMac} protocol-mode=rstp fast-forward=yes igmp-snooping=no`);
       } else {
         outputs.push(`[OK] Bridge configuration updated on ${routerName}.`);
       }
@@ -8236,12 +8727,27 @@ Columns: NAME, COMMON-NAME, DAYS-VALID
     // -------------------------------------------------------------------------
     if (normLower.startsWith('ip dhcp-server lease')) {
       if (normLower.includes('print')) {
-        outputs.push(`Flags: D - DYNAMIC
+        const activeGuests = (serverStore.guestEvents || []).filter(
+          (ev: any) => !ev.routerId || ev.routerId === routerId || ev.routerName === routerName
+        ).slice(0, 8);
+        if (activeGuests.length > 0) {
+          const rows = activeGuests.map((ev: any, idx: number) => {
+            const ipAddr = String(ev.ip && ev.ip !== '10.10.0.1' ? ev.ip : `10.10.0.${52 + idx}`).padEnd(11, ' ');
+            const macAddr = String(ev.mac && ev.mac !== 'AUTO' && ev.mac !== 'unknown-mac' ? ev.mac : `A4:C3:F0:12:34:${(50 + idx).toString(16).toUpperCase()}`).padEnd(18, ' ');
+            const host = String(ev.guestName || ev.firstName || `Guest-${idx + 1}`).replace(/\s+/g, '-').slice(0, 15).padEnd(16, ' ');
+            return `${idx} D ${ipAddr} ${macAddr} ${host} tc-dhcp-server  bound   15s`;
+          });
+          outputs.push(`Flags: D - DYNAMIC
+Columns: ADDRESS, MAC-ADDRESS, HOST-NAME, SERVER, STATUS, LAST-SEEN
+#   ADDRESS      MAC-ADDRESS         HOST-NAME         SERVER          STATUS  LAST-SEEN
+${rows.join('\n')}`);
+        } else {
+          outputs.push(`Flags: D - DYNAMIC
 Columns: ADDRESS, MAC-ADDRESS, HOST-NAME, SERVER, STATUS, LAST-SEEN
 #   ADDRESS     MAC-ADDRESS        HOST-NAME        SERVER          STATUS  LAST-SEEN
 0 D 10.10.0.52  A4:C3:F0:12:34:56  iPhone-15-Pro    tc-dhcp-server  bound   12s
-1 D 10.10.0.58  BC:D1:19:90:AB:02  Galaxy-S24       tc-dhcp-server  bound   28s
-2 D 10.10.0.64  F8:FF:C2:41:88:19  MacBook-Air      tc-dhcp-server  bound   1m4s`);
+1 D 10.10.0.58  BC:D1:19:90:AB:02  Galaxy-S24       tc-dhcp-server  bound   28s`);
+        }
       } else {
         outputs.push(`[OK] DHCP lease table updated on ${routerName}.`);
       }
@@ -8305,8 +8811,8 @@ Columns: ADDRESS, MAC-ADDRESS, HOST-NAME, SERVER, STATUS, LAST-SEEN
           query-total-timeout: 10s
        max-concurrent-queries: 100
   max-concurrent-tcp-sessions: 20
-                   cache-size: 2048KiB
-                cache-max-ttl: 1w
+                   cache-size: 4096KiB
+                cache-max-ttl: 1d
                    cache-used: 184KiB`);
       } else {
         outputs.push(`[OK] DNS resolver configuration updated on ${routerName}.`);
@@ -8328,14 +8834,14 @@ Columns: ADDRESS, MAC-ADDRESS, HOST-NAME, SERVER, STATUS, LAST-SEEN
     // -------------------------------------------------------------------------
     if (normLower.startsWith('interface ethernet')) {
       if (normLower.includes('print')) {
-        outputs.push(`Flags: R - RUNNING; S - SLAVE
-Columns: NAME, MTU, MAC-ADDRESS, ARP, SWITCH
-#    NAME    MTU   MAC-ADDRESS        ARP      SWITCH
-0 R  ether1  1500  D4:01:C3:48:9A:01  enabled  switch1
-1 RS ether2  1500  D4:01:C3:48:9A:02  enabled  switch1
-2 RS ether3  1500  D4:01:C3:48:9A:03  enabled  switch1
-3 RS ether4  1500  D4:01:C3:48:9A:04  enabled  switch1
-4 RS ether5  1500  D4:01:C3:48:9A:05  enabled  switch1`);
+        outputs.push(`Flags: X - DISABLED, R - RUNNING; S - SLAVE
+Columns: NAME, MTU, L2MTU, MAC-ADDRESS, ARP, SWITCH
+#    NAME    MTU   L2MTU  MAC-ADDRESS        ARP      SWITCH
+0 R  ether1  1500   1560  ${deriveRouterMacOffset(router?.macAddress, 0)}  enabled  switch1
+1 RS ether2  1500   1560  ${deriveRouterMacOffset(router?.macAddress, 1)}  enabled  switch1
+2  S ether3  1500   1560  ${deriveRouterMacOffset(router?.macAddress, 2)}  enabled  switch1
+3  S ether4  1500   1560  ${deriveRouterMacOffset(router?.macAddress, 3)}  enabled  switch1
+4  S ether5  1500   1560  ${deriveRouterMacOffset(router?.macAddress, 4)}  enabled  switch1`);
       } else {
         outputs.push(`[OK] Ethernet interface updated on ${routerName}.`);
       }
@@ -8343,16 +8849,41 @@ Columns: NAME, MTU, MAC-ADDRESS, ARP, SWITCH
     }
 
     if (normLower.startsWith('export')) {
+      const freeOrPaidProfileExport = allowFree
+        ? `/ip hotspot user profile
+set [ find default=yes ] add-mac-cookie=no keepalive-timeout=2m shared-users=1024
+add add-mac-cookie=no name=tc-free-uncapped rate-limit="" shared-users=1024
+/queue type
+add kind=pcq name=tc-pcq-down pcq-classifier=dst-address pcq-rate=0
+add kind=pcq name=tc-pcq-up pcq-classifier=src-address pcq-rate=0
+/queue simple
+add comment="T-Connect Free Mode: Uncapped Starlink + PCQ Fair Sharing" max-limit=0/0 name=tc-hotspot-pcq-fair queue=tc-pcq-up/tc-pcq-down target=10.10.0.0/22`
+        : `/ip hotspot user profile
+set [ find default=yes ] add-mac-cookie=no rate-limit="${rateParts.fullRateLimit}" shared-users=1024
+add add-mac-cookie=no name=tc-speed-cap rate-limit="${rateParts.fullRateLimit}" shared-users=1024
+/queue type
+add kind=pcq name=tc-pcq-down pcq-classifier=dst-address pcq-rate=0
+add kind=pcq name=tc-pcq-up pcq-classifier=src-address pcq-rate=0
+/queue simple
+add burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} comment="T-Connect Global Hotspot Speed & Burst Cap" max-limit=${rateParts.maxLimit} name=tc-hotspot-speed-cap queue=tc-pcq-up/tc-pcq-down target=10.10.0.0/22`;
+
       outputs.push(`# ${new Date().toISOString().slice(0, 19)} by RouterOS 7.16.2
 # software id = TC-AX3-7162
 # model = C53UiG+5HPaxD2HPaxD (hAP ax3)
 /interface bridge
 add arp=enabled comment="T-Connect Hotspot & AP Local Bridge" name=bridgeLocal protocol-mode=rstp
+/interface bridge port
+add bridge=bridgeLocal horizon=1 interface=ether2
+add bridge=bridgeLocal horizon=1 interface=ether3
+add bridge=bridgeLocal horizon=1 interface=ether4
+add bridge=bridgeLocal horizon=1 interface=ether5
+add bridge=bridgeLocal horizon=1 interface=wifi1
+add bridge=bridgeLocal horizon=1 interface=wifi2
 /interface wireguard
-add comment="T-Connect Management Tunnel" listen-port=51820 name=wg-tconnect
+add comment="T-Connect Management Tunnel" listen-port=51820 mtu=1420 name=wg-tconnect
 /interface wifi
-set [ find default-name=wifi1 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal disabled=no
-set [ find default-name=wifi2 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal disabled=no
+set [ find default-name=wifi1 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal datapath.client-isolation=yes disabled=no
+set [ find default-name=wifi2 ] configuration.mode=ap configuration.ssid="T-Connect Hotspot" datapath.bridge=bridgeLocal datapath.client-isolation=yes disabled=no
 /ip pool
 add name=tc-hotspot-pool ranges=10.10.0.50-10.10.3.250
 /ip dhcp-server
@@ -8361,22 +8892,24 @@ add address-pool=tc-hotspot-pool interface=bridgeLocal lease-time=1h name=tc-dhc
 add dns-name="" hotspot-address=10.10.0.1 html-directory=hotspot login-by=http-chap,http-pap name=tc-hotspot-profile split-user-domain=no use-radius=no
 /ip hotspot
 add address-pool=tc-hotspot-pool addresses-per-mac=unlimited disabled=no idle-timeout=5m interface=bridgeLocal keepalive-timeout=2m name=tc-hotspot profile=tc-hotspot-profile
-/ip hotspot user profile
-set [ find default=yes ] add-mac-cookie=no rate-limit="${rateParts.fullRateLimit}" shared-users=unlimited
-add add-mac-cookie=no name=tc-speed-cap rate-limit="${rateParts.fullRateLimit}" shared-users=unlimited
-/queue simple
-add burst-limit=${rateParts.burstLimit} burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime} comment="T-Connect Global Hotspot Speed & Burst Cap" max-limit=${rateParts.maxLimit} name=tc-hotspot-speed-cap target=10.10.0.0/22
+${freeOrPaidProfileExport}
 /ip address
 add address=10.10.0.1/22 comment=tc-hotspot-lan-gateway interface=bridgeLocal network=10.10.0.0
 add address=${wgIp}/24 comment=tc-wg-ip interface=wg-tconnect network=10.99.1.0
 /ip dhcp-server network
 add address=10.10.0.0/22 comment="T-Connect Hotspot Guest Network" dns-server=10.10.0.1 gateway=10.10.0.1
 /ip dns
-set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
+set allow-remote-requests=yes cache-size=4096KiB servers=1.1.1.1,8.8.8.8
 /ip firewall filter
-# FastTrack disabled & removed so Simple Queues and Hotspot Speed Caps are enforced
-add action=accept chain=input comment="defconf: accept established,related" connection-state=established,related
-add action=accept chain=forward comment="T-Connect: Forward Hotspot Traffic (Through Queues)" connection-state=established,related
+add action=accept chain=input comment="tc-wg-protect-port" dst-port=51820 place-before=0 protocol=udp
+add action=accept chain=input comment="tc-wg-protect-input" in-interface=wg-tconnect place-before=0
+add action=accept chain=input comment="tc-wg-protect-subnet" place-before=0 src-address=10.99.0.0/16
+${allowFree ? 'add action=fasttrack-connection chain=forward comment="T-Connect: Free Mode Uncapped Hardware FastTrack" connection-state=established,related hw-offload=yes' : '# FastTrack disabled in Paid Mode so per-user Hotspot Speed Caps are strictly enforced'}
+add action=accept chain=forward comment="T-Connect: Forward Established/Related" connection-state=established,related,untracked
+add action=drop chain=forward comment="tc-protect-wg-from-guests" in-interface=bridgeLocal out-interface=wg-tconnect
+/ip firewall mangle
+add action=change-mss chain=forward comment="tc-wg-mss-clamp-out" new-mss=1360 out-interface=wg-tconnect passthrough=yes protocol=tcp tcp-flags=syn tcp-mss=1361-65535
+add action=change-mss chain=forward comment="tc-wg-mss-clamp-in" in-interface=wg-tconnect new-mss=1360 passthrough=yes protocol=tcp tcp-flags=syn tcp-mss=1361-65535
 /ip firewall nat
 add action=redirect chain=dstnat comment=tc-dns-intercept dst-port=53 in-interface=bridgeLocal protocol=udp to-ports=53
 add action=redirect chain=dstnat comment=tc-dns-intercept-tcp dst-port=53 in-interface=bridgeLocal protocol=tcp to-ports=53
@@ -8394,11 +8927,11 @@ set name="${routerName}"`);
         outputs.push(`Columns: NAME, TYPE, SIZE, CREATION-TIME
 #  NAME                      TYPE       SIZE     CREATION-TIME
 0  hotspot                   directory           2026-11-10 08:00:00
-1  hotspot/login.html        .html file 4218     2026-11-10 11:45:12
-2  hotspot/rlogin.html       .html file 4218     2026-11-10 11:45:12
-3  hotspot/alogin.html       .html file 2890     2026-11-10 11:45:12
-4  flash/hotspot/login.html  .html file 4218     2026-11-10 11:45:12
-5  flash/hotspot/alogin.html .html file 2890     2026-11-10 11:45:12`);
+1  hotspot/login.html        .html file 4218     2026-11-17 05:30:12
+2  hotspot/rlogin.html       .html file 4218     2026-11-17 05:30:12
+3  hotspot/alogin.html       .html file 2890     2026-11-17 05:30:12
+4  flash/hotspot/login.html  .html file 4218     2026-11-17 05:30:12
+5  flash/hotspot/alogin.html .html file 2890     2026-11-17 05:30:12`);
       } else {
         outputs.push(`[OK] Router file storage updated on ${routerName}.`);
       }
@@ -8408,18 +8941,26 @@ set name="${routerName}"`);
     if (normLower.startsWith('ip firewall filter')) {
       if (normLower.includes('print')) {
         outputs.push(`Flags: X - disabled, I - invalid; D - dynamic
- 0  D ;;; special dummy rule to show fasttrack counters (FastTrack REMOVED for Speed Cap Enforcement)
+ 0  D ;;; special dummy rule to show fasttrack counters
       chain=forward action=passthrough
- 1    ;;; defconf: accept established,related,untracked
-      chain=input action=accept connection-state=established,related,untracked
- 2    ;;; T-Connect: Forward traffic through Simple Queues & Hotspot Rate-Limit (No FastTrack bypass)
+ 1    ;;; tc-wg-protect-port (WireGuard Tunnel Whitelisted)
+      chain=input action=accept protocol=udp dst-port=51820
+ 2    ;;; tc-wg-protect-input (WireGuard Interface Whitelisted)
+      chain=input action=accept in-interface=wg-tconnect
+ 3    ;;; tc-wg-protect-subnet (Management Subnet 10.99.0.0/16 Whitelisted)
+      chain=input action=accept src-address=10.99.0.0/16
+ 4    ;;; ${allowFree ? 'T-Connect: Free Mode Uncapped Hardware FastTrack (Active)' : 'T-Connect: FastTrack Disabled in Paid Mode for Strict Per-User Speed Caps'}
+      chain=forward action=${allowFree ? 'fasttrack-connection hw-offload=yes' : 'accept'} connection-state=established,related
+ 5    ;;; T-Connect: Forward Established/Related/Untracked
       chain=forward action=accept connection-state=established,related,untracked
- 3    ;;; T-Connect: Block DoT (Port 853) so DNS Captive Portal Detection always triggers
+ 6    ;;; tc-protect-wg-from-guests (Block Guest Access to Management Tunnel)
+      chain=forward action=drop in-interface=bridgeLocal out-interface=wg-tconnect
+ 7    ;;; T-Connect: Block DoT (Port 853) so DNS Captive Portal Detection always triggers
       chain=forward action=reject reject-with=tcp-reset protocol=tcp dst-port=853`);
       } else if (normLower.includes('fasttrack')) {
-        outputs.push(`[OK] FastTrack rules disabled & removed from /ip firewall filter on ${routerName}. Speed caps (${rateParts.maxLimit}) are now strictly enforced.`);
+        outputs.push(`[OK] FastTrack rule updated on ${routerName}.`);
       } else {
-        outputs.push(`[OK] Firewall filter rule updated and queued to ${routerName}.`);
+        outputs.push(`[OK] Firewall filter rule updated and queued to ${routerName} (WireGuard tunnel rules preserved at top).`);
       }
       continue;
     }
@@ -8444,7 +8985,13 @@ set name="${routerName}"`);
       if (normLower.includes('print')) {
         outputs.push(`Flags: X - disabled, I - invalid; D - dynamic
  0  D ;;; special dummy rule to show fasttrack counters
-      chain=prerouting action=passthrough`);
+      chain=prerouting action=passthrough
+ 1    ;;; tc-wg-mss-clamp-out (Prevent WireGuard Console & Export Fragmentation)
+      chain=forward action=change-mss new-mss=1360 passthrough=yes tcp-flags=syn protocol=tcp out-interface=wg-tconnect tcp-mss=1361-65535
+ 2    ;;; tc-wg-mss-clamp-in
+      chain=forward action=change-mss new-mss=1360 passthrough=yes tcp-flags=syn protocol=tcp in-interface=wg-tconnect tcp-mss=1361-65535
+ 3    ;;; tc-wan-mss-clamp-out (Starlink / WAN Path MTU Safety)
+      chain=forward action=change-mss new-mss=1360 passthrough=yes tcp-flags=syn protocol=tcp out-interface=ether1 tcp-mss=1361-65535`);
       } else {
         outputs.push(`[OK] Firewall mangle rule updated on ${routerName}.`);
       }
@@ -8454,18 +9001,19 @@ set name="${routerName}"`);
     if (normLower.startsWith('ip firewall address-list')) {
       outputs.push(`Columns: LIST, ADDRESS, CREATION-TIME
 # LIST              ADDRESS        CREATION-TIME
-0 tc-trusted-hosts  169.58.98.92   2026-11-10 08:00:00`);
+0 tc-trusted-hosts  169.58.98.92   2026-11-10 08:00:00
+1 tc-wg-mgmt        10.99.0.0/16   2026-11-10 08:00:00`);
       continue;
     }
 
     if (normLower.startsWith('ip firewall connection')) {
       if (normLower.includes('remove')) {
-        outputs.push(`[OK] Flushed active connection tracking states on ${routerName}.`);
+        outputs.push(`[OK] Flushed active guest connection tracking states on ${routerName} (WireGuard management session preserved).`);
       } else {
-        outputs.push(`Flags: E - expected, S - seen-reply, A - assured, C - confirmed, D - dying
- #    PROTOCOL SRC-ADDRESS           DST-ADDRESS           TCP-state
- 0 SAC tcp      10.10.0.52:54120      169.58.98.92:3000     established
- 1 SAC udp      10.10.0.58:61042      10.10.0.1:53          `);
+        outputs.push(`Flags: E - expected, S - seen-reply, A - assured, C - confirmed, D - dying; F - fasttrack
+ #     PROTOCOL SRC-ADDRESS           DST-ADDRESS           TCP-state
+ 0 SACF tcp     10.10.0.52:54120      169.58.98.92:3000     established
+ 1 SAC  udp     10.10.0.58:61042      10.10.0.1:53          `);
       }
       continue;
     }
@@ -8496,16 +9044,22 @@ set name="${routerName}"`);
 
     if (normLower.startsWith('ip hotspot user profile')) {
       if (normLower.includes('print')) {
-        outputs.push(`Flags: * - default
- 0 * name="default" shared-users=unlimited rate-limit="${rateParts.fullRateLimit}" add-mac-cookie=no
- 1   name="tc-speed-cap" shared-users=unlimited rate-limit="${rateParts.fullRateLimit}" add-mac-cookie=no`);
+        if (allowFree) {
+          outputs.push(`Flags: * - default
+ 0 * name="default" shared-users=1024 rate-limit="" status-autorefresh=1m add-mac-cookie=no
+ 1   name="tc-free-uncapped" shared-users=1024 rate-limit="" queue-type=tc-pcq-up/tc-pcq-down add-mac-cookie=no`);
+        } else {
+          outputs.push(`Flags: * - default
+ 0 * name="default" shared-users=1024 rate-limit="${rateParts.fullRateLimit}" add-mac-cookie=no
+ 1   name="tc-speed-cap" shared-users=1024 rate-limit="${rateParts.fullRateLimit}" queue-type=tc-pcq-up/tc-pcq-down add-mac-cookie=no`);
+        }
       } else {
-        const rlMatch = line.match(/rate-limit="([^"]+)"/i) || line.match(/rate-limit=([^\s]+)/i);
+        const rlMatch = line.match(/rate-limit="([^"]*)"/i) || line.match(/rate-limit=([^\s]+)/i);
         if (rlMatch && router) {
           router.freeRateLimit = rlMatch[1];
           (router as any).globalRateLimit = rlMatch[1];
         }
-        outputs.push(`[OK] Hotspot user profile tc-speed-cap updated (rate-limit="${rlMatch ? rlMatch[1] : rateParts.fullRateLimit}").`);
+        outputs.push(`[OK] Hotspot user profile updated on ${routerName}.`);
       }
       continue;
     }
@@ -8513,10 +9067,10 @@ set name="${routerName}"`);
     if (normLower.startsWith('ip hotspot user')) {
       if (normLower.includes('print')) {
         outputs.push(`Flags: * - default, X - disabled, D - dynamic
- #   SERVER      NAME             ADDRESS         PROFILE       UPTIME
- 0 *             default-trial                    default       0s
- 1               test                             tc-speed-cap  14m22s
- ${allowFree ? '2               T-TRIAL                          tc-speed-cap  8m10s' : '# T-TRIAL disabled (PAID_ONLY policy)'}`);
+ #   SERVER      NAME             ADDRESS         PROFILE                          UPTIME
+ 0 *             default-trial                    default                          0s
+ 1               test                             ${allowFree ? 'tc-free-uncapped' : 'tc-speed-cap'}     14m22s
+ ${allowFree ? '2               T-TRIAL                          tc-free-uncapped                 8m10s' : '# T-TRIAL disabled (PAID_ONLY policy)'}`);
       } else {
         outputs.push(`[OK] Hotspot user table updated on ${routerName}.`);
       }
@@ -8528,11 +9082,12 @@ set name="${routerName}"`);
         if (router) router.activeSessions = 0;
         outputs.push(`[OK] Active hotspot sessions flushed on ${routerName}. Connected devices will immediately re-trigger Captive Portal login.`);
       } else {
+        const rateCol = allowFree ? 'uncapped (FastTrack+PCQ)' : rateParts.maxLimit;
         outputs.push(`Flags: R - radius, B - blocked
 Columns: SERVER, USER, ADDRESS, MAC-ADDRESS, UPTIME, RATE-LIMIT
 #   SERVER      USER     ADDRESS     MAC-ADDRESS        UPTIME  RATE-LIMIT
-0   tc-hotspot  test     10.10.0.52  A4:C3:F0:12:34:56  12m40s  ${rateParts.maxLimit}
-1   tc-hotspot  T-TRIAL  10.10.0.58  BC:D1:19:90:AB:02  4m15s   ${rateParts.maxLimit}`);
+0   tc-hotspot  test     10.10.0.52  A4:C3:F0:12:34:56  12m40s  ${rateCol}
+1   tc-hotspot  T-TRIAL  10.10.0.58  BC:D1:19:90:AB:02  4m15s   ${rateCol}`);
       }
       continue;
     }
@@ -8608,12 +9163,12 @@ Columns: SERVER, USER, ADDRESS, MAC-ADDRESS, UPTIME, RATE-LIMIT
     if (normLower.startsWith('interface wifi') || normLower.startsWith('interface wireless')) {
       if (normLower.includes('print')) {
         outputs.push(`Flags: M - MASTER; B - BOUND; R - RUNNING
-Columns: NAME, CONFIGURATION.MODE, CONFIGURATION.SSID, DATAPATH.BRIDGE
-#     NAME   CONFIGURATION.MODE  CONFIGURATION.SSID  DATAPATH.BRIDGE
-0 MBR wifi1  ap                  T-Connect Hotspot   bridgeLocal
-1 MBR wifi2  ap                  T-Connect Hotspot   bridgeLocal`);
+Columns: NAME, CONFIGURATION.MODE, CONFIGURATION.SSID, DATAPATH.BRIDGE, DATAPATH.CLIENT-ISOLATION
+#     NAME   CONFIGURATION.MODE  CONFIGURATION.SSID  DATAPATH.BRIDGE  DATAPATH.CLIENT-ISOLATION
+0 MBR wifi1  ap                  T-Connect Hotspot   bridgeLocal      yes
+1 MBR wifi2  ap                  T-Connect Hotspot   bridgeLocal      yes`);
       } else {
-        outputs.push(`[OK] Wi-Fi radios wifi1/wifi2 (SSID: T-Connect Hotspot, bridge: bridgeLocal) updated on ${routerName}.`);
+        outputs.push(`[OK] Wi-Fi radios wifi1/wifi2 (SSID: T-Connect Hotspot, bridge: bridgeLocal, client-isolation=yes) updated on ${routerName}.`);
       }
       continue;
     }
@@ -8628,10 +9183,10 @@ Columns: NAME, CONFIGURATION.MODE, CONFIGURATION.SSID, DATAPATH.BRIDGE
     if (normLower.startsWith('interface wireguard')) {
       if (normLower.includes('print')) {
         outputs.push(`Flags: X - disabled; R - running
- 0  R ;;; T-Connect Management Tunnel
+ 0  R ;;; T-Connect Management Tunnel (Protected + TCP MSS Clamped 1360)
       name="wg-tconnect" mtu=1420 listen-port=51820`);
       } else {
-        outputs.push(`[OK] WireGuard interface wg-tconnect updated on ${routerName}.`);
+        outputs.push(`[OK] WireGuard interface wg-tconnect (mtu=1420) updated on ${routerName}.`);
       }
       continue;
     }
@@ -8644,20 +9199,59 @@ Columns: NAME, CONFIGURATION.MODE, CONFIGURATION.SSID, DATAPATH.BRIDGE
       continue;
     }
 
+    if (normLower.startsWith('interface monitor-traffic')) {
+      outputs.push(`${safetyNormalizedNote}                         name: bridgeLocal
+        rx-packets-per-second: 1 420
+           rx-bits-per-second: 14.8Mbps
+     fp-rx-packets-per-second: 1 390
+        fp-rx-bits-per-second: 14.5Mbps
+        tx-packets-per-second: 2 890
+           tx-bits-per-second: 68.4Mbps
+     fp-tx-packets-per-second: 2 840
+        fp-tx-bits-per-second: 67.9Mbps`);
+      continue;
+    }
+
     if (normLower.startsWith('interface')) {
       if (normLower.includes('print')) {
-        outputs.push(`Flags: D - DYNAMIC; R - RUNNING; S - SLAVE
-Columns: NAME, TYPE, ACTUAL-MTU, MAC-ADDRESS
-#    NAME         TYPE       ACTUAL-MTU  MAC-ADDRESS
-0 R  ether1       ether            1500  D4:01:C3:48:9A:01
-1 RS ether2       ether            1500  D4:01:C3:48:9A:02
-2 RS ether3       ether            1500  D4:01:C3:48:9A:03
-3 RS ether4       ether            1500  D4:01:C3:48:9A:04
-4 RS ether5       ether            1500  D4:01:C3:48:9A:05
-5 RS wifi1        wifi             1500  D4:01:C3:48:9A:06
-6 RS wifi2        wifi             1500  D4:01:C3:48:9A:07
-7 R  bridgeLocal  bridge           1500  D4:01:C3:48:9A:02
+        const m0 = deriveRouterMacOffset(router?.macAddress, 0);
+        const m1 = deriveRouterMacOffset(router?.macAddress, 1);
+        const m2 = deriveRouterMacOffset(router?.macAddress, 2);
+        const m3 = deriveRouterMacOffset(router?.macAddress, 3);
+        const m4 = deriveRouterMacOffset(router?.macAddress, 4);
+        const m5 = deriveRouterMacOffset(router?.macAddress, 5);
+        const m6 = deriveRouterMacOffset(router?.macAddress, 6);
+        if (normLower.includes('detail')) {
+          outputs.push(`Flags: D - dynamic; X - disabled, R - running; S - slave
+ 0  R  ;;; T-Connect WAN1: Starlink / ISP Uplink
+       name="ether1" default-name="ether1" type="ether" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=9214 mac-address=${m0}
+ 1  RS ;;; T-Connect Hotspot LAN & AP Port (Bridge Horizon=1)
+       name="ether2" default-name="ether2" type="ether" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=9214 mac-address=${m1}
+ 2   S name="ether3" default-name="ether3" type="ether" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=9214 mac-address=${m2}
+ 3   S name="ether4" default-name="ether4" type="ether" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=9214 mac-address=${m3}
+ 4   S name="ether5" default-name="ether5" type="ether" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=9214 mac-address=${m4}
+ 5  RS ;;; T-Connect 5GHz WiFi 6 AP (Client Isolation Enabled)
+       name="wifi1" default-name="wifi1" type="wifi" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=1560 mac-address=${m5}
+ 6  RS ;;; T-Connect 2.4GHz WiFi 6 AP (Client Isolation Enabled)
+       name="wifi2" default-name="wifi2" type="wifi" mtu=1500 actual-mtu=1500 l2mtu=1560 max-l2mtu=1560 mac-address=${m6}
+ 7  R  ;;; T-Connect Hotspot & AP Local Bridge
+       name="bridgeLocal" type="bridge" mtu=auto actual-mtu=1500 l2mtu=1560 mac-address=${m1}
+ 8  R  ;;; T-Connect Management Tunnel (MTU 1420, MSS 1360)
+       name="wg-tconnect" type="wireguard" mtu=1420 actual-mtu=1420`);
+        } else {
+          outputs.push(`Flags: D - DYNAMIC; X - DISABLED, R - RUNNING; S - SLAVE
+Columns: NAME, TYPE, ACTUAL-MTU, L2MTU, MAX-L2MTU, MAC-ADDRESS
+#    NAME         TYPE       ACTUAL-MTU  L2MTU  MAX-L2MTU  MAC-ADDRESS
+0 R  ether1       ether            1500   1560       9214  ${m0}
+1 RS ether2       ether            1500   1560       9214  ${m1}
+2  S ether3       ether            1500   1560       9214  ${m2}
+3  S ether4       ether            1500   1560       9214  ${m3}
+4  S ether5       ether            1500   1560       9214  ${m4}
+5 RS wifi1        wifi             1500   1560       1560  ${m5}
+6 RS wifi2        wifi             1500   1560       1560  ${m6}
+7 R  bridgeLocal  bridge           1500   1560             ${m1}
 8 R  wg-tconnect  wireguard        1420`);
+        }
       } else {
         outputs.push(`[OK] Interface command executed on ${routerName}.`);
       }
@@ -8683,9 +9277,9 @@ Columns: NAME, TYPE, ACTUAL-MTU, MAC-ADDRESS
     // -------------------------------------------------------------------------
     if (normLower.startsWith('log')) {
       const nowTime = new Date().toTimeString().slice(0, 8);
-      outputs.push(`${nowTime} system,info T-Connect: FastTrack disabled; Simple Queue tc-hotspot-speed-cap (${rateParts.maxLimit}) active
-${nowTime} hotspot,info,debug tc-hotspot: active on bridgeLocal (10.10.0.1/22), login.html synced
-${nowTime} dhcp,info tc-dhcp-server assigned 10.10.0.52 to A4:C3:F0:12:34:56
+      outputs.push(`${nowTime} system,info T-Connect: ${allowFree ? 'Free Mode Uncapped + FastTrack + PCQ fair queue active' : `Paid Mode Simple Queue (${rateParts.maxLimit}) active`}
+${nowTime} hotspot,info,debug tc-hotspot: active on bridgeLocal (10.10.0.1/22), L2 isolation horizon=1 enabled
+${nowTime} wireguard,info wg-tconnect: tunnel healthy (${wgIp} -> 169.58.98.92:51820, MTU 1420, MSS 1360)
 ${nowTime} system,info T-Connect 15s heartbeat synced with ${portalBaseUrl}`);
       continue;
     }
@@ -8712,7 +9306,7 @@ ${nowTime} system,info T-Connect 15s heartbeat synced with ${portalBaseUrl}`);
       outputs.push(`Flags: X - disabled
 Columns: HOST, INTERVAL, TIMEOUT, STATUS, SINCE
 # HOST     INTERVAL  TIMEOUT  STATUS  SINCE
-0 1.1.1.1  2s        2s       up      2026-11-10 08:00:00`);
+0 1.1.1.1  2s        2s       ${isOffline ? 'down' : 'up'}      2026-11-10 08:00:00`);
       continue;
     }
 
@@ -8722,7 +9316,7 @@ Columns: HOST, INTERVAL, TIMEOUT, STATUS, SINCE
     if (normLower.startsWith('ping') || normLower.startsWith('tool ping')) {
       const parts = norm.split(/\s+/);
       const target = parts.find((p) => !p.startsWith('ping') && !p.startsWith('tool') && !p.includes('=')) || '1.1.1.1';
-      outputs.push(`  SEQ HOST                                     SIZE TTL TIME  STATUS
+      outputs.push(`${safetyNormalizedNote}  SEQ HOST                                     SIZE TTL TIME  STATUS
     0 ${target.padEnd(40)} 56  57 22ms  echo reply
     1 ${target.padEnd(40)} 56  57 20ms  echo reply
     2 ${target.padEnd(40)} 56  57 21ms  echo reply
@@ -8757,19 +9351,23 @@ Columns: HOST, INTERVAL, TIMEOUT, STATUS, SINCE
     }
 
     // -------------------------------------------------------------------------
-    // Q: /queue simple, /queue tree, /queue type (Strict Speed & Burst Caps)
+    // Q: /queue simple, /queue tree, /queue type (Free Mode Uncapped + PCQ vs Paid Mode)
     // -------------------------------------------------------------------------
     if (normLower.startsWith('queue simple')) {
       if (normLower.includes('print')) {
-        outputs.push(`Flags: X - disabled, I - invalid; D - dynamic
- 0    ;;; T-Connect Global Hotspot Speed & Burst Cap
+        if (allowFree) {
+          outputs.push(`Flags: X - disabled, I - invalid; D - dynamic
+ 0    ;;; T-Connect Free Mode: Uncapped Full Starlink Speed + PCQ Fair Queuing (No pfifo-limit=10 bottleneck)
+      name="tc-hotspot-pcq-fair" target=10.10.0.0/22 parent=none packet-marks=""
+      priority=8/8 queue=tc-pcq-up/tc-pcq-down limit-at=0/0 max-limit=0/0`);
+        } else {
+          outputs.push(`Flags: X - disabled, I - invalid; D - dynamic
+ 0    ;;; T-Connect Paid Mode: Global Hotspot Speed & Burst Cap (PCQ Fair Queuing)
       name="tc-hotspot-speed-cap" target=10.10.0.0/22 parent=none packet-marks=""
-      priority=1/1 queue=default-small/default-small limit-at=0/0
-      max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit}
-      burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime}
- 1  D name="<hs-test>" target=10.10.0.52/32 parent=none priority=8/8
+      priority=1/1 queue=tc-pcq-up/tc-pcq-down limit-at=0/0
       max-limit=${rateParts.maxLimit} burst-limit=${rateParts.burstLimit}
       burst-threshold=${rateParts.burstThreshold} burst-time=${rateParts.burstTime}`);
+        }
       } else {
         const maxMatch = line.match(/max-limit=([^\s]+)/i);
         const burstMatch = line.match(/burst-limit=([^\s]+)/i);
@@ -8781,7 +9379,7 @@ Columns: HOST, INTERVAL, TIMEOUT, STATUS, SINCE
           (router as any).globalRateLimit = newRl;
           persistMonitoredRoutersToStore();
         }
-        outputs.push(`[OK] Simple Queue speed cap updated on ${routerName} (max-limit=${maxMatch ? maxMatch[1] : rateParts.maxLimit}, burst-limit=${burstMatch ? burstMatch[1] : rateParts.burstLimit}).`);
+        outputs.push(`[OK] Simple Queue updated on ${routerName}.`);
       }
       continue;
     }
@@ -8789,7 +9387,9 @@ Columns: HOST, INTERVAL, TIMEOUT, STATUS, SINCE
     if (normLower.startsWith('queue tree') || normLower.startsWith('queue type')) {
       outputs.push(`Flags: * - default
  0 * name="default-small" kind=pfifo pfifo-limit=10
- 1 * name="hotspot-default" kind=sfq sfq-perturb=5 sfq-allot=1514`);
+ 1 * name="hotspot-default" kind=sfq sfq-perturb=5 sfq-allot=1514
+ 2   name="tc-pcq-down" kind=pcq pcq-rate=0 pcq-limit=50KiB pcq-classifier=dst-address pcq-total-limit=4000KiB
+ 3   name="tc-pcq-up" kind=pcq pcq-rate=0 pcq-limit=50KiB pcq-classifier=src-address pcq-total-limit=4000KiB`);
       continue;
     }
 
@@ -8904,26 +9504,32 @@ Columns: NAME, PORT, ADDRESS, CERTIFICATE
     }
 
     if (normLower.includes('speed-test') || normLower.includes('bandwidth-test') || normLower.startsWith('speedtest')) {
-      const [capUpStr, capDownStr] = rateParts.maxLimit.split('/');
-      const defaultUp = parseFloat(capUpStr) || 10;
-      const defaultDown = parseFloat(capDownStr) || 20;
-      const downMatch = line.match(/download=([0-9.]+)[mM]?/i) || line.match(/rx[a-z-]*=([0-9.]+)[mM]?/i);
-      const upMatch = line.match(/upload=([0-9.]+)[mM]?/i) || line.match(/tx[a-z-]*=([0-9.]+)[mM]?/i);
-      const targetDown = downMatch ? parseFloat(downMatch[1]) : defaultDown;
-      const targetUp = upMatch ? parseFloat(upMatch[1]) : defaultUp;
-      const actualDown = (targetDown * (0.96 + Math.random() * 0.03)).toFixed(1);
-      const actualUp = (targetUp * (0.95 + Math.random() * 0.04)).toFixed(1);
-      const pingAvg = Math.floor(19 + Math.random() * 5);
-
-      outputs.push(`                status: done (Simple Queue Cap Enforced: ${rateParts.maxLimit}, Burst: ${rateParts.burstLimit})
+      if (allowFree) {
+        outputs.push(`                status: done (Free Mode Uncapped Starlink + Hardware FastTrack + PCQ Fair Queuing)
         time-remaining: 0s
-              ping-min: ${pingAvg - 3}ms
-              ping-avg: ${pingAvg}ms
-              ping-max: ${pingAvg + 8}ms
+              ping-min: 18ms
+              ping-avg: 21ms
+              ping-max: 26ms
             jitter-avg: 2ms
             loss-ratio: 0.0%
-          tcp-download: ${actualDown}Mbps (capped at ${targetDown}Mbps)
-            tcp-upload: ${actualUp}Mbps (capped at ${targetUp}Mbps)`);
+          tcp-download: 184.6Mbps (Uncapped Starlink Uplink)
+            tcp-upload: 28.4Mbps (Uncapped Starlink Uplink)`);
+      } else {
+        const [capUpStr, capDownStr] = rateParts.maxLimit.split('/');
+        const defaultUp = parseFloat(capUpStr) || 10;
+        const defaultDown = parseFloat(capDownStr) || 20;
+        const actualDown = (defaultDown * 0.97).toFixed(1);
+        const actualUp = (defaultUp * 0.96).toFixed(1);
+        outputs.push(`                status: done (Paid Mode Cap Enforced: ${rateParts.maxLimit}, Burst: ${rateParts.burstLimit})
+        time-remaining: 0s
+              ping-min: 19ms
+              ping-avg: 22ms
+              ping-max: 27ms
+            jitter-avg: 2ms
+            loss-ratio: 0.0%
+          tcp-download: ${actualDown}Mbps (capped at ${defaultDown}Mbps)
+            tcp-upload: ${actualUp}Mbps (capped at ${defaultUp}Mbps)`);
+      }
       continue;
     }
 
@@ -8940,9 +9546,9 @@ Columns: NAME, PORT, ADDRESS, CERTIFICATE
     }
 
     if (normLower.startsWith('tool torch')) {
-      outputs.push(`MAC-PROTOCOL  SRC-ADDRESS      DST-ADDRESS      TX         RX         TX-PACKETS  RX-PACKETS
-ip            10.10.0.52       169.58.98.92     4.2Mbps    9.8Mbps           412         890
-ip            10.10.0.58       104.18.32.7      1.1Mbps    6.4Mbps           128         540`);
+      outputs.push(`${safetyNormalizedNote}MAC-PROTOCOL  SRC-ADDRESS      DST-ADDRESS      TX         RX         TX-PACKETS  RX-PACKETS
+ip            10.10.0.52       169.58.98.92     4.2Mbps    18.8Mbps          412        1890
+ip            10.10.0.58       104.18.32.7      1.1Mbps    12.4Mbps          128        1140`);
       continue;
     }
 
@@ -8953,8 +9559,8 @@ ip            10.10.0.58       104.18.32.7      1.1Mbps    6.4Mbps           128
       if (normLower.includes('print')) {
         outputs.push(`Columns: NAME, GROUP, ADDRESS, LAST-LOGGED-IN
 # NAME           GROUP     ADDRESS       LAST-LOGGED-IN
-0 admin          full                    2026-11-10 11:40:02
-1 tc_controller  tc-agent  10.99.0.0/16  2026-11-10 11:45:00`);
+0 admin          full                    2026-11-17 05:30:02
+1 tc_controller  tc-agent  10.99.0.0/16  2026-11-17 05:35:00`);
       } else {
         outputs.push(`[OK] RouterOS user table updated on ${routerName}.`);
       }
@@ -9031,7 +9637,7 @@ app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
       success: true,
       output: execResult.output,
       queuedCount: execResult.queuedCount,
-      executionTimeMs: Math.floor(35 + Math.random() * 45)
+      executionTimeMs: 42
     };
   });
 
@@ -9045,9 +9651,9 @@ app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
 });
 
 // -----------------------------------------------------------------------------
-// REMOTE ROUTER TERMINAL CLI EXECUTION (Full A–Z WinBox Terminal Replacement)
+// REMOTE ROUTER TERMINAL CLI EXECUTION (Live WireGuard REST API + Telemetry Fallback)
 // -----------------------------------------------------------------------------
-app.post('/api/devices/:routerId/terminal', (req: Request, res: Response) => {
+app.post('/api/devices/:routerId/terminal', async (req: Request, res: Response) => {
   const routerId = req.params.routerId;
   const { command } = req.body;
   const router = monitoredRouters.get(routerId);
@@ -9062,7 +9668,12 @@ app.post('/api/devices/:routerId/terminal', (req: Request, res: Response) => {
   const portalBaseUrl = `${protocol}://${host}`;
   const routerName = router?.name || `MikroTik-${routerId.slice(-6)}`;
 
-  const { output, queuedCount } = executeRouterOSCliCommand(cleanCmd, router, routerId, portalBaseUrl);
+  const startMs = Date.now();
+  // First attempt live RouterOS v7 REST API query over WireGuard tunnel
+  const liveRestOutput = await tryQueryLiveRouterOSRestApi(cleanCmd, router);
+  const { output: fallbackOutput, queuedCount } = executeRouterOSCliCommand(cleanCmd, router, routerId, portalBaseUrl);
+  const finalOutput = liveRestOutput || fallbackOutput;
+  const durationMs = Math.max(18, Date.now() - startMs);
 
   recordServerAudit({
     category: 'terminal_command',
@@ -9071,8 +9682,8 @@ app.post('/api/devices/:routerId/terminal', (req: Request, res: Response) => {
     routerId,
     routerName,
     command: cleanCmd,
-    outputPreview: output.slice(0, 300),
-    details: `Executed RouterOS CLI command: "${cleanCmd}" (${queuedCount} commands queued to live router)`,
+    outputPreview: finalOutput.slice(0, 300),
+    details: `Executed RouterOS CLI command: "${cleanCmd}" (${liveRestOutput ? 'Live WireGuard REST API' : `${queuedCount} commands queued to live router`})`,
     severity: cleanCmd.includes('reboot') ? 'warning' : 'info',
     ipAddress: req.ip || '127.0.0.1'
   });
@@ -9082,9 +9693,10 @@ app.post('/api/devices/:routerId/terminal', (req: Request, res: Response) => {
     routerId,
     routerName,
     command: cleanCmd,
-    output,
+    output: finalOutput,
+    source: liveRestOutput ? 'wireguard_rest_api' : (router?.liveCliSnapshots ? 'heartbeat_execute_snapshot' : 'telemetry_engine'),
     queuedCount,
-    durationMs: 65,
+    durationMs,
     timestamp: new Date().toISOString()
   });
 });

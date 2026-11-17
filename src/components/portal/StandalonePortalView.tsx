@@ -75,14 +75,32 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 }) => {
   const loadLocalScopeConfig = (scope: VerticalType): ScopePortalConfig => {
     const fallback = DEFAULT_SCOPE_CONFIGS[scope] || DEFAULT_SCOPE_CONFIGS.hotspot;
+    const masterPlans = storage.getPlans().filter((mp) => {
+      if (scope === 'community' || scope === 'village') return mp.vertical === 'community' || mp.vertical === 'village';
+      return mp.vertical === scope || mp.vertical === 'hotspot';
+    });
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         const stored = window.localStorage.getItem(`tconnect_portal_scope_${scope}`);
         if (stored) {
           const parsed: ScopePortalConfig = JSON.parse(stored);
+          const syncedPlans = Array.isArray(parsed.plans) && parsed.plans.length > 0
+            ? parsed.plans.map((sp) => {
+                const matched = masterPlans.find(
+                  (mp) =>
+                    mp.id === sp.id ||
+                    mp.name.toLowerCase() === sp.name.toLowerCase() ||
+                    Math.abs((mp.durationSeconds || 0) - (sp.durationSeconds || 0)) < 60
+                );
+                return matched
+                  ? { ...sp, name: matched.name, price: matched.price, deviceLimit: 0 }
+                  : { ...sp, deviceLimit: 0 };
+              })
+            : fallback.plans;
           return {
             ...fallback,
             ...parsed,
+            plans: syncedPlans,
             freeButtonX: typeof parsed.freeButtonX === 'number' ? parsed.freeButtonX : 50,
             freeButtonY: typeof parsed.freeButtonY === 'number' ? parsed.freeButtonY : 88,
             freeButtonText: parsed.freeButtonText || 'Login for free',
@@ -361,6 +379,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const handleStorageEvent = () => syncLocal();
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', handleStorageEvent);
+      window.addEventListener('tconnect:plans-synced', handleStorageEvent as EventListener);
     }
     return () => {
       mounted = false;
@@ -368,6 +387,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       unsubStorage();
       if (typeof window !== 'undefined') {
         window.removeEventListener('storage', handleStorageEvent);
+        window.removeEventListener('tconnect:plans-synced', handleStorageEvent as EventListener);
       }
     };
   }, []);

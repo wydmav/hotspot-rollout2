@@ -334,7 +334,7 @@ export default function App() {
               ? incoming.secondsSinceHeartbeat
               : incoming.status === 'online'
                 ? 0
-                : 999;
+                : -1;
 
           const isConfirmedOffline =
             incoming.status === 'offline' ||
@@ -344,22 +344,37 @@ export default function App() {
             // Heartbeat threshold breached (> 30 seconds of silence / 2 missed 15s beats)
             tracker.consecutiveMisses += 1;
             if (!tracker.firstMissDetectedAt) {
-              tracker.firstMissDetectedAt = now - (Math.min(secondsSilent, 35) * 1000);
+              tracker.firstMissDetectedAt = now - (Math.min(Math.max(30, secondsSilent), 35) * 1000);
             }
 
             const missedBeats = Math.max(
               incoming.missedBeats || 0,
-              Math.floor(secondsSilent / HEARTBEAT_CYCLE_SECONDS),
+              secondsSilent > 0 ? Math.floor(secondsSilent / HEARTBEAT_CYCLE_SECONDS) : 0,
               2
             );
+            const formatDurationAgo = (secs: number): string => {
+              if (!Number.isFinite(secs) || secs <= 0) return incoming.lastHeartbeat || 'Offline (unplugged / no heartbeat)';
+              if (secs < 60) return `Offline (${secs}s ago)`;
+              if (secs < 3600) return `Offline (${Math.floor(secs / 60)}m ${secs % 60}s ago)`;
+              if (secs < 86400) {
+                const h = Math.floor(secs / 3600);
+                const m = Math.floor((secs % 3600) / 60);
+                return `Offline (${h}h ${m}m ago)`;
+              }
+              const d = Math.floor(secs / 86400);
+              const h = Math.floor((secs % 86400) / 3600);
+              return `Offline (${d}d ${h}h ago)`;
+            };
             const elapsedOfflineLabel =
-              Number.isFinite(secondsSilent) && secondsSilent > 0 && secondsSilent < 86400
-                ? secondsSilent < 60
-                  ? `Offline (${secondsSilent}s ago)`
-                  : `Offline (${Math.floor(secondsSilent / 60)}m ${secondsSilent % 60}s ago)`
-                : (incoming.lastHeartbeat || 'Offline');
+              secondsSilent > 0 && secondsSilent !== 999
+                ? formatDurationAgo(secondsSilent)
+                : (incoming.lastHeartbeat && !String(incoming.lastHeartbeat).includes('16m 39s')
+                    ? incoming.lastHeartbeat
+                    : 'Offline (unplugged / awaiting heartbeat)');
             const offlineReason = incoming.offlineReason || 
-              `Deadman Watchdog: Unplugged / No heartbeat for ${secondsSilent}s (> 30s threshold, ${missedBeats} missed beats)`;
+              (secondsSilent > 0
+                ? `Deadman Watchdog: Unplugged / No heartbeat for ${secondsSilent}s (> 30s threshold, ${missedBeats} missed beats)`
+                : `Deadman Watchdog: Unplugged / No heartbeat received`);
 
             // Trigger notification ONLY upon confirmed transition to avoid duplicate alerts
             if (tracker.lastNotifiedStatus !== 'offline') {
@@ -368,7 +383,7 @@ export default function App() {
                 id: incoming.id,
                 name: incoming.name || prev?.name || 'MikroTik Router',
                 siteName: incoming.siteName || prev?.siteName || 'Hotspot Site',
-                secondsWithoutHeartbeat: secondsSilent
+                secondsWithoutHeartbeat: Math.max(30, secondsSilent)
               });
             }
 

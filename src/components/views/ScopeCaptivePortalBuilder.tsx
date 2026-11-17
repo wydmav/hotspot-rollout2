@@ -773,21 +773,44 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   // Currently selected scope / builder tab
   const [selectedScope, setSelectedScope] = useState<VerticalType>(initialScope);
 
-  // Storage helper: Load config for a scope (ensuring M10, M60, M280 baseline denominations & official Sesotho Terms)
+  // Storage helper: Load config for a scope (preserving user-customized plan prices and syncing with storage.getPlans())
   const loadScopeConfig = (scope: VerticalType): ScopePortalConfig => {
+    const masterPlans = storage.getPlans().filter((mp) => {
+      if (scope === 'community' || scope === 'village') return mp.vertical === 'community' || mp.vertical === 'village';
+      return mp.vertical === scope || mp.vertical === 'hotspot';
+    });
     if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
       try {
         const stored = window.localStorage.getItem(`tconnect_portal_scope_${scope}`);
         if (stored) {
           const parsed: ScopePortalConfig = JSON.parse(stored);
           let mutated = false;
-          // Ensure baseline denominations M10 (Daily), M60 (Weekly), M280 (Monthly) are seeded
-          const has10 = parsed.plans?.some((p) => p.price === 10);
-          const has60 = parsed.plans?.some((p) => p.price === 60);
-          const has280 = parsed.plans?.some((p) => p.price === 280);
-          if (!has10 || !has60 || !has280) {
+          if (!Array.isArray(parsed.plans) || parsed.plans.length === 0) {
             parsed.plans = DEFAULT_SCOPE_CONFIGS[scope].plans;
             mutated = true;
+          } else if (masterPlans.length > 0) {
+            // Sync any updated plan prices/names from storage.getPlans() into scope plans
+            parsed.plans = parsed.plans.map((sp) => {
+              const matched = masterPlans.find(
+                (mp) =>
+                  mp.id === sp.id ||
+                  mp.name.toLowerCase() === sp.name.toLowerCase() ||
+                  Math.abs((mp.durationSeconds || 0) - (sp.durationSeconds || 0)) < 60
+              );
+              if (matched && (matched.price !== sp.price || matched.name !== sp.name)) {
+                mutated = true;
+                return {
+                  ...sp,
+                  name: matched.name,
+                  price: matched.price,
+                  downloadSpeedMbps: matched.downloadSpeedMbps || sp.downloadSpeedMbps,
+                  uploadSpeedMbps: matched.uploadSpeedMbps || sp.uploadSpeedMbps,
+                  burstDownloadMbps: matched.burstDownloadMbps || sp.burstDownloadMbps,
+                  deviceLimit: 0
+                };
+              }
+              return { ...sp, deviceLimit: 0 };
+            });
           }
           const normalizedTerms = normalizeScopeTermsText(parsed.termsText);
           if (parsed.termsText !== normalizedTerms) {
@@ -1569,15 +1592,54 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     }
   };
 
-  // Pricing & Plans modifications for current scope
+  // Listen for global plan sync events from PlansVouchersView
+  useEffect(() => {
+    const handlePlansSynced = () => {
+      const commConfig = loadScopeConfig('community');
+      setScopeConfigs({
+        hotspot: loadScopeConfig('hotspot'),
+        village: commConfig,
+        community: commConfig,
+        park: loadScopeConfig('park'),
+        bus: loadScopeConfig('bus'),
+        stadium: loadScopeConfig('stadium'),
+      });
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('tconnect:plans-synced', handlePlansSynced as EventListener);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('tconnect:plans-synced', handlePlansSynced as EventListener);
+      }
+    };
+  }, []);
+
+  // Pricing & Plans modifications for current scope (Bidirectionally synced with storage.getPlans())
   const handleUpdatePlanPrice = (planId: string, newPrice: number) => {
+    const safePrice = Math.max(0, newPrice);
+    const targetPlan = currentConfig.plans.find((p) => p.id === planId);
     const updatedPlans = currentConfig.plans.map((p) => {
       if (p.id === planId) {
-        return { ...p, price: Math.max(0, newPrice) };
+        return { ...p, price: safePrice, deviceLimit: 0 };
       }
       return p;
     });
     handleUpdateCurrent({ plans: updatedPlans });
+
+    // Also update master plans in storage so Plans & Vouchers view and OTT denominations update in real time
+    const allMasterPlans = storage.getPlans();
+    const matchedMaster = allMasterPlans.find(
+      (mp) =>
+        mp.id === planId ||
+        (targetPlan && mp.name.toLowerCase() === targetPlan.name.toLowerCase()) ||
+        (targetPlan && Math.abs((mp.durationSeconds || 0) - (targetPlan.durationSeconds || 0)) < 60 && mp.vertical === selectedScope)
+    );
+    if (matchedMaster) {
+      storage.updatePlan(matchedMaster.id, { price: safePrice, deviceLimit: 0 });
+    } else {
+      storage.syncAllPlansEverywhere();
+    }
   };
 
   const handleTogglePlanEnabled = (planId: string) => {
@@ -1610,12 +1672,29 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       downloadSpeedMbps: speed,
       uploadSpeedMbps: Math.max(1, Math.round(speed / 2)),
       burstDownloadMbps: speed * 2,
-      deviceLimit: 2,
+      deviceLimit: 0,
       enabled: true,
-      badge: 'Custom Scope Plan'
+      badge: 'Unlimited Devices'
     };
 
     handleUpdateCurrent({ plans: [...currentConfig.plans, newPlan] });
+    storage.createPlan({
+      name: newPlan.name,
+      vertical: selectedScope,
+      price: newPlan.price,
+      currency: newPlan.currency,
+      durationSeconds: newPlan.durationSeconds,
+      durationLabel: newPlan.durationLabel,
+      downloadSpeedMbps: newPlan.downloadSpeedMbps,
+      uploadSpeedMbps: newPlan.uploadSpeedMbps,
+      burstDownloadMbps: newPlan.burstDownloadMbps,
+      burstUploadMbps: newPlan.uploadSpeedMbps * 2,
+      burstThresholdMbps: Math.max(1, Math.round(newPlan.downloadSpeedMbps * 0.75)),
+      burstTimeSeconds: 15,
+      dataCapMb: null,
+      deviceLimit: 0,
+      sharedUsers: 0
+    });
     form.reset();
   };
 

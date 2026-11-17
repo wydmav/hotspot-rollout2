@@ -61,8 +61,10 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const [planDurationHours, setPlanDurationHours] = useState(24);
   const [planDownMbps, setPlanDownMbps] = useState(4);
   const [planUpMbps, setPlanUpMbps] = useState(2);
-  const [planDeviceLimit, setPlanDeviceLimit] = useState(2);
+  const [planDeviceLimit, setPlanDeviceLimit] = useState(0);
   const [planDataCapGb, setPlanDataCapGb] = useState<number | ''>('');
+  const [inlinePriceEdits, setInlinePriceEdits] = useState<Record<string, string>>({});
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   const filteredPlans = selectedVertical === 'all'
     ? plans
@@ -92,7 +94,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const handleVerifyOttPin = async () => {
     const clean = ottPin.replace(/\D/g, '');
     const cleanRef = uniqueRefInput.trim();
-    if (clean.length !== 16 && !cleanRef) {
+    if (clean.length !== 16 && !uniqueRefInput.trim()) {
       setOttResult({
         success: false,
         message: 'Enter a 16-digit OTT Voucher PIN or a PayLesotho unique_reference to verify.'
@@ -101,6 +103,8 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     }
     setIsVerifyingOtt(true);
     setOttResult(null);
+    const defaultPlan = filteredPlans[0] || plans[0];
+    const checkAmount = defaultPlan ? defaultPlan.price : 10;
     try {
       if (cleanRef) {
         const res = await fetch('/api/gateways/paylesotho/ott-voucher/check', {
@@ -115,8 +119,8 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           success: Boolean(data.success),
           message: data.message || 'Checked via POST https://api.paylesotho.co.ls/ott/voucher/check',
           receipt: cleanRef,
-          planName: data.planName || 'Daily Pass (24 Hours)',
-          amount: data.amount || 10,
+          planName: data.planName || defaultPlan?.name || 'Daily Pass (24 Hours)',
+          amount: data.amount || checkAmount,
           stages: data.diagnosticStages
         });
       } else {
@@ -126,7 +130,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           body: JSON.stringify({
             pin: clean,
             mobile: ottMobile,
-            amount: 10
+            amount: checkAmount
           })
         });
         const data = await res.json();
@@ -134,8 +138,8 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           success: Boolean(data.success),
           message: data.message || (data.success ? '16-Digit PIN validated with OTT Lesotho API' : 'Verification failed'),
           receipt: `OTT-${clean.slice(-4)}`,
-          planName: 'Daily Pass (24 Hours)',
-          amount: 10,
+          planName: defaultPlan?.name || 'Daily Pass (24 Hours)',
+          amount: checkAmount,
           stages: data.diagnosticStages
         });
       }
@@ -161,7 +165,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     setPlanDurationHours(24);
     setPlanDownMbps(10);
     setPlanUpMbps(5);
-    setPlanDeviceLimit(2);
+    setPlanDeviceLimit(0);
     setPlanDataCapGb('');
     setShowCreatePlanModal(true);
   };
@@ -174,9 +178,24 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     setPlanDurationHours(Math.max(1, Math.round(plan.durationSeconds / 3600)));
     setPlanDownMbps(plan.downloadSpeedMbps);
     setPlanUpMbps(plan.uploadSpeedMbps);
-    setPlanDeviceLimit(plan.deviceLimit);
+    setPlanDeviceLimit(plan.deviceLimit ?? 0);
     setPlanDataCapGb(plan.dataCapMb ? Math.round(plan.dataCapMb / 1024) : '');
     setShowCreatePlanModal(true);
+  };
+
+  const handleInlinePriceCommit = (plan: HotspotPlan, rawVal: string) => {
+    const parsed = Number(rawVal);
+    if (isNaN(parsed) || parsed < 0) return;
+    storage.updatePlan(plan.id, { price: parsed });
+    setInlinePriceEdits((prev) => {
+      const next = { ...prev };
+      delete next[plan.id];
+      return next;
+    });
+    setSyncNotice(
+      `Synced ${plan.name} (${currency}${parsed.toFixed(2)}) in real time across OTT Denomination Policy, Captive Portal Builder, Guest Splash Page & Live Routers!`
+    );
+    setTimeout(() => setSyncNotice(null), 5000);
   };
 
   const handleSavePlan = (e: React.FormEvent) => {
@@ -193,16 +212,24 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
       dataCapMb: planDataCapGb ? Number(planDataCapGb) * 1024 : null,
       downloadSpeedMbps: planDownMbps,
       uploadSpeedMbps: planUpMbps,
-      deviceLimit: planDeviceLimit,
+      deviceLimit: Math.max(0, Number(planDeviceLimit) || 0),
       burstDownloadMbps: planDownMbps * 2,
       burstUploadMbps: planUpMbps * 2,
     };
 
     if (editingPlan) {
       storage.updatePlan(editingPlan.id, payload);
+      setSyncNotice(
+        `Updated "${payload.name}" (${currency}${payload.price.toFixed(2)}) & pushed in real time to OTT Denomination Policy, Captive Portal & All Routers!`
+      );
     } else {
       onCreatePlan(payload);
+      storage.syncAllPlansEverywhere();
+      setSyncNotice(
+        `Created "${payload.name}" (${currency}${payload.price.toFixed(2)}) & synced across Captive Portal & Routers!`
+      );
     }
+    setTimeout(() => setSyncNotice(null), 5000);
 
     setShowCreatePlanModal(false);
     setEditingPlan(null);
@@ -214,16 +241,33 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight">Hotspot Plans, Vouchers & Entitlements</h1>
+          <h1 className="text-xl font-extrabold text-white tracking-tight">Hotspot Plans, Vouchers &amp; Entitlements</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Exact pricing-to-entitlement mapping with full CRUD management &amp; atomic voucher redemption
+            Real-time synchronized pricing across Billing, OTT Lesotho Denominations, Captive Portal &amp; MikroTik Routers (Zero Device Caps)
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => storage.resetStarterPlans()}
+            onClick={() => {
+              storage.syncAllPlansEverywhere();
+              setSyncNotice('All Hotspot Plans & Denominations pushed live to Captive Portal & Routers!');
+              setTimeout(() => setSyncNotice(null), 4000);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold rounded-lg transition-colors cursor-pointer"
+            title="Push all current plan prices to Captive Portal and MikroTik Routers immediately"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sync Plans Everywhere</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              storage.resetStarterPlans();
+              setSyncNotice('Restored default plans and synced across Portal & Routers.');
+              setTimeout(() => setSyncNotice(null), 4000);
+            }}
             className="flex items-center gap-1.5 px-3 py-2 bg-[#161d31] hover:bg-[#1f2942] border border-[#232d42] text-slate-300 hover:text-white text-xs font-mono font-bold rounded-lg transition-colors cursor-pointer"
             title="Restore default hotspot pricing plans"
           >
@@ -241,93 +285,166 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
         </div>
       </div>
 
+      {syncNotice && (
+        <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 text-xs font-mono flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-bold">{syncNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSyncNotice(null)}
+            className="text-emerald-300 hover:text-white text-xs cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Plans Comparison Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {filteredPlans.map((plan) => (
-          <div
-            key={plan.id}
-            className={`p-5 rounded-xl border relative flex flex-col justify-between ${
-              plan.isPopular
-                ? 'bg-[#121929] border-[#f05e17]/50 shadow-md'
-                : 'bg-[#0f1422] border-[#232d42]'
-            }`}
-          >
-            <div>
-              <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-1">
-                <span className="uppercase">{plan.vertical}</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500">{plan.deviceLimit} device limit</span>
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(plan)}
-                    className="p-1 text-cyan-400 hover:text-white hover:bg-cyan-500/20 rounded transition-colors cursor-pointer"
-                    title="Edit Plan"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-                  {confirmDeletePlanId === plan.id ? (
-                    <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+        {filteredPlans.map((plan) => {
+          const inlineVal = inlinePriceEdits[plan.id];
+          const isInlineEditing = inlineVal !== undefined;
+          return (
+            <div
+              key={plan.id}
+              className={`p-5 rounded-xl border relative flex flex-col justify-between ${
+                plan.isPopular
+                  ? 'bg-[#121929] border-[#f05e17]/50 shadow-md'
+                  : 'bg-[#0f1422] border-[#232d42]'
+              }`}
+            >
+              <div>
+                <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span className="uppercase">{plan.vertical}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-[10px] font-bold">
+                      {!plan.deviceLimit || plan.deviceLimit <= 0 || plan.deviceLimit >= 1000
+                        ? 'Unlimited Devices'
+                        : `${plan.deviceLimit} Devices`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(plan)}
+                      className="p-1 text-cyan-400 hover:text-white hover:bg-cyan-500/20 rounded transition-colors cursor-pointer"
+                      title="Edit Plan"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    {confirmDeletePlanId === plan.id ? (
+                      <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            storage.deletePlan(plan.id);
+                            setConfirmDeletePlanId(null);
+                          }}
+                          className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeletePlanId(null)}
+                          className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => {
-                          storage.deletePlan(plan.id);
-                          setConfirmDeletePlanId(null);
-                        }}
-                        className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                        onClick={() => setConfirmDeletePlanId(plan.id)}
+                        className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
+                        title="Delete Plan"
                       >
-                        Confirm
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                    )}
+                  </div>
+                </div>
+                <h3 className="text-base font-extrabold text-white">{plan.name}</h3>
+
+                {/* Quick Inline Price Editor */}
+                <div className="mt-3 flex items-center justify-between gap-2 font-mono">
+                  {isInlineEditing ? (
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="text-lg font-black text-slate-300">{currency}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={inlineVal}
+                        onChange={(e) =>
+                          setInlinePriceEdits((prev) => ({ ...prev, [plan.id]: e.target.value }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleInlinePriceCommit(plan, inlineVal);
+                          if (e.key === 'Escape') {
+                            setInlinePriceEdits((prev) => {
+                              const next = { ...prev };
+                              delete next[plan.id];
+                              return next;
+                            });
+                          }
+                        }}
+                        className="w-28 px-2.5 py-1 bg-[#161d31] border border-[#f05e17] rounded-lg text-white font-black text-base focus:outline-none"
+                        autoFocus
+                      />
                       <button
                         type="button"
-                        onClick={() => setConfirmDeletePlanId(null)}
-                        className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                        onClick={() => handleInlinePriceCommit(plan, inlineVal)}
+                        className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs rounded-lg cursor-pointer"
                       >
-                        ✕
+                        Sync
                       </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeletePlanId(plan.id)}
-                      className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
-                      title="Delete Plan"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-2xl font-black text-white">
+                        {currency}{plan.price.toFixed(2)}
+                      </span>
+                      <span className="text-xs text-slate-400">/ {plan.durationLabel}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInlinePriceEdits((prev) => ({ ...prev, [plan.id]: String(plan.price) }))
+                        }
+                        className="ml-2 px-2 py-0.5 text-[10px] font-bold bg-[#161d31] hover:bg-[#1f2942] text-amber-300 border border-amber-500/30 rounded cursor-pointer"
+                        title="Click to quickly change price and sync everywhere"
+                      >
+                        Quick Change Price
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-              <h3 className="text-base font-extrabold text-white">{plan.name}</h3>
 
-              <div className="mt-3 flex items-baseline gap-1 font-mono">
-                <span className="text-2xl font-black text-white">{currency}{plan.price.toFixed(2)}</span>
-                <span className="text-xs text-slate-400">/ {plan.durationLabel}</span>
+                <div className="mt-4 pt-3 border-t border-[#1f283d] space-y-2 text-xs font-mono text-slate-300">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Speed Limits:</span>
+                    <span className="text-emerald-400 font-bold">{plan.downloadSpeedMbps}M down / {plan.uploadSpeedMbps}M up</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Data Volume:</span>
+                    <span className="text-slate-200">{plan.dataCapMb ? `${plan.dataCapMb / 1024} GB Cap` : 'Unlimited Quota'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Burst Profile:</span>
+                    <span className="text-cyan-400 font-bold">{plan.burstDownloadMbps || plan.downloadSpeedMbps * 2}M Burst</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-[#1f283d] space-y-2 text-xs font-mono text-slate-300">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Speed Limits:</span>
-                  <span className="text-emerald-400 font-bold">{plan.downloadSpeedMbps}M down / {plan.uploadSpeedMbps}M up</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Data Volume:</span>
-                  <span className="text-slate-200">{plan.dataCapMb ? `${plan.dataCapMb / 1024} GB Cap` : 'Unlimited Quota'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Burst Profile:</span>
-                  <span className="text-cyan-400 font-bold">{plan.burstDownloadMbps || plan.downloadSpeedMbps * 2}M Burst</span>
-                </div>
+              <div className="mt-5 pt-3 border-t border-[#1f283d] flex items-center justify-between text-[11px] font-mono">
+                <span className="text-slate-400">OTT Denomination:</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                  Exact {currency}{plan.price.toFixed(2)} Match
+                </span>
               </div>
             </div>
-
-            <div className="mt-5 pt-3 border-t border-[#1f283d] flex items-center justify-between text-[11px] font-mono">
-              <span className="text-slate-400">OTT Denomination:</span>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
-                Exact {currency}{plan.price.toFixed(2)} Match
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ======================================================= */}
@@ -343,11 +460,11 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               <h3 className="text-sm font-extrabold text-white font-mono flex items-center gap-2">
                 PAYLESOTHO AGGREGATOR &amp; 16-DIGIT OTT VOUCHER ENFORCEMENT
                 <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
-                  100% On-Demand OTT PINs
+                  100% Live Synchronized Denominations
                 </span>
               </h3>
               <p className="text-xs text-slate-400 font-mono">
-                Zero self-generated platform vouchers. Subscribers pay via PayLesotho (M-Pesa / EcoCash / XPayments), copy their 16-digit OTT Voucher PIN, and redeem exact package denominations.
+                Zero self-generated platform vouchers. Subscribers pay the exact synchronized plan price ({filteredPlans.map((p) => `${currency}${p.price}`).join(' / ')}) via PayLesotho (M-Pesa / EcoCash / XPayments) or redeem an official 16-digit OTT Voucher PIN.
               </p>
             </div>
           </div>
@@ -362,12 +479,14 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
             <div className="text-[11px] text-slate-400 mb-1">2. Generate &amp; Check OTT PIN</div>
             <div className="text-sm font-bold text-amber-300">POST /api/ott/voucher/get</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">Verified via POST /ott/voucher/check</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">Issued only after verified wallet debit</div>
           </div>
           <div className="p-3 bg-[#161d31] border border-[#232d42] rounded-lg text-slate-200">
-            <div className="text-[11px] text-slate-400 mb-1">3. Exact Value Redemption</div>
-            <div className="text-sm font-bold text-cyan-400">{vouchers.length} OTT Redemptions</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">16-digit OTT Voucher only (zero internal vouchers)</div>
+            <div className="text-[11px] text-slate-400 mb-1">3. Live Denominations Active</div>
+            <div className="text-sm font-bold text-cyan-400">
+              {filteredPlans.map((p) => `${currency}${p.price.toFixed(0)}`).join(' · ') || 'None'}
+            </div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{vouchers.length} Verified OTT Redemptions</div>
           </div>
         </div>
       </div>
@@ -458,14 +577,14 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               {ottResult.receipt && (
                 <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400 border-t border-emerald-500/20">
                   <span>Serial Receipt: {ottResult.receipt}</span>
-                  <span>Amount: M{ottResult.amount} ({ottResult.planName})</span>
+                  <span>Amount: {currency}{ottResult.amount} ({ottResult.planName})</span>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Official OTT Lesotho Network Integration Card */}
+        {/* Official OTT Lesotho Network Integration Card — Dynamically Synchronized with Active Plans */}
         <div className="bg-[#0f1422] p-5 rounded-xl border border-[#232d42] space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -474,38 +593,49 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                 OFFICIAL OTT LESOTHO NETWORK
               </h2>
             </div>
-            <span className="text-[10px] font-mono text-cyan-400 font-bold">Exclusive Provider</span>
+            <span className="text-[10px] font-mono text-emerald-400 font-bold">Live Synced Denominations</span>
           </div>
 
           <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 text-xs leading-relaxed">
-            <p className="font-bold mb-1">Internal Custom Voucher Generation Removed</p>
+            <p className="font-bold mb-1">Real-Time Denomination Synchronization Active</p>
             <p className="text-[11px] text-slate-300">
-              Per executive instructions, internally generated custom vouchers have been permanently deleted and purged from the platform. T-Connect Starlink Hotspots exclusively accept official 16-digit OTT Vouchers.
+              Any change to Hotspot Plans above immediately updates the Official OTT Lesotho Network denominations, Captive Portal packages, and MikroTik router profiles in real time.
             </p>
           </div>
 
           <div className="space-y-2 text-xs font-mono">
-            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
-              <div>
-                <span className="text-white font-bold block">Daily Pass (24 Hours)</span>
-                <span className="text-[10px] text-slate-400">Available at all retail spazas &amp; vendors</span>
+            {filteredPlans.map((plan) => (
+              <div
+                key={`ott_denom_${plan.id}`}
+                className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between"
+              >
+                <div>
+                  <span className="text-white font-bold block">
+                    {plan.name} ({plan.durationLabel})
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {plan.downloadSpeedMbps}M/{plan.uploadSpeedMbps}M &middot;{' '}
+                    {!plan.deviceLimit || plan.deviceLimit <= 0 || plan.deviceLimit >= 1000
+                      ? 'Unlimited devices'
+                      : `${plan.deviceLimit} devices`}{' '}
+                    &middot; Exact {currency}{plan.price.toFixed(2)} OTT PIN
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 font-extrabold text-sm">
+                    {currency}{plan.price.toFixed(2)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(plan)}
+                    className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#232d42] cursor-pointer"
+                    title="Edit plan denomination"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <span className="text-emerald-400 font-extrabold text-sm">M10.00</span>
-            </div>
-            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
-              <div>
-                <span className="text-white font-bold block">Weekly Pass (7 Days)</span>
-                <span className="text-[10px] text-slate-400">High-speed Starlink Wi-Fi pass</span>
-              </div>
-              <span className="text-emerald-400 font-extrabold text-sm">M60.00</span>
-            </div>
-            <div className="p-2.5 bg-[#161d31] rounded-lg border border-[#232d42] flex items-center justify-between">
-              <div>
-                <span className="text-white font-bold block">Monthly Pass (30 Days)</span>
-                <span className="text-[10px] text-slate-400">Unlimited 30-day business pass</span>
-              </div>
-              <span className="text-emerald-400 font-extrabold text-sm">M280.00</span>
-            </div>
+            ))}
           </div>
         </div>
       </div>
@@ -592,11 +722,11 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                     </td>
                     <td className="py-3">
                       {voucher.associatedDevices.length === 0 ? (
-                        <span className="text-slate-500">None (0/{voucher.deviceLimit})</span>
+                        <span className="text-slate-500">None (Unlimited)</span>
                       ) : (
                         <div className="space-y-0.5">
                           <span className="text-slate-200 font-bold">
-                            {voucher.associatedDevices.length}/{voucher.deviceLimit} slots used
+                            {voucher.associatedDevices.length} active device(s)
                           </span>
                           <div className="text-[10px] text-slate-400">
                             {voucher.associatedDevices.map(d => d.mac).join(', ')}
@@ -717,7 +847,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                     required
                     value={planName}
                     onChange={(e) => setPlanName(e.target.value)}
-                    placeholder="e.g. Weekend Pass (48h)"
+                    placeholder="e.g. Monthly Pass"
                     className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                   />
                 </div>
@@ -786,15 +916,20 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1">Device Limit</label>
+                  <label className="text-slate-400 block mb-1">Device Limit (0 = Unlimited)</label>
                   <input
                     type="number"
-                    min="1"
-                    max="10"
+                    min="0"
                     value={planDeviceLimit}
-                    onChange={(e) => setPlanDeviceLimit(Number(e.target.value))}
+                    onChange={(e) => setPlanDeviceLimit(Math.max(0, Number(e.target.value)))}
+                    placeholder="0 = Unlimited Devices"
                     className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
                   />
+                  <span className="text-[10px] text-emerald-400 mt-1 block">
+                    {!planDeviceLimit || planDeviceLimit <= 0
+                      ? 'Unlimited devices (National Rollout)'
+                      : `${planDeviceLimit} concurrent devices allowed`}
+                  </span>
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Data Cap (GB, blank = unlimited)</label>
@@ -824,7 +959,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                   type="submit"
                   className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm cursor-pointer"
                 >
-                  {editingPlan ? 'Save Plan Changes' : 'Save Plan'}
+                  {editingPlan ? 'Save & Sync Everywhere' : 'Save & Sync Plan'}
                 </button>
               </div>
             </form>

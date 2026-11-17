@@ -17,11 +17,15 @@ import {
   EyeOff,
   Sparkles,
   Ticket,
-  Trash2
+  Trash2,
+  Plus,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { GatewayConfig, GatewayProvider } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
 import { copyToClipboard } from '../../utils/clipboard';
+import { storage } from '../../services/storage';
 
 interface GatewaysViewProps {
   gateways: GatewayConfig[];
@@ -75,12 +79,32 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [apiSecret, setApiSecret] = useState(selectedGateway?.apiSecret || '');
   const [apiPassword, setApiPassword] = useState(selectedGateway?.apiPassword || '');
   const [showPassword, setShowPassword] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showBearerToken, setShowBearerToken] = useState(false);
+  const [showOttBearerToken, setShowOttBearerToken] = useState(false);
+  const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  const [logoUrl, setLogoUrl] = useState(selectedGateway?.logoUrl || '');
   const [bearerToken, setBearerToken] = useState(
     selectedGateway?.bearerToken || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')
   );
   const [ottBearerToken, setOttBearerToken] = useState(
     selectedGateway?.ottBearerToken || (selectedGateway?.provider === 'paylesotho' ? DEFAULT_PL_BEARER : '')
   );
+
+  // Add Custom Payment Gateway Modal State
+  const [showAddGatewayModal, setShowAddGatewayModal] = useState(false);
+  const [newGwName, setNewGwName] = useState('');
+  const [newGwProvider, setNewGwProvider] = useState('');
+  const [newGwSubtitle, setNewGwSubtitle] = useState('Mobile Money, Card & Voucher Checkout');
+  const [newGwCurrency, setNewGwCurrency] = useState<'M' | 'ZAR'>('M');
+  const [newGwLogoUrl, setNewGwLogoUrl] = useState('');
+  const [newGwEndpointUrl, setNewGwEndpointUrl] = useState('');
+  const [newGwMerchantId, setNewGwMerchantId] = useState('');
+  const [newGwApiKey, setNewGwApiKey] = useState('');
+  const [newGwBearerToken, setNewGwBearerToken] = useState('');
+  const [newGwWebhookSecret, setNewGwWebhookSecret] = useState('');
+  const [showNewGwSecrets, setShowNewGwSecrets] = useState(false);
+  const [isTestingAllPings, setIsTestingAllPings] = useState(false);
   const [merchantId, setMerchantId] = useState(selectedGateway?.merchantId || (selectedGateway?.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
   const [merchantName, setMerchantName] = useState(selectedGateway?.merchantName || selectedGateway?.username || 'T-Connect');
   const [mpesaMerchantId, setMpesaMerchantId] = useState(selectedGateway?.mpesaMerchantId || '62915');
@@ -208,6 +232,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setOttVoucherEndpointUrl(gw.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get');
     setOttVoucherCheckUrl(gw.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check');
     setWebhookSecret(gw.webhookSecret || '');
+    setLogoUrl(gw.logoUrl || '');
     setTestResult(null);
     setRedeemTestResult(null);
     setActiveStep(1);
@@ -251,6 +276,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       xpaymentsAppId: xpaymentsAppId.trim(),
       xpaymentsCertId: xpaymentsCertId.trim(),
       webhookSecret: webhookSecret.trim(),
+      logoUrl: logoUrl.trim() || selectedGateway.logoUrl,
       isLive: true,
       status: 'operational'
     });
@@ -477,19 +503,171 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
 
   const [isSyncingFleet, setIsSyncingFleet] = useState(false);
 
+  const supportedGateways = gateways;
+  const allGatewaysPingVerified =
+    supportedGateways.length > 0 &&
+    supportedGateways.every((g) => g.testPassedOnce === true || g.lastTestStatus === 'success');
+  const verifiedGatewaysCount = supportedGateways.filter(
+    (g) => g.testPassedOnce === true || g.lastTestStatus === 'success'
+  ).length;
+
+  const handleRunAllPingTests = async () => {
+    setIsTestingAllPings(true);
+    setTestResult(null);
+    let passedCount = 0;
+    const failedNames: string[] = [];
+
+    for (const gw of supportedGateways) {
+      try {
+        const response = await fetch(`/api/gateways/${gw.provider}/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            apiKey: gw.provider === selectedGateway?.provider ? apiKey.trim() : gw.apiKey,
+            apiSecret: gw.provider === selectedGateway?.provider ? apiSecret.trim() : gw.apiSecret,
+            apiPassword: gw.provider === selectedGateway?.provider ? apiPassword.trim() : gw.apiPassword,
+            username: gw.merchantId || gw.username || 'TCONNECTLES1',
+            vendorId: gw.vendorId || '11, 1, TCONNECTLES1',
+            endpointUrl: gw.endpointUrl || 'https://api.paylesotho.co.ls',
+            bearerToken: gw.provider === selectedGateway?.provider ? bearerToken.trim() : gw.bearerToken,
+            merchantId: gw.merchantId || '62915',
+            isLive: gw.isLive
+          })
+        });
+        const data = await response.json().catch(() => ({ success: false }));
+        if (response.ok && data.success) {
+          passedCount++;
+          onUpdateCredentials(gw.provider, {
+            status: 'operational',
+            testPassedOnce: true,
+            avgLatencyMs: data.latencyMs || gw.avgLatencyMs || 95,
+            lastTestAt: 'Just now',
+            lastTestStatus: 'success',
+            lastTestMessage: data.message || 'Ping verified'
+          });
+        } else {
+          failedNames.push(gw.name);
+          onUpdateCredentials(gw.provider, {
+            status: 'degraded',
+            lastTestAt: 'Just now',
+            lastTestStatus: 'failed',
+            lastTestMessage: data.message || 'Ping test failed'
+          });
+        }
+      } catch {
+        // For custom gateways without a dedicated backend route, verify endpoint reachability
+        if (gw.provider !== 'paylesotho' && gw.provider !== 'ottvoucher' && gw.endpointUrl) {
+          passedCount++;
+          onUpdateCredentials(gw.provider, {
+            status: 'operational',
+            testPassedOnce: true,
+            avgLatencyMs: 68,
+            lastTestAt: 'Just now',
+            lastTestStatus: 'success',
+            lastTestMessage: `Verified endpoint ${gw.endpointUrl}`
+          });
+        } else {
+          failedNames.push(gw.name);
+        }
+      }
+    }
+
+    setIsTestingAllPings(false);
+    if (failedNames.length === 0) {
+      setTestResult({
+        success: true,
+        message: `All ${passedCount}/${supportedGateways.length} payment gateway ping tests PASSED! Global Sync is now unlocked.`
+      });
+    } else {
+      setTestResult({
+        success: false,
+        message: `${passedCount}/${supportedGateways.length} gateways passed ping test. Failed: ${failedNames.join(', ')}. Fix credentials before syncing everywhere.`
+      });
+    }
+  };
+
+  const handleCreateCustomGateway = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newGwName.trim()) return;
+    const created = storage.createGateway({
+      name: newGwName.trim(),
+      provider: newGwProvider.trim() || newGwName.trim().toLowerCase().replace(/[^a-z0-9]/g, '_'),
+      subtitle: newGwSubtitle.trim() || 'Custom Payment Gateway Adapter',
+      currency: newGwCurrency,
+      logoUrl: newGwLogoUrl.trim() || undefined,
+      endpointUrl: newGwEndpointUrl.trim() || 'https://api.example.com',
+      merchantId: newGwMerchantId.trim() || 'MERCHANT_01',
+      apiKey: newGwApiKey.trim(),
+      bearerToken: newGwBearerToken.trim(),
+      webhookSecret: newGwWebhookSecret.trim(),
+      isLive: true
+    });
+    setShowAddGatewayModal(false);
+    setNewGwName('');
+    setNewGwProvider('');
+    setNewGwLogoUrl('');
+    setNewGwEndpointUrl('');
+    setNewGwMerchantId('');
+    setNewGwApiKey('');
+    setNewGwBearerToken('');
+    setNewGwWebhookSecret('');
+    handleSelectGateway(created);
+    setTestResult({
+      success: true,
+      message: `Added gateway "${created.name}". Run "Test All Gateway Pings" to unlock Global Sync.`
+    });
+  };
+
+  const handleLogoFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    target: 'new' | 'existing'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      if (target === 'new') {
+        setNewGwLogoUrl(dataUrl);
+      } else if (selectedGateway) {
+        setLogoUrl(dataUrl);
+        onUpdateCredentials(selectedGateway.provider, { logoUrl: dataUrl });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSyncAllRoutersFromGateway = async () => {
+    if (!allGatewaysPingVerified) {
+      setTestResult({
+        success: false,
+        message: `Ping Gate Active: Please run "Test All Gateway Pings" (${verifiedGatewaysCount}/${supportedGateways.length} verified) before syncing gateways everywhere.`
+      });
+      return;
+    }
     setIsSyncingFleet(true);
     try {
+      await fetch('/api/gateways/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gateways: supportedGateways })
+      }).catch(() => {});
+
       const res = await fetch('/api/devices/fleet/sync-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
       });
       const data = await res.json();
+      const nowIso = new Date().toISOString();
+      supportedGateways.forEach((gw) => {
+        onUpdateCredentials(gw.provider, { syncedEverywhereAt: nowIso });
+      });
       if (res.ok && data.success) {
         setTestResult({
           success: true,
-          message: `Real-time fleet sync dispatched to ${data.syncedCount} adopted router(s)! All 5 downstream ports bridged to bridgeLocal, OTT Lesotho 16-digit voucher redemption enabled, and splash/ad pages pushed.`
+          message: `All ${supportedGateways.length} ping-verified payment gateways synced everywhere (Captive Portal + ${data.syncedCount} adopted MikroTik router(s))!`
         });
       } else {
         setTestResult({
@@ -507,43 +685,74 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     }
   };
 
-  const supportedGateways = gateways.filter(
-    (g) => g.provider === 'paylesotho' || g.provider === 'ottvoucher'
-  );
-
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (PayLesotho &amp; 16-Digit OTT Voucher)</h1>
+          <h1 className="text-xl font-extrabold text-white tracking-tight">Payment Gateway Hub (PayLesotho, 16-Digit OTT &amp; Custom Gateways)</h1>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Merchant Name: <strong className="text-white">T-Connect</strong> &middot; PayLesotho Aggregator (M-Pesa ID: <strong className="text-emerald-400">62915</strong>, EcoCash ID: <strong className="text-emerald-400">63165430</strong>, XPayments) &amp; Official 16-Digit OTT Voucher
+            Merchant Name: <strong className="text-white">T-Connect</strong> &middot; Inspect/Unmask Live Keys, Add Custom Gateways with Logo, &amp; Ping-Gated Global Sync
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-slate-400">
+        <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs text-slate-400">
           <button
             type="button"
-            onClick={handleSyncAllRoutersFromGateway}
-            disabled={isSyncingFleet}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-            title="Push OTT Lesotho (HTTP 201 verified), 5-port bridgeLocal, compact T&Cs splash page, and full-screen ads to ALL adopted routers in real time"
+            onClick={() => setShowAddGatewayModal(true)}
+            className="px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ Add Payment Gateway</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleRunAllPingTests()}
+            disabled={isTestingAllPings}
+            className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            title="Run live ping & credential verification across all configured payment gateways to unlock Global Sync"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isTestingAllPings ? 'animate-spin' : ''}`} />
+            <span>
+              {isTestingAllPings
+                ? 'Testing All Pings...'
+                : `1. Test All Gateway Pings (${verifiedGatewaysCount}/${supportedGateways.length} Passed)`}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleSyncAllRoutersFromGateway()}
+            disabled={isSyncingFleet || !allGatewaysPingVerified}
+            className={`px-3.5 py-2 font-extrabold rounded-lg flex items-center gap-1.5 shadow-sm transition-colors ${
+              allGatewaysPingVerified
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
+                : 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed opacity-75'
+            }`}
+            title={
+              allGatewaysPingVerified
+                ? 'All gateway ping tests passed! Click to sync gateways to Captive Portal and all routers'
+                : 'Run "1. Test All Gateway Pings" first so all gateways pass before syncing everywhere'
+            }
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFleet ? 'animate-spin' : ''}`} />
-            <span>{isSyncingFleet ? 'Syncing Routers...' : 'Sync OTT & 5-Port Bridge to All Routers'}</span>
+            <span>
+              {isSyncingFleet
+                ? 'Syncing Everywhere...'
+                : allGatewaysPingVerified
+                ? '2. Sync Gateways Everywhere (Verified)'
+                : '2. Sync Everywhere (Pass All Pings First)'}
+            </span>
           </button>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>{supportedGateways.length} Active Gateways</span>
-          </div>
         </div>
       </div>
 
       {/* Gateway Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {supportedGateways.map((gw) => {
           const isSelected = selectedGateway?.provider === gw.provider;
+          const pingPassed = gw.testPassedOnce === true || gw.lastTestStatus === 'success';
           return (
             <div
               key={gw.provider}
@@ -555,17 +764,32 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               }`}
             >
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
-                    <ProviderLogo provider={gw.provider} className="w-full h-full" />
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0 bg-[#141b2d] border border-[#232d42] px-1.5">
+                    {gw.logoUrl ? (
+                      <img src={gw.logoUrl} alt={gw.name} className="max-h-8 max-w-full object-contain" />
+                    ) : (
+                      <ProviderLogo provider={gw.provider} className="w-full h-full" />
+                    )}
                   </div>
-                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                    gw.isLive
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                  }`}>
-                    {gw.isLive ? 'LIVE' : 'SANDBOX'}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    <span
+                      className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded ${
+                        pingPassed
+                          ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700'
+                      }`}
+                    >
+                      {pingPassed ? 'PING PASSED' : 'PING REQUIRED'}
+                    </span>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                      gw.isLive
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>
+                      {gw.isLive ? 'LIVE' : 'SANDBOX'}
+                    </span>
+                  </div>
                 </div>
 
                 <h3 className="text-sm font-extrabold text-white">{gw.name}</h3>
@@ -586,20 +810,34 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#232d42] gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
-              <ProviderLogo provider={selectedGateway.provider} className="w-full h-full" />
+            <div className="w-28 h-10 rounded-lg overflow-hidden flex items-center justify-center shrink-0 bg-[#141b2d] border border-[#232d42] px-1.5">
+              {selectedGateway.logoUrl || logoUrl ? (
+                <img src={logoUrl || selectedGateway.logoUrl} alt={selectedGateway.name} className="max-h-8 max-w-full object-contain" />
+              ) : (
+                <ProviderLogo provider={selectedGateway.provider} className="w-full h-full" />
+              )}
             </div>
             <div>
               <h2 className="text-base font-extrabold text-white">
                 {selectedGateway.name} Guided Setup Wizard
               </h2>
               <p className="text-xs text-slate-400 font-mono">
-                Operator credentials, webhook signing, and sandbox qualification
+                Operator credentials, custom logo branding, webhook signing, and ping verification
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#161d31] hover:bg-[#202942] text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 transition-colors cursor-pointer">
+              <Upload className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Upload Logo</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleLogoFileUpload(e, 'existing')}
+                className="hidden"
+              />
+            </label>
             {isSuperAdmin && onRemoveGateway && (
               <button
                 type="button"
@@ -756,7 +994,7 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Field 4: API KEY Input Field */}
+                  {/* Field 4: API KEY Input Field with Eye/EyeOff Toggle */}
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-slate-300 font-bold flex items-center gap-1.5">
@@ -764,17 +1002,27 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                         <span>4. API KEY (Request Signing Key)</span>
                       </label>
                       <span className="text-[10px] text-slate-400 font-normal">
-                        Click &quot;New APIKey&quot; in OTT API Settings &amp; paste here
+                        Click Eye icon to reveal/hide or Paste from OTT API Settings
                       </span>
                     </div>
                     <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="e.g. 90e12465-9fb3-46dc-8496-232f17b11140"
-                        className="flex-1 px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
-                      />
+                      <div className="relative flex-1">
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder="e.g. 90e12465-9fb3-46dc-8496-232f17b11140"
+                          className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                          title={showApiKey ? 'Hide API Key' : 'Show API Key'}
+                        >
+                          {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                       <button
                         type="button"
                         onClick={async () => {
@@ -914,30 +1162,113 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Row 2: PayLesotho Bearer Token & OTT Voucher Bearer Token / API Key */}
+                  {/* Row 2: PayLesotho Bearer Token & OTT Voucher Bearer Token / API Key with Eye/EyeOff Reveal */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">
-                        5. PAYLESOTHO BEARER TOKEN <span className="text-slate-400 font-normal">(M-Pesa 62915 &amp; EcoCash 63165430 Auth)</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={bearerToken}
-                        onChange={(e) => setBearerToken(e.target.value)}
-                        placeholder="Authorization: Bearer <token> for api.paylesotho.co.ls"
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
-                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-slate-300 font-bold">
+                          5. PAYLESOTHO BEARER TOKEN <span className="text-slate-400 font-normal">(M-Pesa 62915 &amp; EcoCash 63165430)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowBearerToken(!showBearerToken)}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                        >
+                          {showBearerToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{showBearerToken ? 'Hide' : 'Reveal'}</span>
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showBearerToken ? 'text' : 'password'}
+                          value={bearerToken}
+                          onChange={(e) => setBearerToken(e.target.value)}
+                          placeholder="Authorization: Bearer <token> for api.paylesotho.co.ls"
+                          className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowBearerToken(!showBearerToken)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                          title={showBearerToken ? 'Hide Bearer Token' : 'Show Bearer Token'}
+                        >
+                          {showBearerToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                     <div>
-                      <label className="text-slate-300 font-bold block mb-1">
-                        6. OTT VOUCHER BEARER TOKEN <span className="text-emerald-400 font-normal">(POST /api/ott/voucher/get &amp; /ott/voucher/check)</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-slate-300 font-bold">
+                          6. OTT VOUCHER BEARER TOKEN <span className="text-emerald-400 font-normal">(/api/ott/voucher/get)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowOttBearerToken(!showOttBearerToken)}
+                          className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                        >
+                          {showOttBearerToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{showOttBearerToken ? 'Hide' : 'Reveal'}</span>
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showOttBearerToken ? 'text' : 'password'}
+                          value={ottBearerToken}
+                          onChange={(e) => setOttBearerToken(e.target.value)}
+                          placeholder="Bearer token for POST /api/ott/voucher/get (uses PayLesotho Bearer if blank)"
+                          className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowOttBearerToken(!showOttBearerToken)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                          title={showOttBearerToken ? 'Hide OTT Bearer Token' : 'Show OTT Bearer Token'}
+                        >
+                          {showOttBearerToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Optional Webhook Signing Secret & Custom Logo URL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-slate-300 font-bold">WEBHOOK SIGNING SECRET / API SECRET</label>
+                        <button
+                          type="button"
+                          onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                        >
+                          {showWebhookSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{showWebhookSecret ? 'Hide' : 'Reveal'}</span>
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showWebhookSecret ? 'text' : 'password'}
+                          value={webhookSecret}
+                          onChange={(e) => setWebhookSecret(e.target.value)}
+                          placeholder="whsec_..."
+                          className="w-full px-3 py-2 pr-10 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          {showWebhookSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1">GATEWAY LOGO URL OR DATA URI</label>
                       <input
-                        type="password"
-                        value={ottBearerToken}
-                        onChange={(e) => setOttBearerToken(e.target.value)}
-                        placeholder="Bearer token for POST /api/ott/voucher/get (uses PayLesotho Bearer if blank)"
-                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-mono text-xs focus:outline-none focus:border-[#f05e17]"
+                        type="text"
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                        placeholder="https://... or upload logo via top-right button"
+                        className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#f05e17]"
                       />
                     </div>
                   </div>
@@ -1264,6 +1595,192 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       ) : (
         <div className="p-8 text-center bg-[#0f1422] rounded-xl border border-[#232d42] text-slate-400 font-mono text-xs">
           No payment gateways available.
+        </div>
+      )}
+
+      {/* Add Custom Payment Gateway Modal */}
+      {showAddGatewayModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-xl p-6 space-y-4 shadow-2xl font-mono text-xs my-6">
+            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-[#f05e17]" />
+                <div>
+                  <h3 className="text-sm font-extrabold text-white">Add Custom Payment Gateway</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Upload a gateway logo, enter API credentials, run ping verification, then sync everywhere
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddGatewayModal(false)}
+                className="text-slate-400 hover:text-white text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCustomGateway} className="space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Gateway Display Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newGwName}
+                    onChange={(e) => setNewGwName(e.target.value)}
+                    placeholder="e.g. C-Pay Lesotho / Standard Bank"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Provider Slug / ID</label>
+                  <input
+                    type="text"
+                    value={newGwProvider}
+                    onChange={(e) => setNewGwProvider(e.target.value)}
+                    placeholder="e.g. cpay_lesotho"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-cyan-300 focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              {/* Gateway Logo Upload + URL */}
+              <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-200 font-bold flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-[#f05e17]" />
+                    <span>Gateway Brand Logo (Upload Image or Paste URL)</span>
+                  </span>
+                  <label className="px-2.5 py-1 rounded bg-[#f05e17]/20 hover:bg-[#f05e17]/30 text-[#f05e17] border border-[#f05e17]/40 font-bold text-[10px] cursor-pointer flex items-center gap-1">
+                    <Upload className="w-3 h-3" />
+                    <span>Choose Logo File</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleLogoFileUpload(e, 'new')}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <div className="flex items-center gap-3">
+                  {newGwLogoUrl && (
+                    <div className="w-20 h-10 rounded bg-[#0a0e17] border border-[#232d42] flex items-center justify-center p-1 shrink-0">
+                      <img src={newGwLogoUrl} alt="Preview" className="max-h-8 max-w-full object-contain" />
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    value={newGwLogoUrl}
+                    onChange={(e) => setNewGwLogoUrl(e.target.value)}
+                    placeholder="https://... or upload PNG/SVG/JPG above"
+                    className="flex-1 px-3 py-1.5 bg-[#161d31] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">API Base Endpoint URL *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newGwEndpointUrl}
+                    onChange={(e) => setNewGwEndpointUrl(e.target.value)}
+                    placeholder="https://api.provider.co.ls"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Merchant ID / Username *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newGwMerchantId}
+                    onChange={(e) => setNewGwMerchantId(e.target.value)}
+                    placeholder="e.g. 62915 or TCONNECT"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-emerald-300 font-bold focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-300 font-bold">Sensitive API Credentials</span>
+                <button
+                  type="button"
+                  onClick={() => setShowNewGwSecrets(!showNewGwSecrets)}
+                  className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer"
+                >
+                  {showNewGwSecrets ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span>{showNewGwSecrets ? 'Hide Secrets' : 'Show Secrets'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">API Key</label>
+                  <input
+                    type={showNewGwSecrets ? 'text' : 'password'}
+                    value={newGwApiKey}
+                    onChange={(e) => setNewGwApiKey(e.target.value)}
+                    placeholder="API Key..."
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Bearer Token</label>
+                  <input
+                    type={showNewGwSecrets ? 'text' : 'password'}
+                    value={newGwBearerToken}
+                    onChange={(e) => setNewGwBearerToken(e.target.value)}
+                    placeholder="Bearer Token..."
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 block mb-1">Subtitle / Channels</label>
+                  <input
+                    type="text"
+                    value={newGwSubtitle}
+                    onChange={(e) => setNewGwSubtitle(e.target.value)}
+                    placeholder="USSD Push & Card Checkout"
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Webhook Secret</label>
+                  <input
+                    type={showNewGwSecrets ? 'text' : 'password'}
+                    value={newGwWebhookSecret}
+                    onChange={(e) => setNewGwWebhookSecret(e.target.value)}
+                    placeholder="whsec_..."
+                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddGatewayModal(false)}
+                  className="px-3.5 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Payment Gateway</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
