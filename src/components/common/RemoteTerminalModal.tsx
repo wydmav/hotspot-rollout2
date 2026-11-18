@@ -623,13 +623,13 @@ export const RemoteTerminalModal: React.FC<RemoteTerminalModalProps> = ({
               <>
                 <button
                   type="button"
-                  onClick={() => handleExecuteCommand('/tconnect fix-all')}
+                  onClick={() => handleExecuteCommand('/tconnect ios-fix')}
                   disabled={loading}
                   className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Repair iOS/Android Captive Portal Redirect, Remove FastTrack & Enforce Simple Queue Speed Cap"
+                  title="Restore Platform Splash Page to hotspot/ & flash/hotspot/, add Apple iOS Private Relay NXDOMAIN rules, and clear stale MAC sessions so iPhone pops up immediately"
                 >
                   <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Fix Redirect &amp; Speed Cap</span>
+                  <span>Restore Splash &amp; Fix iOS Popup</span>
                 </button>
                 <button
                   type="button"

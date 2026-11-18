@@ -652,6 +652,7 @@ export const RouterTerminalSubTab: React.FC<RouterTerminalSubTabProps> = ({
     { label: '/ip hotspot active print', cmd: '/ip hotspot active print without-paging' },
     { label: '/interface wireguard peers', cmd: '/interface wireguard peers print detail without-paging' },
     { label: '/ping 1.1.1.1 count=4', cmd: '/ping 1.1.1.1 count=4' },
+    { label: '🍎 Restore Splash & Fix iOS Popup', cmd: '/tconnect ios-fix' },
     { label: '/tconnect fix-all (Hardened)', cmd: '/tconnect fix-all' }
   ];
 

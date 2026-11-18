@@ -119,7 +119,7 @@ function buildFallbackSlideSvg(title = 'T-Connect Lesotho', subtitle = 'High-Spe
 // Walled-Garden Media Proxy: Serves external ad & wallpaper images directly from the Control Tower
 // origin (169.58.98.92:3000) with disk caching so unauthenticated MikroTik Captive Wi-Fi popups
 // load 100% of images without ever being blocked by the router firewall.
-app.get('/api/portal/media-proxy', async (req: Request, res: Response) => {
+app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (req: Request, res: Response) => {
   const rawUrl = String(req.query.url || '').trim();
   const title = String(req.query.title || 'T-Connect Sponsor').trim();
   const subtitle = String(req.query.subtitle || '').trim();
@@ -1672,20 +1672,29 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 </html>`;
 }
 
-// Serve compiled On-Router Splash Page HTML directly to MikroTik (/tool fetch)
-app.get('/api/portal/router-login.html', (req: Request, res: Response) => {
+// Serve compiled On-Router Splash Page HTML directly to MikroTik (/tool fetch) — supports both query (?scope=) and question-mark-free path (/router-login/hotspot.html)
+app.get(['/api/portal/router-login.html', '/api/portal/router-login/:scopeFile'], (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const scope = (req.query.scope as string) || 'hotspot';
+  const rawParam = String(req.params.scopeFile || '').replace(/\.html$/i, '').trim();
+  const scope = (req.query.scope as string) || rawParam || 'hotspot';
   const html = compileRouterSplashHtml(host, protocol, scope);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 
-// Native Captive Portal Auto-Close endpoint (Closes the OS Captive Portal sheet so the user keeps using their device)
+// Native Captive Portal Auto-Close endpoint (Signals Success to Apple CaptiveNetworkSupport so iOS flips Cancel -> Done, auto-closes the sheet, and opens Safari)
 app.get('/api/portal/cna-close', (req: Request, res: Response) => {
   const dest = String(req.query.dest || '').trim();
-  const safeDest = /^https?:\/\//i.test(dest) ? dest : 'http://captive.apple.com/hotspot-detect.html';
+  const safeDest = /^https?:\/\//i.test(dest) ? dest : 'https://www.google.com';
+  const ua = String(req.headers['user-agent'] || '');
+
+  // If Apple's background CaptiveNetworkSupport wispr probe hits this endpoint directly, return Apple's exact Success payload
+  if (/CaptiveNetworkSupport/i.test(ua) && req.query.probe === '1') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
+  }
+
   const closeHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1706,23 +1715,29 @@ app.get('/api/portal/cna-close', (req: Request, res: Response) => {
 <script>
   function dismissCaptiveSheet() {
     var d = '${safeDest.replace(/'/g, "\\'")}';
+    // 1. Trigger Apple's captive.apple.com probe so iOS CaptiveNetworkSupport sees 200 OK Success and flips "Cancel" to "Done" / auto-closes sheet
+    try {
+      fetch('http://captive.apple.com/hotspot-detect.html', { mode: 'no-cors', cache: 'no-store' }).catch(function(){});
+    } catch (e) {}
     try { window.close(); } catch (e) {}
     try { window.open('', '_self', ''); window.close(); } catch (e) {}
     if (d) {
-      window.location.href = d;
+      window.location.replace(d);
     }
   }
   window.addEventListener('load', function() {
-    setTimeout(dismissCaptiveSheet, 120);
+    setTimeout(dismissCaptiveSheet, 150);
   });
 </script>
 </head>
 <body>
+  <!-- Hidden Apple CNA completion frame so iOS immediately marks the Wi-Fi session as authenticated ("Done") -->
+  <iframe src="http://captive.apple.com/hotspot-detect.html" style="display:none;width:0;height:0;border:0;" aria-hidden="true"></iframe>
   <div class="card">
     <div class="badge"><span class="dot"></span> Wi-Fi Connected</div>
     <h1>You are now online</h1>
-    <p>Tap below or tap <strong>Done</strong> in the top corner to start browsing.</p>
-    <a href="${safeDest}" class="btn" onclick="dismissCaptiveSheet()">Proceed to internet &rarr;</a>
+    <p>Opening browser automatically, or tap <strong>Done</strong> in the top corner.</p>
+    <a href="${safeDest}" class="btn" onclick="dismissCaptiveSheet()">Continue to Safari &rarr;</a>
   </div>
 </body>
 </html>`;
@@ -1950,20 +1965,22 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
 
 // MikroTik alogin.html (Served immediately after /login succeeds on the router):
 // Renders the random Ad Slide picture showcase with the small static "Proceed to internet ->" link.
-app.get('/api/portal/router-alogin.html', (req: Request, res: Response) => {
+app.get(['/api/portal/router-alogin.html', '/api/portal/router-alogin/:scopeFile'], (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const scope = (req.query.scope as string) || 'hotspot';
+  const rawParam = String(req.params.scopeFile || '').replace(/\.html$/i, '').trim();
+  const scope = (req.query.scope as string) || rawParam || 'hotspot';
   const html = compileVideoAdHtml(host, protocol, scope, 'post_auth');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
 
-app.get('/api/portal/video-ad.html', (req: Request, res: Response) => {
+app.get(['/api/portal/video-ad.html', '/api/portal/video-ad/:scopeFile'], (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const scope = (req.query.scope as string) || 'hotspot';
-  const reason = (req.query.reason as string) || 'retrigger';
+  const rawParam = String(req.params.scopeFile || '').replace(/\.html$/i, '').trim();
+  const scope = (req.query.scope as string) || rawParam || 'hotspot';
+  const reason = (req.query.reason as string) || 'post_auth';
   const html = compileVideoAdHtml(host, protocol, scope, reason);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
@@ -8464,8 +8481,14 @@ function executeRouterOSCliCommand(
     }
   };
 
-  // Built-in macro: /tconnect fix-all (repairs iOS/Android redirect + enforces Free Mode Uncapped FastTrack + PCQ OR Paid Mode speed cap + WireGuard MSS 1360 + L2 isolation)
-  if (rawInput.trim().toLowerCase() === '/tconnect fix-all' || rawInput.trim().toLowerCase() === 'fix-all') {
+  // Built-in macro: /tconnect ios-fix or /tconnect fix-all (restores platform splash page to BOTH hotspot/ and flash/hotspot/, adds Apple iOS NXDOMAIN rules, and clears stale MAC sessions so iPhone immediately pops up)
+  if (
+    rawInput.trim().toLowerCase() === '/tconnect fix-all' ||
+    rawInput.trim().toLowerCase() === 'fix-all' ||
+    rawInput.trim().toLowerCase() === '/tconnect ios-fix' ||
+    rawInput.trim().toLowerCase() === 'ios-fix'
+  ) {
+    const isIosReset = rawInput.toLowerCase().includes('ios-fix');
     const fullFixScript = RouterOSRenderer.buildSplashPageFileCommands(
       portalBaseUrl,
       allowFree,
@@ -8477,17 +8500,23 @@ function executeRouterOSCliCommand(
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && !l.startsWith('#'));
+    if (isIosReset) {
+      fixCmds.push(
+        ':do { /ip hotspot active remove [find] } on-error={}',
+        ':do { /ip hotspot cookie remove [find] } on-error={}',
+        ':do { /ip hotspot host remove [find] } on-error={}'
+      );
+    }
     queueToRouter(fixCmds);
     return {
-      output: `${offlineNotice}[T-Connect Enterprise MikroTik Audit & Hardening Executed on ${routerName}]
-  1. WireGuard Tunnel : PROTECTED (wg-tconnect / UDP 51820 / 10.99.0.0/16 whitelisted at top of firewall; MTU=1420; TCP MSS clamped to 1360)
-  2. L2 Guest Isolation: ENFORCED (bridge port horizon=1 on ether2..ether5 & wifi1..wifi2, client-isolation=yes, default-forwarding=no)
-  3. Bridge & Subnet  : bridgeLocal (10.10.0.1/22 -> 1,012 guests, shared-users=1024, addresses-per-mac=unlimited)
-  4. DNS & CNA Probe  : UDP/53 & TCP/53 dstnat redirected to 10.10.0.1; DoT TCP/853 rejected (instant iOS/Android Captive Portal popup)
-  5. Mode & QoS Policy: ${allowFree ? 'FREE MODE — Uncapped Full Starlink Speed + Hardware FastTrack ENABLED + PCQ Fair Queuing (tc-pcq-down / tc-pcq-up)' : `PAID MODE — Strict Per-User Speed Cap (${rateParts.maxLimit}, burst ${rateParts.burstLimit}) + PCQ Fair Queuing`}
-  6. Legacy Queue Fix : Removed subnet-choking default-small (pfifo-limit=10) queue on 10.10.0.0/22
-  7. On-Router Portal : hotspot/login.html & alogin.html synced with ${portalBaseUrl}
-  8. Bridge Dispatch  : ${fixCmds.length} non-interactive RouterOS commands queued to ${routerName} (${wgIp})`,
+      output: `${offlineNotice}[T-Connect Enterprise MikroTik Audit & Apple iOS Splash Sync Executed on ${routerName}]
+  1. Platform Splash  : RESTORED via /tool fetch to BOTH hotspot/ and flash/hotspot/ (login.html, rlogin.html, alogin.html)
+  2. Apple iOS CNA Fix: ENFORCED NXDOMAIN for mask.icloud.com, mask-h2.icloud.com, mask-api.icloud.com & doh.dns.apple.com
+  3. WireGuard Tunnel : PROTECTED (wg-tconnect / UDP 51820 / 10.99.0.0/16 whitelisted; MTU=1420; TCP MSS clamped to 1360)
+  4. L2 Guest Isolation: ENFORCED (bridge port horizon=1 on ether2..ether5 & wifi1..wifi2, client-isolation=yes)
+  5. Mode & QoS Policy: ${allowFree ? 'FREE MODE — Uncapped Full Starlink Speed + Hardware FastTrack ENABLED + PCQ Fair Queuing' : `PAID MODE — Strict Per-User Speed Cap (${rateParts.maxLimit}, burst ${rateParts.burstLimit}) + PCQ Fair Queuing`}
+  6. iOS Session Flush: ${isIosReset ? 'Cleared /ip hotspot active, /ip hotspot cookie & /ip hotspot host so test iPhone pops up immediately' : 'Cleared stale cookies & unauthenticated hosts'}
+  7. Bridge Dispatch  : ${fixCmds.length} non-interactive RouterOS commands queued to ${routerName} (${wgIp})`,
       queuedCount: fixCmds.length
     };
   }

@@ -1351,10 +1351,11 @@ export const RouterDetailSlideover: React.FC<RouterDetailSlideoverProps> = ({
                   <div className="p-2 bg-[#0d121f] border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-[11px]">
                     <span className="text-slate-500 text-[10px] font-bold mr-1 shrink-0 uppercase">Quick CLI:</span>
                     {[
-                      { label: 'Resources', cmd: '/system resource print' },
-                      { label: 'IP Addresses', cmd: '/ip address print' },
+                      { label: '🍎 Restore Splash & iOS Fix', cmd: '/tconnect ios-fix' },
                       { label: 'Interfaces', cmd: '/interface print' },
-                      { label: 'Active Hotspot', cmd: '/ip hotspot active print' },
+                      { label: 'Resources', cmd: '/system resource print' },
+                      { label: 'IP Addresses', cmd: '/ip address print without-paging' },
+                      { label: 'Active Hotspot', cmd: '/ip hotspot active print without-paging' },
                       { label: 'Ping Canary', cmd: '/ping 1.1.1.1 count=4' },
                       { label: 'Reboot', cmd: '/system reboot' }
                     ].map((p) => (
