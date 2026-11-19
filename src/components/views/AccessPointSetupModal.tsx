@@ -639,7 +639,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => copyToClipboard(
-                          `:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}\n:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}\n:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}\n:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}\n:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={ :do { :if ([:len [/interface bridge port find interface=$p]] > 0) do={ /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no } else={ /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no } } on-error={} }\n:do { /ip hotspot set [find interface="${bridgeName}"] addresses-per-mac=unlimited disabled=no } on-error={}`,
+                          `:if ([:len [/interface bridge find name="${bridgeName}"]] = 0) do={ /interface bridge add name="${bridgeName}" arp=enabled protocol-mode=rstp disabled=no } else={ /interface bridge set [find name="${bridgeName}"] arp=enabled protocol-mode=rstp disabled=no }\n:do { /interface bridge port remove [find interface="ether1"] } on-error={}\n:do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}\n:do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}\n:do { /ip address remove [find interface~"ether2|ether3|ether4|ether5|ether6|ether7|ether8"] } on-error={}\n:do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5|ether6|ether7|ether8|sfp"] disabled=no arp=enabled } on-error={}\n:do { /interface bridge port set [find interface!="ether1" and dynamic=no] bridge="${bridgeName}" horizon=none disabled=no } on-error={ :do { /interface bridge port set [find interface!="ether1"] bridge="${bridgeName}" disabled=no } on-error={} }\n:do { :if ([:len [/interface find name="ether2"]] > 0 and [:len [/interface bridge port find interface="ether2"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="ether2" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="ether3"]] > 0 and [:len [/interface bridge port find interface="ether3"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="ether3" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="ether4"]] > 0 and [:len [/interface bridge port find interface="ether4"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="ether4" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="ether5"]] > 0 and [:len [/interface bridge port find interface="ether5"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="ether5" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="wifi1"]] > 0 and [:len [/interface bridge port find interface="wifi1"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="wifi1" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="wifi2"]] > 0 and [:len [/interface bridge port find interface="wifi2"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="wifi2" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="wlan1"]] > 0 and [:len [/interface bridge port find interface="wlan1"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="wlan1" horizon=none disabled=no } } on-error={}\n:do { :if ([:len [/interface find name="wlan2"]] > 0 and [:len [/interface bridge port find interface="wlan2"]] = 0) do={ /interface bridge port add bridge="${bridgeName}" interface="wlan2" horizon=none disabled=no } } on-error={}\n:do { /ip hotspot set [find interface="${bridgeName}"] addresses-per-mac=unlimited disabled=no } on-error={}`,
                           'port-direct'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-amber-300 hover:text-white px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 transition-colors cursor-pointer"
@@ -650,22 +650,13 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed bg-black/40">
-{`# Ensure ether2-ether5 are pure Layer-2 Hotspot Bridge Ports (No WAN/DHCP-Client conflicts):
+{`# Ensure ether2+ & Wi-Fi radios are pure Layer-2 Hotspot Bridge Ports in ${bridgeName}:
+:do { /interface bridge port remove [find interface="ether1"] } on-error={}
 :do { /ip dhcp-client remove [find interface!="ether1"] } on-error={}
 :do { /interface list member remove [find list=WAN interface!="ether1"] } on-error={}
 :do { /ip address remove [find interface~"ether2|ether3|ether4|ether5"] } on-error={}
 :do { /interface ethernet set [find default-name~"ether2|ether3|ether4|ether5"] disabled=no arp=enabled } on-error={}
-
-# Bind ether2, ether3, ether4, ether5, wifi1, wifi2 to ${bridgeName}:
-:foreach p in={"ether2";"ether3";"ether4";"ether5";"wifi1";"wifi2"} do={
-  :do {
-    :if ([:len [/interface bridge port find interface=$p]] > 0) do={
-      /interface bridge port set [find interface=$p] bridge="${bridgeName}" horizon=none disabled=no
-    } else={
-      /interface bridge port add bridge="${bridgeName}" interface=$p horizon=none disabled=no
-    }
-  } on-error={}
-}
+:do { /interface bridge port set [find interface!="ether1" and dynamic=no] bridge="${bridgeName}" horizon=none disabled=no } on-error={}
 
 # Allow unlimited wireless client MACs per AP port on the Hotspot server:
 :do { /ip hotspot set [find interface="${bridgeName}"] addresses-per-mac=unlimited disabled=no } on-error={}`}
@@ -681,13 +672,13 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     <div className="flex items-center space-x-2">
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
                       <span className="text-xs font-mono font-medium text-slate-200">
-                        2. Setup Open WiFi SSID &quot;T-Connect Hotspot&quot; (RouterOS 7.16.2 wifi-qcom)
+                        2. Setup Open WiFi SSID &quot;T-Connect Hotspot&quot; (2.4GHz &amp; 5GHz across wifi / wifiwave2 / wireless)
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => copyToClipboard(
-                          `/interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no`,
+                          `:do { /interface wifi security set [find] authentication-types="" passphrase="" } on-error={}\n:do { /interface wifi datapath set [find] bridge="${bridgeName}" disabled=no } on-error={}\n:do { /interface wifi configuration set [find] ssid="T-Connect Hotspot" mode=ap disabled=no } on-error={}\n:do { /interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no } on-error={}\n:do { /interface wifi set [find] configuration.manager=local } on-error={}\n:do { /interface wifi set [find] configuration.hide-ssid=no } on-error={}\n:do { /interface wifi set [find] datapath.bridge="${bridgeName}" } on-error={}\n:do { /interface wifi set [find] security.authentication-types="" } on-error={}\n:do { /interface wifi unset [find] security.passphrase } on-error={}\n:do { /interface wifi unset [find] security } on-error={}\n:do { /interface wifi enable [find] } on-error={}\n:do { /interface wifiwave2 security set [find] authentication-types="" passphrase="" } on-error={}\n:do { /interface wifiwave2 set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" security.authentication-types="" disabled=no } on-error={}\n:do { /interface wifiwave2 enable [find] } on-error={}\n:do { /interface wireless security-profiles set [find] mode=none authentication-types="" } on-error={}\n:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default hide-ssid=no disabled=no } on-error={}\n:do { /interface wireless enable [find] } on-error={}`,
                           'wifi-direct'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-emerald-300 hover:text-white px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 transition-colors cursor-pointer"
@@ -697,7 +688,7 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                       </button>
                       <button
                         onClick={() => copyToClipboard(
-                          `:do { :if ([:len [/interface wifi find]] > 0) do={ :foreach w in=[/interface wifi find] do={ /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no } } else={ :if ([:len [/interface wireless find]] > 0) do={ :foreach wl in=[/interface wireless find] do={ /interface wireless set $wl ssid="T-Connect Hotspot" mode=ap-bridge disabled=no } } } } on-error={};`,
+                          `:do { /interface wifi security set [find] authentication-types="" passphrase="" } on-error={}\n:do { /interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" security.authentication-types="" disabled=no } on-error={}\n:do { /interface wifi enable [find] } on-error={}\n:do { /interface wifiwave2 set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" security.authentication-types="" disabled=no } on-error={}\n:do { /interface wifiwave2 enable [find] } on-error={}\n:do { /interface wireless security-profiles set [find] mode=none authentication-types="" } on-error={}\n:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default disabled=no } on-error={}\n:do { /interface wireless enable [find] } on-error={}`,
                           'wifi-setup-script'
                         )}
                         className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-800 transition-colors cursor-pointer"
@@ -708,13 +699,17 @@ export const AccessPointSetupModal: React.FC<AccessPointSetupModalProps> = ({
                     </div>
                   </div>
                   <pre className="p-4 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed bg-black/40">
-{`# RouterOS 7.16.2 (wifi-qcom - wifi1 & wifi2):
-/interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no
-
-# Multi-radio auto-configuration script:
-:foreach w in=[/interface wifi find] do={
-  /interface wifi set $w configuration.ssid="T-Connect Hotspot" configuration.mode=ap disabled=no
-};`}
+{`# RouterOS v7.13+ (/interface wifi), v7.1-7.12 (/interface wifiwave2) & v6/v7 (/interface wireless):
+:do { /interface wifi security set [find] authentication-types="" passphrase="" } on-error={}
+:do { /interface wifi set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" security.authentication-types="" disabled=no } on-error={}
+:do { /interface wifi unset [find] security.passphrase } on-error={}
+:do { /interface wifi unset [find] security } on-error={}
+:do { /interface wifi enable [find] } on-error={}
+:do { /interface wifiwave2 set [find] configuration.ssid="T-Connect Hotspot" configuration.mode=ap datapath.bridge="${bridgeName}" security.authentication-types="" disabled=no } on-error={}
+:do { /interface wifiwave2 enable [find] } on-error={}
+:do { /interface wireless security-profiles set [find] mode=none authentication-types="" } on-error={}
+:do { /interface wireless set [find] mode=ap-bridge ssid="T-Connect Hotspot" security-profile=default disabled=no } on-error={}
+:do { /interface wireless enable [find] } on-error={}`}
                   </pre>
                 </div>
 

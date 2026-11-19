@@ -6793,6 +6793,9 @@ const handleAdoptRsc = (req: Request, res: Response) => {
   const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
   const portalAllowFree = scopedCfg.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : false;
   const effectiveAccessMode = existing?.accessMode || (portalAllowFree ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY');
+  const effectiveSpeedCapsEnabled = (existing as any)?.speedCapsEnabled !== undefined
+    ? Boolean((existing as any).speedCapsEnabled)
+    : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : true);
   const effectiveRateLimit =
     existing?.freeRateLimit ||
     scopedCfg.globalRateLimit ||
@@ -6816,6 +6819,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       existing.freeModeEnabled = effectiveAccessMode !== 'PAID_ONLY';
       existing.freeRateLimit = effectiveRateLimit;
       (existing as any).globalRateLimit = effectiveRateLimit;
+      (existing as any).speedCapsEnabled = effectiveSpeedCapsEnabled;
       existing.lastHeartbeat = 'Just now';
       existing.lastHeartbeatTimestamp = now;
       existing.lastRealHeartbeatAt = now;
@@ -6850,6 +6854,7 @@ const handleAdoptRsc = (req: Request, res: Response) => {
       freeDurationMinutes: existing?.freeDurationMinutes || 30,
       freeRateLimit: effectiveRateLimit,
       globalRateLimit: effectiveRateLimit,
+      speedCapsEnabled: effectiveSpeedCapsEnabled,
       uptime: '1m',
       cpuLoad: 2,
       memoryUsage: 20,
@@ -6868,7 +6873,9 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     radiusSecret: process.env.RADIUS_SECRET || 'radsec_tconnect_lesotho_99120',
     apiPassword: process.env.ROUTER_API_PASSWORD || 'tc_pass_crypto_random_32char',
     walledGardenDomains: WALLED_GARDEN_DOMAINS,
-    blockDoH: true
+    blockDoH: true,
+    speedCapsEnabled: effectiveSpeedCapsEnabled,
+    rateLimit: effectiveRateLimit
   });
 
   // Return as raw RouterOS script with plain text MIME type
@@ -7269,12 +7276,16 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
     router.freeRateLimit = effectiveRateLimit;
   }
 
-  // Queue the full 8-point provisioning bundle (5-port bridgeLocal, DNS 53 intercept, Walled Garden, FastTrack removal, Simple Queue speed cap, login.html)
+  const effectiveSpeedCapsEnabled = (router as any)?.speedCapsEnabled !== undefined
+    ? Boolean((router as any).speedCapsEnabled)
+    : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : true);
+  // Queue the full 8-point provisioning bundle (5-port bridgeLocal, DNS 53 intercept, Walled Garden, two-state QoS/FastTrack, login.html)
   const splashProvisioningCmd = RouterOSRenderer.buildSplashPageFileCommands(
     portalBaseUrl,
     allowFree,
     routerScope,
-    effectiveRateLimit
+    effectiveRateLimit,
+    effectiveSpeedCapsEnabled
   );
   if (!Array.isArray(router.pendingCommands)) {
     router.pendingCommands = [];
@@ -8421,12 +8432,10 @@ function executeRouterOSCliCommand(
   const allowFree = router?.accessMode
     ? router.accessMode !== 'PAID_ONLY'
     : (scopedCfg.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : true);
-  // In Free Mode, enforce Uncapped Full Starlink Speed + FastTrack + PCQ Fair Queuing
-  const speedCapsEnabled = allowFree
-    ? false
-    : ((router as any)?.speedCapsEnabled !== undefined
-        ? Boolean((router as any).speedCapsEnabled)
-        : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : true));
+  // Respect speedCapsEnabled in BOTH Free Mode and Paid Mode
+  const speedCapsEnabled = (router as any)?.speedCapsEnabled !== undefined
+    ? Boolean((router as any).speedCapsEnabled)
+    : (scopedCfg.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : true);
   const activeRateLimit =
     router?.freeRateLimit ||
     (router as any)?.globalRateLimit ||
