@@ -1050,13 +1050,35 @@ class StorageService {
         // Also record in captiveLeads if guest contact info was provided
         if (newSession.guestName || newSession.guestPhone || newSession.guestEmail) {
           const leadId = `lead_${ev.id}`;
-          if (!this.state.captiveLeads.some((l) => l.id === leadId)) {
+          const existingLead = this.state.captiveLeads.find(
+            (l) => l.id === leadId || l.id === `lead_srv_${ev.id}`
+          );
+          if (!existingLead) {
             const guestNameStr = newSession.guestName || 'Guest User';
             const guestPhoneStr = newSession.guestPhone || '';
             const guestEmailStr = newSession.guestEmail || '';
             const parts = guestNameStr.trim().split(' ');
             const fName = ev.firstName || parts[0] || 'Guest';
             const lName = ev.lastName || parts.slice(1).join(' ') || '';
+            const rawMethod = String(ev.paymentMethod || ev.mode || '').toLowerCase();
+            const isPaidEv = ev.accessType === 'paid' || (!isFreeMode && (Number(ev.amount) > 0 || rawMethod === 'mpesa' || rawMethod === 'ecocash' || rawMethod === 'ottvoucher' || rawMethod === 'paylesotho'));
+            const resolvedPaymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi' =
+              rawMethod === 'mpesa'
+                ? 'mpesa'
+                : rawMethod === 'ecocash'
+                ? 'ecocash'
+                : isPaidEv
+                ? 'ottvoucher'
+                : 'free_wifi';
+            const resolvedPaymentLabel =
+              ev.paymentMethodLabel ||
+              (resolvedPaymentMethod === 'mpesa'
+                ? 'M-Pesa (OTT Voucher)'
+                : resolvedPaymentMethod === 'ecocash'
+                ? 'EcoCash (OTT Voucher)'
+                : resolvedPaymentMethod === 'ottvoucher'
+                ? 'Direct 16-Digit OTT Voucher'
+                : 'Free Mode Wi-Fi');
             this.state.captiveLeads.unshift({
               id: leadId,
               firstName: fName,
@@ -1069,12 +1091,34 @@ class StorageService {
               capturedAt: newSession.startedAt,
               routerName: newSession.routerName,
               siteName: newSession.siteName,
+              district: ev.district || 'Maseru',
+              venuePurchasedAt: ev.venuePurchasedAt || `${newSession.siteName} (${newSession.routerName})`,
               vertical: newSession.vertical,
+              scope: newSession.vertical,
               clientMac: newSession.clientMac,
+              mac: newSession.clientMac,
               clientIp: newSession.clientIp,
+              ip: newSession.clientIp,
               deviceType: newSession.deviceType,
               durationMinutes: isFreeMode ? 0 : Math.round(sessionDurationSec / 60),
-              status: 'active'
+              status: 'active',
+              mode:
+                resolvedPaymentMethod === 'mpesa'
+                  ? 'mpesa'
+                  : resolvedPaymentMethod === 'ecocash'
+                  ? 'ecocash'
+                  : resolvedPaymentMethod === 'ottvoucher'
+                  ? 'ottvoucher'
+                  : 'free',
+              accessType: isPaidEv ? 'paid' : 'free',
+              paymentMethod: resolvedPaymentMethod,
+              paymentMethodLabel: resolvedPaymentLabel,
+              planName: ev.planName || (isPaidEv ? 'OTT Voucher Pass' : 'Free Mode Wi-Fi'),
+              amount: Number(ev.amount) || 0,
+              currency: 'M',
+              voucherCode: ev.voucherCode || undefined,
+              ottVoucherPin: ev.ottVoucherPin || ev.voucherCode || undefined,
+              transactionRef: ev.transactionRef || undefined
             });
           }
         }

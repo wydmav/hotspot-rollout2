@@ -1028,8 +1028,13 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
 <main class="main-wrap">
   ${allowFreeAccess ? `
-  <!-- FREE ACCESS MODE: Customizable "Login for free" Button Over Wallpaper -->
-  <div class="free-only-wrap">
+  <!-- FREE ACCESS MODE STEP 2: Customizable "Login for free" Button Over Full Wallpaper (Shown after Step 1 Lead Capture) -->
+  <div id="step2_free_login" class="free-only-wrap" style="display:none;">
+    <div style="margin-bottom:10px;display:flex;justify-content:center;">
+      <button type="button" onclick="backToStep1()" style="padding:6px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.35);background:rgba(15,23,42,0.75);backdrop-filter:blur(6px);color:#ffffff;font-size:11px;font-weight:800;cursor:pointer;">
+        &larr; Edit your details
+      </button>
+    </div>
     <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
       <input type="hidden" name="username" value="T-TRIAL">
       <input type="hidden" name="password" value="123">
@@ -1037,14 +1042,16 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       <button type="submit" id="freeSubmitBtn" class="btn-free-login">${freeButtonText}</button>
     </form>
   </div>
-  ` : `
-  <div class="light-card">
+  ` : ''}
+
+  <div class="light-card" id="portalLightCard">
     <div id="errBox" class="err-box"></div>
 
-    <!-- STEP 1: ENTER YOUR DETAILS (Compact bottom card so background wallpaper is maximally visible) -->
+    <!-- STEP 1: ENTER YOUR DETAILS (Used in BOTH Free Mode and Paid Mode) -->
     <div id="step1_details" class="sec active">
       <div class="step-title-row" style="margin-bottom:8px;">
         <h2 class="step-title" style="font-size:17px;">Enter your details</h2>
+        <span style="font-size:10px;font-weight:700;color:#64748b;">Step 1 of 2</span>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
@@ -1076,7 +1083,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       </button>
     </div>
 
-    <!-- STEP 2: CHOOSE A PACKAGE & PAY WITH M-PESA / ECOCASH / 16-DIGIT OTT VOUCHER -->
+    ${!allowFreeAccess ? `
+    <!-- STEP 2 (PAID MODE): CHOOSE A PACKAGE & PAY WITH M-PESA / ECOCASH / 16-DIGIT OTT VOUCHER -->
     <div id="step2_package" class="sec">
       <div class="step-title-row" style="margin-bottom:8px;">
         <h2 class="step-title" style="font-size:17px;">Choose a package</h2>
@@ -1180,6 +1188,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         </button>
       </form>
     </div>
+    ` : ''}
 
     ${termsEnabled ? `
     <div class="tc-row">
@@ -1190,10 +1199,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     </div>
     ` : ''}
   </div>
-  `}
 </main>
 
 <script>
+  var isFreeAccessMode = ${allowFreeAccess ? 'true' : 'false'};
   var selectedPlanId = '${firstPlan.id}';
   var selectedPlanPrice = ${firstPlan.price || 10};
   var selectedPlanName = '${firstPlanNameClean}';
@@ -1308,6 +1317,32 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       })
       .catch(function(){});
 
+    if (isFreeAccessMode) {
+      // In Free Mode: Capture lead immediately on Continue, then transition to Step 2 ("Login for free" over full wallpaper)
+      try {
+        fetch('${baseUrl}/api/portal/guest-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(getGuestPayload({
+            mode: 'free',
+            accessType: 'free',
+            paymentMethod: 'free_wifi',
+            paymentMethodLabel: 'Free Mode Wi-Fi',
+            amount: 0,
+            currency: 'M',
+            planName: 'Free Wi-Fi Access',
+            durationSeconds: ${freeAccessDurationSeconds}
+          }))
+        }).catch(function(){});
+      } catch (err) {}
+
+      var lc = document.getElementById('portalLightCard');
+      var f2 = document.getElementById('step2_free_login');
+      if (lc) lc.style.display = 'none';
+      if (f2) f2.style.display = 'block';
+      return;
+    }
+
     var s1 = document.getElementById('step1_details');
     var s2 = document.getElementById('step2_package');
     if (s1) s1.className = 'sec';
@@ -1327,6 +1362,13 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
   function backToStep1() {
     showErr('');
+    if (isFreeAccessMode) {
+      var lc = document.getElementById('portalLightCard');
+      var f2 = document.getElementById('step2_free_login');
+      if (f2) f2.style.display = 'none';
+      if (lc) lc.style.display = 'block';
+      return;
+    }
     var s1 = document.getElementById('step1_details');
     var s2 = document.getElementById('step2_package');
     if (s2) s2.className = 'sec';
@@ -1455,7 +1497,16 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       fetch('${baseUrl}/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getGuestPayload({ mode: 'free', planName: 'Free Wi-Fi Access', durationSeconds: ${freeAccessDurationSeconds} }))
+        body: JSON.stringify(getGuestPayload({
+          mode: 'free',
+          accessType: 'free',
+          paymentMethod: 'free_wifi',
+          paymentMethodLabel: 'Free Mode Wi-Fi',
+          amount: 0,
+          currency: 'M',
+          planName: 'Free Wi-Fi Access',
+          durationSeconds: ${freeAccessDurationSeconds}
+        }))
       }).catch(function(){});
     } catch (err) {}
     return true;
@@ -1549,7 +1600,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         planName: selectedPlanName,
         durationSeconds: selectedPlanDurationSec,
         flexibleAmount: true,
-        mode: 'ottvoucher'
+        mode: selectedGw === 'ecocash' ? 'ecocash' : 'mpesa',
+        paymentChannel: selectedGw === 'ecocash' ? 'ecocash' : 'mpesa'
       }))
     }).then(function(r) { return r.json(); }).then(function(data) {
       if (!data || !data.success) {
@@ -4986,6 +5038,34 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     const resolvedMac = String(mac || clientMac || '').trim();
     const resolvedIp = String(ip || clientIp || '').trim();
 
+    // Determine whether this 16-digit OTT Voucher was purchased via M-Pesa (62915), EcoCash (63165430), or redeemed directly
+    const matchedIssuedOtt = (serverStore.issuedPayLesothoOttVouchers || []).find(
+      (v: any) => String(v.pin || '').replace(/\D/g, '') === digitsOnly
+    );
+    const matchedPayLesothoTx = (serverStore.transactions || []).find(
+      (t: any) => String(t.ottVoucherPin || '').replace(/\D/g, '') === digitsOnly
+    );
+    const rawInChannel = String(req.body?.paymentChannel || req.body?.channel || req.body?.mode || '').toLowerCase();
+    const cleanPhoneForGuess = String(phone || guestPhone || '').replace(/\D/g, '').slice(-8);
+
+    let resolvedPaymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' = 'ottvoucher';
+    if (rawInChannel === 'mpesa' || matchedPayLesothoTx?.channel === 'mpesa' || (matchedIssuedOtt as any)?.channel === 'mpesa') {
+      resolvedPaymentMethod = 'mpesa';
+    } else if (rawInChannel === 'ecocash' || matchedPayLesothoTx?.channel === 'ecocash' || (matchedIssuedOtt as any)?.channel === 'ecocash') {
+      resolvedPaymentMethod = 'ecocash';
+    } else if (isPayLesothoIssuedVoucher) {
+      resolvedPaymentMethod = cleanPhoneForGuess.startsWith('6') ? 'ecocash' : 'mpesa';
+    }
+
+    const resolvedPaymentMethodLabel =
+      resolvedPaymentMethod === 'mpesa'
+        ? 'M-Pesa (OTT Voucher)'
+        : resolvedPaymentMethod === 'ecocash'
+        ? 'EcoCash (OTT Voucher)'
+        : 'Direct 16-Digit OTT Voucher';
+
+    const finalPrice = Number(matchedIssuedOtt?.amount || matchedPayLesothoTx?.amount || resolvedPrice || 10);
+
     const expiresIso = new Date(Date.now() + resolvedDuration * 1000).toISOString();
     const entry: any = {
       id: `guest_ott_vch_${Date.now()}`,
@@ -5002,9 +5082,13 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       routerId: routerCtx.routerId,
       routerName: routerCtx.routerName,
       siteName: routerCtx.siteName,
+      venuePurchasedAt: routerCtx.siteName,
       district: routerCtx.district,
       adoptedRouterVerified: true,
-      mode: 'ottvoucher',
+      mode: resolvedPaymentMethod,
+      accessType: 'paid',
+      paymentMethod: resolvedPaymentMethod,
+      paymentMethodLabel: resolvedPaymentMethodLabel,
       voucherCode: formattedPin,
       ottVoucherPin: digitsOnly,
       planId: planId || 'hs_1d',
@@ -5013,7 +5097,8 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       startedAt: nowIso,
       expiresAt: expiresIso,
       roamedSites: [routerCtx.siteName],
-      amount: resolvedPrice,
+      amount: finalPrice,
+      currency: 'M',
       transactionRef: txRef,
       capturedAt: nowIso,
       lastSeenAt: nowIso
@@ -5024,7 +5109,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     const cleanMacForRos = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/.test(resolvedMac) ? resolvedMac.toUpperCase() : '';
     const durationCommands: string[] = [
       `:do { :if ([:len [/ip hotspot user find name="v_${digitsOnly}"]] = 0) do={ /ip hotspot user add name="v_${digitsOnly}" password="123" profile="tc-speed-cap" limit-uptime=${safeDurationSec}s comment="T-Connect Paid Package ${resolvedPlanName} (${safeDurationSec}s)" } else={ /ip hotspot user set [find name="v_${digitsOnly}"] limit-uptime=${safeDurationSec}s disabled=no } } on-error={}`,
-      `:do { :log info "T-Connect Voucher Redeemed: ${formattedPin} | Plan: ${resolvedPlanName} | Duration: ${safeDurationSec}s | MAC: ${cleanMacForRos || 'AUTO'}" } on-error={}`
+      `:do { :log info "T-Connect Voucher Redeemed: ${formattedPin} | Method: ${resolvedPaymentMethodLabel} | Plan: ${resolvedPlanName} (M${finalPrice}) | Duration: ${safeDurationSec}s | MAC: ${cleanMacForRos || 'AUTO'}" } on-error={}`
     ];
     for (const router of monitoredRouters.values()) {
       router.pendingCommands = [...(router.pendingCommands || []), ...durationCommands];
@@ -5033,8 +5118,11 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     const txRecord = {
       id: `tx_ott_vch_${Date.now()}`,
       transactionRef: txRef,
-      provider: 'ottvoucher',
-      amount: resolvedPrice,
+      provider: resolvedPaymentMethod === 'ottvoucher' ? 'ottvoucher' : 'paylesotho',
+      channel: resolvedPaymentMethod,
+      paymentMethod: resolvedPaymentMethod,
+      paymentMethodLabel: resolvedPaymentMethodLabel,
+      amount: finalPrice,
       currency: 'M',
       phoneNumber: entry.guestPhone,
       customerName: entry.guestName,
@@ -5045,6 +5133,8 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       planName: resolvedPlanName,
       durationSeconds: safeDurationSec,
       vertical: routerCtx.scope,
+      routerId: routerCtx.routerId,
+      routerName: routerCtx.routerName,
       siteName: routerCtx.siteName,
       district: routerCtx.district,
       status: 'completed',
@@ -5058,11 +5148,14 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
         rawPayload: {
           voucher_pin: digitsOnly,
           formatted_pin: formattedPin,
-          expected_amount: resolvedPrice,
+          payment_method: resolvedPaymentMethod,
+          payment_method_label: resolvedPaymentMethodLabel,
+          expected_amount: finalPrice,
           duration_seconds: safeDurationSec,
           currency: 'M',
           subscriber_phone: entry.guestPhone,
           subscriber_name: entry.guestName,
+          router_name: routerCtx.routerName,
           site_name: routerCtx.siteName,
           district: routerCtx.district
         },
@@ -5071,7 +5164,8 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
           verified: true,
           receipt: txRef,
           ott_voucher_pin: digitsOnly,
-          amount: resolvedPrice,
+          payment_method: resolvedPaymentMethod,
+          amount: finalPrice,
           currency: 'M',
           plan_name: resolvedPlanName,
           duration_seconds: safeDurationSec,
@@ -5082,7 +5176,20 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
     };
 
     serverStore.transactions.unshift(txRecord);
-    serverStore.guestEvents.unshift(entry);
+    // If this guest already submitted Step 1 in Free/Paid mode, update their existing lead record or unshift new paid record
+    const existingLeadIdx = (serverStore.guestEvents || []).findIndex((ev: any) => {
+      const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '').slice(-8);
+      const inPh = String(entry.phone || entry.guestPhone || '').replace(/\D/g, '').slice(-8);
+      return inPh.length === 8 && evPhone === inPh && ev.accessType !== 'paid';
+    });
+    if (existingLeadIdx >= 0) {
+      serverStore.guestEvents[existingLeadIdx] = {
+        ...serverStore.guestEvents[existingLeadIdx],
+        ...entry
+      };
+    } else {
+      serverStore.guestEvents.unshift(entry);
+    }
     saveServerPortalStore(serverStore);
     dispatchPartnerWebhooksForLead(entry).catch(() => {});
     void syncRecordToSupabaseTable(
@@ -5115,7 +5222,7 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
         id: txRecord.id,
         operator_id: DEFAULT_OPERATOR_ID,
         transaction_ref: txRecord.transactionRef,
-        provider: 'ottvoucher',
+        provider: txRecord.provider,
         msisdn: txRecord.phoneNumber || '+266',
         plan_name: txRecord.planName,
         site_name: txRecord.siteName,
@@ -5133,10 +5240,15 @@ app.post('/api/vouchers/redeem', async (req: Request, res: Response) => {
       code: digitsOnly,
       ottVoucherPin: digitsOnly,
       voucherCode: formattedPin,
+      paymentMethod: resolvedPaymentMethod,
+      paymentMethodLabel: resolvedPaymentMethodLabel,
       planName: resolvedPlanName,
       durationSeconds: safeDurationSec,
       expiresAt: expiresIso,
-      price: resolvedPrice,
+      price: finalPrice,
+      routerName: routerCtx.routerName,
+      siteName: routerCtx.siteName,
+      district: routerCtx.district,
       transactionRef: txRef
     });
   }
@@ -5270,44 +5382,78 @@ app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
   });
 });
 
+// Helper to normalize commercial payment & access fields on any guest event
+function resolveCommercialMetaForEvent(ev: any) {
+  const isPaid =
+    ev.accessType === 'paid' ||
+    ev.mode === 'ottvoucher' ||
+    ev.mode === 'paid' ||
+    ev.mode === 'paylesotho' ||
+    ev.mode === 'mpesa' ||
+    ev.mode === 'ecocash' ||
+    (ev.voucherCode && ev.voucherCode !== 'FREE-PASS' && !String(ev.voucherCode).startsWith('FREE-')) ||
+    Number(ev.amount) > 0;
+
+  let paymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi' = 'free_wifi';
+  if (isPaid) {
+    const rawM = String(ev.paymentMethod || ev.channel || ev.mode || '').toLowerCase();
+    const rawPh = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '').slice(-8);
+    if (rawM === 'mpesa') {
+      paymentMethod = 'mpesa';
+    } else if (rawM === 'ecocash') {
+      paymentMethod = 'ecocash';
+    } else if (rawM === 'paylesotho') {
+      paymentMethod = rawPh.startsWith('6') ? 'ecocash' : 'mpesa';
+    } else {
+      // Check if voucher PIN matches an M-Pesa or EcoCash PayLesotho transaction
+      const pinClean = String(ev.ottVoucherPin || ev.voucherCode || '').replace(/\D/g, '');
+      const matchedTx = pinClean.length === 16
+        ? (serverStore.transactions || []).find((t: any) => String(t.ottVoucherPin || '').replace(/\D/g, '') === pinClean)
+        : null;
+      if (matchedTx?.channel === 'mpesa' || matchedTx?.paymentMethod === 'mpesa') {
+        paymentMethod = 'mpesa';
+      } else if (matchedTx?.channel === 'ecocash' || matchedTx?.paymentMethod === 'ecocash') {
+        paymentMethod = 'ecocash';
+      } else {
+        paymentMethod = 'ottvoucher';
+      }
+    }
+  }
+
+  const paymentMethodLabel =
+    paymentMethod === 'mpesa'
+      ? 'M-Pesa (OTT Voucher)'
+      : paymentMethod === 'ecocash'
+      ? 'EcoCash (OTT Voucher)'
+      : paymentMethod === 'ottvoucher'
+      ? 'Direct 16-Digit OTT Voucher'
+      : 'Free Mode Wi-Fi';
+
+  const amount = isPaid ? Math.max(0, Number(ev.amount) || 10) : 0;
+  const planName = ev.planName || (isPaid ? `Paid Pass (M${amount})` : 'Free Wi-Fi Access');
+  const ottVoucherPin = isPaid
+    ? String(ev.ottVoucherPin || ev.voucherCode || '').replace(/\D/g, '')
+    : '';
+
+  return {
+    isPaid,
+    accessType: (isPaid ? 'paid' : 'free') as 'paid' | 'free',
+    mode: isPaid ? String(ev.mode || paymentMethod || 'ottvoucher') : 'free',
+    paymentMethod,
+    paymentMethodLabel,
+    amount,
+    currency: ev.currency || 'M',
+    planName,
+    ottVoucherPin
+  };
+}
+
 // Guest session / lead capture endpoint from Splash Page (with cross-hotspot handover support)
 app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   const body = req.body || {};
   const inMac = String(body.mac || '').trim().toLowerCase();
   const inPhone = String(body.phone || body.guestPhone || '').replace(/\D/g, '');
   const nowIso = new Date().toISOString();
-
-  // Check for existing active session on another hotspot
-  const existingIdx = serverStore.guestEvents.findIndex((ev: any) => {
-    const evMac = String(ev.mac || '').trim().toLowerCase();
-    const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
-    const macMatch = inMac && inMac !== 'unknown-mac' && inMac !== 'auto' && evMac === inMac;
-    const phoneMatch = inPhone.length >= 8 && evPhone.length >= 8 && (evPhone.includes(inPhone) || inPhone.includes(evPhone));
-    return macMatch || phoneMatch;
-  });
-
-  if (existingIdx >= 0) {
-    const existing = serverStore.guestEvents[existingIdx];
-    const startMs = new Date(existing.startedAt || existing.capturedAt).getTime();
-    const durSec = Number(existing.durationSeconds) || 86400;
-    const isUnexpired = Date.now() - startMs < durSec * 1000;
-
-    if (isUnexpired) {
-      // Roaming Handover: update site name & lastSeen while preserving session tenure
-      const prevSite = existing.siteName;
-      existing.siteName = body.siteName || existing.siteName;
-      existing.routerName = body.routerName || existing.routerName;
-      existing.roamedSites = Array.from(new Set([...(existing.roamedSites || [prevSite]), body.siteName].filter(Boolean)));
-      existing.lastSeenAt = nowIso;
-      saveServerPortalStore(serverStore);
-      return res.json({
-        success: true,
-        isRoaming: true,
-        entry: existing,
-        message: `Handover complete: Roaming session aligned to ${existing.siteName}.`
-      });
-    }
-  }
 
   const routerCtx = resolveAdoptedRouterForLead(body);
   const allPortalCfgs = loadSavedPortalConfigs();
@@ -5319,9 +5465,60 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
       : Number(body.durationSeconds) || 86400;
   const expiresIso = new Date(Date.now() + resolvedDurationSec * 1000).toISOString();
 
+  // Check for existing active session on another hotspot (or Step 1 -> Step 2 Free Mode confirmation)
+  const existingIdx = serverStore.guestEvents.findIndex((ev: any) => {
+    const evMac = String(ev.mac || '').trim().toLowerCase();
+    const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
+    const macMatch = inMac && inMac !== 'unknown-mac' && inMac !== 'auto' && !inMac.includes('$(') && evMac === inMac;
+    const phoneMatch = inPhone.length >= 8 && evPhone.length >= 8 && (evPhone.includes(inPhone) || inPhone.includes(evPhone));
+    return macMatch || phoneMatch;
+  });
+
+  if (existingIdx >= 0) {
+    const existing = serverStore.guestEvents[existingIdx];
+    const startMs = new Date(existing.startedAt || existing.capturedAt).getTime();
+    const durSec = Number(existing.durationSeconds) || 86400;
+    const isUnexpired = Date.now() - startMs < durSec * 1000;
+
+    if (isUnexpired) {
+      // Update contact info & roaming handover while preserving paid attribution if already paid
+      const prevSite = existing.siteName;
+      if (body.firstName) existing.firstName = body.firstName;
+      if (body.lastName) existing.lastName = body.lastName;
+      if (body.guestName) existing.guestName = body.guestName;
+      if (body.email) existing.email = body.email;
+      if (body.phone) existing.phone = body.phone;
+      if (body.guestPhone) existing.guestPhone = body.guestPhone;
+      existing.siteName = body.siteName || routerCtx.siteName || existing.siteName;
+      existing.routerName = body.routerName || routerCtx.routerName || existing.routerName;
+      existing.routerId = body.routerId || routerCtx.routerId || existing.routerId;
+      existing.district = body.district || routerCtx.district || existing.district;
+      existing.roamedSites = Array.from(new Set([...(existing.roamedSites || [prevSite]), existing.siteName].filter(Boolean)));
+      existing.lastSeenAt = nowIso;
+      if (body.amount && Number(body.amount) > 0) {
+        existing.amount = Number(body.amount);
+        existing.mode = body.mode || existing.mode;
+        existing.paymentMethod = body.paymentMethod || existing.paymentMethod;
+        existing.voucherCode = body.voucherCode || existing.voucherCode;
+      }
+      const comm = resolveCommercialMetaForEvent(existing);
+      Object.assign(existing, comm);
+      saveServerPortalStore(serverStore);
+      return res.json({
+        success: true,
+        isRoaming: true,
+        entry: existing,
+        message: `Handover complete: Roaming session aligned to ${existing.siteName}.`
+      });
+    }
+  }
+
+  const commMeta = resolveCommercialMetaForEvent(body);
+
   const entry = {
     id: body.id || `guest_${Date.now()}`,
     ...body,
+    ...commMeta,
     durationSeconds: resolvedDurationSec,
     startedAt: nowIso,
     expiresAt: expiresIso,
@@ -5329,6 +5526,8 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
     routerId: routerCtx.routerId,
     routerName: routerCtx.routerName,
     siteName: routerCtx.siteName,
+    venuePurchasedAt: body.venuePurchasedAt || routerCtx.siteName,
+    district: routerCtx.district,
     adoptedRouterVerified: true,
     roamedSites: [routerCtx.siteName],
     capturedAt: nowIso,
@@ -5368,14 +5567,7 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
 app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
   const nowMs = Date.now();
   const enrichedEvents = (serverStore.guestEvents || []).map((ev: any) => {
-    const isPaid =
-      ev.mode === 'ottvoucher' ||
-      ev.mode === 'paid' ||
-      ev.mode === 'paylesotho' ||
-      ev.mode === 'mpesa' ||
-      ev.mode === 'ecocash' ||
-      (ev.voucherCode && ev.voucherCode !== 'FREE-PASS') ||
-      Number(ev.amount) > 0;
+    const comm = resolveCommercialMetaForEvent(ev);
     const durationSec = Number(ev.durationSeconds) || 86400;
     const startMs = new Date(ev.startedAt || ev.capturedAt || nowMs).getTime();
     const expiresMs = ev.expiresAt
@@ -5401,11 +5593,11 @@ app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
       (Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites[0] : '') ||
       ev.siteName ||
       ev.routerName ||
-      'Maseru Golf Course Clubhouse';
+      'T-Connect Hotspot';
 
     return {
       ...ev,
-      accessType: isPaid ? 'paid' : 'free',
+      ...comm,
       durationSeconds: durationSec,
       expiresAt: new Date(expiresMs).toISOString(),
       remainingSeconds: remainingSec,
@@ -5721,6 +5913,7 @@ function resolveDistrictForRouter(routerName = '', siteName = ''): string {
 
 function sanitizeLeadForPartner(ev: any, _defaultCampaign = 'Sponsored Wi-Fi') {
   const routerCtx = resolveAdoptedRouterForLead(ev);
+  const commercial = resolveCommercialMetaForEvent(ev);
   const firstName = String(ev.firstName || '').trim() || String(ev.guestName || 'Guest').split(' ')[0] || 'Guest';
   const lastName =
     String(ev.lastName || '').trim() ||
@@ -5732,19 +5925,40 @@ function sanitizeLeadForPartner(ev: any, _defaultCampaign = 'Sponsored Wi-Fi') {
   const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
   const hotspotPolicyScope = rawScope === 'village' ? 'community' : rawScope;
   const siteName = String(ev.siteName || routerCtx.siteName || 'T-Connect Hotspot');
+  const routerName = String(ev.routerName || routerCtx.routerName || 'Starlink Central AP-1');
+  const district = String(ev.district || routerCtx.district || resolveDistrictForRouter(routerName, siteName));
   const optInDateTime = String(ev.optInDateTime || ev.capturedAt || new Date().toISOString());
   const roamedSites = Array.isArray(ev.roamedSites) && ev.roamedSites.length > 0 ? ev.roamedSites : [siteName];
+  const rawPhone = String(ev.guestPhone || ev.phone || '').trim();
+  const formattedPhone = rawPhone
+    ? rawPhone.startsWith('+')
+      ? rawPhone
+      : `+266 ${rawPhone.replace(/^266/, '').trim()}`
+    : '';
+  const email = String(ev.email || '').trim();
 
-  // Partner API Privacy Rule: External clients can ONLY see Name, Surname, and the Place Connected To
-  // (No phone number, no email, no MAC, no IP, no voucher codes)
+  // Partner & Finance API Rule: Include full lead & commercial attribution while strictly omitting
+  // internal hardware identifiers (mac, ip, voucherCode, transactionRef)
   return {
     leadId: String(ev.id || `lead_${Date.now()}`),
     name: firstName,
     surname: lastName,
     firstName,
     lastName,
+    phone: formattedPhone,
+    email,
+    accessType: commercial.accessType,
+    accessMode: commercial.accessType === 'paid' ? 'PAID' : 'FREE',
+    mode: commercial.mode,
+    paymentMethod: commercial.paymentMethod,
+    paymentMethodLabel: commercial.paymentMethodLabel,
+    planName: commercial.planName,
+    amount: commercial.amount,
+    currency: commercial.currency,
     placeConnected: siteName,
     siteName,
+    routerName,
+    district,
     roamedSites,
     hotspotPolicyScope,
     connectedAt: optInDateTime,
@@ -5753,9 +5967,8 @@ function sanitizeLeadForPartner(ev: any, _defaultCampaign = 'Sponsored Wi-Fi') {
 }
 
 function isLeadAllowedForPartner(ev: any, partner: PartnerApiKeyRecord): boolean {
-  // Gate 0: Clean-Slate Baseline Timestamp Verification
-  // Ensures newly issued or reset sponsor API keys only receive leads captured at or after key issuance / reset
-  const baselineIso = partner.leadsResetAt || partner.createdAt;
+  // Gate 0: Clean-Slate Baseline Timestamp Verification (only when leadsResetAt was explicitly triggered)
+  const baselineIso = partner.leadsResetAt;
   if (baselineIso) {
     const baselineMs = new Date(baselineIso).getTime();
     const leadMs = ev.capturedAt ? new Date(ev.capturedAt).getTime() : 0;
@@ -5767,7 +5980,7 @@ function isLeadAllowedForPartner(ev: any, partner: PartnerApiKeyRecord): boolean
   // Gate 1: Applied Hotspot Policy Check
   const rawScope = String(ev.scope || ev.vertical || 'hotspot').toLowerCase();
   const leadScope = rawScope === 'village' ? 'community' : rawScope;
-  const scopes = (partner.allowedScopes || []).map((s) => (s.toLowerCase() === 'village' ? 'community' : s.toLowerCase()));
+  const scopes = (partner.allowedScopes || ['*']).map((s) => (s.toLowerCase() === 'village' ? 'community' : s.toLowerCase()));
   const scopeAllowed = scopes.includes('*') || scopes.includes(leadScope);
   if (!scopeAllowed) return false;
 
@@ -5993,7 +6206,7 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
       collectName: true,
       collectPhone: true,
       collectEmail: true,
-      mandatoryFields: ['fullName', 'phone', 'email'],
+      mandatoryFields: ['fullName', 'phone'],
       termsEnabled: cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true,
       allowFreeAccess: cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : true,
       sponsorAdEnabled: serverStore.sponsorAd?.enabled !== false,
@@ -6008,23 +6221,25 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
     success: true,
     apiFormat: 'REST/JSON',
     platform: 'T-Connect Control Tower',
-    version: '1.2.0',
+    version: '1.3.0',
     baseUrl: 'https://your-control-tower-domain.com/api/v1/partner/policies',
     contractEnforcement: {
       strictLeadOnlyIsolation: true,
       mandatoryFields: {
         fullName: 'Mandatory string (First & Last Name required)',
         phone: 'Mandatory Lesotho phone number (8 digits starting with 5 or 6)',
-        email: 'Mandatory valid email address'
+        email: 'Optional valid email address'
       },
-      hotspotMetadata: {
-        district: 'Enforced Lesotho district (e.g. Maseru, Berea, Leribe)',
-        hotspotName: 'Actual internal hotspot name designated by internal team',
-        optInDateTime: 'Enforced opt-in timestamp'
+      commercialFields: {
+        accessType: "'free' | 'paid' — differentiates Free Mode Wi-Fi leads from Paid OTT Voucher sessions",
+        paymentMethod: "'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi'",
+        amount: 'Numeric amount paid in Maloti (M0 for Free Mode, M10/M50/M150 for Paid Mode)',
+        siteName: 'Hotspot Location where the user connected or purchased the package',
+        routerName: 'MikroTik / Starlink router identity'
       },
       privacyGuarantees: {
         macAddressInternalTeamOnly: true,
-        description: 'Client MAC address is strictly reserved for the internal team and is excluded from external partner API payloads.'
+        description: 'Client MAC address, IP, and raw voucher PINs are excluded from external partner API payloads.'
       }
     },
     partner: {
@@ -6039,7 +6254,7 @@ app.get('/api/v1/partner/policies', (req: Request, res: Response) => {
   });
 });
 
-// 2. GET /api/v1/partner/leads — Retrieve leads with filtering and pagination (Strict Lead-Only Payload)
+// 2. GET /api/v1/partner/leads — Retrieve leads with filtering, commercial attribution, and pagination
 app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
   const partner = authenticatePartnerRequest(req, res);
   if (!partner) return;
@@ -6060,7 +6275,8 @@ app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
 
   const reqSite = String(req.query.site || '').trim().toLowerCase();
   const reqDistrict = String(req.query.district || '').trim().toLowerCase();
-  const reqCc = String(req.query.country_code || '').trim();
+  const reqMode = String(req.query.mode || req.query.access_type || '').trim().toLowerCase(); // 'free' | 'paid'
+  const reqPaymentMethod = String(req.query.payment_method || '').trim().toLowerCase(); // 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi'
   const reqSearch = String(req.query.search || '').trim().toLowerCase();
   const reqSince = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
   const reqUntil = req.query.until ? new Date(String(req.query.until)).getTime() : 0;
@@ -6073,15 +6289,31 @@ app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
     .map((ev) => sanitizeLeadForPartner(ev, partner.campaignName))
     .filter((lead) => {
       if (reqScope && lead.hotspotPolicyScope !== reqScope) return false;
-      if (reqSite && !lead.placeConnected.toLowerCase().includes(reqSite)) return false;
+      if (reqSite && !lead.placeConnected.toLowerCase().includes(reqSite) && !lead.routerName.toLowerCase().includes(reqSite)) return false;
+      if (reqDistrict && !lead.district.toLowerCase().includes(reqDistrict)) return false;
+      if (reqMode && (reqMode === 'free' || reqMode === 'paid') && lead.accessType !== reqMode) return false;
+      if (reqPaymentMethod && lead.paymentMethod !== reqPaymentMethod) return false;
       if (reqSince && new Date(lead.capturedAt).getTime() < reqSince) return false;
       if (reqUntil && new Date(lead.capturedAt).getTime() > reqUntil) return false;
       if (reqSearch) {
-        const hay = `${lead.name} ${lead.surname} ${lead.placeConnected} ${(lead.roamedSites || []).join(' ')}`.toLowerCase();
+        const hay = `${lead.name} ${lead.surname} ${lead.phone} ${lead.email} ${lead.placeConnected} ${lead.routerName} ${lead.paymentMethodLabel} ${lead.planName} ${(lead.roamedSites || []).join(' ')}`.toLowerCase();
         if (!hay.includes(reqSearch)) return false;
       }
       return true;
     });
+
+  const freeLeadsCount = filtered.filter((l) => l.accessType === 'free').length;
+  const paidLeadsCount = filtered.filter((l) => l.accessType === 'paid').length;
+  const totalRevenueMaloti = filtered.reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
+  const mpesaRevenue = filtered
+    .filter((l) => l.paymentMethod === 'mpesa')
+    .reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
+  const ecocashRevenue = filtered
+    .filter((l) => l.paymentMethod === 'ecocash')
+    .reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
+  const ottDirectRevenue = filtered
+    .filter((l) => l.paymentMethod === 'ottvoucher')
+    .reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
 
   const totalLeads = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalLeads / limit));
@@ -6095,6 +6327,18 @@ app.get('/api/v1/partner/leads', (req: Request, res: Response) => {
       companyName: partner.companyName,
       campaignName: partner.campaignName,
       allowedScopes: partner.allowedScopes
+    },
+    commercialSummary: {
+      totalLeads,
+      freeLeadsCount,
+      paidLeadsCount,
+      currency: 'M',
+      totalRevenueMaloti,
+      revenueByPaymentMethod: {
+        mpesa: mpesaRevenue,
+        ecocash: ecocashRevenue,
+        ottvoucher: ottDirectRevenue
+      }
     },
     pagination: {
       page,
@@ -6122,9 +6366,12 @@ app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
     .trim()
     .toLowerCase();
   const siteName = String(body.siteName || `${partner.companyName} Hotspot Hub`).trim();
-  const hotspotName = String(body.hotspotName || `${siteName} Starlink AP-1`).trim();
+  const hotspotName = String(body.hotspotName || body.routerName || `${siteName} Starlink AP-1`).trim();
   const district = String(body.district || resolveDistrictForRouter(hotspotName, siteName)).trim();
   const sponsorCampaign = String(body.sponsorCampaign || partner.campaignName).trim();
+  const reqMode = String(body.mode || body.paymentMethod || 'free').toLowerCase();
+  const reqAmount = Number(body.amount) || 0;
+  const reqPlanName = String(body.planName || (reqMode === 'free' ? 'Free Mode Wi-Fi' : 'OTT Voucher Pass')).trim();
 
   const scopes = partner.allowedScopes.map((s) => s.toLowerCase());
   if (!scopes.includes('*') && !scopes.includes(scope)) {
@@ -6169,17 +6416,6 @@ app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
     });
   }
 
-  // Strict Contract Verification: Email is MANDATORY
-  if (!email || !email.includes('@') || !email.includes('.')) {
-    return res.status(400).json({
-      success: false,
-      error: {
-        code: 'MANDATORY_EMAIL_REQUIRED',
-        message: 'Email address is mandatory per partner contract agreement and must be a valid email format (e.g. user@domain.ls).'
-      }
-    });
-  }
-
   const nowIso = new Date().toISOString();
   const rawEntry = {
     id: `guest_partner_${Date.now()}`,
@@ -6193,10 +6429,13 @@ app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
     email,
     scope,
     siteName,
+    routerName: hotspotName,
     hotspotName,
     district,
     optInDateTime: nowIso,
-    mode: 'free',
+    mode: reqMode,
+    planName: reqPlanName,
+    amount: reqAmount,
     sponsorCampaign,
     partnerId: partner.id,
     partnerCompany: partner.companyName,
@@ -6218,7 +6457,7 @@ app.post('/api/v1/partner/leads', (req: Request, res: Response) => {
   });
 });
 
-// 4. GET /api/v1/partner/leads/export.csv — RFC 4180 CSV Export of Partner-Scoped Leads
+// 4. GET /api/v1/partner/leads/export.csv — RFC 4180 Commercial & Lead CSV Export
 app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
   const partner = authenticatePartnerRequest(req, res);
   if (!partner) return;
@@ -6238,6 +6477,8 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
   }
 
   const reqSite = String(req.query.site || '').trim().toLowerCase();
+  const reqMode = String(req.query.mode || req.query.access_type || '').trim().toLowerCase();
+  const reqPaymentMethod = String(req.query.payment_method || '').trim().toLowerCase();
   const reqSince = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
   const reqUntil = req.query.until ? new Date(String(req.query.until)).getTime() : 0;
 
@@ -6247,6 +6488,8 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
     .filter((lead) => {
       if (reqScope && lead.hotspotPolicyScope !== reqScope) return false;
       if (reqSite && !lead.siteName.toLowerCase().includes(reqSite)) return false;
+      if (reqMode && (reqMode === 'free' || reqMode === 'paid') && lead.accessType !== reqMode) return false;
+      if (reqPaymentMethod && lead.paymentMethod !== reqPaymentMethod) return false;
       if (reqSince && new Date(lead.capturedAt).getTime() < reqSince) return false;
       if (reqUntil && new Date(lead.capturedAt).getTime() > reqUntil) return false;
       return true;
@@ -6254,18 +6497,36 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
 
   const csvEsc = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
   const headers = [
-    'Name',
+    'Lead ID',
+    'First Name',
     'Surname',
-    'Place Connected',
+    'Mobile Number',
+    'Email',
+    'Access Mode',
+    'Payment Method',
+    'Package Name',
+    'Price Paid (M)',
+    'Hotspot Location',
+    'Router Name',
+    'District',
     'Visited Locations',
     'Connected At'
   ];
 
   const rows = leads.map((l) =>
     [
+      l.leadId,
       l.firstName,
       l.lastName,
+      l.phone || '—',
+      l.email || '—',
+      l.accessMode,
+      l.paymentMethodLabel,
+      l.planName,
+      `M${Number(l.amount || 0).toFixed(2)}`,
       l.siteName,
+      l.routerName,
+      l.district,
       Array.isArray(l.roamedSites) ? l.roamedSites.join(' -> ') : l.siteName,
       l.connectedAt
     ]

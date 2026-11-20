@@ -221,12 +221,34 @@ export interface CaptivePortalLead {
   routerId?: string;
   routerName: string;
   siteName: string;
+  district?: string;
+  venuePurchasedAt?: string;
   vertical: VerticalType;
   clientMac: string;
   clientIp: string;
   deviceType: string;
   durationMinutes: number;
   status: 'active' | 'expired';
+  accessType?: 'free' | 'paid';
+  mode?: string;
+  paymentMethod?: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi';
+  paymentMethodLabel?: string;
+  planName?: string;
+  amount?: number;
+  currency?: string;
+  voucherCode?: string;
+  ottVoucherPin?: string;
+  transactionRef?: string;
+  mac?: string;
+  ip?: string;
+  scope?: string;
+  hotspotName?: string;
+  ssid?: string;
+  roamedSites?: string[];
+  termsAccepted?: boolean;
+  marketingOptIn?: boolean;
+  sponsorCampaign?: string;
+  lastSeenAt?: string;
 }
 
 export type GatewayProvider = 'ottvoucher' | 'ecocash' | 'paylesotho' | string;

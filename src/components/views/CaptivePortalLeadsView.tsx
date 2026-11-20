@@ -74,6 +74,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState<'all' | '+266' | '+27'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'expired'>('all');
+  const [modeFilter, setModeFilter] = useState<'all' | 'free' | 'paid'>('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<
+    'all' | 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi'
+  >('all');
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -108,6 +112,73 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [editEmail, setEditEmail] = useState('');
   const [editSiteName, setEditSiteName] = useState('');
   const [editRouterName, setEditRouterName] = useState('');
+
+  // Normalize commercial attribution for any lead record
+  const resolveLeadCommercial = (lead: CaptivePortalLead) => {
+    const rawMethod = String(lead.paymentMethod || lead.mode || '').toLowerCase();
+    const rawAmount = Number(lead.amount) || 0;
+    const isPaid =
+      lead.accessType === 'paid' ||
+      rawAmount > 0 ||
+      rawMethod === 'mpesa' ||
+      rawMethod === 'ecocash' ||
+      rawMethod === 'ottvoucher' ||
+      rawMethod === 'paylesotho';
+
+    const paymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi' = !isPaid
+      ? 'free_wifi'
+      : rawMethod === 'mpesa'
+      ? 'mpesa'
+      : rawMethod === 'ecocash'
+      ? 'ecocash'
+      : rawMethod === 'paylesotho'
+      ? (lead.phone || lead.fullPhone || '').replace(/\D/g, '').replace(/^266/, '').startsWith('6')
+        ? 'ecocash'
+        : 'mpesa'
+      : 'ottvoucher';
+
+    const paymentMethodLabel =
+      lead.paymentMethodLabel ||
+      (paymentMethod === 'mpesa'
+        ? 'M-Pesa (OTT Voucher)'
+        : paymentMethod === 'ecocash'
+        ? 'EcoCash (OTT Voucher)'
+        : paymentMethod === 'ottvoucher'
+        ? 'Direct 16-Digit OTT Voucher'
+        : 'Free Mode Wi-Fi');
+
+    const amount = isPaid ? (rawAmount > 0 ? rawAmount : 10) : 0;
+    const planName =
+      lead.planName ||
+      (!isPaid
+        ? 'Free Mode Wi-Fi'
+        : amount >= 150
+        ? 'Monthly Unlimited Pass (30 Days)'
+        : amount >= 50
+        ? 'Weekly Unlimited Pass (7 Days)'
+        : 'Daily Unlimited (24 Hours)');
+
+    const siteName = lead.siteName || 'Maseru Central Hub';
+    const routerName = lead.routerName || 'MIKROTIK-TC';
+    const district = lead.district || (siteName.toLowerCase().includes('maputsoe') || siteName.toLowerCase().includes('leribe') ? 'Leribe' : siteName.toLowerCase().includes('berea') || siteName.toLowerCase().includes('teyateyaneng') ? 'Berea' : 'Maseru');
+    const venuePurchasedAt = lead.venuePurchasedAt || `${siteName} (${routerName})`;
+
+    return {
+      accessType: (isPaid ? 'paid' : 'free') as 'free' | 'paid',
+      accessModeLabel: isPaid ? 'PAID' : 'FREE',
+      paymentMethod,
+      paymentMethodLabel,
+      planName,
+      amount,
+      currency: lead.currency || currency || 'M',
+      siteName,
+      routerName,
+      district,
+      venuePurchasedAt,
+      voucherPin: lead.ottVoucherPin || lead.voucherCode || '',
+      transactionRef: lead.transactionRef || ''
+    };
+  };
 
   const adoptedRoutersList = useMemo(() => {
     if (serverAdoptedRouters.length > 0) return serverAdoptedRouters;
@@ -148,7 +219,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         const res = await fetch('/api/portal/guest-connect');
         const data = await res.json();
         if (!mounted || !data?.success || !Array.isArray(data.events)) return;
-        let added = false;
+        let mutated = false;
         const currentLeads = storage.getCaptiveLeads();
         for (const ev of data.events) {
           const emailVal = (ev.email || ev.guestEmail || '').trim();
@@ -156,37 +227,103 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           const nameVal = (ev.guestName || `${ev.firstName || ''} ${ev.lastName || ''}`).trim();
           if (!emailVal && !phoneVal && (!nameVal || nameVal === 'Guest User')) continue;
           const leadId = `lead_srv_${ev.id}`;
-          const exists = currentLeads.some(
+          const rawMethod = String(ev.paymentMethod || ev.mode || '').toLowerCase();
+          const isPaidEv =
+            ev.accessType === 'paid' ||
+            Number(ev.amount) > 0 ||
+            rawMethod === 'mpesa' ||
+            rawMethod === 'ecocash' ||
+            rawMethod === 'ottvoucher' ||
+            rawMethod === 'paylesotho';
+          const resolvedPaymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi' = !isPaidEv
+            ? 'free_wifi'
+            : rawMethod === 'mpesa'
+            ? 'mpesa'
+            : rawMethod === 'ecocash'
+            ? 'ecocash'
+            : 'ottvoucher';
+          const resolvedPaymentLabel =
+            ev.paymentMethodLabel ||
+            (resolvedPaymentMethod === 'mpesa'
+              ? 'M-Pesa (OTT Voucher)'
+              : resolvedPaymentMethod === 'ecocash'
+              ? 'EcoCash (OTT Voucher)'
+              : resolvedPaymentMethod === 'ottvoucher'
+              ? 'Direct 16-Digit OTT Voucher'
+              : 'Free Mode Wi-Fi');
+
+          const existingMatch = currentLeads.find(
             (l) =>
               l.id === leadId ||
-              (emailVal && l.email.toLowerCase() === emailVal.toLowerCase()) ||
-              (phoneVal && l.fullPhone.replace(/\D/g, '') === phoneVal.replace(/\D/g, ''))
+              l.id === `lead_${ev.id}` ||
+              (phoneVal &&
+                (l.fullPhone || l.phone || '').replace(/\D/g, '') === phoneVal.replace(/\D/g, '') &&
+                (l.accessType || 'free') === (isPaidEv ? 'paid' : 'free') &&
+                Math.abs(new Date(l.capturedAt).getTime() - new Date(ev.capturedAt || Date.now()).getTime()) < 120000)
           );
-          if (!exists) {
+
+          if (!existingMatch) {
             const parts = nameVal.split(' ');
+            const cleanDigits = phoneVal.replace(/^\+266\s?|\+27\s?/, '').trim();
+            const cc = ev.countryCode === '+27' ? '+27' : '+266';
             storage.addCaptiveLead({
               id: leadId,
               firstName: ev.firstName || parts[0] || 'Guest',
               lastName: ev.lastName || parts.slice(1).join(' ') || 'Subscriber',
               fullName: nameVal || 'Guest Subscriber',
-              countryCode: ev.countryCode || '+266',
-              phone: phoneVal.replace(/^\+266\s?|\+27\s?/, ''),
-              fullPhone: phoneVal.startsWith('+') ? phoneVal : `${ev.countryCode || '+266'} ${phoneVal}`,
-              email: emailVal || 'not-provided@tconnect.ls',
-              capturedAt: ev.connectedAt || new Date().toISOString(),
+              countryCode: cc,
+              phone: cleanDigits,
+              fullPhone: phoneVal.startsWith('+') ? phoneVal : `${cc} ${cleanDigits}`,
+              email: emailVal || '—',
+              capturedAt: ev.capturedAt || ev.connectedAt || new Date().toISOString(),
               routerName: ev.routerName || 'MIKROTIK-TC',
               siteName: ev.siteName || 'T-Connect Hotspot',
+              district: ev.district || 'Maseru',
+              venuePurchasedAt: ev.venuePurchasedAt || `${ev.siteName || 'T-Connect Hotspot'} (${ev.routerName || 'MIKROTIK-TC'})`,
               vertical: (ev.scope as VerticalType) || 'hotspot',
+              scope: (ev.scope as VerticalType) || 'hotspot',
               clientMac: ev.mac || 'Client-MAC',
+              mac: ev.mac || 'Client-MAC',
               clientIp: ev.ip || '10.10.0.x',
+              ip: ev.ip || '10.10.0.x',
               deviceType: 'Wi-Fi Guest',
               durationMinutes: ev.durationSeconds ? Math.round(ev.durationSeconds / 60) : 0,
-              status: 'active'
+              status: 'active',
+              mode:
+                resolvedPaymentMethod === 'mpesa'
+                  ? 'mpesa'
+                  : resolvedPaymentMethod === 'ecocash'
+                  ? 'ecocash'
+                  : resolvedPaymentMethod === 'ottvoucher'
+                  ? 'ottvoucher'
+                  : 'free',
+              accessType: isPaidEv ? 'paid' : 'free',
+              paymentMethod: resolvedPaymentMethod,
+              paymentMethodLabel: resolvedPaymentLabel,
+              planName: ev.planName || (isPaidEv ? 'Daily Unlimited (24 Hours)' : 'Free Mode Wi-Fi'),
+              amount: Number(ev.amount) || (isPaidEv ? 10 : 0),
+              currency: 'M',
+              voucherCode: ev.voucherCode || undefined,
+              ottVoucherPin: ev.ottVoucherPin || ev.voucherCode || undefined,
+              transactionRef: ev.transactionRef || undefined
             });
-            added = true;
+            mutated = true;
+          } else if (isPaidEv && existingMatch.accessType !== 'paid') {
+            storage.updateCaptiveLead(existingMatch.id, {
+              accessType: 'paid',
+              paymentMethod: resolvedPaymentMethod,
+              paymentMethodLabel: resolvedPaymentLabel,
+              planName: ev.planName || existingMatch.planName || 'Daily Unlimited (24 Hours)',
+              amount: Number(ev.amount) || 10,
+              currency: 'M',
+              voucherCode: ev.voucherCode || existingMatch.voucherCode,
+              ottVoucherPin: ev.ottVoucherPin || ev.voucherCode || existingMatch.ottVoucherPin,
+              transactionRef: ev.transactionRef || existingMatch.transactionRef
+            });
+            mutated = true;
           }
         }
-        if (added && mounted) {
+        if (mutated && mounted) {
           setLeads([...storage.getCaptiveLeads()]);
         }
       } catch {}
@@ -248,13 +385,18 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           sampleLead.voucherCode === undefined &&
           sampleLead.transactionRef === undefined);
 
+      const commSum = leadsData?.commercialSummary;
+      const commText = commSum
+        ? ` · Free: ${commSum.freeLeadsCount ?? 0} | Paid: ${commSum.paidLeadsCount ?? 0} | Revenue: M${Number(commSum.totalRevenueMaloti || 0).toFixed(2)}`
+        : '';
+
       const summary =
         leadsRes.ok && isIsolated && zeroLeakage
-          ? `ENFORCED: ${leadsData?.pagination?.totalLeads ?? 0} scoped leads accessible (${keyItem.allowedScopes.join(', ').toUpperCase()}) · Non-lead APIs blocked (HTTP 403) · Zero hardware/payment fields leaked.`
+          ? `ENFORCED & LIVE: ${leadsData?.pagination?.totalLeads ?? 0} scoped leads (${keyItem.allowedScopes.join(', ').toUpperCase()})${commText} · Non-lead APIs blocked (HTTP 403) · Zero hardware leakage.`
           : `Check status: Leads HTTP ${leadsRes.status}, Isolation HTTP ${blockedRes.status}`;
 
       setVerificationReport((prev) => ({ ...prev, [keyItem.id]: summary }));
-      showToast('Verified Partner API key isolation & policy enforcement');
+      showToast('Verified Partner & Finance API key enforcement and real-time commercial payload');
       fetchPartnerKeys();
     } catch {
       showToast('Failed to run live key verification');
@@ -294,7 +436,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         setNewCampaignName('');
         setNewRouterIds(['*']);
         setNewWebhookUrl('');
-        showToast(`Issued Lead-Only REST API Key for ${data.key?.companyName} (Clean Slate — 0 prior leads)`);
+        showToast(`Issued REST API Key for ${data.key?.companyName}`);
       } else {
         showToast(data?.message || 'Failed to issue Partner API key');
       }
@@ -522,96 +664,503 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     showToast(`Updated guest lead record for ${fName} ${lName}`);
   };
 
+  // Seed a realistic commercial record (alternating Free Mode Lead, M-Pesa OTT Voucher, EcoCash OTT Voucher, Direct OTT Voucher)
   const handleSeedSampleLead = () => {
-    const isLs = Math.random() > 0.4;
-    const fNames = isLs ? ['Bohlokoa', 'Thabo', 'Palesa', 'Kekeletso'] : ['Thandeka', 'Lwazi', 'Bongani', 'Noluthando'];
-    const lNames = isLs ? ['Majoro', 'Lekhanya', 'Moshoeshoe', 'Sechele'] : ['Khanyile', 'Mthethwa', 'Zulu', 'Ndlovu'];
-    const fName = fNames[Math.floor(Math.random() * fNames.length)];
-    const lName = lNames[Math.floor(Math.random() * lNames.length)];
-    const countryCode = isLs ? '+266' : '+27';
-    const rawDigits = isLs 
-      ? `58${Math.floor(100000 + Math.random() * 900000)}` 
-      : `082${Math.floor(1000000 + Math.random() * 9000000)}`;
-    const email = `${fName.toLowerCase()}.${lName.toLowerCase()}${Math.floor(10 + Math.random() * 90)}@${isLs ? 'tconnect.ls' : 'gmail.com'}`;
+    const sampleScenarios: Array<{
+      fName: string;
+      lName: string;
+      phone: string;
+      accessType: 'free' | 'paid';
+      paymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi';
+      paymentMethodLabel: string;
+      planName: string;
+      amount: number;
+      siteName: string;
+      routerName: string;
+      district: string;
+      scope: VerticalType;
+    }> = [
+      {
+        fName: 'Bohlokoa',
+        lName: 'Majoro',
+        phone: `58${Math.floor(100000 + Math.random() * 899999)}`,
+        accessType: 'paid',
+        paymentMethod: 'mpesa',
+        paymentMethodLabel: 'M-Pesa (OTT Voucher)',
+        planName: 'Daily Unlimited (24 Hours)',
+        amount: 10,
+        siteName: 'Maseru Central Mall Hub',
+        routerName: 'MIKROTIK-MASERU-AP1',
+        district: 'Maseru',
+        scope: 'hotspot'
+      },
+      {
+        fName: 'Palesa',
+        lName: 'Moshoeshoe',
+        phone: `62${Math.floor(100000 + Math.random() * 899999)}`,
+        accessType: 'paid',
+        paymentMethod: 'ecocash',
+        paymentMethodLabel: 'EcoCash (OTT Voucher)',
+        planName: 'Weekly Unlimited Pass (7 Days)',
+        amount: 50,
+        siteName: 'Maputsoe Border Market',
+        routerName: 'MIKROTIK-LERIBE-AP2',
+        district: 'Leribe',
+        scope: 'hotspot'
+      },
+      {
+        fName: 'Thabo',
+        lName: 'Lekhanya',
+        phone: `59${Math.floor(100000 + Math.random() * 899999)}`,
+        accessType: 'free',
+        paymentMethod: 'free_wifi',
+        paymentMethodLabel: 'Free Mode Wi-Fi',
+        planName: 'Free Mode Wi-Fi (24 Hours)',
+        amount: 0,
+        siteName: 'Teyateyaneng Civic Plaza',
+        routerName: 'MIKROTIK-BEREA-AP1',
+        district: 'Berea',
+        scope: 'community'
+      },
+      {
+        fName: 'Kekeletso',
+        lName: 'Sechele',
+        phone: `57${Math.floor(100000 + Math.random() * 899999)}`,
+        accessType: 'paid',
+        paymentMethod: 'mpesa',
+        paymentMethodLabel: 'M-Pesa (OTT Voucher)',
+        planName: 'Monthly Unlimited Pass (30 Days)',
+        amount: 150,
+        siteName: 'Setsoto National Stadium',
+        routerName: 'MIKROTIK-STADIUM-CORE',
+        district: 'Maseru',
+        scope: 'stadium'
+      },
+      {
+        fName: 'Lineo',
+        lName: 'Makoae',
+        phone: `63${Math.floor(100000 + Math.random() * 899999)}`,
+        accessType: 'paid',
+        paymentMethod: 'ottvoucher',
+        paymentMethodLabel: 'Direct 16-Digit OTT Voucher',
+        planName: 'Daily Unlimited (24 Hours)',
+        amount: 10,
+        siteName: 'Maseru Bus Stop Terminal',
+        routerName: 'MIKROTIK-TRANSIT-AP1',
+        district: 'Maseru',
+        scope: 'bus'
+      }
+    ];
+
+    const pick = sampleScenarios[leads.length % sampleScenarios.length];
+    const email = `${pick.fName.toLowerCase()}.${pick.lName.toLowerCase()}${Math.floor(10 + Math.random() * 89)}@tconnect.co.ls`;
+    const ottPin =
+      pick.accessType === 'paid'
+        ? `${Math.floor(1000 + Math.random() * 8999)}-${Math.floor(1000 + Math.random() * 8999)}-${Math.floor(1000 + Math.random() * 8999)}-${Math.floor(1000 + Math.random() * 8999)}`
+        : undefined;
 
     const newLead: CaptivePortalLead = {
       id: `lead_cna_${Date.now()}`,
-      firstName: fName,
-      lastName: lName,
-      fullName: `${fName} ${lName}`,
-      countryCode,
-      phone: rawDigits,
-      fullPhone: `${countryCode} ${rawDigits}`,
+      firstName: pick.fName,
+      lastName: pick.lName,
+      fullName: `${pick.fName} ${pick.lName}`,
+      countryCode: '+266',
+      phone: pick.phone,
+      fullPhone: `+266 ${pick.phone}`,
       email,
       capturedAt: new Date().toISOString(),
-      routerName: 'MikroTik-Node',
-      siteName: isLs ? 'Maseru Central Node' : 'Johannesburg Gateway',
-      vertical: 'hotspot',
-      clientMac: `40:${Math.floor(10+Math.random()*89)}:76:A2:${Math.floor(10+Math.random()*89)}:${Math.floor(10+Math.random()*89)}`,
-      clientIp: `10.89.1.${Math.floor(10 + Math.random() * 80)}`,
+      routerName: pick.routerName,
+      siteName: pick.siteName,
+      district: pick.district,
+      venuePurchasedAt: `${pick.siteName} (${pick.routerName})`,
+      vertical: pick.scope,
+      scope: pick.scope,
+      clientMac: `40:${Math.floor(10 + Math.random() * 89)}:76:A2:${Math.floor(10 + Math.random() * 89)}:${Math.floor(10 + Math.random() * 89)}`,
+      clientIp: `10.10.0.${Math.floor(10 + Math.random() * 200)}`,
       deviceType: Math.random() > 0.5 ? 'Apple iPhone (iOS 17)' : 'Samsung Galaxy A54',
-      durationMinutes: 0,
-      status: 'active'
+      durationMinutes: pick.accessType === 'paid' ? 1440 : 1440,
+      status: 'active',
+      mode:
+        pick.paymentMethod === 'mpesa'
+          ? 'mpesa'
+          : pick.paymentMethod === 'ecocash'
+          ? 'ecocash'
+          : pick.paymentMethod === 'ottvoucher'
+          ? 'ottvoucher'
+          : 'free',
+      accessType: pick.accessType,
+      paymentMethod: pick.paymentMethod,
+      paymentMethodLabel: pick.paymentMethodLabel,
+      planName: pick.planName,
+      amount: pick.amount,
+      currency: 'M',
+      voucherCode: ottPin,
+      ottVoucherPin: ottPin,
+      transactionRef: pick.accessType === 'paid' ? `OTT-${Date.now().toString().slice(-6)}` : undefined
     };
 
     storage.addCaptiveLead(newLead);
+
+    // Also sync to backend serverStore so the Partner & Finance REST API (/api/v1/partner/leads) immediately serves it
+    fetch('/api/portal/guest-connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: newLead.id,
+        firstName: newLead.firstName,
+        lastName: newLead.lastName,
+        guestName: newLead.fullName,
+        countryCode: newLead.countryCode,
+        phone: newLead.phone,
+        guestPhone: newLead.fullPhone,
+        email: newLead.email,
+        mac: newLead.clientMac,
+        ip: newLead.clientIp,
+        scope: newLead.vertical,
+        siteName: newLead.siteName,
+        routerName: newLead.routerName,
+        district: newLead.district,
+        mode: newLead.mode,
+        accessType: newLead.accessType,
+        paymentMethod: newLead.paymentMethod,
+        paymentChannel: newLead.paymentMethod,
+        planName: newLead.planName,
+        amount: newLead.amount,
+        voucherCode: newLead.voucherCode,
+        transactionRef: newLead.transactionRef
+      })
+    }).catch(() => {});
+
     refreshLeads();
-    showToast(`Added sample verified lead for ${newLead.fullName}`);
+    showToast(
+      `Seeded ${pick.accessType === 'paid' ? `${pick.paymentMethodLabel} (M${pick.amount})` : 'Free Mode Wi-Fi'} record at ${pick.siteName}`
+    );
   };
 
-  // Export CSV
-  const handleExportCsv = () => {
-    if (leads.length === 0) {
-      showToast('No leads available to export');
+  // Commercial CSV Exporter supporting 'all' | 'free' | 'paid' scopes
+  const handleExportCommercialCsv = (targetMode: 'all' | 'free' | 'paid' = 'all') => {
+    const sourceRows = filteredLeads.filter((l) => {
+      const c = resolveLeadCommercial(l);
+      if (targetMode === 'free') return c.accessType === 'free';
+      if (targetMode === 'paid') return c.accessType === 'paid';
+      return true;
+    });
+
+    if (sourceRows.length === 0) {
+      showToast(
+        targetMode === 'free'
+          ? 'No Free Mode leads available to export'
+          : targetMode === 'paid'
+          ? 'No Paid transactions available to export'
+          : 'No leads available to export'
+      );
       return;
     }
 
+    const csvEsc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
     const headers = [
       'Lead ID',
-      'Full Name',
+      'Guest Full Name',
       'First Name',
-      'Last Name',
-      'Country Code',
+      'Surname',
       'Mobile Number',
-      'Verified Email',
-      'Hotspot Router',
-      'Site Name',
-      'Vertical',
+      'Email Address',
+      'Access Mode (FREE/PAID)',
+      'Payment Method Used',
+      'Package / Plan Name',
+      'Price Paid (Maloti)',
+      'Hotspot / Location Name',
+      'Router Identity',
+      'District',
+      'Venue / Router Purchased At',
+      'OTT Voucher / Reference',
       'Client MAC',
-      'Client IP',
-      'Device OS',
-      'Captured Timestamp',
-      'Session Status'
+      'Captured Timestamp'
     ];
 
-    const rows = filteredLeads.map((l) => [
-      l.id,
-      `"${l.fullName.replace(/"/g, '""')}"`,
-      `"${l.firstName.replace(/"/g, '""')}"`,
-      `"${l.lastName.replace(/"/g, '""')}"`,
-      l.countryCode,
-      `"${l.fullPhone}"`,
-      `"${l.email}"`,
-      `"${l.routerName}"`,
-      `"${l.siteName}"`,
-      l.vertical,
-      l.clientMac,
-      l.clientIp,
-      `"${l.deviceType}"`,
-      l.capturedAt,
-      l.status
-    ]);
+    const rows = sourceRows.map((l) => {
+      const c = resolveLeadCommercial(l);
+      return [
+        l.id,
+        l.fullName,
+        l.firstName,
+        l.lastName,
+        l.fullPhone || `${l.countryCode} ${l.phone}`,
+        l.email || '—',
+        c.accessModeLabel,
+        c.paymentMethodLabel,
+        c.planName,
+        `${c.currency}${c.amount.toFixed(2)}`,
+        c.siteName,
+        c.routerName,
+        c.district,
+        c.venuePurchasedAt,
+        c.voucherPin || c.transactionRef || (c.accessType === 'free' ? 'FREE-MODE' : 'PAID-OTT'),
+        l.clientMac || l.mac || '—',
+        l.capturedAt
+      ].map(csvEsc);
+    });
 
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    // Append Commercial Summary Footer Rows for Finance Reconciliation
+    const totalRev = sourceRows.reduce((sum, l) => sum + resolveLeadCommercial(l).amount, 0);
+    const mpesaRev = sourceRows
+      .filter((l) => resolveLeadCommercial(l).paymentMethod === 'mpesa')
+      .reduce((sum, l) => sum + resolveLeadCommercial(l).amount, 0);
+    const ecocashRev = sourceRows
+      .filter((l) => resolveLeadCommercial(l).paymentMethod === 'ecocash')
+      .reduce((sum, l) => sum + resolveLeadCommercial(l).amount, 0);
+    const ottRev = sourceRows
+      .filter((l) => resolveLeadCommercial(l).paymentMethod === 'ottvoucher')
+      .reduce((sum, l) => sum + resolveLeadCommercial(l).amount, 0);
+
+    const summaryRows = [
+      [],
+      [
+        csvEsc('SUMMARY'),
+        csvEsc(`Total Records: ${sourceRows.length}`),
+        csvEsc(`M-Pesa (OTT) Revenue: M${mpesaRev.toFixed(2)}`),
+        csvEsc(`EcoCash (OTT) Revenue: M${ecocashRev.toFixed(2)}`),
+        csvEsc(`Direct OTT Revenue: M${ottRev.toFixed(2)}`),
+        csvEsc(`TOTAL REVENUE: M${totalRev.toFixed(2)}`)
+      ]
+    ];
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((r) => r.join(',')),
+      ...summaryRows.map((r) => r.join(','))
+    ].join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
+    const slug =
+      targetMode === 'free'
+        ? 'tconnect_free_mode_leads'
+        : targetMode === 'paid'
+        ? 'tconnect_paid_finance_transactions'
+        : 'tconnect_commercial_leads_ledger';
     link.setAttribute('href', url);
-    link.setAttribute('download', `tconnect_captive_leads_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `${slug}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast('Exported guest leads to CSV');
+    showToast(
+      targetMode === 'free'
+        ? `Exported ${sourceRows.length} Free Mode leads to CSV`
+        : targetMode === 'paid'
+        ? `Exported ${sourceRows.length} Paid Finance transactions (M${totalRev.toFixed(2)}) to CSV`
+        : `Exported ${sourceRows.length} commercial records to CSV`
+    );
+  };
+
+  // Pure TypeScript PDF 1.4 Binary Report Generator (No window.open / popup blocker issues)
+  const handleExportCommercialPdf = (targetMode: 'all' | 'free' | 'paid' = 'all') => {
+    const sourceRows = filteredLeads.filter((l) => {
+      const c = resolveLeadCommercial(l);
+      if (targetMode === 'free') return c.accessType === 'free';
+      if (targetMode === 'paid') return c.accessType === 'paid';
+      return true;
+    });
+
+    if (sourceRows.length === 0) {
+      showToast(
+        targetMode === 'free'
+          ? 'No Free Mode leads available for PDF export'
+          : targetMode === 'paid'
+          ? 'No Paid transactions available for PDF export'
+          : 'No leads available for PDF export'
+      );
+      return;
+    }
+
+    const reportTitle =
+      targetMode === 'free'
+        ? 'T-CONNECT CONTROL TOWER - FREE MODE GUEST LEADS REPORT'
+        : targetMode === 'paid'
+        ? 'T-CONNECT CONTROL TOWER - PAID TRANSACTIONS & OTT VOUCHER FINANCE LEDGER'
+        : 'T-CONNECT CONTROL TOWER - COMPLETE COMMERCIAL LEADS & REVENUE LEDGER';
+
+    const freeCount = sourceRows.filter((l) => resolveLeadCommercial(l).accessType === 'free').length;
+    const paidCount = sourceRows.filter((l) => resolveLeadCommercial(l).accessType === 'paid').length;
+    const totalRev = sourceRows.reduce((s, l) => s + resolveLeadCommercial(l).amount, 0);
+    const mpesaRows = sourceRows.filter((l) => resolveLeadCommercial(l).paymentMethod === 'mpesa');
+    const ecocashRows = sourceRows.filter((l) => resolveLeadCommercial(l).paymentMethod === 'ecocash');
+    const ottDirectRows = sourceRows.filter((l) => resolveLeadCommercial(l).paymentMethod === 'ottvoucher');
+    const mpesaRev = mpesaRows.reduce((s, l) => s + resolveLeadCommercial(l).amount, 0);
+    const ecocashRev = ecocashRows.reduce((s, l) => s + resolveLeadCommercial(l).amount, 0);
+    const ottDirectRev = ottDirectRows.reduce((s, l) => s + resolveLeadCommercial(l).amount, 0);
+
+    // Group revenue & leads by Hotspot Location / Router
+    const venueStats = new Map<string, { leads: number; free: number; paid: number; revenue: number; router: string; district: string }>();
+    sourceRows.forEach((l) => {
+      const c = resolveLeadCommercial(l);
+      const key = `${c.siteName} | ${c.routerName}`;
+      const cur = venueStats.get(key) || {
+        leads: 0,
+        free: 0,
+        paid: 0,
+        revenue: 0,
+        router: c.routerName,
+        district: c.district
+      };
+      cur.leads += 1;
+      if (c.accessType === 'paid') {
+        cur.paid += 1;
+        cur.revenue += c.amount;
+      } else {
+        cur.free += 1;
+      }
+      venueStats.set(key, cur);
+    });
+
+    const pdfClean = (str: string) =>
+      String(str || '')
+        .replace(/[^\x20-\x7E]/g, ' ')
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)');
+
+    const lines: Array<{ text: string; size?: number; bold?: boolean }> = [
+      { text: reportTitle, size: 12, bold: true },
+      {
+        text: `Generated: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC  |  Currency: Lesotho Maloti (M)`,
+        size: 8
+      },
+      { text: '========================================================================================================', size: 8 },
+      { text: '1. EXECUTIVE COMMERCIAL & FINANCE SUMMARY', size: 10, bold: true },
+      {
+        text: `Total Records: ${sourceRows.length}   |   Free Mode Leads: ${freeCount} (M0.00)   |   Paid OTT Transactions: ${paidCount} (M${totalRev.toFixed(2)})`,
+        size: 9,
+        bold: true
+      },
+      {
+        text: `M-Pesa (OTT Voucher): ${mpesaRows.length} tx (M${mpesaRev.toFixed(2)})   |   EcoCash (OTT Voucher): ${ecocashRows.length} tx (M${ecocashRev.toFixed(2)})   |   Direct 16-Digit OTT: ${ottDirectRows.length} tx (M${ottDirectRev.toFixed(2)})`,
+        size: 8.5
+      },
+      { text: '--------------------------------------------------------------------------------------------------------', size: 8 },
+      { text: '2. BREAKDOWN BY HOTSPOT LOCATION, ROUTER & DISTRICT', size: 10, bold: true }
+    ];
+
+    Array.from(venueStats.entries()).forEach(([venueKey, st]) => {
+      const siteOnly = venueKey.split(' | ')[0];
+      lines.push({
+        text: `Hotspot: ${siteOnly.padEnd(26, ' ').slice(0, 26)} | Router: ${st.router.padEnd(20, ' ').slice(0, 20)} | District: ${st.district.padEnd(10, ' ').slice(0, 10)} | Free: ${String(st.free).padStart(2, ' ')} | Paid: ${String(st.paid).padStart(2, ' ')} | Revenue: M${st.revenue.toFixed(2)}`,
+        size: 8
+      });
+    });
+
+    lines.push({ text: '--------------------------------------------------------------------------------------------------------', size: 8 });
+    lines.push({ text: '3. DETAILED GUEST LEADS & TRANSACTION ATTRIBUTION LEDGER', size: 10, bold: true });
+    lines.push({
+      text: `${'GUEST NAME'.padEnd(18, ' ')} | ${'MOBILE'.padEnd(13, ' ')} | ${'MODE'.padEnd(5, ' ')} | ${'PAYMENT METHOD'.padEnd(22, ' ')} | ${'PACKAGE'.padEnd(18, ' ')} | ${'PRICE'.padEnd(7, ' ')} | ${'HOTSPOT / ROUTER'.padEnd(28, ' ')} | DATE`,
+      size: 7.5,
+      bold: true
+    });
+    lines.push({ text: '--------------------------------------------------------------------------------------------------------', size: 8 });
+
+    sourceRows.forEach((l) => {
+      const c = resolveLeadCommercial(l);
+      const guestCol = (l.fullName || `${l.firstName} ${l.lastName}`).padEnd(18, ' ').slice(0, 18);
+      const phoneCol = (l.fullPhone || `${l.countryCode} ${l.phone}`).padEnd(13, ' ').slice(0, 13);
+      const modeCol = c.accessModeLabel.padEnd(5, ' ').slice(0, 5);
+      const methodCol = c.paymentMethodLabel.padEnd(22, ' ').slice(0, 22);
+      const planCol = c.planName.padEnd(18, ' ').slice(0, 18);
+      const priceCol = `M${c.amount.toFixed(2)}`.padEnd(7, ' ').slice(0, 7);
+      const locCol = `${c.siteName} (${c.routerName})`.padEnd(28, ' ').slice(0, 28);
+      const dateCol = new Date(l.capturedAt).toISOString().replace('T', ' ').slice(0, 16);
+      lines.push({
+        text: `${guestCol} | ${phoneCol} | ${modeCol} | ${methodCol} | ${planCol} | ${priceCol} | ${locCol} | ${dateCol}`,
+        size: 7.2
+      });
+    });
+
+    // Paginate into 46 lines per landscape A4 page (842 x 595 pt)
+    const linesPerPage = 44;
+    const pageChunks: Array<typeof lines> = [];
+    for (let i = 0; i < lines.length; i += linesPerPage) {
+      pageChunks.push(lines.slice(i, i + linesPerPage));
+    }
+    if (pageChunks.length === 0) pageChunks.push(lines);
+
+    const objects: string[] = [];
+    // 1: Catalog, 2: Pages, 3: Helvetica Font, 4: Courier-Bold Font, 5: Courier Font
+    const pageObjIds: number[] = [];
+    let nextObjId = 6;
+
+    const pageContents: Array<{ pageId: number; contentId: number; stream: string }> = [];
+    pageChunks.forEach((chunk, pageIdx) => {
+      const pageId = nextObjId++;
+      const contentId = nextObjId++;
+      pageObjIds.push(pageId);
+
+      let y = 555;
+      const streamLines: string[] = ['BT'];
+      chunk.forEach((ln) => {
+        const fontRef = ln.bold ? '/F2' : '/F3';
+        const fontSize = ln.size || 8;
+        streamLines.push(`${fontRef} ${fontSize} Tf`);
+        streamLines.push(`1 0 0 1 28 ${y.toFixed(1)} Tm`);
+        streamLines.push(`(${pdfClean(ln.text)}) Tj`);
+        y -= fontSize + 3.8;
+      });
+      // Page footer
+      streamLines.push('/F3 7.5 Tf');
+      streamLines.push(`1 0 0 1 28 18 Tm`);
+      streamLines.push(
+        `(${pdfClean(`T-Connect Control Tower Commercial Ledger  |  Page ${pageIdx + 1} of ${pageChunks.length}`)}) Tj`
+      );
+      streamLines.push('ET');
+      pageContents.push({ pageId, contentId, stream: streamLines.join('\n') });
+    });
+
+    objects[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
+    objects[2] = `2 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageObjIds.length} >>\nendobj\n`;
+    objects[3] = `3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n`;
+    objects[4] = `4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold >>\nendobj\n`;
+    objects[5] = `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n`;
+
+    pageContents.forEach((pc) => {
+      objects[pc.pageId] = `${pc.pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${pc.contentId} 0 R >>\nendobj\n`;
+      objects[pc.contentId] = `${pc.contentId} 0 obj\n<< /Length ${pc.stream.length} >>\nstream\n${pc.stream}\nendstream\nendobj\n`;
+    });
+
+    let pdfStr = '%PDF-1.4\n';
+    const offsets: number[] = [0];
+    for (let i = 1; i < objects.length; i++) {
+      offsets[i] = pdfStr.length;
+      pdfStr += objects[i];
+    }
+    const xrefOffset = pdfStr.length;
+    pdfStr += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let i = 1; i < objects.length; i++) {
+      pdfStr += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdfStr += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+    const blob = new Blob([pdfStr], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const slug =
+      targetMode === 'free'
+        ? 'tconnect_free_mode_leads_report'
+        : targetMode === 'paid'
+        ? 'tconnect_paid_finance_report'
+        : 'tconnect_commercial_ledger_report';
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${slug}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast(
+      targetMode === 'free'
+        ? `Downloaded Free Mode Leads PDF Report (${sourceRows.length} leads)`
+        : targetMode === 'paid'
+        ? `Downloaded Paid Finance PDF Report (${sourceRows.length} transactions · M${totalRev.toFixed(2)})`
+        : `Downloaded Complete Commercial PDF Report (${sourceRows.length} records)`
+    );
   };
 
   // Active Sessions for status synchronization
@@ -622,6 +1171,8 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   // Filtered Leads
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
+      const comm = resolveLeadCommercial(lead);
+
       // Vertical filter
       if (selectedVertical !== 'all') {
         if (selectedVertical === 'village' || selectedVertical === 'community') {
@@ -631,6 +1182,16 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         }
       }
 
+      // Access Mode filter ('all' | 'free' | 'paid')
+      if (modeFilter !== 'all' && comm.accessType !== modeFilter) {
+        return false;
+      }
+
+      // Payment Method filter ('all' | 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi')
+      if (paymentMethodFilter !== 'all' && comm.paymentMethod !== paymentMethodFilter) {
+        return false;
+      }
+
       // Country filter
       if (countryFilter !== 'all' && lead.countryCode !== countryFilter) {
         return false;
@@ -638,7 +1199,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
 
       // Status filter
       const isCurrentlyActive = activeSessions.some(
-        s => s.clientMac === lead.clientMac || s.guestEmail === lead.email
+        (s) => s.clientMac === lead.clientMac || s.guestEmail === lead.email
       );
       const effectiveStatus = isCurrentlyActive ? 'active' : lead.status;
 
@@ -649,29 +1210,83 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = lead.fullName.toLowerCase().includes(q);
-        const matchesPhone = lead.fullPhone.toLowerCase().includes(q) || lead.phone.includes(q);
-        const matchesEmail = lead.email.toLowerCase().includes(q);
-        const matchesMac = lead.clientMac.toLowerCase().includes(q);
-        const matchesRouter = lead.routerName.toLowerCase().includes(q);
-        const matchesSite = lead.siteName.toLowerCase().includes(q);
-        if (!matchesName && !matchesPhone && !matchesEmail && !matchesMac && !matchesRouter && !matchesSite) {
+        const matchesPhone = (lead.fullPhone || '').toLowerCase().includes(q) || (lead.phone || '').includes(q);
+        const matchesEmail = (lead.email || '').toLowerCase().includes(q);
+        const matchesMac = (lead.clientMac || '').toLowerCase().includes(q);
+        const matchesRouter = comm.routerName.toLowerCase().includes(q);
+        const matchesSite = comm.siteName.toLowerCase().includes(q);
+        const matchesDistrict = comm.district.toLowerCase().includes(q);
+        const matchesMethod = comm.paymentMethodLabel.toLowerCase().includes(q);
+        const matchesPlan = comm.planName.toLowerCase().includes(q);
+        if (
+          !matchesName &&
+          !matchesPhone &&
+          !matchesEmail &&
+          !matchesMac &&
+          !matchesRouter &&
+          !matchesSite &&
+          !matchesDistrict &&
+          !matchesMethod &&
+          !matchesPlan
+        ) {
           return false;
         }
       }
 
       return true;
     });
-  }, [leads, selectedVertical, countryFilter, statusFilter, searchQuery, activeSessions]);
+  }, [leads, selectedVertical, modeFilter, paymentMethodFilter, countryFilter, statusFilter, searchQuery, activeSessions]);
 
-  // Statistics
+  // Commercial & Lead Statistics
   const stats = useMemo(() => {
     const total = leads.length;
-    const lesothoCount = leads.filter(l => l.countryCode === '+266').length;
-    const saCount = leads.filter(l => l.countryCode === '+27').length;
-    const activeCount = leads.filter(l => 
-      activeSessions.some(s => s.clientMac === l.clientMac || s.guestEmail === l.email)
+    let freeCount = 0;
+    let paidCount = 0;
+    let totalRevenue = 0;
+    let mpesaCount = 0;
+    let mpesaRevenue = 0;
+    let ecocashCount = 0;
+    let ecocashRevenue = 0;
+    let ottDirectCount = 0;
+    let ottDirectRevenue = 0;
+
+    leads.forEach((l) => {
+      const c = resolveLeadCommercial(l);
+      if (c.accessType === 'paid') {
+        paidCount += 1;
+        totalRevenue += c.amount;
+        if (c.paymentMethod === 'mpesa') {
+          mpesaCount += 1;
+          mpesaRevenue += c.amount;
+        } else if (c.paymentMethod === 'ecocash') {
+          ecocashCount += 1;
+          ecocashRevenue += c.amount;
+        } else {
+          ottDirectCount += 1;
+          ottDirectRevenue += c.amount;
+        }
+      } else {
+        freeCount += 1;
+      }
+    });
+
+    const activeCount = leads.filter((l) =>
+      activeSessions.some((s) => s.clientMac === l.clientMac || s.guestEmail === l.email)
     ).length;
-    return { total, lesothoCount, saCount, activeCount };
+
+    return {
+      total,
+      freeCount,
+      paidCount,
+      totalRevenue,
+      mpesaCount,
+      mpesaRevenue,
+      ecocashCount,
+      ecocashRevenue,
+      ottDirectCount,
+      ottDirectRevenue,
+      activeCount
+    };
   }, [leads, activeSessions]);
 
   return (
@@ -687,17 +1302,17 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       {/* Header Lockup */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b233a] pb-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <UserCheck className="w-5 h-5 text-[#f05e17]" />
             <h2 className="text-base font-extrabold text-white tracking-tight">
-              Captive Portal Guest Leads CRM &amp; Verified Ledger
+              Guest Leads CRM &amp; Finance Commercial Attribution Ledger
             </h2>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#f05e17]/20 text-[#f05e17] border border-[#f05e17]/30">
-              CNA LOGGED
+              FREE &amp; PAID OTT ATTRIBUTION
             </span>
           </div>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Verified guest contact records captured via 'Connect Free' portal. Enforces 2-char names, 8-digit Lesotho (+266), 10-digit South Africa (+27), and '@' + '.' email format.
+            Real-time Free Mode &amp; Paid Mode (M-Pesa / EcoCash / 16-Digit OTT Voucher) lead capture with package price, hotspot location, router identity, REST API key feed, and separate Finance CSV &amp; PDF exports.
           </p>
         </div>
 
@@ -705,20 +1320,20 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
           <button
             onClick={() => setShowPartnerApiPanel((p) => !p)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors font-bold ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors font-bold cursor-pointer ${
               showPartnerApiPanel
                 ? 'bg-[#f05e17] text-white border-[#f05e17]'
                 : 'bg-[#121829] hover:bg-[#1a233b] text-slate-200 border-[#232d42]'
             }`}
-            title="Manage External Partner Lead REST API Keys & Webhooks"
+            title="Manage External Partner & Finance REST API Keys & Webhooks"
           >
             <Key className="w-3.5 h-3.5" />
-            <span>Partner REST API ({partnerKeys.length})</span>
+            <span>Partner &amp; Finance API ({partnerKeys.length})</span>
           </button>
 
           <button
             onClick={handleDownloadApiDocs}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-emerald-300 border border-emerald-500/30 transition-colors font-bold"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-emerald-300 border border-emerald-500/30 transition-colors font-bold cursor-pointer"
             title="Download T-Connect Control Tower - REST API Documentation.md"
           >
             <FileText className="w-3.5 h-3.5 text-emerald-400" />
@@ -727,21 +1342,11 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
 
           <button
             onClick={handleSeedSampleLead}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-300 border border-white/10 transition-colors font-bold"
-            title="Generate sample guest lead with valid Lesotho or South Africa data"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-300 border border-white/10 transition-colors font-bold cursor-pointer"
+            title="Seed sample Free Mode or Paid Mode (M-Pesa / EcoCash / OTT Voucher) record"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Seed Sample Lead</span>
-          </button>
-
-          <button
-            onClick={handleExportCsv}
-            disabled={filteredLeads.length === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] disabled:opacity-40 text-slate-200 border border-[#232d42] transition-colors font-bold"
-            title="Export filtered guest leads to CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Export CSV</span>
+            <span>Seed Commercial Record</span>
           </button>
 
           <button
@@ -749,7 +1354,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
               setResetTargetScope(selectedVertical === 'all' ? 'all' : selectedVertical);
               setShowResetLeadsModal(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition-colors font-bold"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition-colors font-bold cursor-pointer"
             title="Reset leads globally, per policy scope, or reset a sponsor API key to a clean slate"
           >
             <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
@@ -758,10 +1363,78 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
 
           <button
             onClick={refreshLeads}
-            className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-slate-300 border border-[#232d42] transition-colors"
+            className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1a233b] text-slate-300 border border-[#232d42] transition-colors cursor-pointer"
             title="Refresh Leads Table"
           >
             <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Dedicated Finance & Commercial CSV + PDF Export Bar */}
+      <div className="bg-[#0b0f19] border border-[#232d42] rounded-xl p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3 font-mono text-xs">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-[#f05e17] shrink-0" />
+          <div>
+            <span className="text-white font-bold">Finance &amp; External Partner Commercial Exports</span>
+            <span className="text-slate-400 text-[11px] block sm:inline sm:ml-2">
+              Includes Guest Name, Mobile, Access Mode, Payment Method (M-Pesa / EcoCash / OTT), Package Price (M), Hotspot Location &amp; Router
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Free Mode Leads CSV & PDF */}
+          <button
+            type="button"
+            onClick={() => handleExportCommercialCsv('free')}
+            className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <Download className="w-3 h-3" />
+            <span>Free Leads CSV ({stats.freeCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportCommercialPdf('free')}
+            className="px-2.5 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <FileText className="w-3 h-3" />
+            <span>Free Leads PDF</span>
+          </button>
+
+          {/* Paid Finance Transactions CSV & PDF */}
+          <button
+            type="button"
+            onClick={() => handleExportCommercialCsv('paid')}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <Download className="w-3 h-3" />
+            <span>Paid Finance CSV ({stats.paidCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportCommercialPdf('paid')}
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <FileText className="w-3 h-3" />
+            <span>Paid Finance PDF</span>
+          </button>
+
+          {/* All Commercial Records CSV & PDF */}
+          <button
+            type="button"
+            onClick={() => handleExportCommercialCsv('all')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#f05e17]/20 hover:bg-[#f05e17]/30 text-[#ff8b4d] border border-[#f05e17]/40 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <Download className="w-3 h-3" />
+            <span>All Records CSV</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportCommercialPdf('all')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#f05e17] hover:bg-[#d94e0f] text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+          >
+            <FileText className="w-3 h-3" />
+            <span>All Records PDF</span>
           </button>
         </div>
       </div>
@@ -1317,8 +1990,8 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         </div>
       )}
 
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* Commercial Finance & Lead KPI Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {/* Card 1: Total Captured */}
         <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
           <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
@@ -1328,72 +2001,158 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           <div className="text-2xl font-black text-white font-mono tabular-nums">
             {stats.total}
           </div>
-          <p className="text-[10px] font-mono text-slate-500">Persistent CRM records</p>
+          <p className="text-[10px] font-mono text-slate-500">
+            {stats.freeCount} Free · {stats.paidCount} Paid
+          </p>
         </div>
 
-        {/* Card 2: Lesotho Numbers */}
+        {/* Card 2: Free Mode Leads */}
         <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
           <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
-            <span>🇱🇸 Lesotho (+266)</span>
+            <span>Free Mode Leads</span>
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+          </div>
+          <div className="text-2xl font-black text-cyan-400 font-mono tabular-nums">
+            {stats.freeCount}
+          </div>
+          <p className="text-[10px] font-mono text-slate-500">Step 1 Lead → Login for free</p>
+        </div>
+
+        {/* Card 3: Total Paid OTT Revenue */}
+        <div className="bg-[#121829] p-3.5 rounded-xl border border-emerald-500/30 space-y-1">
+          <div className="flex items-center justify-between text-emerald-300 text-[10px] font-mono uppercase font-bold">
+            <span>Paid OTT Revenue</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          </div>
+          <div className="text-2xl font-black text-emerald-400 font-mono tabular-nums">
+            M{stats.totalRevenue.toFixed(2)}
+          </div>
+          <p className="text-[10px] font-mono text-slate-400">
+            {stats.paidCount} paid OTT voucher sessions
+          </p>
+        </div>
+
+        {/* Card 4: M-Pesa (OTT Voucher) */}
+        <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
+          <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
+            <span>M-Pesa (OTT)</span>
+            <Phone className="w-3.5 h-3.5 text-rose-400" />
+          </div>
+          <div className="text-2xl font-black text-rose-400 font-mono tabular-nums">
+            M{stats.mpesaRevenue.toFixed(2)}
+          </div>
+          <p className="text-[10px] font-mono text-slate-500">
+            {stats.mpesaCount} redeemed ({stats.mpesaCount === 1 ? 'session' : 'sessions'})
+          </p>
+        </div>
+
+        {/* Card 5: EcoCash & Direct OTT */}
+        <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
+          <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
+            <span>EcoCash &amp; Direct OTT</span>
             <Phone className="w-3.5 h-3.5 text-blue-400" />
           </div>
           <div className="text-2xl font-black text-blue-400 font-mono tabular-nums">
-            {stats.lesothoCount}
+            M{(stats.ecocashRevenue + stats.ottDirectRevenue).toFixed(2)}
           </div>
-          <p className="text-[10px] font-mono text-slate-500">8-digit verified mobile</p>
-        </div>
-
-        {/* Card 3: South Africa Numbers */}
-        <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
-            <span>🇿🇦 South Africa (+27)</span>
-            <Phone className="w-3.5 h-3.5 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-black text-emerald-400 font-mono tabular-nums">
-            {stats.saCount}
-          </div>
-          <p className="text-[10px] font-mono text-slate-500">10-digit standard mobile</p>
-        </div>
-
-        {/* Card 4: Active Free Leases */}
-        <div className="bg-[#121829] p-3.5 rounded-xl border border-[#1f283d] space-y-1">
-          <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono uppercase font-bold">
-            <span>Active Live Leases</span>
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-amber-400 font-mono tabular-nums">
-              {stats.activeCount}
-            </span>
-            <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              Live Leases
-            </span>
-          </div>
-          <p className="text-[10px] font-mono text-slate-500">Active free session countdown</p>
+          <p className="text-[10px] font-mono text-slate-500">
+            {stats.ecocashCount} EcoCash · {stats.ottDirectCount} Direct PIN
+          </p>
         </div>
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
         <div className="relative flex-1 max-w-md">
           <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search leads by name, phone, email, MAC address, router..."
+            placeholder="Search by guest, phone, email, M-Pesa/EcoCash, hotspot, router, OTT PIN..."
             className="w-full pl-8 pr-3 py-1.5 bg-[#121829] border border-[#232d42] rounded-lg text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-[#f05e17]"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          {/* Access Mode Filter (Free vs Paid) */}
+          <div className="flex bg-[#121829] p-0.5 rounded-lg border border-[#1f283d]">
+            <button
+              onClick={() => setModeFilter('all')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                modeFilter === 'all' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All Modes ({stats.total})
+            </button>
+            <button
+              onClick={() => setModeFilter('free')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                modeFilter === 'free' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Free Mode ({stats.freeCount})
+            </button>
+            <button
+              onClick={() => setModeFilter('paid')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                modeFilter === 'paid' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Paid Mode ({stats.paidCount})
+            </button>
+          </div>
+
+          {/* Payment Method Filter */}
+          <div className="flex bg-[#121829] p-0.5 rounded-lg border border-[#1f283d]">
+            <button
+              onClick={() => setPaymentMethodFilter('all')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                paymentMethodFilter === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All Methods
+            </button>
+            <button
+              onClick={() => setPaymentMethodFilter('mpesa')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                paymentMethodFilter === 'mpesa' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              M-Pesa ({stats.mpesaCount})
+            </button>
+            <button
+              onClick={() => setPaymentMethodFilter('ecocash')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                paymentMethodFilter === 'ecocash' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              EcoCash ({stats.ecocashCount})
+            </button>
+            <button
+              onClick={() => setPaymentMethodFilter('ottvoucher')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                paymentMethodFilter === 'ottvoucher' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Direct OTT ({stats.ottDirectCount})
+            </button>
+            <button
+              onClick={() => setPaymentMethodFilter('free_wifi')}
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
+                paymentMethodFilter === 'free_wifi' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Free Wi-Fi ({stats.freeCount})
+            </button>
+          </div>
+
           {/* Country filter */}
           <div className="flex bg-[#121829] p-0.5 rounded-lg border border-[#1f283d]">
             <button
               onClick={() => setCountryFilter('all')}
               className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                countryFilter === 'all' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
+                countryFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
               All Regions
@@ -1401,7 +2160,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
             <button
               onClick={() => setCountryFilter('+266')}
               className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                countryFilter === '+266' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
+                countryFilter === '+266' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
               🇱🇸 (+266)
@@ -1409,38 +2168,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
             <button
               onClick={() => setCountryFilter('+27')}
               className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                countryFilter === '+27' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
+                countryFilter === '+27' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
               🇿🇦 (+27)
-            </button>
-          </div>
-
-          {/* Status filter */}
-          <div className="flex bg-[#121829] p-0.5 rounded-lg border border-[#1f283d]">
-            <button
-              onClick={() => setStatusFilter('all')}
-              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                statusFilter === 'all' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setStatusFilter('active')}
-              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                statusFilter === 'active' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Active
-            </button>
-            <button
-              onClick={() => setStatusFilter('expired')}
-              className={`px-2 py-1 rounded text-[11px] font-bold transition-colors ${
-                statusFilter === 'expired' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Expired
             </button>
           </div>
         </div>
@@ -1452,10 +2183,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           <thead>
             <tr className="bg-[#0a0e17] text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#1b233a]">
               <th className="py-2.5 px-3">GUEST SUBSCRIBER</th>
-              <th className="py-2.5 px-3">MOBILE NUMBER</th>
-              <th className="py-2.5 px-3">VERIFIED EMAIL</th>
-              <th className="py-2.5 px-3">HOTSPOT &amp; SCOPE</th>
-              <th className="py-2.5 px-3">DEVICE &amp; IP</th>
+              <th className="py-2.5 px-3">MOBILE &amp; EMAIL</th>
+              <th className="py-2.5 px-3">MODE &amp; PAYMENT METHOD</th>
+              <th className="py-2.5 px-3">PACKAGE &amp; PRICE</th>
+              <th className="py-2.5 px-3">HOTSPOT LOCATION &amp; ROUTER</th>
               <th className="py-2.5 px-3">CAPTURED</th>
               <th className="py-2.5 px-3">SESSION LEASE</th>
               <th className="py-2.5 px-3 text-right">ACTIONS</th>
@@ -1471,6 +2202,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                 const remainingMins = activeSession 
                   ? Math.max(0, Math.round(activeSession.remainingSeconds / 60))
                   : 0;
+                const comm = resolveLeadCommercial(lead);
 
                 return (
                   <tr key={lead.id} className="hover:bg-[#121829]/60 transition-colors">
@@ -1484,14 +2216,14 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                           <div className="text-white font-bold flex items-center gap-1.5">
                             <span>{lead.fullName}</span>
                           </div>
-                          <div className="text-[10px] text-slate-400">
-                            {lead.firstName} · {lead.lastName}
+                          <div className="text-[10px] text-slate-500">
+                            MAC: {lead.clientMac} · {lead.deviceType}
                           </div>
                         </div>
                       </div>
                     </td>
 
-                    {/* Mobile Number */}
+                    {/* Mobile & Email */}
                     <td className="py-2.5 px-3">
                       <div className="flex items-center gap-1.5 font-bold text-cyan-300">
                         <span>{lead.countryCode === '+266' ? '🇱🇸' : '🇿🇦'}</span>
@@ -1504,51 +2236,73 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                           <Phone className="w-3 h-3" />
                         </button>
                       </div>
-                      <div className="text-[10px] text-slate-500">
-                        {lead.countryCode === '+266' ? '8-digit Lesotho format' : 'Standard 10-digit SA'}
+                      <div className="flex items-center gap-1 text-[10px] text-amber-300/90 mt-0.5">
+                        <Mail className="w-2.5 h-2.5 text-amber-400/80 shrink-0" />
+                        <span className="truncate max-w-[165px]">{lead.email || 'Optional (Not entered)'}</span>
                       </div>
                     </td>
 
-                    {/* Verified Email */}
+                    {/* Access Mode & Payment Method */}
                     <td className="py-2.5 px-3">
-                      <div className="flex items-center gap-1.5 text-amber-300 font-mono">
-                        <Mail className="w-3 h-3 text-amber-400/80 shrink-0" />
-                        <span className="truncate max-w-[180px]">{lead.email}</span>
-                        <button
-                          onClick={() => handleCopy(lead.email, 'email')}
-                          className="text-slate-500 hover:text-white"
-                          title="Copy email address"
+                      <div className="flex flex-col items-start gap-1">
+                        {comm.accessType === 'paid' ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            <span>PAID MODE</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                            <span>FREE MODE</span>
+                          </span>
+                        )}
+                        <span
+                          className={`text-[11px] font-bold ${
+                            comm.paymentMethod === 'mpesa'
+                              ? 'text-rose-400'
+                              : comm.paymentMethod === 'ecocash'
+                              ? 'text-blue-400'
+                              : comm.paymentMethod === 'ottvoucher'
+                              ? 'text-amber-300'
+                              : 'text-slate-300'
+                          }`}
                         >
-                          {copiedText === lead.email ? <Check className="w-3 h-3 text-emerald-400" /> : <ExternalLink className="w-3 h-3" />}
-                        </button>
-                      </div>
-                      <div className="text-[10px] text-slate-500 flex items-center gap-1">
-                        <Check className="w-2.5 h-2.5 text-emerald-400" />
-                        <span>Contains @ and domain .</span>
-                      </div>
-                    </td>
-
-                    {/* Hotspot & Scope (Place Connected) */}
-                    <td className="py-2.5 px-3 text-slate-300">
-                      <div className="text-white font-bold flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#f05e17] shrink-0" />
-                        <span>{lead.siteName || 'Maseru Hotspot'}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                        <span>Node: {lead.routerName}</span>
-                        <span className="px-1 py-0.2 rounded bg-slate-800 text-[9px] capitalize text-slate-300">
-                          {lead.vertical}
+                          {comm.paymentMethodLabel}
                         </span>
                       </div>
                     </td>
 
-                    {/* Device & IP */}
-                    <td className="py-2.5 px-3 text-[11px] font-mono">
-                      <div className="text-slate-300">{lead.clientMac}</div>
-                      <div className="text-[10px] text-slate-500 flex items-center gap-1">
-                        <span>{lead.clientIp}</span>
-                        <span>·</span>
-                        <span className="truncate max-w-[110px]">{lead.deviceType}</span>
+                    {/* Package & Price */}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-baseline gap-1.5">
+                        <span
+                          className={`text-sm font-black tabular-nums ${
+                            comm.amount > 0 ? 'text-emerald-400' : 'text-cyan-300'
+                          }`}
+                        >
+                          M{comm.amount.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-slate-500">{comm.currency}</span>
+                      </div>
+                      <div className="text-[10px] text-white font-semibold truncate max-w-[175px]">
+                        {comm.planName}
+                      </div>
+                      {comm.voucherPin && (
+                        <div className="text-[9px] text-amber-300/90 font-mono truncate max-w-[175px]">
+                          OTT PIN: {comm.voucherPin}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Hotspot Location & Router */}
+                    <td className="py-2.5 px-3 text-slate-300">
+                      <div className="text-white font-bold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#f05e17] shrink-0" />
+                        <span>{comm.siteName}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                        <span>Router: {comm.routerName}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-slate-800 text-[9px] text-amber-300 border border-slate-700">
+                          {comm.district}
+                        </span>
                       </div>
                     </td>
 
@@ -1568,10 +2322,14 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                           <span>
                             {isLive && remainingMins > 0 && activeSession?.authMode !== 'free'
                               ? `Live (${remainingMins}m left)`
-                              : 'Unlimited (Forever)'}
+                              : comm.accessType === 'paid'
+                              ? 'Paid OTT Active'
+                              : 'Free Wi-Fi Active'}
                           </span>
                         </span>
-                        <div className="text-[9px] text-slate-500">Free Unlimited Wi-Fi</div>
+                        <div className="text-[9px] text-slate-500">
+                          {comm.accessType === 'paid' ? comm.paymentMethodLabel : 'Step 1 Lead → Step 2 Free Login'}
+                        </div>
                       </div>
                     </td>
 
@@ -1581,10 +2339,10 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                         <button
                           onClick={() => handleRegrantFreeSession(lead)}
                           className="px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold transition-colors flex items-center gap-1"
-                          title="Refresh unlimited free Wi-Fi session"
+                          title="Refresh guest Wi-Fi session"
                         >
                           <Zap className="w-3 h-3 fill-current" />
-                          <span>Unlimited Active</span>
+                          <span>Authorize</span>
                         </button>
 
                         <button
@@ -1633,12 +2391,12 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
                 <td colSpan={8} className="py-8 text-center text-slate-500 font-mono text-xs">
                   <div className="max-w-xs mx-auto space-y-2">
                     <UserCheck className="w-8 h-8 text-slate-600 mx-auto" />
-                    <div>No guest leads matching current filters.</div>
+                    <div>No guest leads or transactions matching current filters.</div>
                     <button
                       onClick={handleSeedSampleLead}
                       className="px-3 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg text-xs"
                     >
-                      Generate Sample Verified Lead
+                      Generate Sample Lead / Transaction
                     </button>
                   </div>
                 </td>

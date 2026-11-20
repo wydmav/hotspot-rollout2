@@ -558,17 +558,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     releaseAndCloseSplash();
   };
 
-  // Guest Input Validation
-  const isFirstNameValid = !currentConfig.collectName || guestFirstName.trim().length >= 2;
-  const isSurnameValid = !currentConfig.collectName || guestSurname.trim().length >= 2;
+  // Guest Input Validation (First Name, Surname, and 8-digit Lesotho mobile required; Email optional)
+  const isFirstNameValid = guestFirstName.trim().length >= 2;
+  const isSurnameValid = guestSurname.trim().length >= 2;
   const cleanPhoneDigits = guestPhone.replace(/\D/g, '');
-  const isPhoneValid = !currentConfig.collectPhone || (
+  const isPhoneValid =
     guestCountryCode === '+266'
       ? /^[56]\d{7}$/.test(cleanPhoneDigits)
-      : (cleanPhoneDigits.startsWith('0') ? cleanPhoneDigits.length === 10 : cleanPhoneDigits.length === 9)
-  );
-  const emailValidation = validateEmailAddress(guestEmail, Boolean(currentConfig.collectEmail));
-  const isEmailValid = !currentConfig.collectEmail || emailValidation.isValid;
+      : cleanPhoneDigits.startsWith('0')
+      ? cleanPhoneDigits.length === 10
+      : cleanPhoneDigits.length === 9;
+  const emailValidation = validateEmailAddress(guestEmail, false);
+  const isEmailValid = !guestEmail.trim() || emailValidation.isValid;
   const isGuestFormValid = isFirstNameValid && isSurnameValid && isPhoneValid && isEmailValid;
 
   const handleGuestPhoneChange = (rawVal: string, cc: '+266' | '+27' = guestCountryCode) => {
@@ -591,7 +592,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   };
 
   const syncGuestSessionToAdmin = async (payload: {
-    mode: 'free' | 'voucher' | 'ecocash' | 'ottvoucher' | 'paylesotho';
+    mode: 'free' | 'voucher' | 'mpesa' | 'ecocash' | 'ottvoucher' | 'paylesotho';
+    paymentChannel?: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi';
     planName: string;
     durationSeconds: number;
     voucherCode: string;
@@ -602,6 +604,26 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     const fullGuestName = [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'Guest User';
     const fullGuestPhone = guestPhone.trim() ? `${guestCountryCode} ${guestPhone.trim()}` : '';
     const sessionId = `sess_${payload.mode}_${Date.now()}`;
+    const isPaid = payload.mode !== 'free' || (Number(payload.amount) || 0) > 0;
+    const resolvedPaymentMethod: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi' =
+      payload.paymentChannel ||
+      (payload.mode === 'mpesa'
+        ? 'mpesa'
+        : payload.mode === 'ecocash'
+        ? 'ecocash'
+        : payload.mode === 'ottvoucher'
+        ? 'ottvoucher'
+        : payload.mode === 'paylesotho'
+        ? payLesothoChannel
+        : 'free_wifi');
+    const resolvedPaymentLabel =
+      resolvedPaymentMethod === 'mpesa'
+        ? 'M-Pesa (OTT Voucher)'
+        : resolvedPaymentMethod === 'ecocash'
+        ? 'EcoCash (OTT Voucher)'
+        : resolvedPaymentMethod === 'ottvoucher'
+        ? 'Direct 16-Digit OTT Voucher'
+        : 'Free Mode Wi-Fi';
 
     try {
       storage.addActiveSession({
@@ -627,6 +649,55 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     } catch {}
 
     try {
+      storage.addCaptiveLead({
+        id: `lead_${Date.now()}`,
+        fullName: fullGuestName,
+        firstName: guestFirstName.trim(),
+        lastName: guestSurname.trim(),
+        countryCode: guestCountryCode,
+        phone: fullGuestPhone.replace(/^\+266\s*/, '').replace(/^\+27\s*/, ''),
+        fullPhone: fullGuestPhone,
+        email: guestEmail.trim(),
+        mac: clientMac || 'Client-Device',
+        ip: clientIp || '10.10.0.x',
+        clientMac: clientMac || 'Client-Device',
+        clientIp: clientIp || '10.10.0.x',
+        deviceType: 'Mobile Device',
+        scope: activeScope,
+        vertical: activeScope,
+        siteName: currentConfig.brandTitle || 'T-Connect Hotspot',
+        routerName: 'MIKROTIK-TC',
+        district: 'Maseru',
+        venuePurchasedAt: `${currentConfig.brandTitle || 'T-Connect Hotspot'} (MIKROTIK-TC)`,
+        durationMinutes: Math.max(60, Math.round((payload.durationSeconds || 86400) / 60)),
+        status: 'active',
+        mode:
+          resolvedPaymentMethod === 'mpesa'
+            ? 'mpesa'
+            : resolvedPaymentMethod === 'ecocash'
+            ? 'ecocash'
+            : resolvedPaymentMethod === 'ottvoucher'
+            ? 'ottvoucher'
+            : 'free',
+        accessType: isPaid ? 'paid' : 'free',
+        paymentMethod: resolvedPaymentMethod,
+        paymentMethodLabel: resolvedPaymentLabel,
+        planName: payload.planName,
+        amount: Number(payload.amount) || 0,
+        currency: 'M',
+        voucherCode: payload.voucherCode || undefined,
+        ottVoucherPin: payload.voucherCode || undefined,
+        transactionRef: payload.transactionRef,
+        termsAccepted: isTermsSatisfied,
+        marketingOptIn: true,
+        sponsorCampaign: activeVideoAd?.sponsorName || currentConfig.brandTitle || 'T-Connect Hotspot',
+        roamedSites: [currentConfig.brandTitle || 'T-Connect Hotspot'],
+        capturedAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString()
+      });
+    } catch {}
+
+    try {
       await fetch('/api/portal/guest-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -644,7 +715,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           scope: activeScope,
           siteName: currentConfig.brandTitle || 'T-Connect Hotspot',
           routerName: 'MIKROTIK-TC',
-          mode: payload.mode,
+          mode:
+            resolvedPaymentMethod === 'mpesa'
+              ? 'mpesa'
+              : resolvedPaymentMethod === 'ecocash'
+              ? 'ecocash'
+              : resolvedPaymentMethod === 'ottvoucher'
+              ? 'ottvoucher'
+              : 'free',
+          accessType: isPaid ? 'paid' : 'free',
+          paymentMethod: resolvedPaymentMethod,
+          paymentChannel: resolvedPaymentMethod,
           planName: payload.planName,
           durationSeconds: payload.durationSeconds,
           voucherCode: payload.voucherCode,
@@ -690,6 +771,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
     await syncGuestSessionToAdmin({
       mode: 'free',
+      paymentChannel: 'free_wifi',
       planName: `Free Wi-Fi (${freeBadge})`,
       durationSeconds: freeDurationSecs,
       voucherCode: '',
@@ -704,18 +786,62 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     startOrEnterConnectedSession();
   };
 
-  // Step 1 -> Step 2 transition in Paid Mode
+  // Step 1 -> Step 2 transition in BOTH Free Mode and Paid Mode
   const handleProceedToStep2 = (e: React.FormEvent) => {
     e.preventDefault();
     setPaymentError(null);
-    if (!isGuestFormValid) {
-      setPaymentError('Please enter your First name, Surname, and valid 8-digit Lesotho mobile number (starts with 5 or 6).');
+    if (!isFirstNameValid || !isSurnameValid) {
+      setPaymentError('Please enter your First name and Surname.');
+      return;
+    }
+    if (!isPhoneValid) {
+      setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+      return;
+    }
+    if (!isEmailValid) {
+      setPaymentError('Please enter a valid email address or leave email blank.');
       return;
     }
     if (!isTermsSatisfied) {
       setPaymentError('Please agree to the Terms and Conditions to continue.');
       return;
     }
+
+    // In Free Mode, immediately capture the guest lead on Step 1 before revealing the full-wallpaper "Login for free" Step 2 screen
+    if (isFreeAccessAllowed) {
+      const freeDurationMins = Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440);
+      const freeBadge = formatFreeDurationBadge(freeDurationMins);
+      const fullGuestName = [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'Guest User';
+      const fullGuestPhone = `${guestCountryCode} ${guestPhone.trim()}`;
+
+      fetch('/api/portal/guest-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: guestFirstName.trim(),
+          lastName: guestSurname.trim(),
+          guestName: fullGuestName,
+          countryCode: guestCountryCode,
+          phone: guestPhone.trim(),
+          guestPhone: fullGuestPhone,
+          email: guestEmail.trim(),
+          mac: clientMac,
+          ip: clientIp,
+          scope: activeScope,
+          siteName: currentConfig.brandTitle || 'T-Connect Hotspot',
+          routerName: 'MIKROTIK-TC',
+          mode: 'free',
+          accessType: 'free',
+          paymentMethod: 'free_wifi',
+          planName: `Free Wi-Fi (${freeBadge})`,
+          durationSeconds: freeDurationMins * 60,
+          amount: 0,
+          termsAccepted: isTermsSatisfied,
+          sponsorCampaign: activeVideoAd?.sponsorName || currentConfig.brandTitle || 'T-Connect Hotspot'
+        })
+      }).catch(() => {});
+    }
+
     setPaidSubStep('package');
   };
 
@@ -769,12 +895,15 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           expectedAmount: expectedPrice,
           flexibleAmount: true,
           requireCopiedFirst: true,
+          paymentChannel: payLesothoChannel,
           planId: selectedPlan?.id || 'hs_1d',
           planName: resolvedPlanTitle,
           durationSeconds: resolvedDurationSec,
           mac: clientMac,
           ip: clientIp,
           scope: activeScope,
+          siteName: currentConfig.brandTitle || 'T-Connect Hotspot',
+          routerName: 'MIKROTIK-TC',
           firstName: guestFirstName.trim(),
           lastName: guestSurname.trim(),
           guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'T-Connect Guest',
@@ -797,7 +926,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       const formattedIssuedPin = `${cleanPinToRedeem.slice(0, 4)}-${cleanPinToRedeem.slice(4, 8)}-${cleanPinToRedeem.slice(8, 12)}-${cleanPinToRedeem.slice(12, 16)}`;
 
       await syncGuestSessionToAdmin({
-        mode: 'paylesotho',
+        mode: payLesothoChannel === 'ecocash' ? 'ecocash' : 'mpesa',
+        paymentChannel: payLesothoChannel,
         planName: resolvedPlanTitle,
         durationSeconds: resolvedDurationSec,
         voucherCode: formattedIssuedPin,
@@ -1303,14 +1433,14 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           {/* Minimal or Zero Darken Overlay so Background Wallpaper is maximally visible */}
           <div
             className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-            style={{ opacity: isFreeAccessAllowed ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
+            style={{ opacity: isFreeAccessAllowed && paidSubStep === 'package' ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
           />
 
           {/* ================================================================= */}
-          {/* PURE FREE ACCESS MODE: Single Repositionable "Login for free"     */}
-          {/* Button Floating Over Wallpaper                                    */}
+          {/* FREE ACCESS MODE STEP 2: Full-Screen Wallpaper with Floating      */}
+          {/* "Login for free" Button (shown after Step 1 Lead Capture)         */}
           {/* ================================================================= */}
-          {isFreeAccessAllowed ? (
+          {isFreeAccessAllowed && paidSubStep === 'package' ? (
             <div
               className="absolute z-20 w-[86%] max-w-[360px]"
               style={{
@@ -1325,6 +1455,18 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   <span>{statusBanner}</span>
                 </div>
               )}
+              <div className="mb-2 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaidSubStep('details');
+                    setPaymentError(null);
+                  }}
+                  className="px-3 py-1 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 text-white text-[11px] font-bold backdrop-blur-md cursor-pointer transition-colors"
+                >
+                  &larr; Edit your details
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={handleConnectFree}
@@ -1337,9 +1479,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
             </div>
           ) : (
             /* ================================================================= */
-            /* COMPACT LIGHT-THEMED 2-STEP PAID CARD DOCKED AT THE BOTTOM        */
-            /* Top 58%-62% of screen is 100% open to showcase the wallpaper      */
-            /* No "Voucher | Buy Pass" tabs — Paid Mode is the default           */
+            /* COMPACT LIGHT-THEMED 2-STEP CARD DOCKED AT THE BOTTOM             */
+            /* Step 1: Enter your details (Used by BOTH Free Mode & Paid Mode)   */
+            /* Step 2 (Paid Mode): Choose a package & Pay with                   */
             /* ================================================================= */
             <div className="relative z-10 w-full max-w-[400px] mt-auto mb-0 px-2.5 pb-2.5 pt-2">
               <div className="bg-white/95 backdrop-blur-md text-slate-900 rounded-2xl p-3.5 shadow-[0_16px_42px_rgba(0,0,0,0.38)] border border-white/90">
@@ -1352,7 +1494,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                 {paidSubStep === 'details' ? (
                   /* ========================================================= */
-                  /* STEP 1: ENTER YOUR DETAILS                                */
+                  /* STEP 1: ENTER YOUR DETAILS (FREE MODE & PAID MODE)        */
                   /* ========================================================= */
                   <form onSubmit={handleProceedToStep2} className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -1364,103 +1506,97 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       </span>
                     </div>
 
-                    {currentConfig.collectName && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
-                            First name <span className="text-[#f05e17]">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={guestFirstName}
-                            onChange={(e) => {
-                              setGuestFirstName(e.target.value);
-                              setPaymentError(null);
-                            }}
-                            placeholder="First name"
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
-                            Surname <span className="text-[#f05e17]">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            required
-                            value={guestSurname}
-                            onChange={(e) => {
-                              setGuestSurname(e.target.value);
-                              setPaymentError(null);
-                            }}
-                            placeholder="Surname"
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {currentConfig.collectPhone && (
-                      <div>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <label className="text-[10px] font-bold text-slate-600">
-                            Mobile number <span className="text-[#f05e17]">*</span>
-                          </label>
-                          <span className="text-[9px] font-mono text-slate-400">
-                            {cleanPhoneDigits.length}/8 digits (5 = M-Pesa, 6 = EcoCash)
-                          </span>
-                        </div>
-                        <div className="flex items-center rounded-lg border border-slate-300 focus-within:border-[#f05e17] bg-white overflow-hidden">
-                          <select
-                            value={guestCountryCode}
-                            onChange={(e) => {
-                              const nextCc = e.target.value as '+266' | '+27';
-                              setGuestCountryCode(nextCc);
-                              setPhoneFormatError(null);
-                            }}
-                            className="px-2 py-1.5 bg-slate-100 border-r border-slate-300 text-slate-800 text-xs font-bold focus:outline-none cursor-pointer shrink-0"
-                          >
-                            <option value="+266">+266</option>
-                            <option value="+27">+27</option>
-                          </select>
-                          <input
-                            type="tel"
-                            inputMode="numeric"
-                            maxLength={guestCountryCode === '+266' ? 8 : 10}
-                            required
-                            value={guestPhone}
-                            onChange={(e) => {
-                              handleGuestPhoneChange(e.target.value, guestCountryCode);
-                              setPaymentError(null);
-                            }}
-                            placeholder="5xxxxxxx or 6xxxxxxx"
-                            className="w-full px-2.5 py-1.5 bg-white text-slate-900 text-xs font-mono placeholder:text-slate-400 focus:outline-none"
-                          />
-                        </div>
-                        {phoneFormatError && (
-                          <p className="text-[9px] text-amber-700 font-semibold mt-0.5">{phoneFormatError}</p>
-                        )}
-                      </div>
-                    )}
-
-                    {currentConfig.collectEmail && (
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
-                          Email address
+                          First name <span className="text-[#f05e17]">*</span>
                         </label>
                         <input
-                          type="email"
-                          value={guestEmail}
+                          type="text"
+                          required
+                          value={guestFirstName}
                           onChange={(e) => {
-                            setGuestEmail(e.target.value);
+                            setGuestFirstName(e.target.value);
                             setPaymentError(null);
                           }}
-                          placeholder="name@example.com"
+                          placeholder="First name"
                           className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
                         />
                       </div>
-                    )}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                          Surname <span className="text-[#f05e17]">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={guestSurname}
+                          onChange={(e) => {
+                            setGuestSurname(e.target.value);
+                            setPaymentError(null);
+                          }}
+                          placeholder="Surname"
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] font-bold text-slate-600">
+                          Mobile number <span className="text-[#f05e17]">*</span>
+                        </label>
+                        <span className="text-[9px] font-mono text-slate-400">
+                          {cleanPhoneDigits.length}/8 digits (5 = M-Pesa, 6 = EcoCash)
+                        </span>
+                      </div>
+                      <div className="flex items-center rounded-lg border border-slate-300 focus-within:border-[#f05e17] bg-white overflow-hidden">
+                        <select
+                          value={guestCountryCode}
+                          onChange={(e) => {
+                            const nextCc = e.target.value as '+266' | '+27';
+                            setGuestCountryCode(nextCc);
+                            setPhoneFormatError(null);
+                          }}
+                          className="px-2 py-1.5 bg-slate-100 border-r border-slate-300 text-slate-800 text-xs font-bold focus:outline-none cursor-pointer shrink-0"
+                        >
+                          <option value="+266">+266</option>
+                          <option value="+27">+27</option>
+                        </select>
+                        <input
+                          type="tel"
+                          inputMode="numeric"
+                          maxLength={guestCountryCode === '+266' ? 8 : 10}
+                          required
+                          value={guestPhone}
+                          onChange={(e) => {
+                            handleGuestPhoneChange(e.target.value, guestCountryCode);
+                            setPaymentError(null);
+                          }}
+                          placeholder="5xxxxxxx or 6xxxxxxx"
+                          className="w-full px-2.5 py-1.5 bg-white text-slate-900 text-xs font-mono placeholder:text-slate-400 focus:outline-none"
+                        />
+                      </div>
+                      {phoneFormatError && (
+                        <p className="text-[9px] text-amber-700 font-semibold mt-0.5">{phoneFormatError}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                        Email address (optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={guestEmail}
+                        onChange={(e) => {
+                          setGuestEmail(e.target.value);
+                          setPaymentError(null);
+                        }}
+                        placeholder="name@example.com"
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-300 focus:border-[#f05e17] rounded-lg text-slate-900 text-xs placeholder:text-slate-400 focus:outline-none"
+                      />
+                    </div>
 
                     {isTermsRequired && (
                       <div className="flex items-center gap-2 pt-0.5 text-[11px] text-slate-600">

@@ -853,8 +853,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
   // Builder sub-tabs: 'builder' | 'pricing' | 'appearance' | 'code'
   const [activeBuilderTab, setActiveBuilderTab] = useState<'builder' | 'pricing' | 'appearance' | 'code'>('builder');
 
-  // Preview Simulator State
-  const [previewStep, setPreviewStep] = useState<'identification' | 'voucher' | 'plan' | 'payment' | 'video_ad' | 'usage'>('identification');
+  // Preview Simulator State (Starts on Step 1 'voucher' = Enter your details for both Free Mode & Paid Mode)
+  const [previewStep, setPreviewStep] = useState<'identification' | 'voucher' | 'plan' | 'payment' | 'video_ad' | 'usage'>('voucher');
   const [deviceFrame, setDeviceFrame] = useState<'iphone' | 'android' | 'desktop'>('iphone');
   const [selectedPlanId, setSelectedPlanId] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<GatewayProvider>('ottvoucher');
@@ -1009,8 +1009,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
   // Auto-switch emulator step in real time when switching between Free Mode and Paid Mode
   useEffect(() => {
-    if (isFreeModeActive && (previewStep === 'voucher' || previewStep === 'plan' || previewStep === 'payment')) {
-      setPreviewStep('identification');
+    if (isFreeModeActive && (previewStep === 'plan' || previewStep === 'payment')) {
+      setPreviewStep('voucher');
     } else if (!isFreeModeActive && previewStep === 'identification') {
       setPreviewStep('voucher');
     }
@@ -1293,11 +1293,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       globalBurstUploadMbps,
       globalRateLimit: computedGlobalRateLimit
     });
-    if (!enableFree) {
-      setPreviewStep('voucher');
-    } else {
-      setPreviewStep('identification');
-    }
+    setPreviewStep('voucher');
     storage.setRouterAccessPolicy('all', {
       accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
       freeDurationMinutes: freeDurationMins,
@@ -3321,7 +3317,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             <div className="flex flex-wrap items-center gap-1">
               {([
                 ...(isFreeModeActive
-                  ? (['identification', 'video_ad'] as const)
+                  ? (['voucher', 'identification', 'video_ad'] as const)
                   : (['voucher', 'plan', 'video_ad'] as const))
               ] as const).map((step) => (
                 <button
@@ -3341,10 +3337,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       : 'text-slate-400 hover:text-white bg-[#121829]'
                   }`}
                 >
-                  {step === 'identification'
-                    ? 'Free Mode'
-                    : step === 'voucher'
+                  {step === 'voucher'
                     ? 'Step 1: Details'
+                    : step === 'identification'
+                    ? 'Step 2: Login Free'
                     : step === 'plan'
                     ? 'Step 2: Package & Pay'
                     : '🎬 Ad Slide'}
@@ -3468,10 +3464,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
               {/* Minimal or Zero Darken Overlay so Background Wallpaper is maximally visible */}
               <div
                 className="absolute inset-0 bg-black pointer-events-none transition-opacity"
-                style={{ opacity: isFreeModeActive ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
+                style={{ opacity: isFreeModeActive && previewStep === 'identification' ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
               />
 
-              {/* PURE 1-TAP "LOGIN FOR FREE" BUTTON FLOATING OVER WALLPAPER (When Free Access Mode is ON) */}
+              {/* FREE MODE STEP 2: FULL-WALLPAPER "LOGIN FOR FREE" BUTTON (Shown after Step 1 Lead Capture) */}
               {isFreeModeActive && previewStep === 'identification' && (
                 <div
                   style={{
@@ -3484,6 +3480,15 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     zIndex: 25
                   }}
                 >
+                  <div className="mb-1.5 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewStep('voucher')}
+                      className="px-2.5 py-0.5 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
+                    >
+                      &larr; Edit your details
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onPointerDown={(e) => {
@@ -3506,7 +3511,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     className={`w-full py-3.5 px-6 rounded-xl text-lg font-extrabold tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
                       isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
                     }`}
-                    title="Drag to reposition or click to test 1-tap Free Wi-Fi login"
+                    title="Drag to reposition or click to test Free Wi-Fi login"
                   >
                     <span>{currentConfig.freeButtonText || 'Login for free'}</span>
                   </button>
@@ -3644,7 +3649,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
               {/* Compact Light 2-Step Docked Portal Card (Maximizes Background Visibility, No "Voucher" Tab) */}
               {!(isFreeModeActive && previewStep === 'identification') && previewStep !== 'video_ad' && previewStep !== 'usage' && (
               <div className="relative z-10 w-full mt-auto mb-0 pb-2">
-                {/* STEP 1: ENTER YOUR DETAILS (Compact 2-Column First Name & Surname) */}
+                {/* STEP 1: ENTER YOUR DETAILS (Used in BOTH Free Mode and Paid Mode) */}
                 {(previewStep === 'voucher' || (!isFreeModeActive && previewStep === 'identification')) && (
                   <form
                     onSubmit={(e) => {
@@ -3664,6 +3669,79 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       }
                       setPreviewVoucherError(null);
                       setPreviewPayMethod(cleanPhone.startsWith('6') ? 'ecocash' : 'mpesa');
+
+                      if (isFreeModeActive) {
+                        const fullGuestName = `${guestFirstName.trim()} ${guestSurname.trim()}`;
+                        const fullGuestPhone = `+266 ${cleanPhone}`;
+                        const freeSite = activeRouter?.siteName || activeMeta.label;
+                        const freeRouter = activeRouter?.name || `${activeMeta.label} Hotspot`;
+                        try {
+                          storage.addCaptiveLead({
+                            id: `lead_free_${Date.now()}`,
+                            fullName: fullGuestName,
+                            firstName: guestFirstName.trim(),
+                            lastName: guestSurname.trim(),
+                            countryCode: '+266',
+                            phone: cleanPhone,
+                            fullPhone: fullGuestPhone,
+                            email: guestEmail.trim(),
+                            mac: '7A:91:02:11:44:99',
+                            ip: activeRouter?.wireguardIp || '10.89.1.45',
+                            clientMac: '7A:91:02:11:44:99',
+                            clientIp: activeRouter?.wireguardIp || '10.89.1.45',
+                            deviceType: 'Mobile Device',
+                            scope: selectedScope,
+                            vertical: selectedScope,
+                            siteName: freeSite,
+                            routerName: freeRouter,
+                            district: activeRouter?.district || 'Maseru',
+                            venuePurchasedAt: `${freeSite} (${freeRouter})`,
+                            durationMinutes: Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440),
+                            status: 'active',
+                            mode: 'free',
+                            accessType: 'free',
+                            paymentMethod: 'free_wifi',
+                            paymentMethodLabel: 'Free Mode Wi-Fi',
+                            planName: 'Free Mode Wi-Fi',
+                            amount: 0,
+                            currency: 'M',
+                            termsAccepted: true,
+                            marketingOptIn: true,
+                            sponsorCampaign: currentConfig.brandTitle || 'T-Connect Hotspot',
+                            roamedSites: [freeSite],
+                            capturedAt: new Date().toISOString(),
+                            lastSeenAt: new Date().toISOString()
+                          });
+                        } catch {}
+                        fetch('/api/portal/guest-connect', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            firstName: guestFirstName.trim(),
+                            lastName: guestSurname.trim(),
+                            guestName: fullGuestName,
+                            countryCode: '+266',
+                            phone: cleanPhone,
+                            guestPhone: fullGuestPhone,
+                            email: guestEmail.trim(),
+                            mac: '7A:91:02:11:44:99',
+                            ip: activeRouter?.wireguardIp || '10.89.1.45',
+                            scope: selectedScope,
+                            siteName: freeSite,
+                            routerName: freeRouter,
+                            mode: 'free',
+                            accessType: 'free',
+                            paymentMethod: 'free_wifi',
+                            planName: 'Free Mode Wi-Fi',
+                            amount: 0,
+                            durationSeconds: (Number(currentConfig.freeAccessDurationMinutes) || 1440) * 60
+                          })
+                        }).catch(() => {});
+                        setCapturedLeadsCount(storage.getCaptiveLeads().length);
+                        setPreviewStep('identification');
+                        return;
+                      }
+
                       if (!selectedPlanId && currentConfig.plans.length > 0) {
                         setSelectedPlanId(currentConfig.plans[0].id);
                       }
@@ -3743,20 +3821,18 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </div>
                       </div>
 
-                      {currentConfig.collectEmail && (
-                        <div>
-                          <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
-                            Email (optional)
-                          </label>
-                          <input
-                            type="email"
-                            value={guestEmail}
-                            onChange={(e) => setGuestEmail(e.target.value)}
-                            placeholder="name@example.com"
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-[11px] font-medium focus:outline-none focus:border-[#f05e17]"
-                          />
-                        </div>
-                      )}
+                      <div>
+                        <label className="block text-[9.5px] font-bold text-slate-600 mb-0.5">
+                          Email (optional)
+                        </label>
+                        <input
+                          type="email"
+                          value={guestEmail}
+                          onChange={(e) => setGuestEmail(e.target.value)}
+                          placeholder="name@example.com"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-[11px] font-medium focus:outline-none focus:border-[#f05e17]"
+                        />
+                      </div>
                     </div>
 
                     <button
