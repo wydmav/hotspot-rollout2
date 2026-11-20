@@ -136,17 +136,24 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [redeemTestResult, setRedeemTestResult] = useState<any>(null);
   const [isRedeemingTest, setIsRedeemingTest] = useState(false);
 
-  // Pull authoritative gateway credentials from server on mount
+  // Pull authoritative gateway credentials from server on mount (and reveal unmasked PayLesotho token without overwriting local token with masked bullets)
   React.useEffect(() => {
-    fetch('/api/gateways')
-      .then((r) => r.json())
-      .then((data) => {
+    const syncGatewaysFromServer = async () => {
+      try {
+        const [gwRes, revealPlRes, revealOttRes] = await Promise.all([
+          fetch('/api/gateways').then((r) => r.json()).catch(() => null),
+          fetch('/api/gateways/paylesotho/reveal-secret', { method: 'POST' }).then((r) => r.json()).catch(() => null),
+          fetch('/api/gateways/ottvoucher/reveal-secret', { method: 'POST' }).then((r) => r.json()).catch(() => null)
+        ]);
+        const data = gwRes;
         if (data?.success && Array.isArray(data.gateways)) {
           const srvOtt = data.gateways.find((g: any) => g.provider === 'ottvoucher');
           if (srvOtt) {
+            const unmaskedOttKey = revealOttRes?.unmasked?.apiKey || (!String(srvOtt.apiKey || '').includes('•') ? srvOtt.apiKey : '');
+            const unmaskedOttPass = revealOttRes?.unmasked?.apiPassword || (!String(srvOtt.apiPassword || '').includes('•') ? srvOtt.apiPassword : '');
             onUpdateCredentials('ottvoucher', {
-              apiKey: srvOtt.apiKey,
-              apiPassword: srvOtt.apiPassword,
+              ...(unmaskedOttKey ? { apiKey: unmaskedOttKey } : {}),
+              ...(unmaskedOttPass ? { apiPassword: unmaskedOttPass } : {}),
               username: srvOtt.username || srvOtt.merchantId || 'TCONNECTLES1',
               merchantId: srvOtt.merchantId || srvOtt.username || 'TCONNECTLES1',
               vendorId: srvOtt.vendorId || '1, 11',
@@ -155,22 +162,70 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               isLive: true
             });
             if (selectedGateway?.provider === 'ottvoucher') {
-              if (srvOtt.apiKey) setApiKey(srvOtt.apiKey);
-              if (srvOtt.apiPassword) setApiPassword(srvOtt.apiPassword);
+              if (unmaskedOttKey) setApiKey(unmaskedOttKey);
+              if (unmaskedOttPass) setApiPassword(unmaskedOttPass);
               if (srvOtt.merchantId || srvOtt.username) setMerchantId(srvOtt.merchantId || srvOtt.username);
               if (srvOtt.vendorId) setVendorId(srvOtt.vendorId);
               if (srvOtt.endpointUrl) setEndpointUrl(srvOtt.endpointUrl);
             }
           }
+
           const srvPl = data.gateways.find((g: any) => g.provider === 'paylesotho');
+          const localPl = gateways.find((g) => g.provider === 'paylesotho');
+          const localUnmaskedBearer = String(localPl?.bearerToken || localPl?.apiKey || '')
+            .replace(/^Bearer\s+/i, '')
+            .trim();
+          const hasLocalUnmaskedBearer = Boolean(localUnmaskedBearer && !localUnmaskedBearer.includes('•'));
+
+          const serverUnmaskedBearer = String(
+            revealPlRes?.unmasked?.bearerToken ||
+              revealPlRes?.unmasked?.apiKey ||
+              (!String(srvPl?.bearerToken || '').includes('•') ? srvPl?.bearerToken : '') ||
+              (!String(srvPl?.apiKey || '').includes('•') ? srvPl?.apiKey : '') ||
+              ''
+          )
+            .replace(/^Bearer\s+/i, '')
+            .trim();
+
+          const serverUnmaskedOttBearer = String(
+            revealPlRes?.unmasked?.ottBearerToken ||
+              (!String(srvPl?.ottBearerToken || '').includes('•') ? srvPl?.ottBearerToken : '') ||
+              serverUnmaskedBearer ||
+              ''
+          )
+            .replace(/^Bearer\s+/i, '')
+            .trim();
+
+          const resolvedPlBearer = serverUnmaskedBearer || (hasLocalUnmaskedBearer ? localUnmaskedBearer : DEFAULT_PL_BEARER);
+          const resolvedPlOttBearer =
+            serverUnmaskedOttBearer ||
+            (localPl?.ottBearerToken && !localPl.ottBearerToken.includes('•')
+              ? localPl.ottBearerToken.replace(/^Bearer\s+/i, '').trim()
+              : resolvedPlBearer);
+
+          // If browser localStorage has a real unmasked token that the server doesn't have yet, push it to the server
+          if (!serverUnmaskedBearer && resolvedPlBearer && !resolvedPlBearer.includes('•')) {
+            fetch('/api/gateways/paylesotho/credentials', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                apiKey: resolvedPlBearer,
+                bearerToken: resolvedPlBearer,
+                ottBearerToken: resolvedPlOttBearer || resolvedPlBearer,
+                merchantName: 'T-Connect',
+                merchantId: srvPl?.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915',
+                mpesaMerchantId: srvPl?.mpesaMerchantId && srvPl.mpesaMerchantId !== '00000' ? srvPl.mpesaMerchantId : '62915',
+                ecocashMerchantId: srvPl?.ecocashMerchantId && srvPl.ecocashMerchantId !== '00000' ? srvPl.ecocashMerchantId : '63165430',
+                endpointUrl: srvPl?.endpointUrl || 'https://api.paylesotho.co.ls',
+                isLive: true
+              })
+            }).catch(() => {});
+          }
+
           if (srvPl) {
-            const resolvedPlBearer = srvPl.bearerToken || srvPl.apiKey || DEFAULT_PL_BEARER;
-            const resolvedPlOttBearer = srvPl.ottBearerToken || resolvedPlBearer;
             onUpdateCredentials('paylesotho', {
-              apiKey: resolvedPlBearer,
-              apiSecret: srvPl.apiSecret || '',
-              bearerToken: resolvedPlBearer,
-              ottBearerToken: resolvedPlOttBearer,
+              ...(resolvedPlBearer ? { apiKey: resolvedPlBearer, bearerToken: resolvedPlBearer } : {}),
+              ...(resolvedPlOttBearer ? { ottBearerToken: resolvedPlOttBearer } : {}),
               username: 'T-Connect',
               merchantName: 'T-Connect',
               merchantId: srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915',
@@ -182,14 +237,17 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
               xpaymentsEndpointUrl: srvPl.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls',
               ottVoucherEndpointUrl: srvPl.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
               ottVoucherCheckUrl: srvPl.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check',
-              status: 'operational',
+              status: resolvedPlBearer ? 'operational' : 'not_configured',
               isLive: Boolean(srvPl.isLive ?? true)
             });
             if (selectedGateway?.provider === 'paylesotho') {
-              setApiKey(resolvedPlBearer);
-              if (srvPl.apiSecret) setApiSecret(srvPl.apiSecret);
-              setBearerToken(resolvedPlBearer);
-              setOttBearerToken(resolvedPlOttBearer);
+              if (resolvedPlBearer) {
+                setApiKey(resolvedPlBearer);
+                setBearerToken(resolvedPlBearer);
+              }
+              if (resolvedPlOttBearer) {
+                setOttBearerToken(resolvedPlOttBearer);
+              }
               setMerchantName('T-Connect');
               setMerchantId(srvPl.merchantId && srvPl.merchantId !== '00000' ? srvPl.merchantId : '62915');
               setMpesaMerchantId(srvPl.mpesaMerchantId && srvPl.mpesaMerchantId !== '00000' ? srvPl.mpesaMerchantId : '62915');
@@ -203,17 +261,22 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
             }
           }
         }
-      })
-      .catch(() => {});
+      } catch {}
+    };
+    syncGatewaysFromServer();
   }, []);
 
   const handleSelectGateway = (gw: GatewayConfig) => {
     setSelectedGateway(gw);
-    setApiKey(gw.apiKey || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
-    setApiSecret(gw.apiSecret || '');
-    setApiPassword(gw.apiPassword || '');
-    setBearerToken(gw.bearerToken || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
-    setOttBearerToken(gw.ottBearerToken || (gw.provider === 'paylesotho' ? DEFAULT_PL_BEARER : ''));
+    const cleanGwKey = String(gw.apiKey || '').replace(/^Bearer\s+/i, '').trim();
+    const cleanGwBearer = String(gw.bearerToken || '').replace(/^Bearer\s+/i, '').trim();
+    const cleanGwOttBearer = String(gw.ottBearerToken || '').replace(/^Bearer\s+/i, '').trim();
+
+    setApiKey(!cleanGwKey.includes('•') && cleanGwKey ? cleanGwKey : gw.provider === 'paylesotho' ? (!cleanGwBearer.includes('•') && cleanGwBearer ? cleanGwBearer : DEFAULT_PL_BEARER) : '');
+    setApiSecret(!String(gw.apiSecret || '').includes('•') ? gw.apiSecret || '' : '');
+    setApiPassword(!String(gw.apiPassword || '').includes('•') ? gw.apiPassword || '' : '');
+    setBearerToken(!cleanGwBearer.includes('•') && cleanGwBearer ? cleanGwBearer : gw.provider === 'paylesotho' ? (!cleanGwKey.includes('•') && cleanGwKey ? cleanGwKey : DEFAULT_PL_BEARER) : '');
+    setOttBearerToken(!cleanGwOttBearer.includes('•') && cleanGwOttBearer ? cleanGwOttBearer : gw.provider === 'paylesotho' ? (!cleanGwBearer.includes('•') && cleanGwBearer ? cleanGwBearer : DEFAULT_PL_BEARER) : '');
     setMerchantName(gw.merchantName || gw.username || 'T-Connect');
     setMerchantId(gw.merchantId || (gw.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915'));
     setMpesaMerchantId(gw.mpesaMerchantId || '62915');
@@ -231,11 +294,29 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
     setXpaymentsEndpointUrl(gw.xpaymentsEndpointUrl || 'https://xpayments.paylesotho.co.ls');
     setOttVoucherEndpointUrl(gw.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get');
     setOttVoucherCheckUrl(gw.ottVoucherCheckUrl || 'https://api.paylesotho.co.ls/ott/voucher/check');
-    setWebhookSecret(gw.webhookSecret || '');
+    setWebhookSecret(!String(gw.webhookSecret || '').includes('•') ? gw.webhookSecret || '' : '');
     setLogoUrl(gw.logoUrl || '');
     setTestResult(null);
     setRedeemTestResult(null);
     setActiveStep(1);
+
+    // Fetch unmasked credentials from backend when selecting a gateway
+    fetch(`/api/gateways/${gw.provider}/reveal-secret`, { method: 'POST' })
+      .then((r) => r.json())
+      .then((rev) => {
+        if (rev?.success && rev.unmasked) {
+          if (rev.unmasked.bearerToken) {
+            setBearerToken(rev.unmasked.bearerToken);
+            if (gw.provider === 'paylesotho') setApiKey(rev.unmasked.bearerToken);
+          } else if (rev.unmasked.apiKey) {
+            setApiKey(rev.unmasked.apiKey);
+          }
+          if (rev.unmasked.ottBearerToken) setOttBearerToken(rev.unmasked.ottBearerToken);
+          if (rev.unmasked.apiPassword) setApiPassword(rev.unmasked.apiPassword);
+          if (rev.unmasked.webhookSecret) setWebhookSecret(rev.unmasked.webhookSecret);
+        }
+      })
+      .catch(() => {});
   };
 
   const handleConfirmRemoveGateway = () => {
@@ -247,7 +328,9 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
 
   const handleSaveCredentials = async () => {
     if (!selectedGateway) return;
-    const cleanKey = apiKey.trim();
+    const cleanBearer = bearerToken.replace(/^Bearer\s+/i, '').trim();
+    const cleanKey = (selectedGateway.provider === 'paylesotho' ? (cleanBearer || apiKey) : apiKey).replace(/^Bearer\s+/i, '').trim();
+    const cleanOttBearer = (ottBearerToken.replace(/^Bearer\s+/i, '').trim() || cleanBearer || cleanKey);
     const cleanPass = apiPassword.trim();
     const cleanUser = (merchantId || (selectedGateway.provider === 'ottvoucher' ? 'TCONNECTLES1' : '62915')).trim();
     const cleanMerchantName = (merchantName || 'T-Connect').trim() || 'T-Connect';
@@ -256,6 +339,14 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       endpointUrl ||
       (selectedGateway.provider === 'paylesotho' ? 'https://api.paylesotho.co.ls' : 'https://api.ottlesotho.com')
     ).trim();
+
+    if (selectedGateway.provider === 'paylesotho' && (!cleanBearer || cleanBearer.includes('•'))) {
+      setTestResult({
+        success: false,
+        message: 'Please paste your real unmasked PayLesotho Bearer Token into Field 5 before saving.'
+      });
+      return;
+    }
 
     onUpdateCredentials(selectedGateway.provider, {
       apiKey: cleanKey,
@@ -268,8 +359,8 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       xpaymentsEndpointUrl: xpaymentsEndpointUrl.trim() || 'https://xpayments.paylesotho.co.ls',
       ottVoucherEndpointUrl: ottVoucherEndpointUrl.trim() || 'https://api.paylesotho.co.ls/api/ott/voucher/get',
       ottVoucherCheckUrl: ottVoucherCheckUrl.trim() || 'https://api.paylesotho.co.ls/ott/voucher/check',
-      bearerToken: bearerToken.trim(),
-      ottBearerToken: ottBearerToken.trim(),
+      bearerToken: cleanBearer,
+      ottBearerToken: cleanOttBearer,
       merchantId: cleanUser,
       mpesaMerchantId: (mpesaMerchantId || '62915').trim(),
       ecocashMerchantId: (ecocashMerchantId || '63165430').trim(),
@@ -290,8 +381,8 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
           body: JSON.stringify({
             apiKey: cleanKey,
             apiSecret: apiSecret.trim(),
-            bearerToken: bearerToken.trim(),
-            ottBearerToken: ottBearerToken.trim(),
+            bearerToken: cleanBearer,
+            ottBearerToken: cleanOttBearer,
             merchantName: cleanMerchantName,
             merchantId: cleanUser,
             mpesaMerchantId: (mpesaMerchantId || '62915').trim(),

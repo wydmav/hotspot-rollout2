@@ -918,24 +918,102 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
       return;
     }
+    if (payLesothoChannel === 'mpesa' && !cleanPhoneDigits.startsWith('5')) {
+      setPaymentError('Vodacom M-Pesa numbers in Lesotho must start with 5 (e.g. 58000000). For 6XXXXXXX numbers, select EcoCash.');
+      return;
+    }
+    if (payLesothoChannel === 'ecocash' && !cleanPhoneDigits.startsWith('6')) {
+      setPaymentError('Econet EcoCash numbers in Lesotho must start with 6 (e.g. 62000000). For 5XXXXXXX numbers, select M-Pesa.');
+      return;
+    }
 
     isConnectingRef.current = true;
     setIsConnecting(true);
 
     const purchaseAmount = Math.max(1, Number(selectedPlan?.price || 10));
     const purchasePlanName = selectedPlan?.name || `Daily Unlimited (M${purchaseAmount})`;
+    const purchaseDurationSeconds = Number(selectedPlan?.durationSeconds || 86400);
+    const clientTxId = `tx_pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
     setStatusBanner(
       payLesothoChannel === 'mpesa'
-        ? `USSD PIN prompt sent to ${guestCountryCode} ${guestPhone} — Enter your M-Pesa PIN on your phone...`
-        : `USSD PIN prompt sent to ${guestCountryCode} ${guestPhone} — Enter your EcoCash PIN on your phone...`
+        ? `Triggering Vodacom M-Pesa (62915) USSD PIN prompt on ${guestCountryCode} ${guestPhone} — Enter your M-Pesa PIN on your phone...`
+        : `Triggering Econet EcoCash (63165430) USSD PIN prompt on ${guestCountryCode} ${guestPhone} — Enter your EcoCash PIN on your phone...`
     );
+
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let settled = false;
+
+    const completeWithOttVoucher = (pinRaw: string, amtRaw: number, refRaw: string) => {
+      if (settled) return;
+      settled = true;
+      if (pollInterval) clearInterval(pollInterval);
+      const generatedPin = String(pinRaw || '').replace(/\D/g, '');
+      const voucherAmt = Number(amtRaw) || purchaseAmount;
+      setIssuedOttVoucherPin(generatedPin);
+      setIssuedOttVoucherAmount(voucherAmt);
+      setIssuedOttVoucherRef(refRaw || clientTxId);
+      setHasCopiedIssuedOttVoucher(false);
+      setRedeemIssuedPinInput('');
+      setIsConnecting(false);
+      isConnectingRef.current = false;
+      setStatusBanner(null);
+    };
+
+    const failPayment = (errMsg: string) => {
+      if (settled) return;
+      settled = true;
+      if (pollInterval) clearInterval(pollInterval);
+      setIsConnecting(false);
+      isConnectingRef.current = false;
+      setStatusBanner(null);
+      setPaymentError(errMsg || 'Payment initiation or verification failed via PayLesotho.');
+    };
+
+    // Start polling immediately using pre-assigned clientTxId so synchronous M-Pesa v2 and asynchronous EcoCash v2 are tracked in real time
+    let attempts = 0;
+    pollInterval = setInterval(async () => {
+      if (settled) {
+        if (pollInterval) clearInterval(pollInterval);
+        return;
+      }
+      attempts++;
+      try {
+        const pollRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(clientTxId)}`);
+        const pollData = await pollRes.json();
+        if (pollData.success && pollData.status === 'completed' && pollData.ottVoucherPin) {
+          completeWithOttVoucher(
+            pollData.ottVoucherPin,
+            Number(pollData.ottVoucherAmount) || purchaseAmount,
+            pollData.ottVoucherRef || pollData.reference || clientTxId
+          );
+        } else if (pollData.status === 'failed') {
+          failPayment(
+            pollData.failureReason ||
+              pollData.errorMessage ||
+              pollData.message ||
+              'USSD transaction was declined or failed.'
+          );
+        } else if (attempts > 75) {
+          failPayment(
+            pollData.failureReason ||
+              pollData.errorMessage ||
+              'Transaction was not approved with your PIN within 115 seconds.'
+          );
+        }
+      } catch {
+        if (attempts > 75) {
+          failPayment('Timed out waiting for PayLesotho USSD PIN confirmation.');
+        }
+      }
+    }, 1500);
 
     try {
       const response = await fetch('/api/gateways/paylesotho/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          transactionId: clientTxId,
           amount: purchaseAmount,
           channel: payLesothoChannel,
           phoneNumber: `${guestCountryCode} ${guestPhone.trim()}`,
@@ -943,6 +1021,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
           customerEmail: guestEmail.trim() || 'guest@tconnect.co.ls',
           planId: selectedPlan?.id || 'hs_1d',
           planName: purchasePlanName,
+          durationSeconds: purchaseDurationSeconds,
           clientMac,
           clientIp,
           vertical: activeScope,
@@ -952,71 +1031,29 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
       const data = await response.json().catch(() => ({ success: false, message: 'Invalid response from PayLesotho.' }));
       if (!response.ok || !data.success) {
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        setStatusBanner(null);
-        setPaymentError(sanitizePortalErrorMessage(data.error || data.message, 'Payment initiation failed via PayLesotho.'));
+        failPayment(
+          data.failureReason ||
+            data.errorMessage ||
+            data.message ||
+            data.error ||
+            'Payment initiation failed via PayLesotho.'
+        );
         return;
       }
 
       if (data.status === 'completed' && data.ottVoucherPin) {
-        const generatedPin = String(data.ottVoucherPin || '').replace(/\D/g, '');
-        const voucherAmt = Number(data.amount) || purchaseAmount;
-        setIssuedOttVoucherPin(generatedPin);
-        setIssuedOttVoucherAmount(voucherAmt);
-        setIssuedOttVoucherRef(data.reference || data.transactionId);
-        setHasCopiedIssuedOttVoucher(false);
-        setRedeemIssuedPinInput('');
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        setStatusBanner(null);
+        completeWithOttVoucher(data.ottVoucherPin, Number(data.amount) || purchaseAmount, data.reference || data.transactionId || clientTxId);
         return;
       }
 
-      setStatusBanner(data.message || 'USSD PIN prompt sent to your phone. Approve with your PIN to receive your 16-digit OTT Voucher...');
-
-      const txId = data.transactionId;
-      let attempts = 0;
-      const pollInterval = setInterval(async () => {
-        attempts++;
-        try {
-          const pollRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
-          const pollData = await pollRes.json();
-          if (pollData.success && pollData.status === 'completed') {
-            clearInterval(pollInterval);
-
-            const generatedPin = String(pollData.ottVoucherPin || '').replace(/\D/g, '');
-            const voucherAmt = Number(pollData.ottVoucherAmount) || selectedPlan?.price || 10;
-
-            setIssuedOttVoucherPin(generatedPin);
-            setIssuedOttVoucherAmount(voucherAmt);
-            setIssuedOttVoucherRef(pollData.ottVoucherRef || data.reference || txId);
-            setHasCopiedIssuedOttVoucher(false);
-            setRedeemIssuedPinInput('');
-            setIsConnecting(false);
-            isConnectingRef.current = false;
-            setStatusBanner(null);
-          } else if (pollData.status === 'failed' || attempts > 25) {
-            clearInterval(pollInterval);
-            setIsConnecting(false);
-            isConnectingRef.current = false;
-            setStatusBanner(null);
-            setPaymentError(sanitizePortalErrorMessage(pollData.errorMessage, 'Transaction was not approved within the allotted time.'));
-          }
-        } catch {
-          if (attempts > 25) {
-            clearInterval(pollInterval);
-            setIsConnecting(false);
-            isConnectingRef.current = false;
-            setStatusBanner(null);
-          }
-        }
-      }, 1500);
+      setStatusBanner(
+        data.message ||
+          'USSD PIN prompt sent to your phone. Approve with your PIN to receive your 16-digit OTT Voucher...'
+      );
     } catch {
-      setIsConnecting(false);
-      isConnectingRef.current = false;
-      setStatusBanner(null);
-      setPaymentError('Network error communicating with PayLesotho gateway.');
+      if (!settled) {
+        failPayment('Network error communicating with PayLesotho gateway.');
+      }
     }
   };
 

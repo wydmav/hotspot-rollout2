@@ -4012,19 +4012,29 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                               await handleSimulatePayment();
                               return;
                             }
-                            const cleanPh = guestPhone.replace(/\D/g, '');
+                            const cleanPh = guestPhone.replace(/\D/g, '').slice(-8);
                             if (!/^[56]\d{7}$/.test(cleanPh)) {
-                              setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 or 6.');
+                              setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+                              return;
+                            }
+                            if (previewPayMethod === 'mpesa' && !cleanPh.startsWith('5')) {
+                              setPaymentError('Vodacom M-Pesa numbers in Lesotho must start with 5 (e.g. 58000000).');
+                              return;
+                            }
+                            if (previewPayMethod === 'ecocash' && !cleanPh.startsWith('6')) {
+                              setPaymentError('Econet EcoCash numbers in Lesotho must start with 6 (e.g. 62000000).');
                               return;
                             }
                             setPaymentError(null);
                             setPreviewUssdSent(true);
                             setIsVerifyingPayment(true);
+                            const clientTxId = `tx_pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
                             try {
                               const res = await fetch('/api/gateways/paylesotho/initiate', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
+                                  transactionId: clientTxId,
                                   firstName: guestFirstName || 'Hotspot',
                                   lastName: guestSurname || 'Guest',
                                   phoneNumber: cleanPh,
@@ -4038,22 +4048,49 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                 })
                               });
                               const data = await res.json().catch(() => ({ success: false }));
-                              setIsVerifyingPayment(false);
-                              if (data && data.ottVoucherPin) {
+                              if (!res.ok || !data?.success) {
+                                setIsVerifyingPayment(false);
+                                setPreviewUssdSent(false);
+                                setPaymentError(
+                                  data?.failureReason ||
+                                    data?.errorMessage ||
+                                    data?.message ||
+                                    'Unable to initiate USSD PIN push.'
+                                );
+                                return;
+                              }
+                              if (data.ottVoucherPin) {
+                                setIsVerifyingPayment(false);
                                 setPreviewIssuedOttPin(String(data.ottVoucherPin).replace(/\D/g, ''));
                                 setPreviewCopiedOtt(false);
-                              } else if (data && data.transactionId) {
-                                setTimeout(async () => {
-                                  const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(data.transactionId)}`);
-                                  const stData = await stRes.json().catch(() => ({}));
-                                  if (stData && stData.ottVoucherPin) {
-                                    setPreviewIssuedOttPin(String(stData.ottVoucherPin).replace(/\D/g, ''));
-                                  }
-                                }, 1500);
-                              } else {
-                                setPaymentError(sanitizeEmulatorError(data?.message, 'Unable to initiate USSD PIN push.'));
-                                setPreviewUssdSent(false);
+                                return;
                               }
+                              const txId = data.transactionId || clientTxId;
+                              for (let i = 0; i < 65; i++) {
+                                await new Promise((r) => setTimeout(r, 1500));
+                                const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
+                                const stData = await stRes.json().catch(() => ({}));
+                                if (stData?.status === 'completed' && stData?.ottVoucherPin) {
+                                  setIsVerifyingPayment(false);
+                                  setPreviewIssuedOttPin(String(stData.ottVoucherPin).replace(/\D/g, ''));
+                                  setPreviewCopiedOtt(false);
+                                  return;
+                                }
+                                if (stData?.status === 'failed') {
+                                  setIsVerifyingPayment(false);
+                                  setPreviewUssdSent(false);
+                                  setPaymentError(
+                                    stData?.failureReason ||
+                                      stData?.errorMessage ||
+                                      stData?.message ||
+                                      'USSD payment was declined or failed.'
+                                  );
+                                  return;
+                                }
+                              }
+                              setIsVerifyingPayment(false);
+                              setPreviewUssdSent(false);
+                              setPaymentError('Timed out waiting for USSD PIN entry.');
                             } catch {
                               setIsVerifyingPayment(false);
                               setPreviewUssdSent(false);

@@ -537,13 +537,28 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
     }
 
     // PayLesotho (Vodacom M-Pesa 62915 / Econet EcoCash 63165430 under Merchant T-Connect) -> Issues 16-Digit OTT Voucher
+    const clean8 = guestPhone.replace(/\D/g, '').slice(-8);
+    if (!/^[56]\d{7}$/.test(clean8)) {
+      setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+      return;
+    }
+    if (paylesothoChannel === 'mpesa' && !clean8.startsWith('5')) {
+      setPaymentError('Vodacom M-Pesa numbers in Lesotho must start with 5 (e.g. 58000000).');
+      return;
+    }
+    if (paylesothoChannel === 'ecocash' && !clean8.startsWith('6')) {
+      setPaymentError('Econet EcoCash numbers in Lesotho must start with 6 (e.g. 62000000).');
+      return;
+    }
+
     setIsProcessing(true);
+    const clientTxId = `tx_pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     try {
-      const clean8 = guestPhone.replace(/\D/g, '').slice(-8) || (paylesothoChannel === 'mpesa' ? '58000000' : '62000000');
       const initRes = await fetch('/api/gateways/paylesotho/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          transactionId: clientTxId,
           amount: selectedPlan?.price || 10,
           phoneNumber: clean8,
           channel: paylesothoChannel,
@@ -559,7 +574,12 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
       const initData = await initRes.json().catch(() => ({ success: false }));
       if (!initRes.ok || !initData.success) {
         setIsProcessing(false);
-        setPaymentError(initData.message || 'Failed to initiate PayLesotho payment.');
+        setPaymentError(
+          initData.failureReason ||
+            initData.errorMessage ||
+            initData.message ||
+            'Failed to initiate PayLesotho payment.'
+        );
         return;
       }
 
@@ -573,9 +593,9 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
       }
 
       // Poll /api/gateways/paylesotho/status/:transactionId for completion & 16-digit OTT Voucher PIN
-      const txId = initData.transactionId;
-      for (let i = 0; i < 6; i++) {
-        await new Promise((r) => setTimeout(r, 1200));
+      const txId = initData.transactionId || clientTxId;
+      for (let i = 0; i < 65; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
         const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
         const stData = await stRes.json().catch(() => ({}));
         if (stData?.status === 'completed' && stData?.ottVoucherPin) {
@@ -586,8 +606,19 @@ Rea leboha ka ho ba karolo ea rona, natefeloa ke khokahano ea mahala ea marang-r
           setIsProcessing(false);
           return;
         }
+        if (stData?.status === 'failed') {
+          setIsProcessing(false);
+          setPaymentError(
+            stData.failureReason ||
+              stData.errorMessage ||
+              stData.message ||
+              'USSD payment was declined or failed.'
+          );
+          return;
+        }
       }
       setIsProcessing(false);
+      setPaymentError('Timed out waiting for USSD PIN confirmation on your handset.');
     } catch {
       setIsProcessing(false);
       setPaymentError('Unable to reach PayLesotho payment gateway.');

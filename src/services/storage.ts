@@ -2482,15 +2482,42 @@ class StorageService {
     const gw = this.state.gateways.find((g) => g.provider === provider);
     if (!gw) return;
 
-    const isCredentialChange =
-      updates.apiKey !== undefined ||
-      updates.apiPassword !== undefined ||
-      updates.vendorId !== undefined ||
-      updates.endpointUrl !== undefined ||
-      updates.merchantId !== undefined;
+    const cleanUpdates: Partial<GatewayConfig> = { ...updates };
+    const secretFields = ['apiKey', 'apiSecret', 'apiPassword', 'bearerToken', 'ottBearerToken', 'webhookSecret'] as const;
+    for (const field of secretFields) {
+      const val = cleanUpdates[field];
+      if (typeof val === 'string') {
+        const stripped = val.replace(/^Bearer\s+/i, '').trim();
+        if (stripped.includes('•')) {
+          delete cleanUpdates[field];
+        } else {
+          cleanUpdates[field] = stripped;
+        }
+      }
+    }
+    delete (cleanUpdates as any).secretsMasked;
 
-    Object.assign(gw, updates);
-    if (provider === 'ottvoucher' && gw.apiKey && gw.apiPassword) {
+    const isCredentialChange =
+      cleanUpdates.apiKey !== undefined ||
+      cleanUpdates.apiPassword !== undefined ||
+      cleanUpdates.bearerToken !== undefined ||
+      cleanUpdates.vendorId !== undefined ||
+      cleanUpdates.endpointUrl !== undefined ||
+      cleanUpdates.merchantId !== undefined;
+
+    Object.assign(gw, cleanUpdates);
+    delete (gw as any).secretsMasked;
+
+    if (provider === 'paylesotho') {
+      const activeBearer = String(gw.bearerToken || gw.apiKey || '').replace(/^Bearer\s+/i, '').trim();
+      if (activeBearer && !activeBearer.includes('•')) {
+        gw.bearerToken = activeBearer;
+        gw.apiKey = activeBearer;
+        if (!gw.ottBearerToken || gw.ottBearerToken.includes('•')) {
+          gw.ottBearerToken = activeBearer;
+        }
+      }
+    } else if (provider === 'ottvoucher' && gw.apiKey && gw.apiPassword) {
       gw.isLive = true;
       gw.isSandbox = false;
       gw.status = 'operational';
@@ -2510,10 +2537,10 @@ class StorageService {
           })
         }).catch(() => {});
       }
-    } else if (isCredentialChange && updates.status === undefined) {
+    } else if (isCredentialChange && cleanUpdates.status === undefined) {
       gw.testPassedOnce = false;
       if (gw.isLive) gw.isLive = false;
-      gw.status = gw.apiKey ? 'testing' : 'not_configured';
+      gw.status = gw.apiKey || gw.bearerToken ? 'testing' : 'not_configured';
     }
 
     this.saveState(true);
