@@ -597,7 +597,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     paymentChannel?: 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi';
     planName: string;
     durationSeconds: number;
-    voucherCode: string;
+    voucherCode?: string;
     amount?: number;
     transactionRef?: string;
     speedLimit?: string;
@@ -629,7 +629,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     try {
       storage.addActiveSession({
         id: sessionId,
-        voucherCode: payload.voucherCode,
+        voucherCode: payload.voucherCode || '',
         clientMac: clientMac || 'Client-Device',
         clientIp: clientIp || '10.10.0.x',
         deviceType: 'Wi-Fi Guest',
@@ -759,71 +759,25 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     }
   };
 
-  // Connect Free Wi-Fi after verifying TC-XXXXX 5-digit reception voucher (up to 3 devices, 24h validity, uncapped speed)
+  // Connect Free Wi-Fi directly (True 24-Hour Seamless Auto-Reconnect, uncapped speed)
   const handleConnectFree = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!isFreeAccessAllowed || isConnecting) return;
     setPaymentError(null);
 
-    const cleanDigits = freeVoucherDigits.replace(/\D/g, '');
-    if (cleanDigits.length !== 5) {
-      setPaymentError('Please enter the 5-digit number on your T-Connect voucher (e.g. 12345).');
-      return;
-    }
-
-    const fullVoucherCode = `TC-${cleanDigits}`;
     isConnectingRef.current = true;
     setIsConnecting(true);
-    setStatusBanner(`Verifying ${fullVoucherCode} & connecting...`);
+    setStatusBanner('Connecting to Free Wi-Fi...');
 
     const freeDurationMins = Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440);
     const freeDurationSecs = freeDurationMins * 60;
     const freeBadge = formatFreeDurationBadge(freeDurationMins);
 
-    try {
-      const response = await fetch('/api/vouchers/redeem-tconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: fullVoucherCode,
-          digits: cleanDigits,
-          mac: clientMac,
-          ip: clientIp,
-          scope: activeScope,
-          siteName: currentConfig.brandTitle || 'T-Connect Hotspot',
-          routerName: 'MIKROTIK-TC',
-          firstName: guestFirstName.trim(),
-          lastName: guestSurname.trim(),
-          guestName: [guestFirstName.trim(), guestSurname.trim()].filter(Boolean).join(' ') || 'Guest User',
-          countryCode: guestCountryCode,
-          phone: guestPhone.trim(),
-          guestPhone: `${guestCountryCode} ${guestPhone.trim()}`,
-          email: guestEmail.trim(),
-          durationSeconds: freeDurationSecs
-        })
-      });
-      const data = await response.json().catch(() => ({ success: false }));
-      if (!response.ok || !data.success) {
-        setIsConnecting(false);
-        isConnectingRef.current = false;
-        setStatusBanner(null);
-        setPaymentError(data.message || `Invalid or expired voucher ${fullVoucherCode}.`);
-        return;
-      }
-    } catch {
-      setIsConnecting(false);
-      isConnectingRef.current = false;
-      setStatusBanner(null);
-      setPaymentError('Unable to verify voucher. Please check your Wi-Fi connection and try again.');
-      return;
-    }
-
     await syncGuestSessionToAdmin({
       mode: 'free',
       paymentChannel: 'free_wifi',
-      planName: `Free Wi-Fi (${fullVoucherCode} · ${freeBadge})`,
+      planName: `Free Wi-Fi Access (${freeBadge})`,
       durationSeconds: freeDurationSecs,
-      voucherCode: fullVoucherCode,
       amount: 0,
       speedLimit: 'Uncapped'
     });
@@ -1531,56 +1485,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   &larr; Edit your details
                 </button>
               </div>
-              <form
-                onSubmit={handleConnectFree}
-                className="bg-[#0b192c]/90 backdrop-blur-xl border border-white/25 border-t-[3.5px] rounded-2xl p-4 shadow-[0_20px_46px_rgba(0,0,0,0.55)] text-left"
-                style={{ borderTopColor: accentColor || '#f05e17' }}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-black text-white tracking-tight">
-                    Enter T-Connect Voucher
-                  </span>
-                  <span className="text-[10px] font-mono font-bold text-slate-400">
-                    Step 2 of 2
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-300 mb-2.5 leading-snug">
-                  Enter the <strong className="text-white">5-digit number</strong> on your T-Connect voucher below and tap <strong className="text-white">Log in</strong>.
-                </p>
-
-                {paymentError && (
-                  <div className="mb-2.5 p-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-800 text-[11px] font-bold">
-                    {paymentError}
-                  </div>
-                )}
-
-                <div className="flex items-stretch rounded-xl border-2 border-white/35 bg-white overflow-hidden mb-2.5 focus-within:border-[#f05e17] focus-within:ring-2 focus-within:ring-[#f05e17]/25">
-                  <input
-                    type="text"
-                    value="TC-"
-                    readOnly
-                    tabIndex={-1}
-                    aria-label="Voucher Prefix TC-"
-                    style={{ color: accentColor || '#f05e17' }}
-                    className="w-[68px] shrink-0 bg-[#0b192c] border-r-2 border-slate-300 font-mono text-lg font-black text-center py-2.5 px-1.5 select-none pointer-events-none focus:outline-none"
-                  />
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={5}
-                    value={freeVoucherDigits}
-                    onChange={(e) => {
-                      const digits = e.target.value.replace(/\D/g, '').slice(0, 5);
-                      setFreeVoucherDigits(digits);
-                      if (paymentError) setPaymentError(null);
-                    }}
-                    placeholder="12345"
-                    autoComplete="off"
-                    className="flex-1 min-w-0 bg-white text-slate-900 font-mono text-xl font-black tracking-[0.25em] py-2.5 px-3.5 placeholder:text-slate-400 placeholder:font-bold focus:outline-none"
-                  />
-                </div>
-
+              <form onSubmit={handleConnectFree}>
                 <button
                   type="submit"
                   disabled={isConnecting}
@@ -1588,9 +1493,9 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     backgroundColor: currentConfig.freeButtonColor || accentColor || '#f05e17',
                     color: currentConfig.freeButtonTextColor || '#ffffff'
                   }}
-                  className="w-full py-3 px-6 font-black text-base tracking-wide rounded-xl shadow-[0_10px_26px_rgba(240,94,23,0.38)] transition-transform active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center justify-center text-center"
+                  className="w-full py-3.5 px-6 font-black text-base tracking-wide rounded-2xl border-2 border-white/25 shadow-[0_14px_34px_rgba(0,0,0,0.45)] transition-transform active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center justify-center text-center"
                 >
-                  {isConnecting ? 'Verifying & Connecting...' : 'Log in'}
+                  {isConnecting ? 'Connecting...' : currentConfig.freeButtonText || 'Login for free'}
                 </button>
               </form>
             </div>

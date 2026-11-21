@@ -24,7 +24,9 @@ import {
   Globe,
   RotateCcw,
   AlertTriangle,
-  Edit2
+  Edit2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { CaptivePortalLead, VerticalType } from '../../types';
 import { storage } from '../../services/storage';
@@ -78,6 +80,8 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     'all' | 'mpesa' | 'ecocash' | 'ottvoucher' | 'free_wifi'
   >('all');
+  const [leadsRowsPerPage, setLeadsRowsPerPage] = useState<number>(20);
+  const [leadsPage, setLeadsPage] = useState<number>(1);
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -2233,9 +2237,9 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       </div>
 
       {/* Main Table Breakdown */}
-      <div className="overflow-x-auto rounded-xl border border-[#1b233a]">
+      <div className="overflow-x-auto max-h-[620px] overflow-y-auto rounded-xl border border-[#1b233a]">
         <table className="w-full text-left text-xs font-mono">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-[#0a0e17]">
             <tr className="bg-[#0a0e17] text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#1b233a]">
               <th className="py-2.5 px-3">GUEST SUBSCRIBER</th>
               <th className="py-2.5 px-3">MOBILE &amp; EMAIL</th>
@@ -2249,7 +2253,14 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           </thead>
           <tbody className="divide-y divide-[#1b233a] text-slate-300">
             {filteredLeads.length > 0 ? (
-              filteredLeads.map((lead) => {
+              filteredLeads
+                .slice(
+                  (Math.min(leadsPage, Math.max(1, Math.ceil(filteredLeads.length / leadsRowsPerPage))) - 1) *
+                    leadsRowsPerPage,
+                  Math.min(leadsPage, Math.max(1, Math.ceil(filteredLeads.length / leadsRowsPerPage))) *
+                    leadsRowsPerPage
+                )
+                .map((lead) => {
                 const activeSession = activeSessions.find(
                   (s) => s.clientMac === lead.clientMac || s.guestEmail === lead.email
                 );
@@ -2461,16 +2472,69 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         </table>
       </div>
 
-      {/* Footer Info Ribbon */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[10px] font-mono text-slate-500 border-t border-[#1b233a] pt-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Synchronized with MikroTik DHCP Option 114 CNA &amp; Active Radius Sessions</span>
-        </div>
-        <div>
-          Showing <strong>{filteredLeads.length}</strong> of <strong>{leads.length}</strong> captive portal subscriber leads
-        </div>
-      </div>
+      {/* Footer Info Ribbon & Pagination Controls */}
+      {(() => {
+        const totalLeadPages = Math.max(1, Math.ceil(filteredLeads.length / leadsRowsPerPage));
+        const safeLeadPage = Math.min(leadsPage, totalLeadPages);
+        const startIdx = filteredLeads.length === 0 ? 0 : (safeLeadPage - 1) * leadsRowsPerPage + 1;
+        const endIdx = Math.min(filteredLeads.length, safeLeadPage * leadsRowsPerPage);
+        return (
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[#0a0e17] border border-[#1b233a] text-xs font-mono text-slate-300">
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>
+                Total Captured Leads: <strong className="text-white">{leads.length}</strong> &middot; Active Sessions:{' '}
+                <strong className="text-emerald-400">{activeSessions.length}</strong>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-4 ml-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Rows per page:</span>
+                <select
+                  value={leadsRowsPerPage}
+                  onChange={(e) => {
+                    setLeadsRowsPerPage(Number(e.target.value) || 20);
+                    setLeadsPage(1);
+                  }}
+                  className="bg-[#121829] border border-[#232d42] rounded-lg px-2 py-1 text-white font-bold text-xs focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                >
+                  {[10, 20, 50, 100].map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <span className="text-slate-200 font-bold tabular-nums">
+                {startIdx}&ndash;{endIdx} of {filteredLeads.length}
+              </span>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeLeadPage <= 1}
+                  onClick={() => setLeadsPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1c253d] border border-[#232d42] text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer transition-colors"
+                  title="Previous page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={safeLeadPage >= totalLeadPages}
+                  onClick={() => setLeadsPage((p) => Math.min(totalLeadPages, p + 1))}
+                  className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1c253d] border border-[#232d42] text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer transition-colors"
+                  title="Next page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Edit Lead Modal */}
       {editingLead && (

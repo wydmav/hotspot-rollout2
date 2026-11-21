@@ -18,7 +18,9 @@ import {
   MapPin,
   RefreshCw,
   ShieldCheck,
-  Power
+  Power,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType, ScopePortalConfig } from '../../types';
 import { TransactionTrendsChart } from './TransactionTrendsChart';
@@ -56,6 +58,23 @@ interface UnifiedGuestDeviceRecord {
   disconnectReason?: string;
   status: 'connected' | 'disconnected';
   remainingSeconds: number;
+  bytesDown: number;
+  bytesUp: number;
+  bytesTotal: number;
+}
+
+function formatDataBytes(bytes: number): string {
+  const safe = Math.max(0, Number(bytes) || 0);
+  if (safe >= 1024 * 1024 * 1024) {
+    return `${(safe / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+  if (safe >= 1024 * 1024) {
+    return `${(safe / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (safe >= 1024) {
+    return `${(safe / 1024).toFixed(0)} KB`;
+  }
+  return `${safe} B`;
 }
 
 function formatCountdownRemaining(seconds: number): string {
@@ -119,6 +138,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Live Guest Connect Registry (Connected & Disconnected devices with countdowns & venue tracking)
   const [serverGuestRecords, setServerGuestRecords] = useState<any[]>([]);
   const [deviceFilter, setDeviceFilter] = useState<'all' | 'connected' | 'disconnected' | 'paid' | 'free'>('all');
+  const [deviceRowsPerPage, setDeviceRowsPerPage] = useState<number>(20);
+  const [devicePage, setDevicePage] = useState<number>(1);
   const [tickNowMs, setTickNowMs] = useState<number>(() => Date.now());
   const [togglingSessionId, setTogglingSessionId] = useState<string | null>(null);
 
@@ -339,6 +360,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           ? rawIp
           : '—';
 
+      const bDown = Math.max(0, Number(rec.bytesDown) || 0);
+      const bUp = Math.max(0, Number(rec.bytesUp) || 0);
+      const bTot = Math.max(bDown + bUp, Number(rec.bytesTotal) || 0);
+
       byId.set(rec.id, {
         id: rec.id,
         guestName: rec.guestName || matchedTx?.customerName || (authMode === 'paid' ? 'Paid Subscriber' : 'Free Wi-Fi Guest'),
@@ -367,7 +392,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         disconnectReason:
           rec.disconnectReason || (isExpired ? 'Session Time Expired' : undefined),
         status,
-        remainingSeconds: status === 'connected' ? remSec : 0
+        remainingSeconds: status === 'connected' ? remSec : 0,
+        bytesDown: bDown,
+        bytesUp: bUp,
+        bytesTotal: bTot
       });
     }
 
@@ -397,6 +425,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         s.siteName ||
         'Maseru Golf Course Clubhouse';
 
+      const bDown = Math.max(0, Number(s.bytesDown) || 0);
+      const bUp = Math.max(0, Number(s.bytesUp) || 0);
+
       byId.set(s.id, {
         id: s.id,
         guestName: s.guestName || (authMode === 'paid' ? 'Paid Subscriber' : 'Free Wi-Fi Guest'),
@@ -417,7 +448,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         disconnectedAt: s.disconnectedAt,
         disconnectReason: s.disconnectReason || (isExpired ? 'Session Time Expired' : undefined),
         status,
-        remainingSeconds: status === 'connected' ? remSec : 0
+        remainingSeconds: status === 'connected' ? remSec : 0,
+        bytesDown: bDown,
+        bytesUp: bUp,
+        bytesTotal: bDown + bUp
       });
     }
 
@@ -443,6 +477,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     [unifiedDevices]
   );
 
+  const totalDataConsumedBytes = useMemo(
+    () => unifiedDevices.reduce((acc, d) => acc + (d.bytesTotal || 0), 0),
+    [unifiedDevices]
+  );
+
   const displayedDevices = useMemo(() => {
     switch (deviceFilter) {
       case 'connected':
@@ -457,6 +496,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         return unifiedDevices;
     }
   }, [deviceFilter, unifiedDevices, connectedDevices, disconnectedDevices, paidDevices, freeDevices]);
+
+  const totalDevicePages = Math.max(1, Math.ceil(displayedDevices.length / deviceRowsPerPage));
+  const safeDevicePage = Math.min(devicePage, totalDevicePages);
+  const deviceStartIndex = displayedDevices.length === 0 ? 0 : (safeDevicePage - 1) * deviceRowsPerPage + 1;
+  const deviceEndIndex = Math.min(displayedDevices.length, safeDevicePage * deviceRowsPerPage);
+  const paginatedDevices = useMemo(
+    () => displayedDevices.slice((safeDevicePage - 1) * deviceRowsPerPage, safeDevicePage * deviceRowsPerPage),
+    [displayedDevices, safeDevicePage, deviceRowsPerPage]
+  );
 
   const handleToggleDeviceConnection = async (device: UnifiedGuestDeviceRecord) => {
     setTogglingSessionId(device.id);
@@ -843,9 +891,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <h3 className="text-sm font-extrabold text-white tracking-wide">
                 Connected &amp; Disconnected Devices — Live Session Countdown &amp; Venue Tracker
               </h3>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Total Connected: {connectedDevices.length} {connectedDevices.length === 1 ? 'Device' : 'Devices'}
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/35 text-cyan-300 text-xs font-mono font-bold">
+                Total Data: {formatDataBytes(totalDataConsumedBytes)}
+              </span>
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
-              Paid Mode shows remaining subscription time &amp; exact venue where voucher was bought · Free Mode shows time left in 24-hour window
+              Paid Mode shows remaining subscription time &amp; exact venue where voucher was bought &middot; Free Mode shows time left in 24-hour window &amp; data consumed
             </p>
           </div>
 
@@ -861,7 +916,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setDeviceFilter(tab.id as any)}
+                onClick={() => {
+                  setDeviceFilter(tab.id as any);
+                  setDevicePage(1);
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${
                   deviceFilter === tab.id
                     ? 'bg-[#f05e17] text-white border-[#f05e17]'
@@ -881,150 +939,228 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               No {deviceFilter === 'all' ? '' : deviceFilter.toUpperCase()} guest devices recorded yet
             </div>
             <p className="text-[11px] font-mono text-slate-500 max-w-md mx-auto">
-              When guests authenticate via the Captive Portal in Paid Mode (OTT Voucher / PayLesotho) or Free 24h Mode, their live countdown and venue appear here automatically.
+              When guests authenticate via the Captive Portal in Paid Mode (OTT Voucher / PayLesotho) or Free 24h Mode, their live countdown, data consumed, and venue appear here automatically.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-[#1f283d] text-[10px] font-mono uppercase text-slate-400">
-                  <th className="py-2.5 px-3">Subscriber &amp; Device</th>
-                  <th className="py-2.5 px-3">Connection Status</th>
-                  <th className="py-2.5 px-3">Mode &amp; Hotspot Plan</th>
-                  <th className="py-2.5 px-3">Time Left (Live Countdown)</th>
-                  <th className="py-2.5 px-3">Venue Voucher Bought At &amp; Router</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1a2236] text-xs font-mono">
-                {displayedDevices.map((dev) => {
-                  const isConnected = dev.status === 'connected';
-                  const isPaid = dev.authMode === 'paid';
-                  return (
-                    <tr key={dev.id} className="hover:bg-[#121829]/90 transition-colors">
-                      {/* Subscriber & MAC/IP */}
-                      <td className="py-3 px-3">
-                        <div className="font-bold text-white">{dev.guestName}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {dev.guestPhone !== '—' ? `${dev.guestPhone} · ` : ''}
-                          <span className="text-cyan-400">{dev.clientIp}</span> · {dev.clientMac}
-                        </div>
-                      </td>
+          <div className="space-y-2">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-xl border border-[#1a2236]">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10 bg-[#0f1422]">
+                  <tr className="border-b border-[#1f283d] text-[10px] font-mono uppercase text-slate-400">
+                    <th className="py-2.5 px-3">Subscriber &amp; Device</th>
+                    <th className="py-2.5 px-3">Connection Status</th>
+                    <th className="py-2.5 px-3">Mode &amp; Hotspot Plan</th>
+                    <th className="py-2.5 px-3">Data Consumed</th>
+                    <th className="py-2.5 px-3">Time Left (Live Countdown)</th>
+                    <th className="py-2.5 px-3">Hotspot Venue &amp; Router</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1a2236] text-xs font-mono">
+                  {paginatedDevices.map((dev) => {
+                    const isConnected = dev.status === 'connected';
+                    const isPaid = dev.authMode === 'paid';
+                    return (
+                      <tr key={dev.id} className="hover:bg-[#121829]/90 transition-colors">
+                        {/* Subscriber & MAC/IP */}
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-white">{dev.guestName}</div>
+                          <div className="text-[11px] text-slate-400">
+                            {dev.guestPhone !== '—' ? `${dev.guestPhone} · ` : ''}
+                            <span className="text-cyan-400">{dev.clientIp}</span> · {dev.clientMac}
+                          </div>
+                        </td>
 
-                      {/* Status */}
-                      <td className="py-3 px-3">
-                        {isConnected ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-extrabold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            CONNECTED
-                          </span>
-                        ) : (
-                          <div className="space-y-0.5">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[10px] font-extrabold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                              DISCONNECTED
+                        {/* Status */}
+                        <td className="py-3 px-3">
+                          {isConnected ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[10px] font-extrabold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              CONNECTED
                             </span>
-                            {dev.disconnectReason && (
-                              <div className="text-[10px] text-rose-400/90">
-                                {dev.disconnectReason}
+                          ) : (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[10px] font-extrabold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                                DISCONNECTED
+                              </span>
+                              {dev.disconnectReason && (
+                                <div className="text-[10px] text-rose-400/90">
+                                  {dev.disconnectReason}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Mode & Plan */}
+                        <td className="py-3 px-3">
+                          {isPaid ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[10px] font-bold">
+                                PAID PLAN · {currency}{dev.amountPaid.toFixed(2)}
+                              </span>
+                              <div className="text-[11px] text-white font-bold">{dev.planName}</div>
+                              {dev.voucherCode && (
+                                <div className="text-[10px] text-slate-400">PIN: {dev.voucherCode}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold">
+                                FREE 24H MODE
+                              </span>
+                              <div className="text-[11px] text-slate-200">{dev.planName}</div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Per-Device Data Consumed */}
+                        <td className="py-3 px-3">
+                          <div className="font-extrabold text-cyan-300 text-xs tabular-nums">
+                            {formatDataBytes(dev.bytesTotal)}
+                          </div>
+                          <div className="text-[10px] text-slate-400 tabular-nums mt-0.5">
+                            &darr; {formatDataBytes(dev.bytesDown)} &middot; &uarr; {formatDataBytes(dev.bytesUp)}
+                          </div>
+                        </td>
+
+                        {/* Live Countdown */}
+                        <td className="py-3 px-3">
+                          {isConnected ? (
+                            <div className="space-y-0.5">
+                              <div className="inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-400 tabular-nums">
+                                <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span>{formatCountdownRemaining(dev.remainingSeconds)}</span>
                               </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Mode & Plan */}
-                      <td className="py-3 px-3">
-                        {isPaid ? (
-                          <div className="space-y-0.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[10px] font-bold">
-                              PAID PLAN · {currency}{dev.amountPaid.toFixed(2)}
-                            </span>
-                            <div className="text-[11px] text-white font-bold">{dev.planName}</div>
-                            {dev.voucherCode && (
-                              <div className="text-[10px] text-slate-400">PIN: {dev.voucherCode}</div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-0.5">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold">
-                              FREE 24H MODE
-                            </span>
-                            <div className="text-[11px] text-slate-200">{dev.planName}</div>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Live Countdown */}
-                      <td className="py-3 px-3">
-                        {isConnected ? (
-                          <div className="space-y-0.5">
-                            <div className="inline-flex items-center gap-1.5 text-sm font-extrabold text-emerald-400 tabular-nums">
-                              <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                              <span>{formatCountdownRemaining(dev.remainingSeconds)}</span>
+                              <div className="text-[10px] text-slate-400">
+                                {isPaid
+                                  ? 'Remaining on Paid Subscription'
+                                  : 'Remaining in 24-Hour Free Window'}
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-400">
+                          ) : (
+                            <div className="text-[11px] text-slate-500">
+                              0s left · Ended{' '}
+                              {dev.disconnectedAt
+                                ? new Date(dev.disconnectedAt).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : 'Recently'}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Hotspot Venue & Router */}
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-1 text-white font-bold">
+                            <MapPin className="w-3.5 h-3.5 text-[#f05e17] shrink-0" />
+                            <span>
                               {isPaid
-                                ? 'Remaining on Paid Subscription'
-                                : 'Remaining in 24-Hour Free Window'}
-                            </div>
+                                ? `Bought at: ${dev.venuePurchasedAt}`
+                                : `Venue: ${dev.siteName}`}
+                            </span>
                           </div>
-                        ) : (
-                          <div className="text-[11px] text-slate-500">
-                            0s left · Ended{' '}
-                            {dev.disconnectedAt
-                              ? new Date(dev.disconnectedAt).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })
-                              : 'Recently'}
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            Router: <strong className="text-slate-300">{dev.routerName}</strong>
                           </div>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Venue Purchased At & Router */}
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-1 text-white font-bold">
-                          <MapPin className="w-3.5 h-3.5 text-[#f05e17] shrink-0" />
-                          <span>
-                            {isPaid
-                              ? `Bought at: ${dev.venuePurchasedAt}`
-                              : `Venue: ${dev.siteName}`}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          Router: <strong className="text-slate-300">{dev.routerName}</strong>
-                        </div>
-                      </td>
+                        {/* Action */}
+                        <td className="py-3 px-3 text-right">
+                          <button
+                            type="button"
+                            disabled={togglingSessionId === dev.id}
+                            onClick={() => void handleToggleDeviceConnection(dev)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                              isConnected
+                                ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30'
+                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            }`}
+                          >
+                            <Power className="w-3 h-3" />
+                            <span>
+                              {togglingSessionId === dev.id
+                                ? '...'
+                                : isConnected
+                                ? 'Disconnect'
+                                : 'Reconnect'}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-                      {/* Action */}
-                      <td className="py-3 px-3 text-right">
-                        <button
-                          type="button"
-                          disabled={togglingSessionId === dev.id}
-                          onClick={() => void handleToggleDeviceConnection(dev)}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
-                            isConnected
-                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30'
-                              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                          }`}
-                        >
-                          <Power className="w-3 h-3" />
-                          <span>
-                            {togglingSessionId === dev.id
-                              ? '...'
-                              : isConnected
-                              ? 'Disconnect'
-                              : 'Reconnect'}
-                          </span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {/* Bottom Pagination Footer matching Screenshot 2 ("Rows per page: 20 ▼   1-20   <   >") */}
+            <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[#0a0e17] border border-[#1b233a] text-xs font-mono text-slate-300">
+              <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                <span>
+                  Total Connected Devices:{' '}
+                  <strong className="text-emerald-400 font-extrabold">{connectedDevices.length}</strong>
+                </span>
+                <span className="text-slate-600">|</span>
+                <span>
+                  Total Recorded:{' '}
+                  <strong className="text-white font-bold">{unifiedDevices.length}</strong>
+                </span>
+                <span className="text-slate-600">|</span>
+                <span>
+                  Fleet Data Consumed:{' '}
+                  <strong className="text-cyan-400 font-bold">{formatDataBytes(totalDataConsumedBytes)}</strong>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-4 ml-auto">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">Rows per page:</span>
+                  <select
+                    value={deviceRowsPerPage}
+                    onChange={(e) => {
+                      setDeviceRowsPerPage(Number(e.target.value) || 20);
+                      setDevicePage(1);
+                    }}
+                    className="bg-[#121829] border border-[#232d42] rounded-lg px-2 py-1 text-white font-bold text-xs focus:outline-none focus:border-[#f05e17] cursor-pointer"
+                  >
+                    {[10, 20, 50, 100].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <span className="text-slate-200 font-bold tabular-nums">
+                  {deviceStartIndex}&ndash;{deviceEndIndex} of {displayedDevices.length}
+                </span>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safeDevicePage <= 1}
+                    onClick={() => setDevicePage((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1c253d] border border-[#232d42] text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer transition-colors"
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={safeDevicePage >= totalDevicePages}
+                    onClick={() => setDevicePage((p) => Math.min(totalDevicePages, p + 1))}
+                    className="p-1.5 rounded-lg bg-[#121829] hover:bg-[#1c253d] border border-[#232d42] text-slate-200 disabled:opacity-35 disabled:pointer-events-none cursor-pointer transition-colors"
+                    title="Next page"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

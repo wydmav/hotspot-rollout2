@@ -3500,7 +3500,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 style={{ opacity: isFreeModeActive && previewStep === 'identification' ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
               />
 
-              {/* FREE MODE STEP 2: FULL-WALLPAPER READ-ONLY TC- + 5-DIGIT VOUCHER INPUT + "LOG IN" BUTTON */}
+              {/* FREE MODE STEP 2: FULL-WALLPAPER "LOGIN FOR FREE" BUTTON */}
               {isFreeModeActive && previewStep === 'identification' && (
                 <div
                   style={{
@@ -3508,79 +3508,49 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     left: `${currentConfig.freeButtonX ?? 50}%`,
                     top: `${currentConfig.freeButtonY ?? 88}%`,
                     transform: 'translate(-50%, -50%)',
-                    width: '90%',
-                    maxWidth: '345px',
+                    width: '86%',
+                    maxWidth: '330px',
                     zIndex: 25
                   }}
                 >
-                  <div className="mb-1.5 flex justify-center">
+                  <div className="mb-2 flex justify-center">
                     <button
                       type="button"
                       onClick={() => setPreviewStep('voucher')}
-                      className="px-2.5 py-0.5 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
+                      className="px-3 py-1 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
                     >
                       &larr; Edit your details
                     </button>
                   </div>
-                  <div
-                    className="bg-[#0b192c]/90 backdrop-blur-xl border border-white/25 border-t-[3px] rounded-2xl p-3.5 shadow-2xl text-left"
-                    style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-black text-white">Enter T-Connect Voucher</span>
-                      <span className="text-[9px] font-mono font-bold text-slate-400">Step 2 of 2</span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 mb-2 leading-tight">
-                      Enter the <strong className="text-white">5-digit number</strong> on your T-Connect voucher and tap <strong className="text-white">Log in</strong>.
-                    </p>
-                    <div className="flex items-stretch rounded-xl border-2 border-white/35 bg-white overflow-hidden mb-2">
-                      <input
-                        type="text"
-                        value="TC-"
-                        readOnly
-                        tabIndex={-1}
-                        style={{ color: currentConfig.accentColor || '#f05e17' }}
-                        className="w-14 shrink-0 bg-[#0b192c] border-r-2 border-slate-300 font-mono text-sm font-black text-center py-2 px-1 select-none pointer-events-none"
-                      />
-                      <input
-                        type="tel"
-                        inputMode="numeric"
-                        maxLength={5}
-                        defaultValue="48291"
-                        placeholder="12345"
-                        className="flex-1 min-w-0 bg-white text-slate-900 font-mono text-base font-black tracking-[0.25em] py-2 px-3 focus:outline-none"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        isDraggingFreeBtnRef.current = true;
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      isDraggingFreeBtnRef.current = true;
+                      freeBtnDragMovedRef.current = false;
+                      setIsDraggingFreeBtn(true);
+                    }}
+                    onClick={() => {
+                      if (freeBtnDragMovedRef.current) {
                         freeBtnDragMovedRef.current = false;
-                        setIsDraggingFreeBtn(true);
-                      }}
-                      onClick={() => {
-                        if (freeBtnDragMovedRef.current) {
-                          freeBtnDragMovedRef.current = false;
-                          return;
-                        }
-                        handleConnectFree();
-                      }}
-                      style={{
-                        backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
-                        color: currentConfig.freeButtonTextColor || '#ffffff'
-                      }}
-                      className={`w-full py-2.5 px-5 rounded-xl text-sm font-black tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
-                        isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
-                      }`}
-                      title="Drag to reposition or click to test Free Wi-Fi voucher login"
-                    >
-                      <span>Log in</span>
-                    </button>
-                  </div>
-                  <div className="mt-1 text-center pointer-events-none">
+                        return;
+                      }
+                      handleConnectFree();
+                    }}
+                    style={{
+                      backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                      color: currentConfig.freeButtonTextColor || '#ffffff'
+                    }}
+                    className={`w-full py-3.5 px-6 rounded-2xl border-2 border-white/25 text-sm font-black tracking-wide shadow-[0_14px_34px_rgba(0,0,0,0.45)] transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
+                      isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
+                    }`}
+                    title="Drag to reposition or click to test Free Wi-Fi login"
+                  >
+                    <span>{currentConfig.freeButtonText || 'Login for free'}</span>
+                  </button>
+                  <div className="mt-1.5 text-center pointer-events-none">
                     <span className="inline-block px-2 py-0.5 rounded bg-black/65 text-white/90 text-[9px] font-mono">
-                      Drag to move ({currentConfig.freeButtonX ?? 50}%, {currentConfig.freeButtonY ?? 88}%) · Tap Log in to test
+                      Drag to move ({currentConfig.freeButtonX ?? 50}%, {currentConfig.freeButtonY ?? 88}%) &middot; Tap to test Free Login
                     </span>
                   </div>
                 </div>
