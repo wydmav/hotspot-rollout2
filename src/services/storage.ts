@@ -19,6 +19,7 @@ import {
   VideoAdItem,
   PlatformRole
 } from '../types';
+import { supabaseService } from './supabase';
 
 export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   {
@@ -939,8 +940,47 @@ class StorageService {
    * Ingests live guest leads, sessions, and payment transactions captured on the public Splash Page
    * so they immediately reflect on the Admin Dashboard across devices.
    */
-  ingestServerPortalEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>) {
+  ingestServerPortalEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>, serverCleanSlateAt?: string | null) {
     let mutated = false;
+
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined' && serverCleanSlateAt) {
+      const existingSlate = window.localStorage.getItem('tconnect_clean_slate_at');
+      if (!existingSlate || new Date(serverCleanSlateAt).getTime() > new Date(existingSlate).getTime()) {
+        window.localStorage.setItem('tconnect_clean_slate_at', serverCleanSlateAt);
+      }
+    }
+
+    const cleanSlateIso =
+      serverCleanSlateAt ||
+      (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+        ? window.localStorage.getItem('tconnect_clean_slate_at')
+        : null);
+    const cleanSlateMs = cleanSlateIso ? new Date(cleanSlateIso).getTime() : 0;
+
+    if (cleanSlateMs && !isNaN(cleanSlateMs)) {
+      const prevLeadsLen = this.state.captiveLeads.length;
+      const prevTxLen = this.state.transactions.length;
+      const prevSessLen = this.state.activeSessions.length;
+      this.state.captiveLeads = this.state.captiveLeads.filter((l) => {
+        const ts = new Date(l.capturedAt || 0).getTime();
+        return !isNaN(ts) && ts > cleanSlateMs;
+      });
+      this.state.transactions = this.state.transactions.filter((t) => {
+        const ts = new Date(t.completedAt || t.createdAt || 0).getTime();
+        return !isNaN(ts) && ts > cleanSlateMs;
+      });
+      this.state.activeSessions = this.state.activeSessions.filter((s) => {
+        const ts = new Date(s.startedAt || 0).getTime();
+        return !isNaN(ts) && ts > cleanSlateMs;
+      });
+      if (
+        this.state.captiveLeads.length !== prevLeadsLen ||
+        this.state.transactions.length !== prevTxLen ||
+        this.state.activeSessions.length !== prevSessLen
+      ) {
+        mutated = true;
+      }
+    }
 
     if (Array.isArray(events)) {
       const nowMs = Date.now();
@@ -961,6 +1001,10 @@ class StorageService {
 
       for (const ev of events) {
         if (!ev || !ev.id) continue;
+        if (cleanSlateMs && !isNaN(cleanSlateMs)) {
+          const evTs = new Date(ev.capturedAt || ev.startedAt || 0).getTime();
+          if (!isNaN(evTs) && evTs <= cleanSlateMs) continue;
+        }
         const evMac = String(ev.mac || ev.clientMac || '').trim().toLowerCase();
         const evPhoneDigits = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
         const evSite = ev.siteName || 'T-Connect Hotspot';
@@ -1073,11 +1117,11 @@ class StorageService {
             const resolvedPaymentLabel =
               ev.paymentMethodLabel ||
               (resolvedPaymentMethod === 'mpesa'
-                ? 'M-Pesa (OTT Voucher)'
+                ? 'M-Pesa'
                 : resolvedPaymentMethod === 'ecocash'
-                ? 'EcoCash (OTT Voucher)'
+                ? 'EcoCash'
                 : resolvedPaymentMethod === 'ottvoucher'
-                ? 'Direct 16-Digit OTT Voucher'
+                ? '16-Digit OTT Voucher'
                 : 'Free Mode Wi-Fi');
             this.state.captiveLeads.unshift({
               id: leadId,
@@ -1128,6 +1172,10 @@ class StorageService {
     if (Array.isArray(serverTransactions)) {
       for (const stx of serverTransactions) {
         if (!stx || !stx.transactionRef) continue;
+        if (cleanSlateMs && !isNaN(cleanSlateMs)) {
+          const txTs = new Date(stx.completedAt || stx.createdAt || 0).getTime();
+          if (!isNaN(txTs) && txTs <= cleanSlateMs) continue;
+        }
         if (!this.state.transactions.some((t) => t.transactionRef === stx.transactionRef || t.id === stx.id)) {
           this.state.transactions.unshift(stx);
           mutated = true;
@@ -1145,18 +1193,29 @@ class StorageService {
     }
   }
 
-  ingestServerGuestEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>) {
-    this.ingestServerPortalEvents(events, serverTransactions);
+  ingestServerGuestEvents(events: Array<any>, serverTransactions?: Array<PaymentTransaction>, serverCleanSlateAt?: string | null) {
+    this.ingestServerPortalEvents(events, serverTransactions, serverCleanSlateAt);
   }
 
   async resetAllLiveData(): Promise<void> {
+    const nowIso = new Date().toISOString();
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem('tconnect_clean_slate_at', nowIso);
+      } catch {}
+    }
     try {
-      await fetch('/api/admin/reset-live-data', {
+      const res = await fetch('/api/admin/reset-live-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: 'dashboard-ui' })
       });
+      const data = await res.json().catch(() => null);
+      if (data?.cleanSlateAt && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        window.localStorage.setItem('tconnect_clean_slate_at', data.cleanSlateAt);
+      }
     } catch {}
+    await supabaseService.wipeLiveLeadsAndTransactions();
     this.state.activeSessions = [];
     this.state.captiveLeads = [];
     this.state.transactions = [];

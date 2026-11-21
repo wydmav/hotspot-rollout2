@@ -4028,49 +4028,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       )}
 
                       {/* USSD PIN Prompt Box */}
-                      {previewUssdSent && !previewIssuedOttPin && (
+                      {previewUssdSent && (
                         <div className="p-2 rounded-xl bg-orange-50 border border-[#f05e17] text-left space-y-1">
                           <div className="text-[10.5px] font-black text-orange-900">
                             USSD PIN Prompt Sent to +266 {guestPhone || '58000000'}
                           </div>
                           <p className="text-[9.5px] text-slate-700 font-semibold leading-snug">
-                            Enter your <strong>{previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN</strong> on your phone to approve <strong>{currency}{chosenPlan.price} ({chosenPlan.name})</strong>.
+                            Enter your <strong>{previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN</strong> on your phone to approve <strong>{currency}{chosenPlan.price} ({chosenPlan.name})</strong> and connect immediately.
                           </p>
-                        </div>
-                      )}
-
-                      {/* Issued 16-Digit OTT Voucher Box after USSD PIN approval */}
-                      {previewIssuedOttPin && (
-                        <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-400 text-center space-y-1.5">
-                          <div className="text-[9.5px] font-black text-emerald-800 uppercase">
-                            Payment Approved &mdash; Copy Your 16-Digit OTT Voucher
-                          </div>
-                          <div className="font-mono text-xs font-black text-slate-900 bg-white py-1 px-2 rounded-lg border border-emerald-300 tracking-widest">
-                            {(previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' ')}
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewCopiedOtt(true);
-                                setOttPin((previewIssuedOttPin.match(/.{1,4}/g) || [previewIssuedOttPin]).join(' '));
-                              }}
-                              className="py-1 px-2 rounded-lg bg-[#f05e17] text-white font-extrabold text-[10px] cursor-pointer"
-                            >
-                              {previewCopiedOtt ? '✓ Copied PIN' : '1. Copy PIN'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewUssdSent(false);
-                                setPreviewIssuedOttPin('');
-                                enterPostAuthAdOrUsage(false);
-                              }}
-                              className="py-1 px-2 rounded-lg bg-emerald-600 text-white font-extrabold text-[10px] cursor-pointer"
-                            >
-                              2. Connect &rarr;
-                            </button>
-                          </div>
                         </div>
                       )}
 
@@ -4080,110 +4045,110 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </div>
                       )}
 
-                      {!previewIssuedOttPin && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (previewPayMethod === 'ottvoucher') {
-                              await handleSimulatePayment();
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (previewPayMethod === 'ottvoucher') {
+                            await handleSimulatePayment();
+                            return;
+                          }
+                          const cleanPh = guestPhone.replace(/\D/g, '').slice(-8);
+                          if (!/^[56]\d{7}$/.test(cleanPh)) {
+                            setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+                            return;
+                          }
+                          if (previewPayMethod === 'mpesa' && !cleanPh.startsWith('5')) {
+                            setPaymentError('Vodacom M-Pesa numbers in Lesotho must start with 5 (e.g. 58000000).');
+                            return;
+                          }
+                          if (previewPayMethod === 'ecocash' && !cleanPh.startsWith('6')) {
+                            setPaymentError('Econet EcoCash numbers in Lesotho must start with 6 (e.g. 62000000).');
+                            return;
+                          }
+                          setPaymentError(null);
+                          setPreviewUssdSent(true);
+                          setIsVerifyingPayment(true);
+                          const clientTxId = `tx_pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                          try {
+                            const res = await fetch('/api/gateways/paylesotho/initiate', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                transactionId: clientTxId,
+                                firstName: guestFirstName || 'Hotspot',
+                                lastName: guestSurname || 'Guest',
+                                phoneNumber: cleanPh,
+                                channel: previewPayMethod,
+                                amount: chosenPlan.price,
+                                planId: chosenPlan.id,
+                                planName: chosenPlan.name,
+                                durationSeconds: chosenPlan.durationSeconds || 86400,
+                                currency: 'M',
+                                scope: selectedScope
+                              })
+                            });
+                            const data = await res.json().catch(() => ({ success: false }));
+                            if (!res.ok || !data?.success) {
+                              setIsVerifyingPayment(false);
+                              setPreviewUssdSent(false);
+                              setPaymentError(
+                                data?.failureReason ||
+                                  data?.errorMessage ||
+                                  data?.message ||
+                                  'Unable to initiate USSD PIN push.'
+                              );
                               return;
                             }
-                            const cleanPh = guestPhone.replace(/\D/g, '').slice(-8);
-                            if (!/^[56]\d{7}$/.test(cleanPh)) {
-                              setPaymentError('Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).');
+                            if (data.status === 'completed') {
+                              setIsVerifyingPayment(false);
+                              setPreviewUssdSent(false);
+                              setPreviewIssuedOttPin('');
+                              enterPostAuthAdOrUsage(false);
                               return;
                             }
-                            if (previewPayMethod === 'mpesa' && !cleanPh.startsWith('5')) {
-                              setPaymentError('Vodacom M-Pesa numbers in Lesotho must start with 5 (e.g. 58000000).');
-                              return;
-                            }
-                            if (previewPayMethod === 'ecocash' && !cleanPh.startsWith('6')) {
-                              setPaymentError('Econet EcoCash numbers in Lesotho must start with 6 (e.g. 62000000).');
-                              return;
-                            }
-                            setPaymentError(null);
-                            setPreviewUssdSent(true);
-                            setIsVerifyingPayment(true);
-                            const clientTxId = `tx_pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                            try {
-                              const res = await fetch('/api/gateways/paylesotho/initiate', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  transactionId: clientTxId,
-                                  firstName: guestFirstName || 'Hotspot',
-                                  lastName: guestSurname || 'Guest',
-                                  phoneNumber: cleanPh,
-                                  channel: previewPayMethod,
-                                  amount: chosenPlan.price,
-                                  planId: chosenPlan.id,
-                                  planName: chosenPlan.name,
-                                  durationSeconds: chosenPlan.durationSeconds || 86400,
-                                  currency: 'M',
-                                  scope: selectedScope
-                                })
-                              });
-                              const data = await res.json().catch(() => ({ success: false }));
-                              if (!res.ok || !data?.success) {
+                            const txId = data.transactionId || clientTxId;
+                            for (let i = 0; i < 65; i++) {
+                              await new Promise((r) => setTimeout(r, 1500));
+                              const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
+                              const stData = await stRes.json().catch(() => ({}));
+                              if (stData?.status === 'completed') {
+                                setIsVerifyingPayment(false);
+                                setPreviewUssdSent(false);
+                                setPreviewIssuedOttPin('');
+                                enterPostAuthAdOrUsage(false);
+                                return;
+                              }
+                              if (stData?.status === 'failed') {
                                 setIsVerifyingPayment(false);
                                 setPreviewUssdSent(false);
                                 setPaymentError(
-                                  data?.failureReason ||
-                                    data?.errorMessage ||
-                                    data?.message ||
-                                    'Unable to initiate USSD PIN push.'
+                                  stData?.failureReason ||
+                                    stData?.errorMessage ||
+                                    stData?.message ||
+                                    'USSD payment was declined or failed.'
                                 );
                                 return;
                               }
-                              if (data.ottVoucherPin) {
-                                setIsVerifyingPayment(false);
-                                setPreviewIssuedOttPin(String(data.ottVoucherPin).replace(/\D/g, ''));
-                                setPreviewCopiedOtt(false);
-                                return;
-                              }
-                              const txId = data.transactionId || clientTxId;
-                              for (let i = 0; i < 65; i++) {
-                                await new Promise((r) => setTimeout(r, 1500));
-                                const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(txId)}`);
-                                const stData = await stRes.json().catch(() => ({}));
-                                if (stData?.status === 'completed' && stData?.ottVoucherPin) {
-                                  setIsVerifyingPayment(false);
-                                  setPreviewIssuedOttPin(String(stData.ottVoucherPin).replace(/\D/g, ''));
-                                  setPreviewCopiedOtt(false);
-                                  return;
-                                }
-                                if (stData?.status === 'failed') {
-                                  setIsVerifyingPayment(false);
-                                  setPreviewUssdSent(false);
-                                  setPaymentError(
-                                    stData?.failureReason ||
-                                      stData?.errorMessage ||
-                                      stData?.message ||
-                                      'USSD payment was declined or failed.'
-                                  );
-                                  return;
-                                }
-                              }
-                              setIsVerifyingPayment(false);
-                              setPreviewUssdSent(false);
-                              setPaymentError('Timed out waiting for USSD PIN entry.');
-                            } catch {
-                              setIsVerifyingPayment(false);
-                              setPreviewUssdSent(false);
-                              setPaymentError('Network error communicating with PayLesotho gateway.');
                             }
-                          }}
-                          disabled={isVerifyingPayment}
-                          style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                          className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
-                        >
-                          {isVerifyingPayment
-                            ? `Sending ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} USSD PIN Prompt...`
-                            : previewPayMethod === 'ottvoucher'
-                            ? 'Redeem OTT Voucher & Connect →'
-                            : `Proceed with ${chosenPlan.name} →`}
-                        </button>
-                      )}
+                            setIsVerifyingPayment(false);
+                            setPreviewUssdSent(false);
+                            setPaymentError('Timed out waiting for USSD PIN entry.');
+                          } catch {
+                            setIsVerifyingPayment(false);
+                            setPreviewUssdSent(false);
+                            setPaymentError('Network error communicating with PayLesotho gateway.');
+                          }
+                        }}
+                        disabled={isVerifyingPayment}
+                        style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
+                        className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
+                      >
+                        {isVerifyingPayment
+                          ? `Waiting for ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN...`
+                          : previewPayMethod === 'ottvoucher'
+                          ? 'Redeem OTT Voucher & Connect →'
+                          : `Pay with ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} & Connect →`}
+                      </button>
                     </div>
                   );
                 })()}

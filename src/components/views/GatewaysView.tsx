@@ -20,7 +20,8 @@ import {
   Trash2,
   Plus,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Smartphone
 } from 'lucide-react';
 import { GatewayConfig, GatewayProvider } from '../../types';
 import { ProviderLogo } from '../common/BrandLogos';
@@ -135,6 +136,13 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
   const [testMobile, setTestMobile] = useState('26658000000');
   const [redeemTestResult, setRedeemTestResult] = useState<any>(null);
   const [isRedeemingTest, setIsRedeemingTest] = useState(false);
+
+  // PayLesotho M-Pesa (62915) & EcoCash (63165430) Live USSD Push & Direct Auth Tester
+  const [plTestChannel, setPlTestChannel] = useState<'mpesa' | 'ecocash'>('mpesa');
+  const [plTestPhone, setPlTestPhone] = useState('58000000');
+  const [plTestAmount, setPlTestAmount] = useState<number>(10);
+  const [isRunningPlUssdTest, setIsRunningPlUssdTest] = useState(false);
+  const [plUssdTestResult, setPlUssdTestResult] = useState<any>(null);
 
   // Pull authoritative gateway credentials from server on mount (and reveal unmasked PayLesotho token without overwriting local token with masked bullets)
   React.useEffect(() => {
@@ -550,6 +558,137 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
       setRedeemTestResult({ success: false, message: err?.message || 'Failed to verify 16-digit OTT Voucher redemption.' });
     } finally {
       setIsRedeemingTest(false);
+    }
+  };
+
+  const handleTestPayLesothoUssdPush = async () => {
+    const cleanPh = plTestPhone.replace(/\D/g, '').slice(-8);
+    if (!/^[56]\d{7}$/.test(cleanPh)) {
+      setPlUssdTestResult({
+        success: false,
+        message: 'Please enter a valid 8-digit Lesotho mobile number starting with 5 (M-Pesa) or 6 (EcoCash).'
+      });
+      return;
+    }
+    if (plTestChannel === 'mpesa' && !cleanPh.startsWith('5')) {
+      setPlUssdTestResult({
+        success: false,
+        message: 'Vodacom M-Pesa numbers must start with 5 (e.g. 58000000). Switch channel to EcoCash for 6XXXXXXX numbers.'
+      });
+      return;
+    }
+    if (plTestChannel === 'ecocash' && !cleanPh.startsWith('6')) {
+      setPlUssdTestResult({
+        success: false,
+        message: 'Econet EcoCash numbers must start with 6 (e.g. 62000000). Switch channel to M-Pesa for 5XXXXXXX numbers.'
+      });
+      return;
+    }
+
+    setIsRunningPlUssdTest(true);
+    setPlUssdTestResult({
+      success: true,
+      pending: true,
+      message: `Initiating live ${plTestChannel === 'ecocash' ? 'EcoCash (63165430)' : 'M-Pesa (62915)'} USSD PIN push to +266 ${cleanPh} for M${plTestAmount}...`
+    });
+
+    const txId = `tx_gwtest_${Date.now()}`;
+    try {
+      const res = await fetch('/api/gateways/paylesotho/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionId: txId,
+          channel: plTestChannel,
+          phoneNumber: `+266 ${cleanPh}`,
+          amount: Math.max(1, Number(plTestAmount) || 10),
+          customerName: 'Gateway Diagnostic Tester',
+          planId: 'hs_1d',
+          planName: `Direct ${plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} Test (M${plTestAmount})`,
+          durationSeconds: 86400,
+          siteName: 'T-Connect Gateway Verifier'
+        })
+      });
+      const data = await res.json().catch(() => ({ success: false, message: 'Invalid JSON response' }));
+      if (!res.ok || !data.success) {
+        setPlUssdTestResult({
+          success: false,
+          message: data.failureReason || data.errorMessage || data.message || 'USSD push failed.',
+          reference: data.reference || txId,
+          channel: plTestChannel
+        });
+        setIsRunningPlUssdTest(false);
+        return;
+      }
+
+      if (data.status === 'completed') {
+        onUpdateCredentials('paylesotho', { testPassedOnce: true, status: 'operational' });
+        setPlUssdTestResult({
+          success: true,
+          status: 'completed',
+          channel: plTestChannel,
+          paymentMethodLabel: plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa',
+          reference: data.reference || data.transactionId || txId,
+          amount: plTestAmount,
+          message: `Direct ${plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} Authentication Confirmed! Transaction recorded directly under ${plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} (no intermediate OTT voucher step).`
+        });
+        setIsRunningPlUssdTest(false);
+        return;
+      }
+
+      setPlUssdTestResult({
+        success: true,
+        pending: true,
+        reference: data.reference || data.transactionId || txId,
+        channel: plTestChannel,
+        message: data.message || `USSD PIN prompt sent to +266 ${cleanPh}. Waiting for PIN confirmation on handset...`
+      });
+
+      const pollTxId = data.transactionId || txId;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const stRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(pollTxId)}`);
+        const stData = await stRes.json().catch(() => ({}));
+        if (stData?.status === 'completed') {
+          onUpdateCredentials('paylesotho', { testPassedOnce: true, status: 'operational' });
+          setPlUssdTestResult({
+            success: true,
+            status: 'completed',
+            channel: plTestChannel,
+            paymentMethodLabel: plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa',
+            reference: stData.reference || pollTxId,
+            amount: plTestAmount,
+            message: `Direct ${plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} Authentication Confirmed! Customer is immediately authenticated and recorded under ${plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'}.`
+          });
+          setIsRunningPlUssdTest(false);
+          return;
+        }
+        if (stData?.status === 'failed') {
+          setPlUssdTestResult({
+            success: false,
+            status: 'failed',
+            channel: plTestChannel,
+            reference: stData.reference || pollTxId,
+            message: stData.failureReason || stData.errorMessage || stData.message || 'USSD PIN prompt was declined or failed.'
+          });
+          setIsRunningPlUssdTest(false);
+          return;
+        }
+      }
+
+      setPlUssdTestResult({
+        success: false,
+        channel: plTestChannel,
+        reference: pollTxId,
+        message: 'Timed out waiting for USSD PIN entry on phone (60s).'
+      });
+    } catch (err: any) {
+      setPlUssdTestResult({
+        success: false,
+        message: err?.message || 'Network error testing PayLesotho USSD push.'
+      });
+    } finally {
+      setIsRunningPlUssdTest(false);
     }
   };
 
@@ -1593,10 +1732,145 @@ export const GatewaysView: React.FC<GatewaysViewProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Telecom Sandbox Payment Simulation or Production Bypass */
-                <div className="space-y-3">
+                /* PayLesotho M-Pesa (62915) & EcoCash (63165430) Live USSD Push & Direct Auth Verifier + Sandbox Simulation */
+                <div className="space-y-4">
+                  {selectedGateway.provider === 'paylesotho' && (
+                    <div className="p-4 bg-[#121829] rounded-xl border border-emerald-500/30 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-2">
+                        <span className="font-bold text-white flex items-center gap-1.5">
+                          <Smartphone className="w-4 h-4 text-emerald-400" />
+                          <span>Live M-Pesa ({mpesaMerchantId || '62915'}) &amp; EcoCash ({ecocashMerchantId || '63165430'}) Direct Auth Tester</span>
+                        </span>
+                        <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                          Direct Hotspot Auth (No Intermediate OTT Voucher Step)
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">Select Mobile Money Channel</label>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlTestChannel('mpesa');
+                                if (!plTestPhone.startsWith('5')) setPlTestPhone('58000000');
+                              }}
+                              className={`py-2 px-2.5 rounded-lg font-bold text-xs border cursor-pointer transition-all ${
+                                plTestChannel === 'mpesa'
+                                  ? 'bg-red-600/20 border-red-500 text-red-300'
+                                  : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              M-Pesa (62915)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPlTestChannel('ecocash');
+                                if (!plTestPhone.startsWith('6')) setPlTestPhone('62000000');
+                              }}
+                              className={`py-2 px-2.5 rounded-lg font-bold text-xs border cursor-pointer transition-all ${
+                                plTestChannel === 'ecocash'
+                                  ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                                  : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              EcoCash (63165430)
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">
+                            8-Digit Lesotho Mobile ({plTestChannel === 'mpesa' ? '5xxxxxxx' : '6xxxxxxx'})
+                          </label>
+                          <div className="flex items-center bg-black/60 border border-emerald-400/40 rounded-lg overflow-hidden">
+                            <span className="px-2.5 py-2 text-xs font-bold text-slate-400 bg-white/5 border-r border-white/10">
+                              +266
+                            </span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              maxLength={8}
+                              value={plTestPhone}
+                              onChange={(e) => {
+                                const digits = e.target.value.replace(/\D/g, '').slice(0, 8);
+                                setPlTestPhone(digits);
+                                if (digits.startsWith('5')) setPlTestChannel('mpesa');
+                                else if (digits.startsWith('6')) setPlTestChannel('ecocash');
+                              }}
+                              placeholder={plTestChannel === 'mpesa' ? '58000000' : '62000000'}
+                              className="w-full px-2.5 py-2 bg-transparent text-emerald-400 font-mono text-sm font-extrabold focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">Test Amount ({currency})</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={500}
+                            value={plTestAmount}
+                            onChange={(e) => setPlTestAmount(Math.max(1, Number(e.target.value) || 10))}
+                            className="w-full px-3 py-2 bg-black/60 border border-emerald-400/40 rounded-lg text-white font-mono text-sm font-extrabold focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleTestPayLesothoUssdPush()}
+                        disabled={isRunningPlUssdTest || plTestPhone.replace(/\D/g, '').length !== 8}
+                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-400 disabled:opacity-50 text-slate-950 font-extrabold text-xs font-mono rounded-lg shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-all"
+                      >
+                        {isRunningPlUssdTest ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Waiting for {plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} USSD PIN Approval on +266 {plTestPhone}...</span>
+                          </>
+                        ) : (
+                          <span>
+                            Trigger Live {plTestChannel === 'ecocash' ? 'EcoCash (63165430)' : 'M-Pesa (62915)'} USSD Push &amp; Direct Auth &rarr;
+                          </span>
+                        )}
+                      </button>
+
+                      {plUssdTestResult && (
+                        <div
+                          className={`p-3 rounded-xl border space-y-1.5 ${
+                            plUssdTestResult.pending
+                              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                              : plUssdTestResult.success
+                              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 font-bold text-xs">
+                            {plUssdTestResult.pending ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
+                            ) : plUssdTestResult.success ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            ) : (
+                              <AlertTriangle className="w-4 h-4 text-rose-400" />
+                            )}
+                            <span>{plUssdTestResult.message}</span>
+                          </div>
+                          {plUssdTestResult.reference && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono pt-1.5 border-t border-white/10 text-slate-300">
+                              <div>Ref: <strong className="text-white">{plUssdTestResult.reference}</strong></div>
+                              <div>Method: <strong className="text-emerald-400">{plUssdTestResult.paymentMethodLabel || (plTestChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa')}</strong></div>
+                              <div>Amount: <strong className="text-cyan-400">{currency}{plUssdTestResult.amount || plTestAmount}</strong></div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <p className="text-slate-400">
-                    If your provider issued production merchant credentials directly (no sandbox required, e.g. OTTvoucher), you can proceed directly to Live Production.
+                    You can also simulate an instant test transaction or mark the gateway ready for Live Production:
                   </p>
                   <div className="flex flex-wrap gap-2.5">
                     <button

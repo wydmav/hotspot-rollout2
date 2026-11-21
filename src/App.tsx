@@ -235,8 +235,8 @@ export default function App() {
 
     if (isCollaborator && currentTab !== 'network') {
       setCurrentTab('network');
-    } else if (isFinance && currentTab !== 'billing') {
-      setCurrentTab('billing');
+    } else if (isFinance && currentTab !== 'billing' && currentTab !== 'dashboard') {
+      setCurrentTab('dashboard');
     } else if (isTech && currentTab !== 'fleet') {
       setCurrentTab('fleet');
     } else if (isManagement && currentTab !== 'dashboard') {
@@ -453,7 +453,7 @@ export default function App() {
         if (!res.ok) return;
         const data = await res.json();
         if (data && data.success) {
-          storage.ingestServerGuestEvents(data.events || [], data.transactions || []);
+          storage.ingestServerGuestEvents(data.events || [], data.transactions || [], data.cleanSlateAt || null);
         }
       } catch {}
     };

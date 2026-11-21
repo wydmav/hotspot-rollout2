@@ -1161,26 +1161,11 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         <div id="ussdPinPushBox" class="ussd-box">
           <div class="ussd-title" id="ussdPushTitle">&#128241; USSD PIN Prompt Sent to Your Phone</div>
           <div class="ussd-desc" id="ussdPushDesc">
-            Please check your phone screen and enter your <strong>M-Pesa / EcoCash PIN</strong> to approve payment and receive your 16-Digit OTT Voucher PIN.
+            Please check your phone screen and enter your <strong>M-Pesa / EcoCash PIN</strong> to approve payment and connect immediately.
           </div>
           <button type="button" id="ussdCheckNowBtn" onclick="manualPollPayLesothoStatus()" style="width:100%;padding:9px 12px;border-radius:999px;border:1.5px solid ${accentColor};background:#ffffff;color:${accentColor};font-size:11px;font-weight:900;cursor:pointer;">
-            I've Entered My PIN &mdash; Check Payment Status
+            I've Entered My PIN &mdash; Connect Now
           </button>
-        </div>
-
-        <!-- Post-Payment OTT Voucher Copy & Instant Redeem Box -->
-        <div id="ottCopyRedeemBox" class="ott-box">
-          <div style="font-size:11px;color:#047857;font-weight:900;margin-bottom:4px;">&#10003; PAYMENT APPROVED &mdash; YOUR 16-DIGIT OTT VOUCHER</div>
-          <div id="issuedOttPinDisplay" style="font-family:monospace;font-size:15px;font-weight:900;color:#0f172a;letter-spacing:1.8px;background:#ffffff;padding:9px;border-radius:12px;text-align:center;margin-bottom:8px;border:1.5px solid #10b981;"></div>
-          <button type="button" id="copyOttPinBtn" onclick="copyIssuedOttVoucher()" style="width:100%;padding:9px;border-radius:999px;border:none;background:${accentColor};color:#fff;font-size:12px;font-weight:900;cursor:pointer;margin-bottom:8px;">
-            Copy 16-Digit OTT Voucher PIN
-          </button>
-          <div id="redeemCopiedWrap">
-            <input class="inp" type="text" id="redeemCopiedPinInput" placeholder="Paste 16-digit OTT Voucher PIN" style="font-family:monospace;margin-bottom:8px;text-align:center;font-weight:900;" />
-            <button type="button" id="redeemCopiedBtn" onclick="redeemCopiedOttVoucher()" class="btn-orange" style="background:#059669;">
-              Authenticate &amp; Connect Now &rarr;
-            </button>
-          </div>
         </div>
 
         <button type="submit" id="buySubmitBtn" class="btn-orange">
@@ -1208,7 +1193,6 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   var selectedPlanName = '${firstPlanNameClean}';
   var selectedPlanDurationSec = ${Number(firstPlan.durationSeconds) || 86400};
   var selectedGw = 'mpesa';
-  var issuedOttPinRaw = '';
   var activeTxId = '';
   var pollTimer = null;
   var mtError = "$(error)";
@@ -1390,7 +1374,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     if (selectedGw === 'ottvoucher') {
       btn.textContent = 'Redeem OTT Voucher & Connect \\u2192';
     } else {
-      btn.textContent = 'Proceed with ' + selectedPlanName + ' (M' + selectedPlanPrice + ') \\u2192';
+      var gwName = selectedGw === 'ecocash' ? 'EcoCash' : 'M-Pesa';
+      btn.textContent = 'Pay M' + selectedPlanPrice + ' with ' + gwName + ' & Connect \\u2192';
     }
   }
 
@@ -1512,21 +1497,20 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     return true;
   }
 
-  function showIssuedOttVoucherBox(pinStr) {
-    issuedOttPinRaw = String(pinStr || '').replace(/\\D/g, '');
-    var ussdBox = document.getElementById('ussdPinPushBox');
-    var box = document.getElementById('ottCopyRedeemBox');
-    var disp = document.getElementById('issuedOttPinDisplay');
-    var pField = document.getElementById('payField');
-    var rInp = document.getElementById('redeemCopiedPinInput');
+  function completeDirectMobileMoneyAuth() {
+    var ussdTitle = document.getElementById('ussdPushTitle');
+    var ussdDesc = document.getElementById('ussdPushDesc');
+    var chkBtn = document.getElementById('ussdCheckNowBtn');
     var btn = document.getElementById('buySubmitBtn');
-    if (ussdBox) ussdBox.style.display = 'none';
-    if (pField) pField.style.display = 'none';
-    if (btn) btn.style.display = 'none';
-    var formatted = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
-    if (disp) disp.textContent = formatted + ' (M' + selectedPlanPrice + ')';
-    if (rInp) rInp.value = formatted;
-    if (box) box.style.display = 'block';
+    var gwLabel = selectedGw === 'ecocash' ? 'EcoCash' : 'M-Pesa';
+    if (ussdTitle) ussdTitle.textContent = '\\u2713 ' + gwLabel + ' Payment Confirmed!';
+    if (ussdDesc) ussdDesc.innerHTML = 'Your <strong>' + gwLabel + '</strong> payment for <strong>' + selectedPlanName + ' (M' + selectedPlanPrice + ')</strong> is verified. Authenticating &amp; connecting now...';
+    if (chkBtn) chkBtn.style.display = 'none';
+    if (btn) { btn.disabled = true; btn.textContent = '\\u2713 ' + gwLabel + ' Verified — Connecting...'; }
+    setTimeout(function() {
+      var bf = document.getElementById('buyForm');
+      if (bf) bf.submit();
+    }, 350);
   }
 
   function manualPollPayLesothoStatus() {
@@ -1536,9 +1520,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     fetch('${baseUrl}/api/gateways/paylesotho/status/' + encodeURIComponent(activeTxId))
       .then(function(r) { return r.json(); })
       .then(function(st) {
-        if (st && st.success && st.status === 'completed' && st.ottVoucherPin) {
+        if (st && st.success && st.status === 'completed') {
           if (pollTimer) clearInterval(pollTimer);
-          showIssuedOttVoucherBox(st.ottVoucherPin);
+          completeDirectMobileMoneyAuth();
         } else if (st && st.status === 'failed') {
           if (pollTimer) clearInterval(pollTimer);
           var ussdBox = document.getElementById('ussdPinPushBox');
@@ -1551,69 +1535,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         }
       })
       .catch(function() {
-        if (chkBtn) chkBtn.textContent = "I've Entered My PIN — Check Payment Status";
+        if (chkBtn) chkBtn.textContent = "I've Entered My PIN — Connect Now";
       });
-  }
-
-  function copyIssuedOttVoucher() {
-    if (!issuedOttPinRaw) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(issuedOttPinRaw).catch(function(){});
-    } else {
-      var ta = document.createElement('textarea');
-      ta.value = issuedOttPinRaw;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
-    }
-    fetch('${baseUrl}/api/gateways/paylesotho/ott-voucher/mark-copied', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voucherPin: issuedOttPinRaw })
-    }).catch(function(){});
-    var copyBtn = document.getElementById('copyOttPinBtn');
-    if (copyBtn) {
-      copyBtn.textContent = '\\u2713 Copied! Now Tap Authenticate & Connect Below';
-      copyBtn.style.background = '#059669';
-    }
-    var rInp = document.getElementById('redeemCopiedPinInput');
-    if (rInp) rInp.value = (issuedOttPinRaw.match(/.{1,4}/g) || [issuedOttPinRaw]).join(' ');
-  }
-
-  function redeemCopiedOttVoucher() {
-    var rInp = document.getElementById('redeemCopiedPinInput');
-    var pinDigits = (rInp && rInp.value ? rInp.value : issuedOttPinRaw).replace(/\\D/g, '');
-    if (pinDigits.length !== 16) {
-      showErr('Please enter your 16-digit OTT Voucher PIN.');
-      return;
-    }
-    var rBtn = document.getElementById('redeemCopiedBtn');
-    if (rBtn) { rBtn.disabled = true; rBtn.textContent = 'Authenticating & Starting Session...'; }
-    fetch('${baseUrl}/api/vouchers/redeem', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(getGuestPayload({
-        code: pinDigits,
-        expectedAmount: selectedPlanPrice,
-        planId: selectedPlanId,
-        planName: selectedPlanName,
-        durationSeconds: selectedPlanDurationSec,
-        flexibleAmount: true,
-        mode: selectedGw === 'ecocash' ? 'ecocash' : 'mpesa',
-        paymentChannel: selectedGw === 'ecocash' ? 'ecocash' : 'mpesa'
-      }))
-    }).then(function(r) { return r.json(); }).then(function(data) {
-      if (!data || !data.success) {
-        if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Authenticate & Connect Now \\u2192'; }
-        showErr((data && data.message) ? data.message : 'OTT Voucher verification failed.');
-        return;
-      }
-      document.getElementById('buyForm').submit();
-    }).catch(function() {
-      if (rBtn) { rBtn.disabled = false; rBtn.textContent = 'Authenticate & Connect Now \\u2192'; }
-      showErr('Network error redeeming OTT Voucher.');
-    });
   }
 
   function handleBuySubmit(e) {
@@ -1630,7 +1553,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         return false;
       }
       var btn0 = document.getElementById('buySubmitBtn');
-      if (btn0) { btn0.disabled = true; btn0.textContent = 'Verifying 16-Digit OTT Voucher...'; }
+      if (btn0) { btn0.disabled = true; btn0.textContent = 'Redeeming 16-Digit OTT Voucher...'; }
       fetch('${baseUrl}/api/vouchers/redeem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1641,7 +1564,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
           planName: selectedPlanName,
           durationSeconds: selectedPlanDurationSec,
           flexibleAmount: true,
-          mode: 'ottvoucher'
+          mode: 'ottvoucher',
+          paymentChannel: 'ottvoucher'
         }))
       }).then(function(r) { return r.json(); }).then(function(data) {
         if (!data || !data.success) {
@@ -1682,10 +1606,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     var ussdTitle = document.getElementById('ussdPushTitle');
     var ussdDesc = document.getElementById('ussdPushDesc');
     var chkBtn = document.getElementById('ussdCheckNowBtn');
-    if (chkBtn) chkBtn.textContent = "I've Entered My PIN — Check Payment Status";
+    if (chkBtn) { chkBtn.style.display = 'block'; chkBtn.textContent = "I've Entered My PIN — Connect Now"; }
     if (ussdTitle) ussdTitle.textContent = 'USSD PIN Prompt Sent to +266 ' + val;
     if (ussdDesc) {
-      ussdDesc.innerHTML = 'Check your phone now and enter your <strong>' + gwLabel + ' PIN</strong> to approve <strong>M' + selectedPlanPrice + ' (' + selectedPlanName + ')</strong>. Your 16-Digit OTT Voucher PIN will appear below first before connecting.';
+      ussdDesc.innerHTML = 'Check your phone now and enter your <strong>' + gwLabel + ' PIN</strong> to approve <strong>M' + selectedPlanPrice + ' (' + selectedPlanName + ')</strong>. You will be authenticated and connected automatically as soon as your PIN is confirmed.';
     }
     if (ussdBox) ussdBox.style.display = 'block';
 
@@ -1699,9 +1623,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         fetch('${baseUrl}/api/gateways/paylesotho/status/' + encodeURIComponent(activeTxId))
           .then(function(r) { return r.json(); })
           .then(function(st) {
-            if (st && st.success && st.status === 'completed' && st.ottVoucherPin) {
+            if (st && st.success && st.status === 'completed') {
               clearInterval(pollTimer);
-              showIssuedOttVoucherBox(st.ottVoucherPin);
+              completeDirectMobileMoneyAuth();
             } else if ((st && st.status === 'failed') || attempts > 65) {
               clearInterval(pollTimer);
               if (ussdBox) ussdBox.style.display = 'none';
@@ -1738,9 +1662,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
       if (data.transactionId) {
         activeTxId = data.transactionId;
       }
-      if (data.status === 'completed' && data.ottVoucherPin) {
+      if (data.status === 'completed') {
         if (pollTimer) clearInterval(pollTimer);
-        showIssuedOttVoucherBox(data.ottVoucherPin);
+        completeDirectMobileMoneyAuth();
         return;
       }
     }).catch(function() {
@@ -2144,6 +2068,7 @@ interface ServerPortalStore {
   issuedPayLesothoOttVouchers: IssuedPayLesothoOttVoucher[];
   guestEvents: Array<any>;
   transactions: Array<any>;
+  cleanSlateAt?: string;
   supabaseConfig?: { url: string; anonKey: string };
   sponsorAd?: any;
   partnerApiKeys: PartnerApiKeyRecord[];
@@ -2235,6 +2160,7 @@ function loadServerPortalStore(): ServerPortalStore {
       : [],
     guestEvents: Array.isArray(rawStore?.guestEvents) ? rawStore.guestEvents : [],
     transactions: Array.isArray(rawStore?.transactions) ? rawStore.transactions : [],
+    cleanSlateAt: typeof rawStore?.cleanSlateAt === 'string' ? rawStore.cleanSlateAt : undefined,
     supabaseConfig: rawStore?.supabaseConfig && rawStore.supabaseConfig.url ? rawStore.supabaseConfig : undefined,
     sponsorAd: rawStore?.sponsorAd || defaultServerSponsorAd,
     partnerApiKeys:
@@ -2522,6 +2448,31 @@ async function syncRecordToSupabaseTable(table: string, payload: any, onConflict
   } catch {
     return false;
   }
+}
+
+async function wipeLiveRecordsFromSupabase(): Promise<void> {
+  const { url, key } = getSupabaseCredentials();
+  if (!url || !key) return;
+  const tables: Array<{ table: string; filter: string }> = [
+    { table: 'guest_leads', filter: 'id=neq.__never__' },
+    { table: 'transactions', filter: 'id=neq.__never__' },
+    { table: 'ott_vouchers_issued', filter: 'pin=neq.__never__' }
+  ];
+  await Promise.all(
+    tables.map(async ({ table, filter }) => {
+      try {
+        await fetch(`${url}/rest/v1/${encodeURIComponent(table)}?${filter}`, {
+          method: 'DELETE',
+          headers: {
+            apikey: key,
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json'
+          },
+          signal: AbortSignal.timeout(4500)
+        });
+      } catch {}
+    })
+  );
 }
 
 app.get('/api/supabase/status', (_req: Request, res: Response) => {
@@ -3926,6 +3877,147 @@ async function issuePayLesothoOttVoucherForTransaction(tx: any): Promise<IssuedP
   }
 }
 
+// Direct M-Pesa (62915) & EcoCash (63165430) Hotspot Session & Lead Authorization
+// Authenticates the customer directly upon USSD PIN confirmation without issuing an intermediate OTT voucher.
+function authorizeDirectPayLesothoSession(tx: any) {
+  if (!tx) return null;
+  const nowIso = new Date().toISOString();
+  const channel: 'mpesa' | 'ecocash' =
+    String(tx.channel || tx.paymentMethod || '').toLowerCase() === 'ecocash' ? 'ecocash' : 'mpesa';
+  const paymentMethodLabel = channel === 'ecocash' ? 'EcoCash' : 'M-Pesa';
+  const safeDurationSec = Math.max(60, Math.floor(Number(tx.durationSeconds) || 86400));
+  const expiresIso = new Date(Date.now() + safeDurationSec * 1000).toISOString();
+  const finalPrice = Math.max(1, Number(tx.amount) || 10);
+  const resolvedPlanName = tx.planName || 'Daily Pass';
+  const txRef = tx.upstreamReference || tx.transactionRef || `PL-${Date.now()}`;
+
+  tx.status = 'completed';
+  tx.paymentMethod = channel;
+  tx.paymentMethodLabel = paymentMethodLabel;
+  tx.completedAt = tx.completedAt || nowIso;
+
+  const fullGuestName = String(tx.customerName || tx.guestName || 'Mobile Money Subscriber').trim();
+  const nameParts = fullGuestName.split(' ');
+  const firstName = String(tx.firstName || nameParts[0] || 'Guest').trim();
+  const lastName = String(tx.lastName || nameParts.slice(1).join(' ') || '').trim();
+  const clean8Phone = String(tx.cleanPhone || tx.phoneNumber || '').replace(/\D/g, '').slice(-8);
+  const formattedPhone = clean8Phone ? `+266 ${clean8Phone}` : String(tx.phoneNumber || '+266');
+  const rawEmail = String(tx.customerEmail || tx.guestEmail || '').trim();
+  const cleanEmail = rawEmail === 'guest@tconnect.ls' || rawEmail === 'not-provided@tconnect.ls' ? '' : rawEmail;
+  const resolvedMac = String(tx.clientMac || tx.mac || '').trim();
+  const resolvedIp = String(tx.clientIp || tx.ip || '').trim();
+  const siteName = tx.siteName || 'T-Connect Hotspot';
+  const routerName = tx.routerName || 'MIKROTIK-TC';
+  const district = tx.district || resolveDistrictForRouter(routerName, siteName);
+
+  const entry: any = {
+    id: `guest_${channel}_${tx.id || Date.now()}`,
+    firstName,
+    lastName,
+    guestName: fullGuestName,
+    countryCode: '+266',
+    phone: clean8Phone,
+    guestPhone: formattedPhone,
+    email: cleanEmail,
+    mac: resolvedMac,
+    ip: resolvedIp,
+    scope: tx.vertical || 'hotspot',
+    routerId: tx.routerId,
+    routerName,
+    siteName,
+    venuePurchasedAt: `${siteName} (${routerName})`,
+    district,
+    adoptedRouterVerified: true,
+    mode: channel,
+    accessType: 'paid',
+    paymentMethod: channel,
+    paymentMethodLabel,
+    planId: tx.planId || 'hs_1d',
+    planName: resolvedPlanName,
+    durationSeconds: safeDurationSec,
+    startedAt: nowIso,
+    expiresAt: expiresIso,
+    roamedSites: [siteName],
+    amount: finalPrice,
+    currency: 'M',
+    transactionRef: txRef,
+    capturedAt: nowIso,
+    lastSeenAt: nowIso
+  };
+
+  if (!(tx as any).directAuthRecorded) {
+    (tx as any).directAuthRecorded = true;
+    const cleanMacForRos = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/.test(resolvedMac) ? resolvedMac.toUpperCase() : '';
+    const rosUser = `mm_${clean8Phone || Date.now()}`;
+    const durationCommands: string[] = [
+      `:do { :if ([:len [/ip hotspot user find name="${rosUser}"]] = 0) do={ /ip hotspot user add name="${rosUser}" password="123" profile="tc-speed-cap" limit-uptime=${safeDurationSec}s comment="T-Connect ${paymentMethodLabel} ${resolvedPlanName} (M${finalPrice})" } else={ /ip hotspot user set [find name="${rosUser}"] limit-uptime=${safeDurationSec}s disabled=no } } on-error={}`,
+      `:do { :log info "T-Connect Direct ${paymentMethodLabel} Auth: ${formattedPhone} | Plan: ${resolvedPlanName} (M${finalPrice}) | Ref: ${txRef} | Duration: ${safeDurationSec}s | MAC: ${cleanMacForRos || 'AUTO'}" } on-error={}`
+    ];
+    for (const router of monitoredRouters.values()) {
+      router.pendingCommands = [...(router.pendingCommands || []), ...durationCommands];
+    }
+
+    const existingLeadIdx = (serverStore.guestEvents || []).findIndex((ev: any) => {
+      if (ev.id === entry.id || (ev.transactionRef && ev.transactionRef === txRef)) return true;
+      const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '').slice(-8);
+      return clean8Phone.length === 8 && evPhone === clean8Phone && ev.accessType !== 'paid';
+    });
+    if (existingLeadIdx >= 0) {
+      serverStore.guestEvents[existingLeadIdx] = {
+        ...serverStore.guestEvents[existingLeadIdx],
+        ...entry
+      };
+    } else {
+      serverStore.guestEvents.unshift(entry);
+    }
+    saveServerPortalStore(serverStore);
+    dispatchPartnerWebhooksForLead(entry).catch(() => {});
+
+    void syncRecordToSupabaseTable(
+      'guest_leads',
+      {
+        id: `lead_${entry.id}`,
+        operator_id: DEFAULT_OPERATOR_ID,
+        first_name: entry.firstName || 'Guest',
+        last_name: entry.lastName || '',
+        full_name: entry.guestName || 'Subscriber',
+        country_code: '+266',
+        phone: entry.phone || entry.guestPhone || '',
+        full_phone: entry.guestPhone || '',
+        email: entry.email || '',
+        router_name: entry.routerName || 'MIKROTIK-TC',
+        site_name: entry.siteName || 'T-Connect Hotspot',
+        vertical: entry.scope || 'hotspot',
+        client_mac: entry.mac || 'AUTO',
+        client_ip: entry.ip || '10.10.0.1',
+        device_type: 'Mobile',
+        duration_minutes: Math.round(safeDurationSec / 60),
+        status: 'active',
+        captured_at: nowIso
+      },
+      'id'
+    );
+    void syncRecordToSupabaseTable(
+      'transactions',
+      {
+        id: tx.id,
+        operator_id: DEFAULT_OPERATOR_ID,
+        transaction_ref: txRef,
+        provider: 'paylesotho',
+        msisdn: formattedPhone,
+        plan_name: resolvedPlanName,
+        site_name: siteName,
+        amount: finalPrice,
+        currency: 'M',
+        status: 'completed'
+      },
+      'id'
+    );
+  }
+
+  return entry;
+}
+
 app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response) => {
   try {
     const {
@@ -3936,8 +4028,11 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       planId,
       planName,
       durationSeconds,
+      firstName,
+      lastName,
       guestName,
       customerName,
+      email,
       guestEmail,
       customerEmail,
       clientMac,
@@ -3946,6 +4041,9 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       ip,
       scope,
       vertical,
+      routerId,
+      routerName,
+      siteName,
       bearerToken: requestBearerOverride
     } = req.body || {};
 
@@ -4044,10 +4142,6 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       .trim()
       .replace(/\/+$/, '');
 
-    // Official PayLesotho Merchant Name & Merchant IDs:
-    // Merchant Name: T-Connect
-    // M-Pesa Merchant ID: 62915
-    // EcoCash Merchant ID: 63165430
     const merchantName = 'T-Connect';
     const rawMpesaId = (
       payGw?.mpesaMerchantId ||
@@ -4066,9 +4160,6 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
     const xpaymentsAppId = (payGw?.xpaymentsAppId || process.env.PAYLESOTHO_XPAYMENTS_APP_ID || '').trim();
     const xpaymentsCertId = (payGw?.xpaymentsCertId || process.env.PAYLESOTHO_XPAYMENTS_CERT_ID || '').trim();
 
-    // Clean alphanumeric clientReference / client_reference per official Pay Lesotho Postman Collection:
-    // M-Pesa: "PayRefMP189739" (no spaces or parentheses)
-    // EcoCash: "Reference709828" (no spaces or parentheses)
     const txRef =
       selectedChannel === 'mpesa'
         ? `PayRefMP${Math.floor(100000 + Math.random() * 899999)}`
@@ -4080,14 +4171,23 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
     const msisdn = `266${clean8DigitPhone}`;
     const nowIso = new Date().toISOString();
 
-    const routerCtx = resolveAdoptedRouterForLead({ scope: scope || vertical, routerName: 'MIKROTIK-TC' });
+    const routerCtx = resolveAdoptedRouterForLead({
+      scope: scope || vertical,
+      routerId,
+      routerName: routerName || 'MIKROTIK-TC',
+      siteName
+    });
 
     const targetEndpoint =
       selectedChannel === 'mpesa'
-        ? `${apiBaseUrl}/api/v2/vcl/payment`
+        ? `${apiBaseUrl}/api/v1/vcl/payment`
         : selectedChannel === 'ecocash'
            ? `${apiBaseUrl}/api/v2/econet/payment`
           : `${xpaymentsBaseUrl}/api/v1/initiate-payment`;
+
+    const resolvedFullName =
+      customerName || guestName || [firstName, lastName].filter(Boolean).join(' ') || 'T-Connect Guest';
+    const resolvedEmail = String(customerEmail || guestEmail || email || '').trim();
 
     const newTx: any = {
       id: txId,
@@ -4095,19 +4195,25 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       upstreamReference: txRef,
       provider: 'paylesotho',
       channel: selectedChannel,
+      paymentMethod: selectedChannel === 'ecocash' ? 'ecocash' : 'mpesa',
+      paymentMethodLabel: selectedChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa',
       amount: numAmount,
       currency: 'M',
       phoneNumber: clean8DigitPhone ? `+266 ${clean8DigitPhone}` : '+266 Card',
       cleanPhone: clean8DigitPhone,
       msisdn,
-      customerName: customerName || guestName || 'T-Connect Guest',
-      customerEmail: customerEmail || guestEmail || 'guest@tconnect.ls',
+      firstName: firstName || '',
+      lastName: lastName || '',
+      customerName: resolvedFullName,
+      customerEmail: resolvedEmail,
       planId: planId || 'plan_daily_m10',
       planName: planName || 'Daily Pass',
       durationSeconds: Number(durationSeconds) || (numAmount >= 250 ? 2592000 : numAmount >= 50 ? 604800 : 86400),
       vertical: routerCtx.scope,
+      routerId: routerCtx.routerId,
       siteName: routerCtx.siteName,
       routerName: routerCtx.routerName,
+      district: routerCtx.district,
       clientMac: clientMac || mac || '',
       clientIp: clientIp || ip || '',
       status: 'pending',
@@ -4132,21 +4238,21 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
 
     let checkoutUrl = '';
     let upstreamMessage = '';
-    let issuedVoucherOnInitiate: IssuedPayLesothoOttVoucher | null = null;
 
     try {
       if (selectedChannel === 'mpesa') {
-        // Postman #b05e5278-37ce-4726-a18f-4bbc4421d998: M-Pesa Pay Merchant (Merchant ID: 62915, Merchant Name: T-Connect)
-        // Clean alphanumeric clientReference (e.g. "PayRefMP189739") as required by Vodacom M-Pesa OpenAPI
+        // M-Pesa Pay Merchant (Merchant ID: 62915, Merchant Name: T-Connect)
+        // Try /api/v1/vcl/payment first (with automatic fallback to /api/v2/vcl/payment if v1 returns 404/405)
         const mpesaBody = {
           merchantid: mpesaMerchantId,
           amount: String(numAmount),
           mobileNumber: clean8DigitPhone,
           merchantname: merchantName,
-          clientReference: txRef
+          clientReference: txRef,
+          client_reference: txRef
         };
         newTx.debugLogs.rawPayload = mpesaBody;
-        const upRes = await fetch(`${apiBaseUrl}/api/v2/vcl/payment`, {
+        let upRes = await fetch(`${apiBaseUrl}/api/v1/vcl/payment`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${bearerToken}`,
@@ -4156,6 +4262,19 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           body: JSON.stringify(mpesaBody),
           signal: AbortSignal.timeout(95000)
         });
+        if (upRes.status === 404 || upRes.status === 405) {
+          newTx.debugLogs.endpoint = `${apiBaseUrl}/api/v2/vcl/payment`;
+          upRes = await fetch(`${apiBaseUrl}/api/v2/vcl/payment`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${bearerToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            body: JSON.stringify(mpesaBody),
+            signal: AbortSignal.timeout(95000)
+          });
+        }
         const respData: any = await upRes.json().catch(() => ({}));
         newTx.debugLogs.httpStatus = upRes.status;
         newTx.debugLogs.rawResponse = respData;
@@ -4171,9 +4290,7 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           (newTx as any).failureReason =
             'PayLesotho rejected the Bearer Token (401 Unauthenticated). Please verify your PayLesotho Bearer Token in Payment Gateways -> PayLesotho.';
           upstreamMessage = (newTx as any).failureReason;
-        } else if (respCode === 'INS-0') {
-          // PayLesotho M-Pesa v2/vcl/payment pushes USSD STK prompt synchronously and returns INS-0 ("Request processed successfully") when user enters PIN.
-          // Also query GET /api/v1/vcl/verify/:mpesa_reference/:service_provider_code to enrich and double-confirm settlement.
+        } else if (respCode === 'INS-0' || respCode === '0' || (respCode === '200' && /processed successfully|completed|success/i.test(respMsg))) {
           let verifyConfirmed = true;
           try {
             const refToVerify = newTx.upstreamReference || txRef;
@@ -4203,16 +4320,16 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
             newTx.status = 'completed';
             (newTx as any).walletDebitedConfirmed = true;
             newTx.completedAt = new Date().toISOString();
-            issuedVoucherOnInitiate = await issuePayLesothoOttVoucherForTransaction(newTx);
+            authorizeDirectPayLesothoSession(newTx);
             upstreamMessage =
               respMsg ||
-              `M-Pesa payment of M${numAmount} confirmed (${newTx.upstreamReference}). Your 16-Digit OTT Voucher PIN is ready below.`;
+              `M-Pesa payment of M${numAmount} confirmed (${newTx.upstreamReference}). Direct M-Pesa authentication active.`;
           }
-        } else if (respCode === 'INS-9') {
+        } else if (respCode === 'INS-9' || (upRes.ok && /initiated|confirm|pin/i.test(respMsg))) {
           newTx.status = 'pending';
           upstreamMessage =
             respMsg ||
-            `M-Pesa USSD push sent to ${newTx.phoneNumber}. Please enter your M-Pesa PIN on your phone to complete debit.`;
+            `M-Pesa USSD push sent to ${newTx.phoneNumber}. Please enter your M-Pesa PIN on your phone to connect.`;
         } else {
           newTx.status = 'failed';
           (newTx as any).failureReason =
@@ -4221,17 +4338,17 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           upstreamMessage = (newTx as any).failureReason;
         }
       } else if (selectedChannel === 'ecocash') {
-        // Postman #d214ef02-df31-4384-ad89-e13198da9868: EcoCash Pay Merchant (Merchant ID: 63165430, Merchant Name: T-Connect)
-        // Clean alphanumeric client_reference (e.g. "Reference709828") per official Postman spec
+        // EcoCash Pay Merchant (Merchant ID: 63165430, Merchant Name: T-Connect)
         const ecocashBody = {
           amount: String(numAmount),
           mobileNumber: clean8DigitPhone,
           merchantid: ecocashMerchantId,
           merchantname: merchantName,
-          client_reference: txRef
+          client_reference: txRef,
+          clientReference: txRef
         };
         newTx.debugLogs.rawPayload = ecocashBody;
-        const upRes = await fetch(`${apiBaseUrl}/api/v2/econet/payment`, {
+        let upRes = await fetch(`${apiBaseUrl}/api/v2/econet/payment`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${bearerToken}`,
@@ -4241,6 +4358,19 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           body: JSON.stringify(ecocashBody),
           signal: AbortSignal.timeout(45000)
         });
+        if (upRes.status === 404 || upRes.status === 405) {
+          newTx.debugLogs.endpoint = `${apiBaseUrl}/api/v1/econet/payment`;
+          upRes = await fetch(`${apiBaseUrl}/api/v1/econet/payment`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${bearerToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            body: JSON.stringify(ecocashBody),
+            signal: AbortSignal.timeout(45000)
+          });
+        }
         const respData: any = await upRes.json().catch(() => ({}));
         newTx.debugLogs.httpStatus = upRes.status;
         newTx.debugLogs.rawResponse = respData;
@@ -4256,9 +4386,7 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           (newTx as any).failureReason =
             'PayLesotho rejected the Bearer Token (401 Unauthenticated). Please verify your PayLesotho Bearer Token in Payment Gateways -> PayLesotho.';
           upstreamMessage = (newTx as any).failureReason;
-        } else if (respCode === '200' || (upRes.ok && /transaction initiated/i.test(respMsg))) {
-          // Status 200 on POST /api/v2/econet/payment means EcoCash USSD Push was sent to handset;
-          // GET /api/v2/econet/verify/:reference will return status_code "200" + "Verification Successful" once user enters PIN
+        } else if (respCode === '200' || respCode === '0' || (upRes.ok && /transaction initiated/i.test(respMsg))) {
           newTx.status = 'pending';
           upstreamMessage =
             respMsg || 'Transaction Initiated, the client can confirm transaction by entering the pin';
@@ -4270,7 +4398,6 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
           upstreamMessage = (newTx as any).failureReason;
         }
       } else if (selectedChannel === 'card') {
-        // Postman #7df2735e-ddf9-45ad-b49f-1f75f8d3aa7e: Card Payments / XPayments Initiate
         const host = req.get('host') || '169.58.98.92:3000';
         const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const cardBody = {
@@ -4312,7 +4439,6 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       }
     } catch (e: any) {
       console.warn('[PayLesotho Postman Initiate] Upstream call error:', e);
-      // If M-Pesa synchronous request timed out while user was entering PIN, check v1/vcl/verify before failing
       if (selectedChannel === 'mpesa') {
         try {
           const refToVerify = newTx.upstreamReference || txRef;
@@ -4334,7 +4460,7 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
             newTx.status = 'completed';
             (newTx as any).walletDebitedConfirmed = true;
             newTx.completedAt = new Date().toISOString();
-            issuedVoucherOnInitiate = await issuePayLesothoOttVoucherForTransaction(newTx);
+            authorizeDirectPayLesothoSession(newTx);
           }
         } catch {}
       }
@@ -4354,12 +4480,15 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
       transactionId: txId,
       reference: newTx.upstreamReference || txRef,
       channel: selectedChannel,
+      paymentMethod: selectedChannel === 'ecocash' ? 'ecocash' : 'mpesa',
+      paymentMethodLabel: selectedChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa',
       amount: numAmount,
       currency: 'M',
       status: newTx.status,
+      directAuthConnected: newTx.status === 'completed',
+      requiresCopyAndRedeem: false,
       failureReason: (newTx as any).failureReason || undefined,
       errorMessage: (newTx as any).failureReason || undefined,
-      ottVoucherPin: newTx.status === 'completed' ? (issuedVoucherOnInitiate?.pin || newTx.ottVoucherPin || undefined) : undefined,
       endpointCalled: targetEndpoint,
       checkoutUrl: checkoutUrl || undefined,
       ussdPromptSent: isSuccess && (selectedChannel === 'ecocash' || selectedChannel === 'mpesa'),
@@ -4368,8 +4497,8 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
         (selectedChannel === 'card'
           ? 'XPayments card gateway initialized via PayLesotho.'
           : selectedChannel === 'mpesa'
-            ? `M-Pesa USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to receive your 16-Digit OTT Voucher PIN.`
-            : `EcoCash USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to receive your 16-Digit OTT Voucher PIN.`)
+            ? `M-Pesa USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to authenticate and connect immediately.`
+            : `EcoCash USSD push sent to ${newTx.phoneNumber} for M${numAmount}. Confirm PIN on your phone to authenticate and connect immediately.`)
     });
   } catch (err: any) {
     res.status(500).json({ success: false, status: 'failed', message: err.message, error: err.message });
@@ -4377,12 +4506,6 @@ app.post('/api/gateways/paylesotho/initiate', async (req: Request, res: Response
 });
 
 // Helper: Strictly evaluates PayLesotho Verify API response to determine if subscriber wallet was actually debited
-// Matches official Pay Lesotho Postman responses:
-//   - M-Pesa Verify (GET /api/v1/vcl/verify/:ref/:merchantid):
-//       { "status_code": "INS-0", "message": "Request processed successfully", "transaction_status": "30", "reference": "..." }
-//   - EcoCash Verify (GET /api/v2/econet/verify/:ref):
-//       Success: { "status_code": "200", "message": "Verification Successful" }
-//       Pending (while user is entering PIN): { "status_code": "401", "message": "Transaction reference was never received, try again!" }
 function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
   state: 'completed' | 'pending' | 'failed';
   reason?: string;
@@ -4407,7 +4530,6 @@ function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
     .toLowerCase();
   const statusCode = String(vData?.status_code ?? vData?.output_ResponseCode ?? '').trim();
 
-  // 1. EcoCash / M-Pesa "never received, try again!" (status_code "401") or INS-9 means subscriber is still entering their PIN on the handset
   if (
     /never received|try again|pending|initiated|processing|in_progress|waiting|confirm transaction|entering the pin|sent to|queued/i.test(
       `${rawStatus} ${rawMsg}`
@@ -4418,7 +4540,6 @@ function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
     return { state: 'pending' };
   }
 
-  // 2. Explicit failure / insufficient funds / user cancelled / wrong PIN / invalid number detection
   if (
     /failed|cancel|declined|insufficient|expired|rejected|reversed|aborted|timeout|invalid pin|wrong pin|low balance|invalid mobile/i.test(
       `${rawStatus} ${rawMsg}`
@@ -4437,33 +4558,30 @@ function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
     };
   }
 
-  // 3. M-Pesa Settlement Detection (Postman: status_code === "INS-0", message === "Request processed successfully")
   if (channel === 'mpesa') {
     const hasSettledStatus =
       /^(completed|success|successful|paid|settled|approved|ok|ins-0|30|0)$/i.test(rawStatus) ||
       /request processed successfully|processed successfully|verification successful|payment successful|transaction successful|completed/i.test(
         rawMsg
       );
-    if (statusCode === 'INS-0' && hasSettledStatus) {
+    if ((statusCode === 'INS-0' || statusCode === '0' || statusCode === '200') && hasSettledStatus) {
       return { state: 'completed' };
     }
     return { state: 'pending' };
   }
 
-  // 4. EcoCash Settlement Detection (Postman: status_code === "200", message === "Verification Successful")
   if (channel === 'ecocash') {
     const hasSettledStatus =
-      /^(completed|success|successful|paid|settled|approved|verified|200)$/i.test(rawStatus) ||
+      /^(completed|success|successful|paid|settled|approved|verified|200|0)$/i.test(rawStatus) ||
       /verification successful|verified|request processed successfully|payment successful|transaction completed|successfully debited|paid successfully|transaction successful/i.test(
         rawMsg
       );
-    if ((statusCode === '200' || vData?.success === true) && hasSettledStatus) {
+    if ((statusCode === '200' || statusCode === '0' || vData?.success === true) && hasSettledStatus) {
       return { state: 'completed' };
     }
     return { state: 'pending' };
   }
 
-  // 5. XPayments Card Settlement Detection
   if (channel === 'card') {
     if (
       Number(vData?.status_code) === 200 &&
@@ -4477,7 +4595,7 @@ function evaluatePayLesothoVerifySettlement(channel: string, vData: any): {
   return { state: 'pending' };
 }
 
-// GET /api/gateways/paylesotho/status/:transactionId — Poll & strictly verify transaction debit via PayLesotho Verify API before issuing OTT Voucher
+// GET /api/gateways/paylesotho/status/:transactionId — Poll & strictly verify transaction debit via PayLesotho Verify API and directly authorize hotspot session
 app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, res: Response) => {
   const txId = String(req.params.transactionId || '').trim();
   const tx = serverStore.transactions.find(
@@ -4518,7 +4636,6 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
         new Set([tx.upstreamReference, tx.transactionRef].map((r) => String(r || '').trim()).filter(Boolean))
       );
       if (tx.channel === 'mpesa') {
-        // Postman #23c9c4c9-df20-4d62-977f-b8222a6c666a: Verify M-Pesa Transaction
         const serviceProviderCode = tx.mpesaMerchantId || payGw?.mpesaMerchantId || payGw?.merchantId || '62915';
         for (const refToVerify of candidateRefs) {
           const vRes = await fetch(
@@ -4549,8 +4666,6 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
           }
         }
       } else if (tx.channel === 'ecocash') {
-        // Postman #4f71df8d-c3f1-44ac-bdfa-65b3022d1fd0: Verify EcoCash Transaction
-        // Queries GET https://api.paylesotho.co.ls/api/v2/econet/verify/:reference
         for (const refToVerify of candidateRefs) {
           const vRes = await fetch(`${apiBaseUrl}/api/v2/econet/verify/${encodeURIComponent(refToVerify)}`, {
             method: 'GET',
@@ -4577,7 +4692,6 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
           }
         }
       } else if (tx.channel === 'card') {
-        // Postman #159537ea-2504-4fbd-9ccf-f4ebc3895fab: Verify Card Payment (XPayments)
         const refToVerify = tx.upstreamReference || tx.transactionRef;
         const vRes = await fetch(`${xpaymentsBaseUrl}/api/transactions/status`, {
           method: 'POST',
@@ -4611,7 +4725,6 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
     } catch {}
   }
 
-  // Strictly NO fake auto-complete! If USSD Push is not confirmed within 120 seconds, expire as failed without issuing any voucher.
   const elapsedMs = Date.now() - new Date(tx.createdAt || Date.now()).getTime();
   if (tx.status === 'pending' && elapsedMs > 120_000) {
     tx.status = 'failed';
@@ -4619,14 +4732,16 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
     saveServerPortalStore(serverStore);
   }
 
-  let issuedOttVoucher: IssuedPayLesothoOttVoucher | null = null;
-  if (tx.status === 'completed' && ((tx as any).walletDebitedConfirmed || tx.ottVoucherPin)) {
-    issuedOttVoucher = await issuePayLesothoOttVoucherForTransaction(tx);
+  if (tx.status === 'completed') {
+    authorizeDirectPayLesothoSession(tx);
   }
 
   res.json({
     success: tx.status !== 'failed',
     status: tx.status,
+    directAuthConnected: tx.status === 'completed',
+    paymentMethod: tx.channel === 'ecocash' ? 'ecocash' : 'mpesa',
+    paymentMethodLabel: tx.channel === 'ecocash' ? 'EcoCash' : 'M-Pesa',
     failureReason: (tx as any).failureReason || null,
     errorMessage: (tx as any).failureReason || null,
     transaction: tx,
@@ -4635,15 +4750,11 @@ app.get('/api/gateways/paylesotho/status/:transactionId', async (req: Request, r
     amount: tx.amount,
     currency: tx.currency || 'M',
     durationSeconds: tx.durationSeconds || (tx.amount >= 200 ? 2592000 : tx.amount >= 50 ? 604800 : 86400),
-    ottVoucherPin: tx.status === 'completed' ? (issuedOttVoucher?.pin || tx.ottVoucherPin || null) : null,
-    ottVoucherAmount: issuedOttVoucher?.amount || tx.amount,
-    ottVoucherRef: issuedOttVoucher?.paymentRef || tx.upstreamReference || tx.transactionRef,
-    ottVoucherSource: issuedOttVoucher?.source || 'paylesotho_ott_api',
-    requiresCopyAndRedeem: true
+    requiresCopyAndRedeem: false
   });
 });
 
-// Explicit POST /api/gateways/paylesotho/ott-voucher/get — Calls https://api.paylesotho.co.ls/api/ott/voucher/get for a verified payment
+// Explicit POST /api/gateways/paylesotho/ott-voucher/get — Legacy support endpoint
 app.post('/api/gateways/paylesotho/ott-voucher/get', async (req: Request, res: Response) => {
   try {
     const { transactionId, reference, amount, mobileNumber, planId, planName, durationSeconds } = req.body || {};
@@ -4678,14 +4789,14 @@ app.post('/api/gateways/paylesotho/ott-voucher/get', async (req: Request, res: R
       paymentRef: voucher.paymentRef,
       planName: voucher.planName,
       source: voucher.source,
-      message: `16-Digit OTT Voucher (${voucher.currency}${voucher.amount}) issued. Copy the PIN and redeem it in the portal to connect.`
+      message: `16-Digit OTT Voucher (${voucher.currency}${voucher.amount}) issued.`
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// Explicit POST /api/gateways/paylesotho/ott-voucher/check — Verifies an OTT voucher after purchase via POST https://api.paylesotho.co.ls/ott/voucher/check
+// Explicit POST /api/gateways/paylesotho/ott-voucher/check
 app.post('/api/gateways/paylesotho/ott-voucher/check', async (req: Request, res: Response) => {
   try {
     const { unique_reference, reference } = req.body || {};
@@ -4737,7 +4848,6 @@ app.post('/api/gateways/paylesotho/ott-voucher/check', async (req: Request, res:
   }
 });
 
-// Mark an issued OTT Voucher as copied when the user presses the Copy button in the captive portal
 app.post('/api/gateways/paylesotho/ott-voucher/mark-copied', (req: Request, res: Response) => {
   const { voucherPin, pin, transactionId } = req.body || {};
   const cleanPin = String(voucherPin || pin || '').replace(/\D/g, '');
@@ -4769,6 +4879,7 @@ app.post('/api/gateways/paylesotho/webhook', async (req: Request, res: Response)
     if (
       status.includes('ins-0') ||
       status === '200' ||
+      status === '0' ||
       status.includes('approved') ||
       status.includes('success') ||
       status.includes('complete') ||
@@ -4778,7 +4889,7 @@ app.post('/api/gateways/paylesotho/webhook', async (req: Request, res: Response)
       (tx as any).walletDebitedConfirmed = true;
       tx.completedAt = new Date().toISOString();
       tx.upstreamResponse = body;
-      await issuePayLesothoOttVoucherForTransaction(tx);
+      authorizeDirectPayLesothoSession(tx);
       saveServerPortalStore(serverStore);
     } else if (status.includes('fail') || status.includes('reject')) {
       tx.status = 'failed';
@@ -5422,11 +5533,11 @@ function resolveCommercialMetaForEvent(ev: any) {
 
   const paymentMethodLabel =
     paymentMethod === 'mpesa'
-      ? 'M-Pesa (OTT Voucher)'
+      ? 'M-Pesa'
       : paymentMethod === 'ecocash'
-      ? 'EcoCash (OTT Voucher)'
+      ? 'EcoCash'
       : paymentMethod === 'ottvoucher'
-      ? 'Direct 16-Digit OTT Voucher'
+      ? '16-Digit OTT Voucher'
       : 'Free Mode Wi-Fi';
 
   const amount = isPaid ? Math.max(0, Number(ev.amount) || 10) : 0;
@@ -5616,6 +5727,7 @@ app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
 
   res.json({
     success: true,
+    cleanSlateAt: serverStore.cleanSlateAt || null,
     events: enrichedEvents,
     transactions: serverStore.transactions
   });
@@ -5798,6 +5910,40 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       globalRateLimit: effectiveRateLimit,
       syncedRouters: monitoredRouters.size,
       cliScript: fullSyncScript
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Safe One-Click Splash HTML Sync Endpoint (Updates ONLY hotspot/login.html on adopted routers without touching DHCP, bridges, or active guest sessions)
+app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
+  try {
+    const host = req.get('host') || '169.58.98.92:3000';
+    const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+    const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
+    const nowIso = new Date().toISOString();
+    let queuedRouters = 0;
+
+    for (const router of monitoredRouters.values()) {
+      const rScope = String(router.vertical || 'hotspot').toLowerCase();
+      const loginUrl = `${portalBaseUrl}/api/portal/router-login/${encodeURIComponent(rScope)}.html`;
+      const safeSplashCmds = [
+        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=hotspot/login.html } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=flash/hotspot/login.html } on-error={}`
+      ];
+      const existingPending = Array.isArray(router.pendingCommands) ? router.pendingCommands : [];
+      router.pendingCommands = [...existingPending, ...safeSplashCmds];
+      router.policyLastSyncedAt = nowIso;
+      queuedRouters++;
+    }
+    persistMonitoredRoutersToStore();
+
+    res.json({
+      success: true,
+      syncedRouters: queuedRouters,
+      syncedAt: nowIso,
+      message: `Queued safe non-disruptive hotspot/login.html update for ${queuedRouters} adopted router(s). Active Wi-Fi sessions, iOS CNA, and WireGuard tunnels remain untouched.`
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -6546,8 +6692,9 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // LIVE PRODUCTION RESET ENDPOINT (Resets Leads, Reconciled Revenue, Sessions & Auth)
 // -----------------------------------------------------------------------------
-app.post('/api/admin/reset-live-data', (_req: Request, res: Response) => {
+app.post('/api/admin/reset-live-data', async (_req: Request, res: Response) => {
   const nowIso = new Date().toISOString();
+  serverStore.cleanSlateAt = nowIso;
   serverStore.guestEvents = [];
   serverStore.transactions = [];
   serverStore.issuedPayLesothoOttVouchers = [];
@@ -6561,16 +6708,19 @@ app.post('/api/admin/reset-live-data', (_req: Request, res: Response) => {
   if (Array.isArray(serverStore.partnerApiKeys)) {
     serverStore.partnerApiKeys = serverStore.partnerApiKeys.map((k: any) => ({
       ...k,
-      leadsResetAt: nowIso
+      leadsResetAt: nowIso,
+      totalRequests: 0
     }));
   }
   monitoredRouters.forEach((router) => {
     router.activeSessions = 0;
   });
   saveServerPortalStore(serverStore);
+  await wipeLiveRecordsFromSupabase();
   res.json({
     success: true,
     resetAt: nowIso,
+    cleanSlateAt: nowIso,
     message: 'All leads, reconciled revenue, session durations, and live auth counts have been reset to 0.'
   });
 });
@@ -6722,7 +6872,7 @@ app.post('/api/admin/partner-keys/:id/reset-leads', (req: Request, res: Response
 });
 
 // Reset captured leads globally or per hotspot policy scope (and reset matching sponsor baselines)
-app.post('/api/admin/leads/reset', (req: Request, res: Response) => {
+app.post('/api/admin/leads/reset', async (req: Request, res: Response) => {
   const { scope, partnerKeyId } = req.body || {};
   const nowIso = new Date().toISOString();
 
@@ -6754,10 +6904,19 @@ app.post('/api/admin/leads/reset', (req: Request, res: Response) => {
   let removedCount = 0;
   if (!normScope || normScope === 'all') {
     removedCount = (serverStore.guestEvents || []).length;
+    serverStore.cleanSlateAt = nowIso;
     serverStore.guestEvents = [];
+    serverStore.transactions = [];
+    serverStore.issuedPayLesothoOttVouchers = [];
+    serverStore.redeemedOttPins = [];
     (serverStore.partnerApiKeys || []).forEach((k) => {
       k.leadsResetAt = nowIso;
+      k.totalRequests = 0;
     });
+    monitoredRouters.forEach((router) => {
+      router.activeSessions = 0;
+    });
+    await wipeLiveRecordsFromSupabase();
   } else {
     const beforeCount = (serverStore.guestEvents || []).length;
     serverStore.guestEvents = (serverStore.guestEvents || []).filter((ev: any) => {
@@ -6788,6 +6947,7 @@ app.post('/api/admin/leads/reset', (req: Request, res: Response) => {
     scope: normScope,
     removedCount,
     resetAt: nowIso,
+    cleanSlateAt: serverStore.cleanSlateAt || nowIso,
     events: serverStore.guestEvents,
     keys: keysWithCounts
   });

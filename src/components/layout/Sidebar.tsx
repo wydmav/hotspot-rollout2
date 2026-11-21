@@ -84,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = allNavItems.filter((item) => {
     if (isSuperAdmin) return true;
     if (isCollaborator) return item.id === 'network';
-    if (isFinance) return item.id === 'billing';
+    if (isFinance) return item.id === 'dashboard' || item.id === 'billing';
     if (isTech) return item.id === 'fleet';
     if (isManagement) return item.id === 'dashboard';
     return item.id === 'dashboard';

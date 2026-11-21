@@ -126,8 +126,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     try {
       const res = await fetch('/api/portal/guest-connect');
       const data = await res.json();
-      if (data?.success && Array.isArray(data.records)) {
-        setServerGuestRecords(data.records);
+      if (data?.success) {
+        const eventsList = Array.isArray(data.events)
+          ? data.events
+          : Array.isArray(data.records)
+          ? data.records
+          : [];
+        setServerGuestRecords(eventsList);
+        storage.ingestServerGuestEvents(eventsList, data.transactions || [], data.cleanSlateAt || null);
       }
     } catch {}
   }, []);
@@ -287,14 +293,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
     // 1. Server guest connect records
     for (const rec of serverGuestRecords) {
-      const recVertical = rec.vertical || 'hotspot';
+      const recVertical = rec.scope || rec.vertical || 'hotspot';
       if (!matchesScope(recVertical)) continue;
 
       const expMs = rec.expiresAt ? new Date(rec.expiresAt).getTime() : tickNowMs + 86400 * 1000;
       const remSec = Math.max(0, Math.floor((expMs - tickNowMs) / 1000));
       const isExpired = remSec <= 0;
       const status: 'connected' | 'disconnected' =
-        rec.status === 'disconnected' || isExpired ? 'disconnected' : 'connected';
+        rec.connectionStatus === 'disconnected' || rec.status === 'disconnected' || isExpired ? 'disconnected' : 'connected';
 
       // Match voucher or transaction for exact venue purchased at
       const matchedVoucher = rec.voucherCode
@@ -305,7 +311,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         : transactions.find(t => t.phoneNumber && rec.guestPhone && t.phoneNumber === rec.guestPhone);
 
       const authMode: 'paid' | 'free' =
-        rec.authMode === 'paid' || rec.authMode === 'voucher' || Boolean(rec.voucherCode) ? 'paid' : 'free';
+        rec.accessType === 'paid' ||
+        rec.authMode === 'paid' ||
+        rec.authMode === 'voucher' ||
+        rec.paymentMethod === 'mpesa' ||
+        rec.paymentMethod === 'ecocash' ||
+        rec.paymentMethod === 'ottvoucher' ||
+        (Number(rec.amount) || 0) > 0
+          ? 'paid'
+          : 'free';
 
       const venuePurchasedAt =
         rec.venuePurchasedAt ||
@@ -454,6 +468,88 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const onlineRoutersCount = filteredRouters.filter(r => r.status === 'online').length;
   const offlineRoutersCount = filteredRouters.length - onlineRoutersCount;
 
+  // Real-time Finance & Commercial Attribution Summary (Free Mode Leads vs M-Pesa, EcoCash & Direct 16-Digit OTT Voucher)
+  const commercialSummary = useMemo(() => {
+    const localLeads = storage.getCaptiveLeads() || [];
+    const byKey = new Map<string, any>();
+
+    const matchesScope = (v?: string) => {
+      if (selectedVertical === 'all' || !v) return true;
+      if (selectedVertical === 'village' || selectedVertical === 'community') {
+        return v === 'village' || v === 'community';
+      }
+      return v === selectedVertical;
+    };
+
+    for (const ev of serverGuestRecords) {
+      const sc = ev.scope || ev.vertical || 'hotspot';
+      if (!matchesScope(sc)) continue;
+      const key = String(ev.id || '').replace(/^lead_srv_|^lead_/, '');
+      byKey.set(key, ev);
+    }
+
+    for (const l of localLeads) {
+      const sc = l.scope || l.vertical || 'hotspot';
+      if (!matchesScope(sc)) continue;
+      const key = String(l.id || '').replace(/^lead_srv_|^lead_/, '');
+      if (!byKey.has(key)) {
+        byKey.set(key, l);
+      }
+    }
+
+    let freeCount = 0;
+    let paidCount = 0;
+    let mpesaCount = 0;
+    let mpesaRev = 0;
+    let ecocashCount = 0;
+    let ecocashRev = 0;
+    let ottCount = 0;
+    let ottRev = 0;
+
+    for (const item of byKey.values()) {
+      const methodRaw = String(item.paymentMethod || item.mode || '').toLowerCase();
+      const isPaidItem =
+        item.accessType === 'paid' ||
+        methodRaw === 'mpesa' ||
+        methodRaw === 'ecocash' ||
+        methodRaw === 'ottvoucher' ||
+        (Number(item.amount) || 0) > 0;
+
+      if (!isPaidItem) {
+        freeCount++;
+      } else {
+        paidCount++;
+        const amt = Math.max(0, Number(item.amount) || 10);
+        if (methodRaw === 'mpesa') {
+          mpesaCount++;
+          mpesaRev += amt;
+        } else if (methodRaw === 'ecocash') {
+          ecocashCount++;
+          ecocashRev += amt;
+        } else {
+          ottCount++;
+          ottRev += amt;
+        }
+      }
+    }
+
+    // Reconcile any completed transactions not yet in guestEvents
+    const TotalPaidRev = Math.max(totalRevenue, mpesaRev + ecocashRev + ottRev);
+
+    return {
+      totalLeads: freeCount + paidCount,
+      freeCount,
+      paidCount,
+      paidRevenue: TotalPaidRev,
+      mpesaCount,
+      mpesaRev,
+      ecocashCount,
+      ecocashRev,
+      ottCount,
+      ottRev
+    };
+  }, [serverGuestRecords, selectedVertical, totalRevenue, transactions]);
+
   return (
     <div className="space-y-6 font-sans">
       {/* Clean Header Bar */}
@@ -512,168 +608,81 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {freeModeSyncToast && (
+        <div className="px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold">
+          {freeModeSyncToast}
+        </div>
+      )}
+
       {/* ================================================================= */}
-      {/* MASTER FREE ACCESS MODE ("Login for free") DASHBOARD CONTROL BAR  */}
+      {/* 5 REAL-TIME FINANCE & COMMERCIAL ATTRIBUTION KPI CARDS            */}
+      {/* (Total Leads, Free Mode Leads, Paid Revenue, M-Pesa, EcoCash/OTT) */}
       {/* ================================================================= */}
-      <div
-        className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-lg ${
-          portalConfig.allowFreeAccess
-            ? 'bg-gradient-to-r from-[#f05e17]/15 via-[#121829] to-[#0f1422] border-[#f05e17]/50'
-            : 'bg-[#0f1422] border-[#232d42]'
-        }`}
-      >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div
-              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                portalConfig.allowFreeAccess
-                  ? 'bg-[#f05e17]/20 border-[#f05e17]/40 text-[#f05e17]'
-                  : 'bg-[#161d31] border-[#232d42] text-slate-400'
-              }`}
-            >
-              {portalConfig.allowFreeAccess ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm font-extrabold text-white">
-                  Hotspot Free Access Mode (&ldquo;{portalConfig.freeButtonText || 'Login for free'}&rdquo; Splash Button)
-                </h2>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
-                    portalConfig.allowFreeAccess
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {portalConfig.allowFreeAccess
-                    ? 'ACTIVE — UNCAPPED STARLINK + FASTTRACK + PCQ'
-                    : 'OFF — PAID MODE (OTT VOUCHER & PAYLESOTHO)'}
-                </span>
-                {freeModeSyncToast && (
-                  <span className="text-[11px] font-mono text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded">
-                    {freeModeSyncToast}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-300 mt-1">
-                {portalConfig.allowFreeAccess
-                  ? `Free Mode pushes uncapped Starlink throughput with hardware FastTrack + PCQ fair queuing and L2 client isolation. Each guest receives ${
-                      (portalConfig.freeAccessDurationMinutes || 1440) === 720
-                        ? '12 Hours'
-                        : (portalConfig.freeAccessDurationMinutes || 1440) === 1440
-                        ? '24 Hours'
-                        : `${Math.round((portalConfig.freeAccessDurationMinutes || 1440) / 1440)} Days`
-                    } of Free Wi-Fi.`
-                  : 'Paid Mode enforces per-plan QoS limits + PCQ fair queuing. Guests authenticate via M-Pesa, EcoCash, or 16-Digit OTT Voucher.'}
-              </p>
-            </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl p-4">
+          <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
+            <span>Total Leads Captured</span>
+            <Users className="w-4 h-4 text-[#f05e17]" />
           </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                const nextState = !portalConfig.allowFreeAccess;
-                applyDashboardFreeAccessPatch(
-                  { allowFreeAccess: nextState },
-                  nextState
-                    ? 'Free Mode enabled: Uncapped Starlink + FastTrack + PCQ synced to routers'
-                    : 'Free Mode disabled: Paid Mode (OTT & PayLesotho) synced to routers'
-                );
-              }}
-              className={`px-4 py-2.5 rounded-xl font-mono text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 shadow-md ${
-                portalConfig.allowFreeAccess
-                  ? 'bg-[#f05e17] hover:bg-[#d94c0b] text-white'
-                  : 'bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200'
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              <span>
-                {portalConfig.allowFreeAccess ? 'Turn Free Access Mode OFF' : 'Turn Free Access Mode ON'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onNavigateTab('portal')}
-              className="px-3.5 py-2.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 font-mono text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-[#f05e17]" />
-              <span>Customize Splash Portal</span>
-            </button>
+          <div className="text-2xl font-black text-white font-mono mt-1.5 tabular-nums">
+            {commercialSummary.totalLeads}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {commercialSummary.freeCount} Free &middot; {commercialSummary.paidCount} Paid
           </div>
         </div>
 
-        {portalConfig.allowFreeAccess && (
-          <div className="mt-4 pt-3.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-mono font-bold text-emerald-400 mr-1">
-                Free Session Window:
-              </span>
-              {[
-                { label: '12 Hours', mins: 720 },
-                { label: '24 Hours (1 Day)', mins: 1440 },
-                { label: '3 Days', mins: 4320 },
-                { label: '7 Days', mins: 10080 }
-              ].map((opt) => {
-                const activeMins = Number(portalConfig.freeAccessDurationMinutes) || 1440;
-                const isPicked = activeMins === opt.mins;
-                return (
-                  <button
-                    key={opt.mins}
-                    type="button"
-                    onClick={() =>
-                      applyDashboardFreeAccessPatch(
-                        { freeAccessDurationMinutes: opt.mins },
-                        `Free Mode session limit set to ${opt.label} per guest`
-                      )
-                    }
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-extrabold border cursor-pointer transition-all ${
-                      isPicked
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow'
-                        : 'bg-[#161d31] text-slate-300 border-[#232d42] hover:text-white'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Palette className="w-3.5 h-3.5 text-[#f05e17]" />
-              <span className="text-[11px] font-mono text-slate-300 font-bold">Button Color:</span>
-              {[
-                { label: 'Orange', bg: '#f05e17', text: '#ffffff' },
-                { label: 'Emerald', bg: '#10b981', text: '#ffffff' },
-                { label: 'Blue', bg: '#2563eb', text: '#ffffff' },
-                { label: 'Dark', bg: '#0f172a', text: '#ffffff' }
-              ].map((sw) => {
-                const active = (portalConfig.freeButtonColor || '#f05e17').toLowerCase() === sw.bg.toLowerCase();
-                return (
-                  <button
-                    key={sw.label}
-                    type="button"
-                    onClick={() =>
-                      applyDashboardFreeAccessPatch(
-                        { freeButtonColor: sw.bg, freeButtonTextColor: sw.text },
-                        `Button color updated to ${sw.label}`
-                      )
-                    }
-                    className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border flex items-center gap-1 transition-all cursor-pointer ${
-                      active
-                        ? 'border-white bg-white/10 text-white'
-                        : 'border-[#232d42] bg-[#121829] text-slate-300'
-                    }`}
-                  >
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: sw.bg }} />
-                    <span>{sw.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+        <div className="bg-[#0f1422] border border-cyan-500/30 rounded-2xl p-4">
+          <div className="flex items-center justify-between text-cyan-300 text-[11px] font-mono uppercase">
+            <span>Free Mode Leads</span>
+            <Zap className="w-4 h-4 text-cyan-400" />
           </div>
-        )}
+          <div className="text-2xl font-black text-cyan-400 font-mono mt-1.5 tabular-nums">
+            {commercialSummary.freeCount}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            Step 1 Lead &rarr; Login for free
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-emerald-500/30 rounded-2xl p-4">
+          <div className="flex items-center justify-between text-emerald-300 text-[11px] font-mono uppercase">
+            <span>Paid OTT &amp; Mobile Revenue</span>
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-2xl font-black text-emerald-400 font-mono mt-1.5 tabular-nums">
+            {currency}{commercialSummary.paidRevenue.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {commercialSummary.paidCount} paid sessions
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-red-500/30 rounded-2xl p-4">
+          <div className="flex items-center justify-between text-red-300 text-[11px] font-mono uppercase">
+            <span>M-Pesa</span>
+            <Smartphone className="w-4 h-4 text-red-400" />
+          </div>
+          <div className="text-2xl font-black text-red-400 font-mono mt-1.5 tabular-nums">
+            {currency}{commercialSummary.mpesaRev.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {commercialSummary.mpesaCount} M-Pesa sessions
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-blue-500/30 rounded-2xl p-4">
+          <div className="flex items-center justify-between text-blue-300 text-[11px] font-mono uppercase">
+            <span>EcoCash &amp; Direct OTT</span>
+            <Smartphone className="w-4 h-4 text-blue-400" />
+          </div>
+          <div className="text-2xl font-black text-blue-400 font-mono mt-1.5 tabular-nums">
+            {currency}{(commercialSummary.ecocashRev + commercialSummary.ottRev).toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {commercialSummary.ecocashCount} EcoCash ({currency}{commercialSummary.ecocashRev.toFixed(0)}) &middot; {commercialSummary.ottCount} OTT PIN
+          </div>
+        </div>
       </div>
 
       {/* ================================================================= */}

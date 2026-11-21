@@ -138,14 +138,13 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       : 'ottvoucher';
 
     const paymentMethodLabel =
-      lead.paymentMethodLabel ||
-      (paymentMethod === 'mpesa'
-        ? 'M-Pesa (OTT Voucher)'
+      paymentMethod === 'mpesa'
+        ? 'M-Pesa'
         : paymentMethod === 'ecocash'
-        ? 'EcoCash (OTT Voucher)'
+        ? 'EcoCash'
         : paymentMethod === 'ottvoucher'
-        ? 'Direct 16-Digit OTT Voucher'
-        : 'Free Mode Wi-Fi');
+        ? '16-Digit OTT Voucher'
+        : 'Free Mode Wi-Fi';
 
     const amount = isPaid ? (rawAmount > 0 ? rawAmount : 10) : 0;
     const planName =
@@ -219,9 +218,21 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         const res = await fetch('/api/portal/guest-connect');
         const data = await res.json();
         if (!mounted || !data?.success || !Array.isArray(data.events)) return;
+        storage.ingestServerGuestEvents(data.events || [], data.transactions || [], data.cleanSlateAt || null);
         let mutated = false;
         const currentLeads = storage.getCaptiveLeads();
+        const cleanSlateIso =
+          data.cleanSlateAt ||
+          (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+            ? window.localStorage.getItem('tconnect_clean_slate_at')
+            : null);
+        const cleanSlateMs = cleanSlateIso ? new Date(cleanSlateIso).getTime() : 0;
+
         for (const ev of data.events) {
+          if (cleanSlateMs && !isNaN(cleanSlateMs)) {
+            const evMs = new Date(ev.capturedAt || ev.startedAt || 0).getTime();
+            if (!isNaN(evMs) && evMs <= cleanSlateMs) continue;
+          }
           const emailVal = (ev.email || ev.guestEmail || '').trim();
           const phoneVal = (ev.phone || ev.guestPhone || '').trim();
           const nameVal = (ev.guestName || `${ev.firstName || ''} ${ev.lastName || ''}`).trim();
@@ -243,14 +254,13 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
             ? 'ecocash'
             : 'ottvoucher';
           const resolvedPaymentLabel =
-            ev.paymentMethodLabel ||
-            (resolvedPaymentMethod === 'mpesa'
-              ? 'M-Pesa (OTT Voucher)'
+            resolvedPaymentMethod === 'mpesa'
+              ? 'M-Pesa'
               : resolvedPaymentMethod === 'ecocash'
-              ? 'EcoCash (OTT Voucher)'
+              ? 'EcoCash'
               : resolvedPaymentMethod === 'ottvoucher'
-              ? 'Direct 16-Digit OTT Voucher'
-              : 'Free Mode Wi-Fi');
+              ? '16-Digit OTT Voucher'
+              : 'Free Mode Wi-Fi';
 
           const existingMatch = currentLeads.find(
             (l) =>
@@ -482,7 +492,11 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         body: JSON.stringify({ scope: scopeToReset })
       });
       const data = await res.json();
-      storage.resetCaptiveLeads(scopeToReset);
+      if (scopeToReset === 'all') {
+        await storage.resetAllLiveData();
+      } else {
+        storage.resetCaptiveLeads(scopeToReset);
+      }
       setLeads([...storage.getCaptiveLeads()]);
       if (Array.isArray(data?.keys)) {
         setPartnerKeys(data.keys);
@@ -493,16 +507,41 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
       setShowResetLeadsModal(false);
       showToast(
         scopeToReset === 'all'
-          ? 'All captured leads and sponsor API slates have been reset to 0'
+          ? 'Clean Slate Reset Complete: All old leads, transactions & Supabase records cleared to 0. Now recording only real live authentications.'
           : `Reset all captured leads for ${scopeToReset.toUpperCase()} policy scope`
       );
     } catch {
-      storage.resetCaptiveLeads(scopeToReset);
+      if (scopeToReset === 'all') {
+        await storage.resetAllLiveData();
+      } else {
+        storage.resetCaptiveLeads(scopeToReset);
+      }
       setLeads([...storage.getCaptiveLeads()]);
       setShowResetLeadsModal(false);
-      showToast('Reset local captured leads');
+      showToast('Clean Slate Reset Complete (0 leads & transactions)');
     } finally {
       setIsResettingLeads(false);
+    }
+  };
+
+  const [isSyncingSplashSafe, setIsSyncingSplashSafe] = useState(false);
+  const handleSafeOneClickSplashSync = async () => {
+    setIsSyncingSplashSafe(true);
+    try {
+      const res = await fetch('/api/portal/sync-splash-safe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        showToast(data.message || `Synced updated splash page (hotspot/login.html) to ${data.syncedRouters ?? 0} adopted router(s)!`);
+      } else {
+        showToast(data?.error || 'Could not queue splash sync');
+      }
+    } catch {
+      showToast('Network error queueing safe splash sync');
+    } finally {
+      setIsSyncingSplashSafe(false);
     }
   };
 
@@ -1036,7 +1075,7 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         bold: true
       },
       {
-        text: `M-Pesa (OTT Voucher): ${mpesaRows.length} tx (M${mpesaRev.toFixed(2)})   |   EcoCash (OTT Voucher): ${ecocashRows.length} tx (M${ecocashRev.toFixed(2)})   |   Direct 16-Digit OTT: ${ottDirectRows.length} tx (M${ottDirectRev.toFixed(2)})`,
+        text: `M-Pesa: ${mpesaRows.length} tx (M${mpesaRev.toFixed(2)})   |   EcoCash: ${ecocashRows.length} tx (M${ecocashRev.toFixed(2)})   |   16-Digit OTT Voucher: ${ottDirectRows.length} tx (M${ottDirectRev.toFixed(2)})`,
         size: 8.5
       },
       { text: '--------------------------------------------------------------------------------------------------------', size: 8 },
@@ -1052,27 +1091,33 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
     });
 
     lines.push({ text: '--------------------------------------------------------------------------------------------------------', size: 8 });
-    lines.push({ text: '3. DETAILED GUEST LEADS & TRANSACTION ATTRIBUTION LEDGER', size: 10, bold: true });
+    lines.push({ text: '3. DETAILED GUEST LEADS & TRANSACTION ATTRIBUTION LEDGER (INCLUDES OPTIONAL EMAIL)', size: 10, bold: true });
     lines.push({
-      text: `${'GUEST NAME'.padEnd(18, ' ')} | ${'MOBILE'.padEnd(13, ' ')} | ${'MODE'.padEnd(5, ' ')} | ${'PAYMENT METHOD'.padEnd(22, ' ')} | ${'PACKAGE'.padEnd(18, ' ')} | ${'PRICE'.padEnd(7, ' ')} | ${'HOTSPOT / ROUTER'.padEnd(28, ' ')} | DATE`,
-      size: 7.5,
+      text: `${'GUEST NAME'.padEnd(16, ' ')} | ${'MOBILE'.padEnd(13, ' ')} | ${'EMAIL'.padEnd(22, ' ')} | ${'MODE'.padEnd(4, ' ')} | ${'PAYMENT METHOD'.padEnd(16, ' ')} | ${'PACKAGE'.padEnd(14, ' ')} | ${'PRICE'.padEnd(7, ' ')} | ${'HOTSPOT / ROUTER'.padEnd(21, ' ')} | DATE`,
+      size: 6.9,
       bold: true
     });
     lines.push({ text: '--------------------------------------------------------------------------------------------------------', size: 8 });
 
     sourceRows.forEach((l) => {
       const c = resolveLeadCommercial(l);
-      const guestCol = (l.fullName || `${l.firstName} ${l.lastName}`).padEnd(18, ' ').slice(0, 18);
+      const guestCol = (l.fullName || `${l.firstName} ${l.lastName}`).padEnd(16, ' ').slice(0, 16);
       const phoneCol = (l.fullPhone || `${l.countryCode} ${l.phone}`).padEnd(13, ' ').slice(0, 13);
-      const modeCol = c.accessModeLabel.padEnd(5, ' ').slice(0, 5);
-      const methodCol = c.paymentMethodLabel.padEnd(22, ' ').slice(0, 22);
-      const planCol = c.planName.padEnd(18, ' ').slice(0, 18);
+      const rawEmail = String(l.email || '').trim();
+      const cleanEmail =
+        !rawEmail || rawEmail === '—' || rawEmail === '-' || rawEmail === 'not-provided@tconnect.ls'
+          ? '-'
+          : rawEmail;
+      const emailCol = cleanEmail.padEnd(22, ' ').slice(0, 22);
+      const modeCol = c.accessModeLabel.padEnd(4, ' ').slice(0, 4);
+      const methodCol = c.paymentMethodLabel.padEnd(16, ' ').slice(0, 16);
+      const planCol = c.planName.padEnd(14, ' ').slice(0, 14);
       const priceCol = `M${c.amount.toFixed(2)}`.padEnd(7, ' ').slice(0, 7);
-      const locCol = `${c.siteName} (${c.routerName})`.padEnd(28, ' ').slice(0, 28);
+      const locCol = `${c.siteName} (${c.routerName})`.padEnd(21, ' ').slice(0, 21);
       const dateCol = new Date(l.capturedAt).toISOString().replace('T', ' ').slice(0, 16);
       lines.push({
-        text: `${guestCol} | ${phoneCol} | ${modeCol} | ${methodCol} | ${planCol} | ${priceCol} | ${locCol} | ${dateCol}`,
-        size: 7.2
+        text: `${guestCol} | ${phoneCol} | ${emailCol} | ${modeCol} | ${methodCol} | ${planCol} | ${priceCol} | ${locCol} | ${dateCol}`,
+        size: 6.7
       });
     });
 
@@ -1350,15 +1395,25 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
           </button>
 
           <button
+            onClick={() => void handleSafeOneClickSplashSync()}
+            disabled={isSyncingSplashSafe}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 disabled:opacity-50 text-cyan-300 border border-cyan-500/30 transition-colors font-bold cursor-pointer"
+            title="Safely push updated hotspot/login.html splash page to adopted routers in one click without disrupting active sessions or iOS CNA"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isSyncingSplashSafe ? 'animate-spin' : ''}`} />
+            <span>{isSyncingSplashSafe ? 'Syncing Splash...' : 'One-Click Sync Splash'}</span>
+          </button>
+
+          <button
             onClick={() => {
               setResetTargetScope(selectedVertical === 'all' ? 'all' : selectedVertical);
               setShowResetLeadsModal(true);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition-colors font-bold cursor-pointer"
-            title="Reset leads globally, per policy scope, or reset a sponsor API key to a clean slate"
+            title="Reset all leads, transactions, and Supabase records to a 0 clean slate"
           >
             <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
-            <span>Reset Leads</span>
+            <span>Reset Leads (0 Slate)</span>
           </button>
 
           <button

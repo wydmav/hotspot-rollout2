@@ -618,11 +618,11 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         : 'free_wifi');
     const resolvedPaymentLabel =
       resolvedPaymentMethod === 'mpesa'
-        ? 'M-Pesa (OTT Voucher)'
+        ? 'M-Pesa'
         : resolvedPaymentMethod === 'ecocash'
-        ? 'EcoCash (OTT Voucher)'
+        ? 'EcoCash'
         : resolvedPaymentMethod === 'ottvoucher'
-        ? 'Direct 16-Digit OTT Voucher'
+        ? '16-Digit OTT Voucher'
         : 'Free Mode Wi-Fi';
 
     try {
@@ -1074,20 +1074,33 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let settled = false;
 
-    const completeWithOttVoucher = (pinRaw: string, amtRaw: number, refRaw: string) => {
+    const completeDirectMobileMoneySession = async (amtRaw: number, refRaw: string) => {
       if (settled) return;
       settled = true;
       if (pollInterval) clearInterval(pollInterval);
-      const generatedPin = String(pinRaw || '').replace(/\D/g, '');
-      const voucherAmt = Number(amtRaw) || purchaseAmount;
-      setIssuedOttVoucherPin(generatedPin);
-      setIssuedOttVoucherAmount(voucherAmt);
-      setIssuedOttVoucherRef(refRaw || clientTxId);
+      const paidAmt = Number(amtRaw) || purchaseAmount;
+      const paidRef = refRaw || clientTxId;
+      const directPassCode = `${payLesothoChannel === 'ecocash' ? 'ECOCASH' : 'MPESA'}-${paidRef}`;
+
+      await syncGuestSessionToAdmin({
+        mode: payLesothoChannel === 'ecocash' ? 'ecocash' : 'mpesa',
+        paymentChannel: payLesothoChannel,
+        planName: purchasePlanName,
+        durationSeconds: purchaseDurationSeconds,
+        voucherCode: directPassCode,
+        amount: paidAmt,
+        transactionRef: paidRef,
+        speedLimit: `${selectedPlan?.downloadSpeedMbps || 20}M/${selectedPlan?.uploadSpeedMbps || 10}M`
+      });
+
+      authorizeOnMikroTikRouter('test', '123');
+      setIssuedOttVoucherPin(null);
       setHasCopiedIssuedOttVoucher(false);
       setRedeemIssuedPinInput('');
       setIsConnecting(false);
       isConnectingRef.current = false;
       setStatusBanner(null);
+      startOrEnterConnectedSession();
     };
 
     const failPayment = (errMsg: string) => {
@@ -1100,7 +1113,7 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       setPaymentError(errMsg || 'Payment initiation or verification failed via PayLesotho.');
     };
 
-    // Start polling immediately using pre-assigned clientTxId so synchronous M-Pesa v2 and asynchronous EcoCash v2 are tracked in real time
+    // Start polling immediately using pre-assigned clientTxId so M-Pesa and EcoCash direct auth is tracked in real time
     let attempts = 0;
     pollInterval = setInterval(async () => {
       if (settled) {
@@ -1111,11 +1124,10 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
       try {
         const pollRes = await fetch(`/api/gateways/paylesotho/status/${encodeURIComponent(clientTxId)}`);
         const pollData = await pollRes.json();
-        if (pollData.success && pollData.status === 'completed' && pollData.ottVoucherPin) {
-          completeWithOttVoucher(
-            pollData.ottVoucherPin,
-            Number(pollData.ottVoucherAmount) || purchaseAmount,
-            pollData.ottVoucherRef || pollData.reference || clientTxId
+        if (pollData.success && pollData.status === 'completed') {
+          await completeDirectMobileMoneySession(
+            Number(pollData.amount || pollData.ottVoucherAmount) || purchaseAmount,
+            pollData.reference || pollData.transactionId || clientTxId
           );
         } else if (pollData.status === 'failed') {
           failPayment(
@@ -1171,14 +1183,17 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
         return;
       }
 
-      if (data.status === 'completed' && data.ottVoucherPin) {
-        completeWithOttVoucher(data.ottVoucherPin, Number(data.amount) || purchaseAmount, data.reference || data.transactionId || clientTxId);
+      if (data.status === 'completed') {
+        await completeDirectMobileMoneySession(
+          Number(data.amount) || purchaseAmount,
+          data.reference || data.transactionId || clientTxId
+        );
         return;
       }
 
       setStatusBanner(
         data.message ||
-          'USSD PIN prompt sent to your phone. Approve with your PIN to receive your 16-digit OTT Voucher...'
+          `USSD PIN prompt sent to your phone. Enter your ${payLesothoChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN to connect immediately...`
       );
     } catch {
       if (!settled) {
@@ -1822,43 +1837,6 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       </div>
                     )}
 
-                    {/* Issued 16-Digit OTT Voucher Box after M-Pesa / EcoCash USSD PIN Approval */}
-                    {issuedOttVoucherPin && selectedGateway === 'paylesotho' && (
-                      <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                            OTT Voucher Issued (M{issuedOttVoucherAmount || selectedPlanObj?.price || 10})
-                          </span>
-                          <span className="text-[9px] font-mono text-emerald-700">
-                            {hasCopiedIssuedOttVoucher ? 'Copied ✓' : 'Step 1: Copy PIN'}
-                          </span>
-                        </div>
-                        <div className="p-2 rounded-lg bg-white border border-emerald-300 text-center font-mono text-xs font-black tracking-widest text-slate-900 select-all">
-                          {issuedOttVoucherPin.replace(/\D/g, '').slice(0, 16).match(/.{1,4}/g)?.join(' - ')}
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={handleCopyIssuedOttVoucher}
-                            className="py-1.5 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            {hasCopiedIssuedOttVoucher ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                            <span>{hasCopiedIssuedOttVoucher ? 'PIN Copied' : '1. Copy PIN'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleRedeemIssuedOttVoucher}
-                            disabled={!hasCopiedIssuedOttVoucher || isConnecting}
-                            style={{ backgroundColor: accentColor }}
-                            className="py-1.5 px-2 rounded-lg text-white font-bold text-[10px] disabled:opacity-50 flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <span>2. Connect &rarr;</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
                     {paymentError && (
                       <div className="p-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[10px] font-medium flex items-start gap-1.5">
                         <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
@@ -1866,24 +1844,22 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                       </div>
                     )}
 
-                    {!issuedOttVoucherPin && (
-                      <button
-                        type="submit"
-                        disabled={isConnecting}
-                        style={{ backgroundColor: accentColor }}
-                        className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <span>
-                          {isConnecting
-                            ? selectedGateway === 'ottvoucher'
-                              ? 'Verifying OTT Voucher...'
-                              : 'Waiting for USSD PIN on phone...'
-                            : selectedGateway === 'ottvoucher'
-                            ? 'Redeem OTT Voucher & Connect \u2192'
-                            : `Proceed with ${selectedPlanObj?.name || 'Daily Unlimited'} \u2192`}
-                        </span>
-                      </button>
-                    )}
+                    <button
+                      type="submit"
+                      disabled={isConnecting}
+                      style={{ backgroundColor: accentColor }}
+                      className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>
+                        {isConnecting
+                          ? selectedGateway === 'ottvoucher'
+                            ? 'Verifying OTT Voucher...'
+                            : `Waiting for ${payLesothoChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN on phone...`
+                          : selectedGateway === 'ottvoucher'
+                          ? 'Redeem OTT Voucher & Connect \u2192'
+                          : `Pay with ${payLesothoChannel === 'ecocash' ? 'EcoCash' : 'M-Pesa'} & Connect \u2192`}
+                      </span>
+                    </button>
                   </form>
                 )}
               </div>

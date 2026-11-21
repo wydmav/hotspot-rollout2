@@ -886,7 +886,19 @@ class SupabaseService {
         batchId: v.batch_id
       }));
 
-      const transactions: PaymentTransaction[] = (txRes.data || []).map((t: any) => ({
+      const cleanSlateIso =
+        typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+          ? window.localStorage.getItem('tconnect_clean_slate_at')
+          : null;
+      const cleanSlateMs = cleanSlateIso ? new Date(cleanSlateIso).getTime() : 0;
+
+      const rawTransactions = (txRes.data || []).filter((t: any) => {
+        if (!cleanSlateMs || isNaN(cleanSlateMs)) return true;
+        const rowMs = new Date(t.created_at || t.completed_at || 0).getTime();
+        return !isNaN(rowMs) && rowMs > cleanSlateMs;
+      });
+
+      const transactions: PaymentTransaction[] = rawTransactions.map((t: any) => ({
         id: t.id,
         transactionRef: t.transaction_ref,
         provider: (t.provider === 'ottvoucher' ? 'ottvoucher' : 'paylesotho') as 'paylesotho' | 'ottvoucher',
@@ -931,7 +943,13 @@ class SupabaseService {
         isPopular: Boolean(p.is_popular)
       }));
 
-      const captiveLeads: CaptivePortalLead[] = (leadsRes.data || []).map((l: any) => ({
+      const rawLeads = (leadsRes.data || []).filter((l: any) => {
+        if (!cleanSlateMs || isNaN(cleanSlateMs)) return true;
+        const rowMs = new Date(l.captured_at || 0).getTime();
+        return !isNaN(rowMs) && rowMs > cleanSlateMs;
+      });
+
+      const captiveLeads: CaptivePortalLead[] = rawLeads.map((l: any) => ({
         id: l.id,
         firstName: l.first_name || 'Guest',
         lastName: l.last_name || '',
@@ -967,6 +985,17 @@ class SupabaseService {
     } catch {
       return null;
     }
+  }
+
+  async wipeLiveLeadsAndTransactions(): Promise<void> {
+    if (!this.client || !this.config.isConnected) return;
+    try {
+      await Promise.all([
+        this.client.from('guest_leads').delete().neq('id', '__never__'),
+        this.client.from('transactions').delete().neq('id', '__never__'),
+        this.client.from('ott_vouchers_issued').delete().neq('pin', '__never__')
+      ]);
+    } catch {}
   }
 }
 
