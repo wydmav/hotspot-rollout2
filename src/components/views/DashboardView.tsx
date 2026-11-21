@@ -328,12 +328,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         rec.siteName ||
         'Maseru Golf Course Clubhouse';
 
+      const rawMac = String(rec.clientMac || rec.mac || '').trim();
+      const rawIp = String(rec.clientIp || rec.ip || '').trim();
+      const cleanMac =
+        rawMac && !rawMac.includes('$(') && rawMac.toLowerCase() !== 'auto' && rawMac.toLowerCase() !== 'unknown-mac'
+          ? rawMac.toUpperCase()
+          : '—';
+      const cleanIp =
+        rawIp && !rawIp.includes('$(') && rawIp.toLowerCase() !== 'auto'
+          ? rawIp
+          : '—';
+
       byId.set(rec.id, {
         id: rec.id,
         guestName: rec.guestName || matchedTx?.customerName || (authMode === 'paid' ? 'Paid Subscriber' : 'Free Wi-Fi Guest'),
         guestPhone: rec.guestPhone || matchedTx?.phoneNumber || '—',
-        clientMac: rec.clientMac || 'F4:5C:89:AA:10:01',
-        clientIp: rec.clientIp || '10.10.0.101',
+        clientMac: cleanMac,
+        clientIp: cleanIp,
         deviceType: rec.deviceType || 'Mobile / Wi-Fi Client',
         authMode,
         planName:
@@ -390,8 +401,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         id: s.id,
         guestName: s.guestName || (authMode === 'paid' ? 'Paid Subscriber' : 'Free Wi-Fi Guest'),
         guestPhone: s.guestPhone || '—',
-        clientMac: s.clientMac || 'D8:BB:2C:71:09:44',
-        clientIp: s.clientIp || '10.10.0.102',
+        clientMac: s.clientMac && !s.clientMac.includes('$(') ? s.clientMac.toUpperCase() : '—',
+        clientIp: s.clientIp && !s.clientIp.includes('$(') ? s.clientIp : '—',
         deviceType: s.deviceType || 'Mobile / Wi-Fi Client',
         authMode,
         planName: s.planName || (authMode === 'free' ? 'Free 24-Hour Access' : 'Paid Hotspot Pass'),
@@ -565,7 +576,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              setFreeModeSyncToast('Syncing 24h seamless auto-reconnect & splash page to adopted routers...');
+              try {
+                const res = await fetch('/api/portal/sync-splash-safe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (data?.success) {
+                  setFreeModeSyncToast(data.message || `Synced 24h seamless auto-reconnect & splash page to ${data.syncedRouters ?? 0} router(s).`);
+                } else {
+                  setFreeModeSyncToast('Sync completed.');
+                }
+              } catch {
+                setFreeModeSyncToast('Failed to reach /api/portal/sync-splash-safe.');
+              }
+              setTimeout(() => setFreeModeSyncToast(null), 5000);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer"
+            title="Safely push updated hotspot/login.html and 24-Hour Seamless Auto-Reconnect rules to all adopted routers without dropping active sessions"
+          >
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            <span>One-Click Sync Splash (24h)</span>
+          </button>
+
           <button
             type="button"
             onClick={() => void fetchGuestRegistry()}

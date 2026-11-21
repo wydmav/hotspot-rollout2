@@ -595,7 +595,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     : defaultPlans;
 
   // Post-authentication always shows a random Ad Slide picture with a small static "Proceed to Internet" link
-  const freeAccessDurationMinutes = Math.max(60, Number(cfg.freeAccessDurationMinutes) || 1440);
+  const rawFreeMins = Number(cfg.freeAccessDurationMinutes) || 1440;
+  const freeAccessDurationMinutes = rawFreeMins <= 60 ? 1440 : rawFreeMins;
   const freeAccessDurationSeconds = freeAccessDurationMinutes * 60;
   const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}`;
   const postAuthDst = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
@@ -654,26 +655,90 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     left: ${freeButtonX}%;
     top: ${freeButtonY}%;
     transform: translate(-50%, -50%);
-    width: 86%;
-    max-width: 360px;
+    width: 90%;
+    max-width: 365px;
+  }
+  .free-voucher-card {
+    background: rgba(11, 25, 44, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    border-top: 3.5px solid ${accentColor};
+    border-radius: 22px;
+    padding: 16px;
+    box-shadow: 0 20px 46px rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+    text-align: left;
+  }
+  .tc-voucher-pill {
+    display: flex;
+    align-items: stretch;
+    border-radius: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    background: #ffffff;
+    overflow: hidden;
+    margin-bottom: 11px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .tc-voucher-pill:focus-within {
+    border-color: ${accentColor};
+    box-shadow: 0 0 0 3px rgba(240, 94, 23, 0.25);
+  }
+  .tc-prefix-ro {
+    width: 68px;
+    border: none;
+    border-right: 2px solid #cbd5e1;
+    background: #0b192c;
+    color: ${accentColor};
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 19px;
+    font-weight: 900;
+    text-align: center;
+    padding: 11px 6px;
+    user-select: none;
+    pointer-events: none;
+    outline: none;
+    flex-shrink: 0;
+  }
+  .tc-digits-inp {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: #ffffff;
+    color: #0f172a;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 21px;
+    font-weight: 900;
+    letter-spacing: 5px;
+    padding: 11px 14px;
+    outline: none;
+  }
+  .tc-digits-inp::placeholder {
+    color: #94a3b8;
+    letter-spacing: 4px;
+    font-weight: 700;
   }
   .btn-free-login {
     width: 100%;
-    padding: 15px 22px;
-    border-radius: 12px;
+    padding: 13px 20px;
+    border-radius: 14px;
     border: none;
     background: ${freeButtonColor};
     color: ${freeButtonTextColor};
-    font-size: 19px;
-    font-weight: 800;
+    font-size: 17px;
+    font-weight: 900;
     letter-spacing: 0.3px;
     cursor: pointer;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    box-shadow: 0 10px 26px rgba(240, 94, 23, 0.38);
     text-align: center;
-    transition: transform 0.15s ease;
+    transition: transform 0.15s ease, opacity 0.15s ease;
   }
   .btn-free-login:active {
     transform: scale(0.98);
+  }
+  .btn-free-login:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
   }
   .main-wrap {
     position: relative;
@@ -1028,19 +1093,43 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
 <main class="main-wrap">
   ${allowFreeAccess ? `
-  <!-- FREE ACCESS MODE STEP 2: Customizable "Login for free" Button Over Full Wallpaper (Shown after Step 1 Lead Capture) -->
+  <!-- FREE ACCESS MODE STEP 2: Read-Only TC- Prefix + 5-Digit Numeric Voucher Input + "Log in" Button Over Full Wallpaper -->
   <div id="step2_free_login" class="free-only-wrap" style="display:none;">
     <div style="margin-bottom:10px;display:flex;justify-content:center;">
-      <button type="button" onclick="backToStep1()" style="padding:6px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.35);background:rgba(15,23,42,0.75);backdrop-filter:blur(6px);color:#ffffff;font-size:11px;font-weight:800;cursor:pointer;">
+      <button type="button" onclick="backToStep1()" style="padding:6px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.35);background:rgba(15,23,42,0.78);backdrop-filter:blur(6px);color:#ffffff;font-size:11px;font-weight:800;cursor:pointer;">
         &larr; Edit your details
       </button>
     </div>
-    <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
-      <input type="hidden" name="username" value="T-TRIAL">
-      <input type="hidden" name="password" value="123">
-      <input type="hidden" name="dst" value="${postAuthDst}">
-      <button type="submit" id="freeSubmitBtn" class="btn-free-login">${freeButtonText}</button>
-    </form>
+    <div class="free-voucher-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:14px;font-weight:900;color:#ffffff;letter-spacing:-0.2px;">Enter T-Connect Voucher</span>
+        <span style="font-size:10px;font-weight:800;color:#94a3b8;font-family:monospace;">Step 2 of 2</span>
+      </div>
+      <p style="font-size:11px;color:#cbd5e1;margin-bottom:10px;line-height:1.35;">
+        Enter the <strong>5-digit number</strong> on your T-Connect voucher below and tap <strong>Log in</strong>.
+      </p>
+      <div id="freeStep2ErrBox" class="err-box" style="margin-bottom:10px;"></div>
+      <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
+        <input type="hidden" name="username" value="T-TRIAL">
+        <input type="hidden" name="password" value="123">
+        <input type="hidden" name="dst" value="${postAuthDst}">
+        <div class="tc-voucher-pill">
+          <input type="text" class="tc-prefix-ro" value="TC-" readonly tabindex="-1" aria-label="Voucher Prefix TC-" />
+          <input
+            type="tel"
+            id="freeVoucherDigits"
+            class="tc-digits-inp"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="5"
+            placeholder="12345"
+            autocomplete="off"
+            oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5);showFreeErr('');"
+          />
+        </div>
+        <button type="submit" id="freeSubmitBtn" class="btn-free-login">Log in</button>
+      </form>
+    </div>
   </div>
   ` : ''}
 
@@ -1477,24 +1566,75 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     return base;
   }
 
+  function showFreeErr(msg) {
+    var eb = document.getElementById('freeStep2ErrBox');
+    if (eb) {
+      eb.style.display = msg ? 'block' : 'none';
+      eb.textContent = msg || '';
+    }
+  }
+
+  var isFreeVoucherVerified = false;
   function handleFreeSubmit(e) {
-    try {
-      fetch('${baseUrl}/api/portal/guest-connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getGuestPayload({
-          mode: 'free',
-          accessType: 'free',
-          paymentMethod: 'free_wifi',
-          paymentMethodLabel: 'Free Mode Wi-Fi',
-          amount: 0,
-          currency: 'M',
-          planName: 'Free Wi-Fi Access',
-          durationSeconds: ${freeAccessDurationSeconds}
-        }))
-      }).catch(function(){});
-    } catch (err) {}
-    return true;
+    if (isFreeVoucherVerified) {
+      return true;
+    }
+    if (e) e.preventDefault();
+    showFreeErr('');
+    var inp = document.getElementById('freeVoucherDigits');
+    var digits = (inp ? inp.value : '').replace(/\\D/g, '');
+    if (digits.length !== 5) {
+      showFreeErr('Please enter your 5-digit T-Connect voucher number (e.g. 12345).');
+      return false;
+    }
+    var fullCode = 'TC-' + digits;
+    var btn = document.getElementById('freeSubmitBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Verifying TC-' + digits + '...';
+    }
+    fetch('${baseUrl}/api/vouchers/redeem-tconnect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(getGuestPayload({
+        code: fullCode,
+        digits: digits,
+        mode: 'free',
+        accessType: 'free',
+        paymentMethod: 'free_wifi',
+        paymentMethodLabel: 'Free Mode Voucher (' + fullCode + ')',
+        voucherCode: fullCode,
+        amount: 0,
+        currency: 'M',
+        planName: 'Free Wi-Fi Access (' + fullCode + ')',
+        durationSeconds: ${freeAccessDurationSeconds}
+      }))
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || !data.success) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Log in';
+          }
+          showFreeErr((data && data.message) ? data.message : 'Invalid or expired T-Connect voucher.');
+          return;
+        }
+        isFreeVoucherVerified = true;
+        if (btn) {
+          btn.textContent = 'Connecting...';
+        }
+        var ff = document.getElementById('freeForm');
+        if (ff) ff.submit();
+      })
+      .catch(function() {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Log in';
+        }
+        showFreeErr('Unable to verify voucher. Please check your Wi-Fi connection and try again.');
+      });
+    return false;
   }
 
   function completeDirectMobileMoneyAuth() {
@@ -5061,6 +5201,302 @@ app.post('/api/gateways/paylesotho/test', async (req: Request, res: Response) =>
   });
 });
 
+// Get all server-side T-Connect & OTT vouchers
+app.get('/api/vouchers', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    vouchers: Array.isArray(serverStore.vouchers) ? serverStore.vouchers : []
+  });
+});
+
+// Generate a batch of T-Connect Free Mode Reception Vouchers (TC-XXXXX, 5 numeric digits, up to 3 devices, 24h validity, uncapped speed)
+app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
+  const {
+    count = 300,
+    planId = 'tc_free_reception_24h',
+    planName = 'T-Connect Reception Wi-Fi Voucher (24h · 3 Devices · Uncapped)',
+    durationSeconds = 86400,
+    deviceLimit = 3,
+    venueName = 'Clubhouse & Reception'
+  } = req.body || {};
+
+  const targetCount = Math.min(1000, Math.max(1, Number(count) || 300));
+  if (!Array.isArray(serverStore.vouchers)) {
+    serverStore.vouchers = [];
+  }
+
+  const existingCodes = new Set(
+    serverStore.vouchers.map((v: any) => String(v.code || '').trim().toUpperCase())
+  );
+
+  const nowIso = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const generatedBatch: any[] = [];
+  let safetyCounter = 0;
+
+  while (generatedBatch.length < targetCount && safetyCounter < 95000) {
+    safetyCounter++;
+    const num = Math.floor(10000 + Math.random() * 90000);
+    const code = `TC-${num}`;
+    if (existingCodes.has(code)) continue;
+    existingCodes.add(code);
+
+    const voucher = {
+      id: `vch_tc_${Date.now()}_${generatedBatch.length + 1}_${num}`,
+      code,
+      digits: String(num),
+      planId,
+      planName: `${planName}${venueName ? ` — ${venueName}` : ''}`,
+      price: 0,
+      currency: 'M',
+      durationSeconds: Math.max(3600, Number(durationSeconds) || 86400),
+      deviceLimit: Math.max(1, Number(deviceLimit) || 3),
+      speedLimit: 'Uncapped',
+      venueName,
+      status: 'active',
+      generatedAt: nowIso,
+      associatedDevices: []
+    };
+    generatedBatch.push(voucher);
+  }
+
+  serverStore.vouchers = [...generatedBatch, ...serverStore.vouchers];
+  saveServerPortalStore(serverStore);
+
+  res.json({
+    success: true,
+    count: generatedBatch.length,
+    vouchers: generatedBatch,
+    allVouchersCount: serverStore.vouchers.length,
+    message: `Generated ${generatedBatch.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Up to 3 Devices · Uncapped Speed).`
+  });
+});
+
+// Verify & redeem a T-Connect Free Mode Reception Voucher (TC-XXXXX where XXXXX is 5 numeric digits)
+// Enforces up to 3 devices per voucher, 24-hour validity from first login, and uncapped speed.
+app.post('/api/vouchers/redeem-tconnect', (req: Request, res: Response) => {
+  const {
+    code,
+    digits,
+    mac,
+    clientMac,
+    ip,
+    clientIp,
+    firstName,
+    lastName,
+    guestName,
+    countryCode,
+    phone,
+    guestPhone,
+    email,
+    guestEmail,
+    scope,
+    siteName,
+    routerName,
+    durationSeconds
+  } = req.body || {};
+
+  const rawDigits = String(digits || code || '').replace(/\D/g, '');
+  if (!/^\d{5}$/.test(rawDigits)) {
+    return res.status(400).json({
+      success: false,
+      reason: 'INVALID_FORMAT',
+      message: 'Please enter the 5-digit number on your T-Connect voucher (e.g. TC-12345).'
+    });
+  }
+
+  const normalizedCode = `TC-${rawDigits}`;
+  if (!Array.isArray(serverStore.vouchers)) {
+    serverStore.vouchers = [];
+  }
+
+  const voucher = serverStore.vouchers.find(
+    (v: any) =>
+      String(v.code || '').trim().toUpperCase() === normalizedCode ||
+      String(v.code || '').replace(/\D/g, '') === rawDigits
+  );
+
+  if (!voucher) {
+    return res.status(404).json({
+      success: false,
+      reason: 'INVALID_VOUCHER',
+      message: `Voucher ${normalizedCode} was not found. Please check your 5-digit voucher number.`
+    });
+  }
+
+  if (voucher.status === 'revoked') {
+    return res.status(403).json({
+      success: false,
+      reason: 'REVOKED',
+      message: `Voucher ${normalizedCode} has been revoked by reception.`
+    });
+  }
+
+  const voucherDurationSec = Math.max(3600, Number(voucher.durationSeconds) || Number(durationSeconds) || 86400);
+  const maxDevices = Math.max(1, Number(voucher.deviceLimit) || 3);
+
+  // Check 24-hour expiration from firstUsedAt
+  if (voucher.firstUsedAt) {
+    const firstMs = new Date(String(voucher.firstUsedAt).replace(' ', 'T')).getTime();
+    if (!isNaN(firstMs)) {
+      const expMs = firstMs + voucherDurationSec * 1000;
+      if (Date.now() > expMs) {
+        voucher.status = 'expired';
+        saveServerPortalStore(serverStore);
+        return res.status(403).json({
+          success: false,
+          reason: 'EXPIRED',
+          message: `Voucher ${normalizedCode} has expired after 24 hours of active use.`
+        });
+      }
+    }
+  }
+
+  if (!Array.isArray(voucher.associatedDevices)) {
+    voucher.associatedDevices = [];
+  }
+
+  const rawMac = String(mac || clientMac || '').trim();
+  const cleanPhone = String(phone || guestPhone || '').replace(/\D/g, '').slice(-8);
+  const deviceIdentifier = (
+    rawMac && rawMac.indexOf('$(') === -1
+      ? rawMac
+      : cleanPhone
+      ? `PHONE-${cleanPhone}`
+      : `GUEST-${ip || clientIp || 'DEVICE'}`
+  ).toUpperCase();
+
+  const existingIdx = voucher.associatedDevices.findIndex(
+    (d: any) => String(d.mac || '').toUpperCase() === deviceIdentifier
+  );
+
+  const nowIso = new Date().toISOString();
+  const nowStr = nowIso.replace('T', ' ').slice(0, 19);
+
+  if (existingIdx === -1 && voucher.associatedDevices.length >= maxDevices) {
+    return res.status(403).json({
+      success: false,
+      reason: 'DEVICE_LIMIT_REACHED',
+      message: `Voucher ${normalizedCode} has reached its maximum limit of ${maxDevices} devices.`
+    });
+  }
+
+  if (!voucher.firstUsedAt) {
+    voucher.firstUsedAt = nowStr;
+    voucher.expiresAt = new Date(Date.now() + voucherDurationSec * 1000)
+      .toISOString()
+      .replace('T', ' ')
+      .slice(0, 19);
+  }
+
+  const routerCtx = resolveAdoptedRouterForLead({
+    ...req.body,
+    scope: scope || 'hotspot',
+    siteName,
+    routerName
+  });
+
+  if (existingIdx !== -1) {
+    voucher.associatedDevices[existingIdx].lastSeen = nowStr;
+    voucher.associatedDevices[existingIdx].ip = String(ip || clientIp || voucher.associatedDevices[existingIdx].ip || '10.10.0.50');
+  } else {
+    voucher.associatedDevices.push({
+      mac: deviceIdentifier,
+      hostname: [firstName, lastName].filter(Boolean).join(' ') || guestName || 'Reception-Guest',
+      ip: String(ip || clientIp || '10.10.0.50'),
+      firstSeen: nowStr,
+      lastSeen: nowStr,
+      bytesIn: 0,
+      bytesOut: 0
+    });
+  }
+
+  voucher.status = voucher.associatedDevices.length >= maxDevices ? 'used' : 'active';
+
+  // Link this redeemed TC-XXXXX voucher to the guest's Step 1 Free Mode lead in serverStore.guestEvents
+  if (!Array.isArray(serverStore.guestEvents)) {
+    serverStore.guestEvents = [];
+  }
+  const existingLead = serverStore.guestEvents.find((ev: any) => {
+    const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '').slice(-8);
+    const evMac = String(ev.mac || '').trim().toUpperCase();
+    return (
+      ev.accessType === 'free' &&
+      ((cleanPhone && evPhone === cleanPhone) || (rawMac && rawMac.indexOf('$(') === -1 && evMac === rawMac.toUpperCase()))
+    );
+  });
+
+  const resolvedGuestName =
+    [firstName, lastName].filter(Boolean).join(' ').trim() ||
+    String(guestName || '').trim() ||
+    existingLead?.guestName ||
+    'Wi-Fi Guest';
+
+  if (existingLead) {
+    existingLead.voucherCode = normalizedCode;
+    existingLead.paymentMethod = 'free_wifi';
+    existingLead.paymentMethodLabel = `Free Mode Voucher (${normalizedCode})`;
+    existingLead.planName = `Free Wi-Fi (${normalizedCode})`;
+    existingLead.durationSeconds = voucherDurationSec;
+    existingLead.startedAt = nowIso;
+    existingLead.expiresAt = new Date(Date.now() + voucherDurationSec * 1000).toISOString();
+    existingLead.lastSeenAt = nowIso;
+    if (email || guestEmail) {
+      existingLead.email = String(email || guestEmail).trim();
+    }
+  } else {
+    const newFreeLead = {
+      id: `guest_tc_free_${Date.now()}`,
+      firstName: firstName || resolvedGuestName.split(' ')[0] || 'Wi-Fi',
+      lastName: lastName || resolvedGuestName.split(' ').slice(1).join(' ') || 'Guest',
+      guestName: resolvedGuestName,
+      countryCode: countryCode || '+266',
+      phone: cleanPhone,
+      guestPhone: cleanPhone ? `${countryCode || '+266'} ${cleanPhone}` : '+266 Guest',
+      email: String(email || guestEmail || '').trim(),
+      mac: rawMac && rawMac.indexOf('$(') === -1 ? rawMac : deviceIdentifier,
+      ip: String(ip || clientIp || ''),
+      scope: routerCtx.scope,
+      routerId: routerCtx.routerId,
+      routerName: routerCtx.routerName,
+      siteName: routerCtx.siteName,
+      venuePurchasedAt: routerCtx.siteName,
+      district: routerCtx.district,
+      adoptedRouterVerified: true,
+      mode: 'free',
+      accessType: 'free',
+      paymentMethod: 'free_wifi',
+      paymentMethodLabel: `Free Mode Voucher (${normalizedCode})`,
+      voucherCode: normalizedCode,
+      planId: voucher.planId || 'tc_free_reception_24h',
+      planName: `Free Wi-Fi (${normalizedCode})`,
+      durationSeconds: voucherDurationSec,
+      startedAt: nowIso,
+      expiresAt: new Date(Date.now() + voucherDurationSec * 1000).toISOString(),
+      roamedSites: [routerCtx.siteName],
+      amount: 0,
+      currency: 'M',
+      capturedAt: nowIso,
+      lastSeenAt: nowIso
+    };
+    serverStore.guestEvents.unshift(newFreeLead);
+  }
+
+  saveServerPortalStore(serverStore);
+
+  return res.json({
+    success: true,
+    voucherCode: normalizedCode,
+    digits: rawDigits,
+    planName: voucher.planName || `Free Wi-Fi (${normalizedCode})`,
+    durationSeconds: voucherDurationSec,
+    deviceSlot: `${voucher.associatedDevices.length}/${maxDevices}`,
+    deviceLimit: maxDevices,
+    speedLimit: 'Uncapped',
+    expiresAt: voucher.expiresAt,
+    message: `Voucher ${normalizedCode} verified (${voucher.associatedDevices.length}/${maxDevices} devices). Connecting to uncapped internet...`
+  });
+});
+
 // Verify & redeem 16-digit OTT voucher PINs from Splash Page
 // Enforces exact match between voucher denomination and selected package price,
 // and binds the redeemed session to the exact paid package duration on the MikroTik router.
@@ -5461,10 +5897,11 @@ app.get('/api/portal/check-roaming', (req: Request, res: Response) => {
     : existing.capturedAt
     ? new Date(existing.capturedAt).getTime()
     : now;
-  const durationSec = Number(existing.durationSeconds) || 86400;
+  const rawDur = Number(existing.durationSeconds) || 86400;
+  const durationSec = isFree && rawDur <= 3600 ? 86400 : rawDur;
   const elapsedSec = Math.floor((now - startMs) / 1000);
-  const remainingSec = isFree ? 0 : Math.max(0, durationSec - elapsedSec);
-  const isActive = isFree ? elapsedSec < 7200 : remainingSec > 0;
+  const remainingSec = Math.max(0, durationSec - elapsedSec);
+  const isActive = remainingSec > 0;
 
   if (!isActive) {
     return res.json({ roamed: false, active: false, expired: true });
@@ -5562,66 +5999,105 @@ function resolveCommercialMetaForEvent(ev: any) {
 // Guest session / lead capture endpoint from Splash Page (with cross-hotspot handover support)
 app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
   const body = req.body || {};
-  const inMac = String(body.mac || '').trim().toLowerCase();
+  const rawInMac = String(body.mac || body.clientMac || '').trim();
+  const cleanMac =
+    rawInMac && !rawInMac.includes('$(') && rawInMac.toLowerCase() !== 'auto' && rawInMac.toLowerCase() !== 'unknown-mac'
+      ? rawInMac.toUpperCase()
+      : '';
+  const inMac = cleanMac.toLowerCase();
+
+  const rawInIp = String(body.ip || body.clientIp || '').trim();
+  const reqForwardedIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
+    .split(',')[0]
+    .trim()
+    .replace(/^::ffff:/, '');
+  const cleanIp =
+    rawInIp && !rawInIp.includes('$(') && rawInIp.toLowerCase() !== 'auto'
+      ? rawInIp
+      : reqForwardedIp && reqForwardedIp !== '127.0.0.1' && reqForwardedIp !== '::1'
+      ? reqForwardedIp
+      : '';
+
   const inPhone = String(body.phone || body.guestPhone || '').replace(/\D/g, '');
   const nowIso = new Date().toISOString();
 
   const routerCtx = resolveAdoptedRouterForLead(body);
   const allPortalCfgs = loadSavedPortalConfigs();
   const scopeCfg = allPortalCfgs[routerCtx.scope] || allPortalCfgs['hotspot'] || {};
-  const configuredFreeDurationMins = Math.max(60, Number(scopeCfg.freeAccessDurationMinutes) || 1440);
+  const rawCfgFreeMins = Number(scopeCfg.freeAccessDurationMinutes) || 1440;
+  const configuredFreeDurationMins = rawCfgFreeMins <= 60 ? 1440 : rawCfgFreeMins;
+  const rawBodyDurSec = Number(body.durationSeconds) || 0;
   const resolvedDurationSec =
     body.mode === 'free'
-      ? Number(body.durationSeconds) || configuredFreeDurationMins * 60
-      : Number(body.durationSeconds) || 86400;
+      ? rawBodyDurSec > 3600
+        ? rawBodyDurSec
+        : configuredFreeDurationMins * 60
+      : rawBodyDurSec || 86400;
   const expiresIso = new Date(Date.now() + resolvedDurationSec * 1000).toISOString();
 
-  // Check for existing active session on another hotspot (or Step 1 -> Step 2 Free Mode confirmation)
+  // Check for existing active session on another hotspot (or Step 1 -> Step 2 Free Mode confirmation / 24h auto-reconnect)
   const existingIdx = serverStore.guestEvents.findIndex((ev: any) => {
-    const evMac = String(ev.mac || '').trim().toLowerCase();
+    const evMac = String(ev.clientMac || ev.mac || '').trim().toLowerCase();
     const evPhone = String(ev.phone || ev.guestPhone || '').replace(/\D/g, '');
-    const macMatch = inMac && inMac !== 'unknown-mac' && inMac !== 'auto' && !inMac.includes('$(') && evMac === inMac;
+    const macMatch = inMac && evMac === inMac;
     const phoneMatch = inPhone.length >= 8 && evPhone.length >= 8 && (evPhone.includes(inPhone) || inPhone.includes(evPhone));
     return macMatch || phoneMatch;
   });
 
   if (existingIdx >= 0) {
     const existing = serverStore.guestEvents[existingIdx];
-    const startMs = new Date(existing.startedAt || existing.capturedAt).getTime();
-    const durSec = Number(existing.durationSeconds) || 86400;
+    const startMs = new Date(existing.startedAt || existing.capturedAt || nowIso).getTime();
+    const prevDurSec = Number(existing.durationSeconds) || 86400;
+    const durSec = existing.mode === 'free' && prevDurSec <= 3600 ? 86400 : Math.max(prevDurSec, resolvedDurationSec);
     const isUnexpired = Date.now() - startMs < durSec * 1000;
 
-    if (isUnexpired) {
-      // Update contact info & roaming handover while preserving paid attribution if already paid
-      const prevSite = existing.siteName;
-      if (body.firstName) existing.firstName = body.firstName;
-      if (body.lastName) existing.lastName = body.lastName;
-      if (body.guestName) existing.guestName = body.guestName;
-      if (body.email) existing.email = body.email;
-      if (body.phone) existing.phone = body.phone;
-      if (body.guestPhone) existing.guestPhone = body.guestPhone;
-      existing.siteName = body.siteName || routerCtx.siteName || existing.siteName;
-      existing.routerName = body.routerName || routerCtx.routerName || existing.routerName;
-      existing.routerId = body.routerId || routerCtx.routerId || existing.routerId;
-      existing.district = body.district || routerCtx.district || existing.district;
-      existing.roamedSites = Array.from(new Set([...(existing.roamedSites || [prevSite]), existing.siteName].filter(Boolean)));
-      existing.lastSeenAt = nowIso;
-      if (body.amount && Number(body.amount) > 0) {
-        existing.amount = Number(body.amount);
-        existing.mode = body.mode || existing.mode;
-        existing.paymentMethod = body.paymentMethod || existing.paymentMethod;
-        existing.voucherCode = body.voucherCode || existing.voucherCode;
-      }
-      const comm = resolveCommercialMetaForEvent(existing);
-      Object.assign(existing, comm);
-      saveServerPortalStore(serverStore);
-      return res.json({
-        success: true,
-        isRoaming: true,
-        entry: existing,
-        message: `Handover complete: Roaming session aligned to ${existing.siteName}.`
-      });
+    // Update contact info, real MAC/IP & roaming handover while re-activating the 24-hour session
+    const prevSite = existing.siteName;
+    if (body.firstName) existing.firstName = body.firstName;
+    if (body.lastName) existing.lastName = body.lastName;
+    if (body.guestName) existing.guestName = body.guestName;
+    if (body.email) existing.email = body.email;
+    if (body.phone) existing.phone = body.phone;
+    if (body.guestPhone) existing.guestPhone = body.guestPhone;
+    if (cleanMac) {
+      existing.mac = cleanMac;
+      existing.clientMac = cleanMac;
     }
+    if (cleanIp) {
+      existing.ip = cleanIp;
+      existing.clientIp = cleanIp;
+    }
+    existing.siteName = body.siteName || routerCtx.siteName || existing.siteName;
+    existing.routerName = body.routerName || routerCtx.routerName || existing.routerName;
+    existing.routerId = body.routerId || routerCtx.routerId || existing.routerId;
+    existing.district = body.district || routerCtx.district || existing.district;
+    existing.roamedSites = Array.from(new Set([...(existing.roamedSites || [prevSite]), existing.siteName].filter(Boolean)));
+    existing.lastSeenAt = nowIso;
+    existing.connectionStatus = 'connected';
+    delete existing.disconnectedAt;
+    delete existing.disconnectReason;
+    existing.durationSeconds = durSec;
+    if (isUnexpired) {
+      existing.expiresAt = new Date(startMs + durSec * 1000).toISOString();
+    } else {
+      existing.startedAt = nowIso;
+      existing.expiresAt = expiresIso;
+    }
+    if (body.amount && Number(body.amount) > 0) {
+      existing.amount = Number(body.amount);
+      existing.mode = body.mode || existing.mode;
+      existing.paymentMethod = body.paymentMethod || existing.paymentMethod;
+      existing.voucherCode = body.voucherCode || existing.voucherCode;
+    }
+    const comm = resolveCommercialMetaForEvent(existing);
+    Object.assign(existing, comm);
+    saveServerPortalStore(serverStore);
+    return res.json({
+      success: true,
+      isRoaming: isUnexpired,
+      entry: existing,
+      message: `Handover complete: 24-hour session active on ${existing.siteName}.`
+    });
   }
 
   const commMeta = resolveCommercialMetaForEvent(body);
@@ -5630,6 +6106,11 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
     id: body.id || `guest_${Date.now()}`,
     ...body,
     ...commMeta,
+    mac: cleanMac || '',
+    clientMac: cleanMac || '',
+    ip: cleanIp || '',
+    clientIp: cleanIp || '',
+    connectionStatus: 'connected',
     durationSeconds: resolvedDurationSec,
     startedAt: nowIso,
     expiresAt: expiresIso,
@@ -5663,8 +6144,8 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
       router_name: entry.routerName || 'MIKROTIK-TC',
       site_name: entry.siteName || 'T-Connect Hotspot',
       vertical: entry.scope || 'hotspot',
-      client_mac: entry.mac || 'AUTO',
-      client_ip: entry.ip || '10.10.0.1',
+      client_mac: cleanMac || '—',
+      client_ip: cleanIp || '—',
       device_type: entry.deviceType || 'Mobile',
       duration_minutes: Math.round(resolvedDurationSec / 60),
       status: 'active',
@@ -5677,14 +6158,34 @@ app.post('/api/portal/guest-connect', (req: Request, res: Response) => {
 
 app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
   const nowMs = Date.now();
+  let mutatedStore = false;
   const enrichedEvents = (serverStore.guestEvents || []).map((ev: any) => {
     const comm = resolveCommercialMetaForEvent(ev);
-    const durationSec = Number(ev.durationSeconds) || 86400;
+    const rawDurSec = Number(ev.durationSeconds) || 86400;
+    // Upgrade any legacy 1-hour (3600s) Free Mode lead to the full 24-hour (86400s) duration
+    const durationSec = comm.accessType === 'free' && rawDurSec <= 3600 ? 86400 : rawDurSec;
     const startMs = new Date(ev.startedAt || ev.capturedAt || nowMs).getTime();
+    if (comm.accessType === 'free' && rawDurSec <= 3600) {
+      ev.durationSeconds = 86400;
+      ev.expiresAt = new Date(startMs + 86400 * 1000).toISOString();
+      mutatedStore = true;
+    }
     const expiresMs = ev.expiresAt
       ? new Date(ev.expiresAt).getTime()
       : startMs + durationSec * 1000;
     const remainingSec = Math.max(0, Math.round((expiresMs - nowMs) / 1000));
+
+    // Normalize real MAC and IP so both mac/clientMac and ip/clientIp match across Fleet Overview & Guest Leads
+    const rawMac = String(ev.clientMac || ev.mac || '').trim();
+    const rawIp = String(ev.clientIp || ev.ip || '').trim();
+    const normMac =
+      rawMac && !rawMac.includes('$(') && rawMac.toLowerCase() !== 'auto' && rawMac.toLowerCase() !== 'unknown-mac'
+        ? rawMac.toUpperCase()
+        : '';
+    const normIp =
+      rawIp && !rawIp.includes('$(') && rawIp.toLowerCase() !== 'auto'
+        ? rawIp
+        : '';
 
     // Check if the router serving this guest is currently offline
     const assignedRouter = ev.routerId
@@ -5709,6 +6210,10 @@ app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
     return {
       ...ev,
       ...comm,
+      mac: normMac,
+      clientMac: normMac,
+      ip: normIp,
+      clientIp: normIp,
       durationSeconds: durationSec,
       expiresAt: new Date(expiresMs).toISOString(),
       remainingSeconds: remainingSec,
@@ -5724,6 +6229,10 @@ app.get('/api/portal/guest-connect', (_req: Request, res: Response) => {
         : undefined
     };
   });
+
+  if (mutatedStore) {
+    saveServerPortalStore(serverStore);
+  }
 
   res.json({
     success: true,
@@ -5916,7 +6425,8 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
   }
 });
 
-// Safe One-Click Splash HTML Sync Endpoint (Updates ONLY hotspot/login.html on adopted routers without touching DHCP, bridges, or active guest sessions)
+// Safe One-Click Splash HTML & 24h Seamless Auto-Reconnect Sync Endpoint
+// Updates hotspot/login.html AND applies in-place 24-hour MAC-cookie/lease-time=1d rules without resetting bridges, WireGuard, or active guest connections
 app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
   try {
     const host = req.get('host') || '169.58.98.92:3000';
@@ -5929,8 +6439,15 @@ app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
       const loginUrl = `${portalBaseUrl}/api/portal/router-login/${encodeURIComponent(rScope)}.html`;
       const safeSplashCmds = [
-        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=hotspot/login.html } on-error={}`,
-        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=flash/hotspot/login.html } on-error={}`
+        `:do { /ip dhcp-server set [find interface="bridgeLocal"] lease-time=1d } on-error={}`,
+        `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`,
+        `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`,
+        `:do { /ip hotspot set [find interface="bridgeLocal"] idle-timeout=none keepalive-timeout=2m } on-error={}`,
+        `:do { /ip hotspot user profile set [find name="tc-free-trial"] session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } on-error={}`,
+        `:do { /ip hotspot user profile set [find name="tc-speed-cap"] session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } on-error={}`,
+        `:do { /ip hotspot user profile set [find default=yes] session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=hotspot/login.html check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=flash/hotspot/login.html check-certificate=no } on-error={}`
       ];
       const existingPending = Array.isArray(router.pendingCommands) ? router.pendingCommands : [];
       router.pendingCommands = [...existingPending, ...safeSplashCmds];
@@ -5943,7 +6460,7 @@ app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
       success: true,
       syncedRouters: queuedRouters,
       syncedAt: nowIso,
-      message: `Queued safe non-disruptive hotspot/login.html update for ${queuedRouters} adopted router(s). Active Wi-Fi sessions, iOS CNA, and WireGuard tunnels remain untouched.`
+      message: `Queued safe non-disruptive hotspot/login.html + 24-Hour Seamless Auto-Reconnect (lease-time=1d, mac-cookie-timeout=1d, idle-timeout=none) for ${queuedRouters} adopted router(s). Active Wi-Fi sessions, iOS CNA, and WireGuard tunnels remain untouched.`
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

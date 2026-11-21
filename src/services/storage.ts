@@ -2352,12 +2352,62 @@ class StorageService {
     return newRecord;
   }
 
-  generateVoucherBatch(_planId: string, _count: number): Voucher[] {
-    return [];
+  generateVoucherBatch(planId: string, count: number, venueName = 'Clubhouse & Reception'): Voucher[] {
+    const targetCount = Math.min(1000, Math.max(1, Number(count) || 300));
+    const existingCodes = new Set(
+      this.state.vouchers.map((v) => String(v.code || '').trim().toUpperCase())
+    );
+    const plan = this.state.plans.find((p) => p.id === planId);
+    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const batch: Voucher[] = [];
+    let safety = 0;
+
+    while (batch.length < targetCount && safety < 95000) {
+      safety++;
+      const num = Math.floor(10000 + Math.random() * 90000);
+      const code = `TC-${num}`;
+      if (existingCodes.has(code)) continue;
+      existingCodes.add(code);
+
+      batch.push({
+        id: `vch_tc_${Date.now()}_${batch.length + 1}_${num}`,
+        code,
+        planId: plan?.id || planId || 'tc_free_reception_24h',
+        planName: plan ? plan.name : `T-Connect Reception Wi-Fi Voucher (24h · 3 Devices · Uncapped) — ${venueName}`,
+        price: 0,
+        currency: 'M',
+        durationSeconds: 86400,
+        deviceLimit: 3,
+        status: 'active',
+        generatedAt: nowStr,
+        expiresAt: '',
+        associatedDevices: []
+      });
+    }
+
+    this.state.vouchers = [...batch, ...this.state.vouchers];
+    this.saveState();
+    return batch;
+  }
+
+  mergeServerVouchers(incoming: Voucher[]): Voucher[] {
+    if (!Array.isArray(incoming) || incoming.length === 0) return this.state.vouchers;
+    const byCode = new Map<string, Voucher>();
+    incoming.forEach((v) => {
+      if (v && v.code) byCode.set(String(v.code).toUpperCase(), v);
+    });
+    this.state.vouchers.forEach((v) => {
+      const k = String(v.code || '').toUpperCase();
+      if (!byCode.has(k)) byCode.set(k, v);
+    });
+    this.state.vouchers = Array.from(byCode.values());
+    this.saveState();
+    return this.state.vouchers;
   }
 
   redeemVoucher(code: string, clientMac: string, hostname = 'Generic-Client', siteName = 'Hotspot') {
-    const cleanCode = code.trim().toUpperCase();
+    const rawDigits = code.replace(/\D/g, '');
+    const cleanCode = /^\d{5}$/.test(rawDigits) ? `TC-${rawDigits}` : code.trim().toUpperCase();
     const voucher = this.state.vouchers.find((v) => v.code.toUpperCase() === cleanCode);
 
     if (!voucher) {

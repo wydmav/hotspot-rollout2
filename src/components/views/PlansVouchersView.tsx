@@ -19,7 +19,10 @@ import {
   Check,
   Edit3,
   Trash2,
-  RotateCcw
+  RotateCcw,
+  Printer,
+  FileText,
+  Wifi
 } from 'lucide-react';
 import { HotspotPlan, Voucher, VerticalType } from '../../types';
 import { ExportService } from '../../services/exportService';
@@ -66,12 +69,96 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const [inlinePriceEdits, setInlinePriceEdits] = useState<Record<string, string>>({});
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
+  // T-Connect Reception Printable A4 Voucher Sheet (x300 TC-XXXXX) State
+  const [receptionVenueName, setReceptionVenueName] = useState('Maseru Golf Course Clubhouse');
+  const [receptionWifiSsid, setReceptionWifiSsid] = useState('T-Connect Hotspot');
+  const [receptionBatchSize, setReceptionBatchSize] = useState(300);
+  const [isGeneratingReceptionBatch, setIsGeneratingReceptionBatch] = useState(false);
+  const [showReceptionSheetModal, setShowReceptionSheetModal] = useState(false);
+  const [previewSheetPage, setPreviewSheetPage] = useState(0);
+
+  // Sync server vouchers on mount so any existing TC-XXXXX vouchers are loaded
+  useEffect(() => {
+    fetch('/api/vouchers')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.success && Array.isArray(d.vouchers) && d.vouchers.length > 0) {
+          storage.mergeServerVouchers(d.vouchers);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const tcReceptionVouchers = vouchers.filter((v) =>
+    /^TC-\d{5}$/i.test(String(v.code || '').trim())
+  );
+
+  const handleGenerateReceptionBatch = async (countToGenerate = receptionBatchSize, openPreviewAfter = true) => {
+    setIsGeneratingReceptionBatch(true);
+    try {
+      const targetCount = Math.min(1000, Math.max(1, Number(countToGenerate) || 300));
+      const res = await fetch('/api/vouchers/generate-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          count: targetCount,
+          venueName: receptionVenueName.trim() || 'Maseru Golf Course Clubhouse',
+          durationSeconds: 86400,
+          deviceLimit: 3
+        })
+      });
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.vouchers)) {
+        storage.mergeServerVouchers(data.vouchers);
+        setSyncNotice(
+          `Generated ${data.vouchers.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Up to 3 Devices · Uncapped Speed) & synced to live routers!`
+        );
+        setTimeout(() => setSyncNotice(null), 6000);
+        setPreviewSheetPage(0);
+        if (openPreviewAfter) {
+          setShowReceptionSheetModal(true);
+        }
+      } else {
+        const localBatch = storage.generateVoucherBatch(
+          'tc_free_reception_24h',
+          targetCount,
+          receptionVenueName.trim() || 'Maseru Golf Course Clubhouse'
+        );
+        setSyncNotice(`Generated ${localBatch.length} T-Connect Reception Vouchers (TC-XXXXX).`);
+        setTimeout(() => setSyncNotice(null), 5000);
+        setPreviewSheetPage(0);
+        if (openPreviewAfter) {
+          setShowReceptionSheetModal(true);
+        }
+      }
+    } catch {
+      const targetCount = Math.min(1000, Math.max(1, Number(countToGenerate) || 300));
+      const localBatch = storage.generateVoucherBatch(
+        'tc_free_reception_24h',
+        targetCount,
+        receptionVenueName.trim() || 'Maseru Golf Course Clubhouse'
+      );
+      setSyncNotice(`Generated ${localBatch.length} T-Connect Reception Vouchers (TC-XXXXX).`);
+      setTimeout(() => setSyncNotice(null), 5000);
+      setPreviewSheetPage(0);
+      if (openPreviewAfter) {
+        setShowReceptionSheetModal(true);
+      }
+    } finally {
+      setIsGeneratingReceptionBatch(false);
+    }
+  };
+
   const filteredPlans = selectedVertical === 'all'
     ? plans
     : plans.filter(p => p.vertical === selectedVertical);
 
   const filteredVouchers = vouchers.filter(v => {
-    const matchesVertical = selectedVertical === 'all' || plans.find(p => p.id === v.planId)?.vertical === selectedVertical;
+    const isTcVoucher = /^TC-\d{5}$/i.test(String(v.code || '').trim());
+    const matchesVertical =
+      selectedVertical === 'all' ||
+      isTcVoucher ||
+      plans.find(p => p.id === v.planId)?.vertical === selectedVertical;
     const matchesSearch = voucherSearch === '' || 
       v.code.toLowerCase().includes(voucherSearch.toLowerCase()) || 
       v.planName.toLowerCase().includes(voucherSearch.toLowerCase());
@@ -445,6 +532,233 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* ======================================================= */}
+      {/* A4 PRINTABLE & CUTTABLE x300 RECEPTION VOUCHERS STUDIO  */}
+      {/* Format: TC-XXXXX (Read-Only TC- + 5 Numeric Digits)     */}
+      {/* ======================================================= */}
+      <div className="bg-gradient-to-br from-[#0f172a] via-[#111a2e] to-[#172138] p-5 rounded-xl border-2 border-[#f05e17]/60 shadow-lg space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#f05e17] text-white flex items-center justify-center shrink-0 shadow-md">
+              <Printer className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm sm:text-base font-black text-white tracking-tight">
+                  RECEPTION &amp; CLUBHOUSE A4 PRINTABLE VOUCHERS (<code className="text-amber-300">TC-XXXXX</code>)
+                </h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold">
+                  FREE MODE STEP 2 &middot; 24H &middot; UP TO 3 DEVICES &middot; UNCAPPED
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                Generate &amp; print <strong className="text-white">300 cuttable A4 reception vouchers</strong> (15 cards per A4 sheet &times; 20 sheets) with the T-Connect logo. Guests enter their details on Step 1 (capturing the lead), then type only the <strong className="text-amber-300">5-digit number</strong> next to the pre-filled <code className="text-white font-bold">TC-</code> prefix and tap <strong className="text-emerald-300">&ldquo;Log in&rdquo;</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void handleGenerateReceptionBatch(300, true)}
+              disabled={isGeneratingReceptionBatch}
+              className="px-4 py-2.5 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-60 text-white text-xs font-extrabold rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all"
+            >
+              {isGeneratingReceptionBatch ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
+              <span>
+                {isGeneratingReceptionBatch
+                  ? 'Generating 300 Vouchers...'
+                  : 'Generate x300 Vouchers & Open A4 Print Sheet'}
+              </span>
+            </button>
+
+            {tcReceptionVouchers.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewSheetPage(0);
+                    setShowReceptionSheetModal(true);
+                  }}
+                  className="px-3.5 py-2.5 bg-[#161f36] hover:bg-[#1e2a47] border border-cyan-500/40 text-cyan-300 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Preview &amp; Print A4 ({Math.min(300, tcReceptionVouchers.length)})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    ExportService.downloadReceptionVoucherSheetsA4Pdf(
+                      tcReceptionVouchers.slice(0, 300),
+                      {
+                        venueName: receptionVenueName,
+                        wifiSsid: receptionWifiSsid
+                      }
+                    )
+                  }
+                  className="px-3.5 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Download A4 PDF (x{Math.min(300, tcReceptionVouchers.length)})</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Venue Name, Wi-Fi Name & Live Sample Voucher Preview */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-3 border-t border-white/10">
+          <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+            <div>
+              <label className="text-slate-400 block mb-1 text-[11px] font-bold">
+                Venue / Clubhouse Label on Card
+              </label>
+              <input
+                type="text"
+                value={receptionVenueName}
+                onChange={(e) => setReceptionVenueName(e.target.value)}
+                placeholder="Maseru Golf Course Clubhouse"
+                className="w-full px-3 py-2 bg-[#0b101d] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+              />
+            </div>
+            <div>
+              <label className="text-slate-400 block mb-1 text-[11px] font-bold">
+                Wi-Fi Network Name (SSID)
+              </label>
+              <input
+                type="text"
+                value={receptionWifiSsid}
+                onChange={(e) => setReceptionWifiSsid(e.target.value)}
+                placeholder="T-Connect Hotspot"
+                className="w-full px-3 py-2 bg-[#0b101d] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+              />
+            </div>
+            <div>
+              <label className="text-slate-400 block mb-1 text-[11px] font-bold">
+                Batch Size (15 Cards / A4 Sheet)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={15}
+                  max={600}
+                  step={15}
+                  value={receptionBatchSize}
+                  onChange={(e) => setReceptionBatchSize(Math.max(1, Number(e.target.value) || 300))}
+                  className="w-full px-3 py-2 bg-[#0b101d] border border-[#232d42] rounded-lg text-amber-300 font-bold text-xs focus:outline-none focus:border-[#f05e17]"
+                />
+                <span className="text-[11px] text-slate-400 whitespace-nowrap">
+                  = {Math.ceil((receptionBatchSize || 300) / 15)} A4 Sheets
+                </span>
+              </div>
+            </div>
+
+            <div className="sm:col-span-3 flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-[#0b101d]/90 border border-[#232d42] text-[11px]">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-slate-300">
+                  Active Reception Vouchers Ready:{' '}
+                  <strong className="text-emerald-400 font-extrabold">
+                    {tcReceptionVouchers.filter((v) => v.status === 'active').length}
+                  </strong>
+                </span>
+                <span className="text-slate-500">|</span>
+                <span className="text-slate-300">
+                  In Use / Redeemed:{' '}
+                  <strong className="text-cyan-400 font-extrabold">
+                    {tcReceptionVouchers.filter((v) => v.associatedDevices.length > 0).length}
+                  </strong>
+                </span>
+                <span className="text-slate-500">|</span>
+                <span className="text-slate-400">
+                  Latest Code:{' '}
+                  <code className="text-amber-300 font-bold">
+                    {tcReceptionVouchers[0]?.code || 'TC-48291'}
+                  </code>
+                </span>
+              </div>
+              {tcReceptionVouchers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    ExportService.downloadReceptionVoucherSheetsA4Html(
+                      tcReceptionVouchers.slice(0, 300),
+                      {
+                        venueName: receptionVenueName,
+                        wifiSsid: receptionWifiSsid
+                      }
+                    )
+                  }
+                  className="text-cyan-400 hover:text-cyan-300 font-bold underline cursor-pointer"
+                >
+                  Download Printable A4 HTML (.html)
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Real-Life Cuttable Voucher Card Preview */}
+          <div className="bg-white text-slate-900 rounded-xl p-3 border-2 border-dashed border-slate-400 shadow-md relative flex flex-col justify-between">
+            <span className="absolute -top-2.5 left-3 bg-white px-1.5 text-[10px] font-mono font-bold text-slate-500">
+              &#9986; Real-Life A4 Cuttable Card Preview
+            </span>
+            <div className="bg-[#0b192c] text-white px-2.5 py-1.5 rounded-lg border-b-2 border-[#ff5500] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md bg-[#ff5500] flex items-center justify-center shrink-0">
+                  <Wifi className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-black tracking-wide leading-none">T-CONNECT</div>
+                  <div className="text-[8px] font-bold text-orange-300 tracking-wider">STARLINK HIGH-SPEED WI-FI</div>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-black text-slate-300 bg-white/10 px-1.5 py-0.5 rounded">
+                #001
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-[9px] font-extrabold text-slate-600 px-0.5 pt-1">
+              <span className="truncate">{receptionVenueName.toUpperCase()}</span>
+              <span className="text-orange-700 shrink-0">Wi-Fi: {receptionWifiSsid}</span>
+            </div>
+
+            <div className="my-1.5 text-center">
+              <div className="text-[8px] font-black text-slate-500 tracking-wider uppercase mb-0.5">
+                ENTER THESE 5 DIGITS TO LOG IN
+              </div>
+              <div className="flex items-center border-2 border-[#0b192c] rounded-lg overflow-hidden bg-orange-50">
+                <span className="bg-[#0b192c] text-[#ff5500] font-mono text-sm font-black px-2.5 py-1 border-r border-[#0b192c]">
+                  TC-
+                </span>
+                <span className="flex-1 font-mono text-base font-black text-slate-900 tracking-[0.28em] py-1 text-center">
+                  {(tcReceptionVouchers[0]?.code || 'TC-48291').replace(/\D/g, '').slice(0, 5) || '48291'}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-[9px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 leading-tight space-y-0.5">
+              <div><strong>1.</strong> Connect to Wi-Fi &amp; enter your Name &amp; Phone</div>
+              <div>
+                <strong>2.</strong> Type{' '}
+                <strong>{(tcReceptionVouchers[0]?.code || 'TC-48291').replace(/\D/g, '').slice(0, 5) || '48291'}</strong>{' '}
+                next to <strong>TC-</strong> &amp; tap <strong>Log in</strong>
+              </div>
+            </div>
+
+            <div className="pt-1 mt-1 border-t border-slate-200 flex items-center justify-between text-[8px] font-black text-[#0b192c]">
+              <span>24 HOURS VALIDITY</span>
+              <span>&bull;</span>
+              <span>UP TO 3 DEVICES</span>
+              <span>&bull;</span>
+              <span className="text-[#ff5500]">UNCAPPED</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ======================================================= */}
@@ -966,6 +1280,213 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ================================================================= */}
+      {/* A4 PRINTABLE & CUTTABLE x300 RECEPTION VOUCHERS MODAL             */}
+      {/* 15 Cards per A4 Sheet (3 Columns x 5 Rows) × 20 Sheets = 300      */}
+      {/* ================================================================= */}
+      {showReceptionSheetModal && (() => {
+        const activeBatch = tcReceptionVouchers.slice(0, Math.max(15, receptionBatchSize || 300));
+        const cardsPerSheet = 15;
+        const totalSheets = Math.max(1, Math.ceil(activeBatch.length / cardsPerSheet));
+        const safePage = Math.min(previewSheetPage, totalSheets - 1);
+        const currentSheetVouchers = activeBatch.slice(
+          safePage * cardsPerSheet,
+          (safePage + 1) * cardsPerSheet
+        );
+
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 z-50 overflow-y-auto">
+            <div className="bg-[#0b101d] border-2 border-[#f05e17]/60 rounded-2xl w-full max-w-5xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden">
+              {/* Modal Top Toolbar */}
+              <div className="p-4 bg-[#0f172a] border-b border-[#232d42] flex flex-col lg:flex-row lg:items-center justify-between gap-3 shrink-0">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-[#f05e17] text-white text-[10px] font-mono font-black">
+                      A4 PORTRAIT &middot; 15 CARDS / SHEET
+                    </span>
+                    <h3 className="text-sm sm:text-base font-black text-white">
+                      T-Connect Reception &amp; Clubhouse Printable Vouchers ({activeBatch.length} Vouchers &middot; {totalSheets} A4 Sheets)
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    Format: <code className="text-amber-300 font-bold">TC-XXXXX</code> (5 numeric digits) &middot; 24 Hours Validity &middot; Up to 3 Devices &middot; Uncapped Speed
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      ExportService.printReceptionVoucherSheetsA4(activeBatch, {
+                        venueName: receptionVenueName,
+                        wifiSsid: receptionWifiSsid
+                      })
+                    }
+                    className="px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-extrabold rounded-xl shadow flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Print A4 Sheets Now ({totalSheets} Pages)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      ExportService.downloadReceptionVoucherSheetsA4Pdf(activeBatch, {
+                        venueName: receptionVenueName,
+                        wifiSsid: receptionWifiSsid
+                      })
+                    }
+                    className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-extrabold rounded-xl shadow flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>Download A4 Vector PDF (.pdf)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      ExportService.downloadReceptionVoucherSheetsA4Html(activeBatch, {
+                        venueName: receptionVenueName,
+                        wifiSsid: receptionWifiSsid
+                      })
+                    }
+                    className="px-3 py-2 bg-[#161f36] hover:bg-[#1f2b49] border border-cyan-500/40 text-cyan-300 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download A4 HTML (.html)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowReceptionSheetModal(false)}
+                    className="px-2.5 py-2 bg-[#161d31] hover:bg-[#232d42] text-slate-300 hover:text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+              </div>
+
+              {/* Sheet Page Switcher */}
+              <div className="px-4 py-2.5 bg-[#131c31] border-b border-[#232d42] flex flex-wrap items-center justify-between gap-2 text-xs font-mono shrink-0">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <span>
+                    Showing <strong className="text-white">A4 Sheet {safePage + 1} of {totalSheets}</strong> (Vouchers #{String(safePage * cardsPerSheet + 1).padStart(3, '0')} &ndash; #{String(Math.min(activeBatch.length, (safePage + 1) * cardsPerSheet)).padStart(3, '0')})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safePage === 0}
+                    onClick={() => setPreviewSheetPage((p) => Math.max(0, p - 1))}
+                    className="px-2.5 py-1 rounded bg-[#0b101d] border border-[#232d42] text-slate-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    &larr; Prev Sheet
+                  </button>
+                  <span className="px-2.5 py-1 rounded bg-[#f05e17]/20 border border-[#f05e17]/40 text-amber-300 font-bold">
+                    Page {safePage + 1} / {totalSheets}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safePage >= totalSheets - 1}
+                    onClick={() => setPreviewSheetPage((p) => Math.min(totalSheets - 1, p + 1))}
+                    className="px-2.5 py-1 rounded bg-[#0b101d] border border-[#232d42] text-slate-200 disabled:opacity-40 cursor-pointer"
+                  >
+                    Next Sheet &rarr;
+                  </button>
+                </div>
+              </div>
+
+              {/* Live A4 Sheet Canvas Preview (3 Columns x 5 Rows = 15 Cuttable Cards) */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-200">
+                <div className="max-w-[790px] mx-auto bg-white text-slate-900 rounded-lg shadow-2xl p-5 border border-slate-300">
+                  {/* A4 Sheet Top Metadata */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-2.5 mb-3.5 border-b-2 border-[#0b192c] text-[11px]">
+                    <div className="font-black text-[#0b192c]">
+                      T-CONNECT RECEPTION WI-FI VOUCHERS (TC-XXXXX) &mdash; {receptionVenueName}
+                    </div>
+                    <div className="text-slate-600 font-mono text-[10px]">
+                      A4 Sheet {safePage + 1} of {totalSheets} &bull; Cut along dashed lines (&#9986;) &bull; Total Batch: {activeBatch.length} Vouchers
+                    </div>
+                  </div>
+
+                  {/* 3x5 Grid of Cuttable Voucher Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {currentSheetVouchers.map((v, idx) => {
+                      const serialNum = String(safePage * cardsPerSheet + idx + 1).padStart(3, '0');
+                      const rawDigits = String(v.code || '').replace(/\D/g, '').slice(0, 5) || '12345';
+                      return (
+                        <div
+                          key={v.id}
+                          className="relative border-2 border-dashed border-slate-400 rounded-xl p-2.5 bg-white flex flex-col justify-between shadow-sm"
+                        >
+                          <span className="absolute -top-2.5 left-2.5 bg-white px-1 text-[10px] text-slate-500 leading-none">
+                            &#9986;
+                          </span>
+
+                          {/* Brand Header */}
+                          <div className="bg-[#0b192c] text-white px-2.5 py-1.5 rounded-lg border-b-2 border-[#ff5500] flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-5 h-5 rounded bg-[#ff5500] flex items-center justify-center shrink-0">
+                                <Wifi className="w-3 h-3 text-white" />
+                              </div>
+                              <div>
+                                <div className="text-[10px] font-black tracking-wide leading-none">T-CONNECT</div>
+                                <div className="text-[7px] font-bold text-orange-300 tracking-wider">
+                                  STARLINK HIGH-SPEED WI-FI
+                                </div>
+                              </div>
+                            </div>
+                            <span className="text-[9px] font-mono font-black text-slate-200 bg-white/15 px-1.5 py-0.5 rounded">
+                              #{serialNum}
+                            </span>
+                          </div>
+
+                          {/* Venue & SSID */}
+                          <div className="flex items-center justify-between text-[8px] font-extrabold text-slate-600 pt-1 px-0.5">
+                            <span className="truncate max-w-[125px]">{receptionVenueName.toUpperCase()}</span>
+                            <span className="text-orange-700 shrink-0">Wi-Fi: {receptionWifiSsid}</span>
+                          </div>
+
+                          {/* Center Ticket Code Box */}
+                          <div className="my-1.5 text-center">
+                            <div className="text-[7.5px] font-black text-slate-500 tracking-wider uppercase mb-0.5">
+                              ENTER THESE 5 DIGITS TO LOG IN
+                            </div>
+                            <div className="flex items-center border-2 border-[#0b192c] rounded-lg overflow-hidden bg-orange-50/90">
+                              <span className="bg-[#0b192c] text-[#ff5500] font-mono text-xs font-black px-2 py-1 border-r border-[#0b192c]">
+                                TC-
+                              </span>
+                              <span className="flex-1 font-mono text-sm font-black text-slate-900 tracking-[0.25em] py-1 text-center">
+                                {rawDigits}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 2-Step Instructions */}
+                          <div className="text-[8px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 leading-snug space-y-0.5">
+                            <div><strong>1.</strong> Connect to Wi-Fi &amp; enter your Name &amp; Phone</div>
+                            <div><strong>2.</strong> Type <strong>{rawDigits}</strong> next to <strong>TC-</strong> &amp; tap <strong>Log in</strong></div>
+                          </div>
+
+                          {/* Specs Footer */}
+                          <div className="pt-1 mt-1 border-t border-slate-200 flex items-center justify-between text-[7.5px] font-black text-[#0b192c]">
+                            <span>24 HOURS VALIDITY</span>
+                            <span>&bull;</span>
+                            <span>UP TO 3 DEVICES</span>
+                            <span>&bull;</span>
+                            <span className="text-[#ff5500]">UNCAPPED</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

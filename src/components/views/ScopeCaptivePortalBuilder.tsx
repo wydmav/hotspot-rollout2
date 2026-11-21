@@ -314,7 +314,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 15,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -389,7 +389,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 30,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -464,7 +464,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 30,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -539,7 +539,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 30,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -614,7 +614,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 15,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -689,7 +689,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
     collectDob: false,
     defaultCountryCode: '+266',
     allowFreeAccess: false,
-    freeAccessDurationMinutes: 10,
+    freeAccessDurationMinutes: 1440,
     freeButtonX: 50,
     freeButtonY: 88,
     freeButtonText: 'Login for free',
@@ -815,6 +815,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           const normalizedTerms = normalizeScopeTermsText(parsed.termsText);
           if (parsed.termsText !== normalizedTerms) {
             parsed.termsText = normalizedTerms;
+            mutated = true;
+          }
+          if (!parsed.freeAccessDurationMinutes || Number(parsed.freeAccessDurationMinutes) <= 60) {
+            parsed.freeAccessDurationMinutes = 1440;
             mutated = true;
           }
           if (parsed.freeButtonX === undefined) parsed.freeButtonX = 50;
@@ -1881,12 +1885,41 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
             </p>
           </div>
 
-          {savedToast && (
-            <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono rounded-lg flex items-center gap-1.5 animate-pulse">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{savedToast}</span>
-            </div>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {savedToast && (
+              <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono rounded-lg flex items-center gap-1.5 animate-pulse">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{savedToast}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={async () => {
+                setSavedToast('Syncing 24h seamless auto-reconnect & splash page to adopted routers...');
+                try {
+                  const res = await fetch('/api/portal/sync-splash-safe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                  });
+                  const data = await res.json();
+                  if (data?.success) {
+                    setSavedToast(data.message || `Synced 24h seamless auto-reconnect & splash page to ${data.syncedRouters ?? 0} router(s).`);
+                  } else {
+                    setSavedToast('Splash & 24h auto-reconnect sync queued.');
+                  }
+                } catch {
+                  setSavedToast('Failed to reach /api/portal/sync-splash-safe.');
+                }
+                setTimeout(() => setSavedToast(null), 5000);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer"
+              title="Safely push updated hotspot/login.html and 24-Hour Seamless Auto-Reconnect rules to all adopted routers without dropping active sessions"
+            >
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span>One-Click Sync Splash (24h)</span>
+            </button>
+          </div>
         </div>
 
         {/* 5-Scope Tab Buttons */}
@@ -2106,7 +2139,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-300">
-                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Taps <strong>&ldquo;{currentConfig.freeButtonText || 'Login for free'}&rdquo;</strong> button over wallpaper &rarr; <strong>Straight to the Internet</strong> (Google / original URL, <strong>NO ad carousel</strong>).
+                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Enters contact details (Step 1 lead capture) &rarr; Enters 5-digit <strong>T-Connect Voucher (<code className="text-emerald-300">TC-xxxxx</code>)</strong> &amp; taps <strong>&ldquo;Log in&rdquo;</strong> &rarr; <strong>Uncapped High-Speed Internet</strong>.
                       </p>
                     </div>
                   </button>
@@ -3467,7 +3500,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 style={{ opacity: isFreeModeActive && previewStep === 'identification' ? 0 : Math.min(12, currentConfig.bgDarken ?? 0) / 100 }}
               />
 
-              {/* FREE MODE STEP 2: FULL-WALLPAPER "LOGIN FOR FREE" BUTTON (Shown after Step 1 Lead Capture) */}
+              {/* FREE MODE STEP 2: FULL-WALLPAPER READ-ONLY TC- + 5-DIGIT VOUCHER INPUT + "LOG IN" BUTTON */}
               {isFreeModeActive && previewStep === 'identification' && (
                 <div
                   style={{
@@ -3475,8 +3508,8 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     left: `${currentConfig.freeButtonX ?? 50}%`,
                     top: `${currentConfig.freeButtonY ?? 88}%`,
                     transform: 'translate(-50%, -50%)',
-                    width: '88%',
-                    maxWidth: '340px',
+                    width: '90%',
+                    maxWidth: '345px',
                     zIndex: 25
                   }}
                 >
@@ -3484,40 +3517,70 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                     <button
                       type="button"
                       onClick={() => setPreviewStep('voucher')}
-                      className="px-2.5 py-0.5 rounded-full bg-black/65 hover:bg-black/85 border border-white/25 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
+                      className="px-2.5 py-0.5 rounded-full bg-black/75 hover:bg-black/90 border border-white/25 text-white text-[10px] font-bold backdrop-blur-md cursor-pointer"
                     >
                       &larr; Edit your details
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      isDraggingFreeBtnRef.current = true;
-                      freeBtnDragMovedRef.current = false;
-                      setIsDraggingFreeBtn(true);
-                    }}
-                    onClick={() => {
-                      if (freeBtnDragMovedRef.current) {
-                        freeBtnDragMovedRef.current = false;
-                        return;
-                      }
-                      handleConnectFree();
-                    }}
-                    style={{
-                      backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
-                      color: currentConfig.freeButtonTextColor || '#ffffff'
-                    }}
-                    className={`w-full py-3.5 px-6 rounded-xl text-lg font-extrabold tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
-                      isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
-                    }`}
-                    title="Drag to reposition or click to test Free Wi-Fi login"
+                  <div
+                    className="bg-[#0b192c]/90 backdrop-blur-xl border border-white/25 border-t-[3px] rounded-2xl p-3.5 shadow-2xl text-left"
+                    style={{ borderTopColor: currentConfig.accentColor || '#f05e17' }}
                   >
-                    <span>{currentConfig.freeButtonText || 'Login for free'}</span>
-                  </button>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-black text-white">Enter T-Connect Voucher</span>
+                      <span className="text-[9px] font-mono font-bold text-slate-400">Step 2 of 2</span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 mb-2 leading-tight">
+                      Enter the <strong className="text-white">5-digit number</strong> on your T-Connect voucher and tap <strong className="text-white">Log in</strong>.
+                    </p>
+                    <div className="flex items-stretch rounded-xl border-2 border-white/35 bg-white overflow-hidden mb-2">
+                      <input
+                        type="text"
+                        value="TC-"
+                        readOnly
+                        tabIndex={-1}
+                        style={{ color: currentConfig.accentColor || '#f05e17' }}
+                        className="w-14 shrink-0 bg-[#0b192c] border-r-2 border-slate-300 font-mono text-sm font-black text-center py-2 px-1 select-none pointer-events-none"
+                      />
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={5}
+                        defaultValue="48291"
+                        placeholder="12345"
+                        className="flex-1 min-w-0 bg-white text-slate-900 font-mono text-base font-black tracking-[0.25em] py-2 px-3 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        isDraggingFreeBtnRef.current = true;
+                        freeBtnDragMovedRef.current = false;
+                        setIsDraggingFreeBtn(true);
+                      }}
+                      onClick={() => {
+                        if (freeBtnDragMovedRef.current) {
+                          freeBtnDragMovedRef.current = false;
+                          return;
+                        }
+                        handleConnectFree();
+                      }}
+                      style={{
+                        backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                        color: currentConfig.freeButtonTextColor || '#ffffff'
+                      }}
+                      className={`w-full py-2.5 px-5 rounded-xl text-sm font-black tracking-wide shadow-xl transition-transform flex items-center justify-center cursor-grab active:cursor-grabbing ${
+                        isDraggingFreeBtn ? 'ring-2 ring-white scale-[1.02]' : 'hover:brightness-105 active:scale-[0.99]'
+                      }`}
+                      title="Drag to reposition or click to test Free Wi-Fi voucher login"
+                    >
+                      <span>Log in</span>
+                    </button>
+                  </div>
                   <div className="mt-1 text-center pointer-events-none">
                     <span className="inline-block px-2 py-0.5 rounded bg-black/65 text-white/90 text-[9px] font-mono">
-                      Drag to move ({currentConfig.freeButtonX ?? 50}%, {currentConfig.freeButtonY ?? 88}%) · Tap to connect
+                      Drag to move ({currentConfig.freeButtonX ?? 50}%, {currentConfig.freeButtonY ?? 88}%) · Tap Log in to test
                     </span>
                   </div>
                 </div>
