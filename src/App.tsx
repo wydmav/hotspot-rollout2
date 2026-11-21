@@ -802,16 +802,16 @@ export default function App() {
         onClose={() => setIsSidebarOpen(false)}
       />
 
-      {/* Floating Re-open Side Panel Button (Visible when sidebar is closed) */}
+      {/* Floating Re-open Navigation Button (Icon-only when sidebar is closed) */}
       {!isSidebarOpen && (
         <button
           type="button"
           onClick={() => setIsSidebarOpen(true)}
-          className="fixed bottom-5 left-5 z-40 px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-xl shadow-2xl font-mono text-xs font-bold flex items-center gap-2 border border-white/20 transition-all cursor-pointer animate-in fade-in duration-150"
-          title="Open side panel (Navigation menu)"
+          className="fixed bottom-5 left-5 z-40 p-2.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-xl shadow-2xl flex items-center justify-center border border-white/20 transition-all cursor-pointer animate-in fade-in duration-150"
+          title="Open navigation"
+          aria-label="Open navigation"
         >
           <PanelLeftOpen className="w-4 h-4 text-white" />
-          <span>Side Panel</span>
         </button>
       )}
 

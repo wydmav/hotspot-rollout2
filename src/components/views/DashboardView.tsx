@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { RouterDevice, PaymentTransaction, HotspotPlan, Voucher, VerticalType, ScopePortalConfig } from '../../types';
 import { TransactionTrendsChart } from './TransactionTrendsChart';
+import { RegionalFleetMap } from './RegionalFleetMap';
 import { DEFAULT_SCOPE_CONFIGS } from './ScopeCaptivePortalBuilder';
 import { storage } from '../../services/storage';
 
@@ -1315,6 +1316,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* ================================================================= */}
+      {/* REAL LESOTHO FLEET DEPLOYMENT MAP (HANDOVER VIEW)                 */}
+      {/* ================================================================= */}
+      <RegionalFleetMap
+        routers={filteredRouters.map((rt) => {
+          const isOnline = rt.status === 'online';
+          const matchedConnected = connectedDevices.filter(
+            (d) =>
+              d.routerName.toLowerCase() === rt.name.toLowerCase() ||
+              (rt.siteName && d.siteName.toLowerCase() === rt.siteName.toLowerCase())
+          );
+          return {
+            ...rt,
+            activeSessions: isOnline
+              ? Math.max(rt.activeSessions || 0, matchedConnected.length)
+              : 0
+          };
+        })}
+        onNavigateTab={onNavigateTab}
+      />
 
       {/* ================================================================= */}
       {/* REAL VERIFIED REVENUE CHART                                       */}

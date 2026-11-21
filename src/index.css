@@ -238,3 +238,27 @@
 ):not(.portal-isolated-theme):not(.portal-isolated-theme *) {
   background-color: #f5f3ff !important;
 }
+
+/* Leaflet Real Lesotho Fleet Map Styling */
+.tconnect-lesotho-map {
+  background: #0b1120;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.tconnect-leaflet-pin-wrapper {
+  background: transparent !important;
+  border: none !important;
+}
+.tconnect-handover-popup .leaflet-popup-content-wrapper {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid #e2e8f0 !important;
+}
+.tconnect-handover-popup .leaflet-popup-tip {
+  background: #ffffff !important;
+}
+.tconnect-handover-popup .leaflet-popup-content {
+  margin: 12px 14px !important;
+}
+

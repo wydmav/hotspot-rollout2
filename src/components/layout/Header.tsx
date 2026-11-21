@@ -158,16 +158,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onToggleSidebar}
-            className="p-1.5 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 hover:text-white transition-all cursor-pointer flex items-center gap-1 text-xs font-mono"
-            title={isSidebarOpen ? "Hide side panel (Full page view)" : "Open side panel"}
+            className="p-2 rounded-lg bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+            title={isSidebarOpen ? "Hide navigation" : "Open navigation"}
+            aria-label={isSidebarOpen ? "Hide navigation" : "Open navigation"}
           >
             {isSidebarOpen ? (
               <PanelLeftClose className="w-4 h-4 text-[#f05e17]" />
             ) : (
-              <>
-                <PanelLeft className="w-4 h-4 text-[#f05e17]" />
-                <span className="text-[11px] font-bold text-white hidden sm:inline">Side Panel</span>
-              </>
+              <PanelLeft className="w-4 h-4 text-[#f05e17]" />
             )}
           </button>
         )}
