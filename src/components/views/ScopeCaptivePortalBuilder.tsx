@@ -289,7 +289,7 @@ export const SCOPE_WALLPAPERS: Record<VerticalType, Array<{ name: string; url: s
 };
 
 // Default Scope Config Initializers with Specific Prices & Wallpapers
-// Aligned with standard denominations: M10 (Daily), M60 (Weekly), M280 (Monthly)
+// Aligned with standard denominations: M10 (Daily), M60 (Weekly), M220 (Monthly) — Nationwide Unlimited Devices
 export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
   hotspot: {
     scope: 'hotspot',
@@ -331,7 +331,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 5.0,
         uploadSpeedMbps: 2.5,
         burstDownloadMbps: 10.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Daily Surfer'
       },
@@ -345,22 +345,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 6.0,
         uploadSpeedMbps: 3.0,
         burstDownloadMbps: 12.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Best Value'
       },
       {
-        id: 'hs_monthly_m280',
+        id: 'hs_monthly_m220',
         name: 'Monthly Hotspot Pass',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 8.0,
         uploadSpeedMbps: 4.0,
         burstDownloadMbps: 15.0,
-        deviceLimit: 3,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Full Month'
       }
@@ -406,7 +406,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 4.0,
         uploadSpeedMbps: 2.0,
         burstDownloadMbps: 8.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Village 24h'
       },
@@ -420,22 +420,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 5.0,
         uploadSpeedMbps: 2.5,
         burstDownloadMbps: 10.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Popular Weekly'
       },
       {
-        id: 'cm_monthly_m280',
+        id: 'cm_monthly_m220',
         name: 'Village 30-Day Household Pass',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 6.0,
         uploadSpeedMbps: 3.0,
         burstDownloadMbps: 12.0,
-        deviceLimit: 4,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Whole Home'
       }
@@ -481,7 +481,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 4.0,
         uploadSpeedMbps: 2.0,
         burstDownloadMbps: 8.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Village 24h'
       },
@@ -495,22 +495,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 5.0,
         uploadSpeedMbps: 2.5,
         burstDownloadMbps: 10.0,
-        deviceLimit: 3,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Weekly Village'
       },
       {
-        id: 'vg_monthly_m280',
+        id: 'vg_monthly_m220',
         name: 'Village Monthly Unlimited',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 6.0,
         uploadSpeedMbps: 3.0,
         burstDownloadMbps: 12.0,
-        deviceLimit: 4,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Whole Home'
       }
@@ -556,7 +556,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 4.5,
         uploadSpeedMbps: 2.0,
         burstDownloadMbps: 8.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Day in Park'
       },
@@ -570,22 +570,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 5.5,
         uploadSpeedMbps: 2.5,
         burstDownloadMbps: 10.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Fitness Weekly'
       },
       {
-        id: 'pk_monthly_m280',
+        id: 'pk_monthly_m220',
         name: 'Park Civic Monthly Pass',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 7.0,
         uploadSpeedMbps: 3.5,
         burstDownloadMbps: 14.0,
-        deviceLimit: 3,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Park Regular'
       }
@@ -631,7 +631,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 5.0,
         uploadSpeedMbps: 2.5,
         burstDownloadMbps: 10.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Commuter 24h'
       },
@@ -645,22 +645,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 6.0,
         uploadSpeedMbps: 3.0,
         burstDownloadMbps: 12.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Weekly Commute'
       },
       {
-        id: 'bus_monthly_m280',
+        id: 'bus_monthly_m220',
         name: 'Transit Monthly Travel Pass',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 8.0,
         uploadSpeedMbps: 4.0,
         burstDownloadMbps: 15.0,
-        deviceLimit: 3,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Unlimited Travel'
       }
@@ -706,7 +706,7 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 12.0,
         uploadSpeedMbps: 6.0,
         burstDownloadMbps: 25.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         badge: 'Matchday Turbo'
       },
@@ -720,22 +720,22 @@ export const DEFAULT_SCOPE_CONFIGS: Record<VerticalType, ScopePortalConfig> = {
         downloadSpeedMbps: 15.0,
         uploadSpeedMbps: 7.5,
         burstDownloadMbps: 30.0,
-        deviceLimit: 2,
+        deviceLimit: 0,
         enabled: true,
         isPopular: true,
         badge: 'Tournament Pass'
       },
       {
-        id: 'std_monthly_m280',
+        id: 'std_monthly_m220',
         name: 'Season Arena Monthly Pass',
-        price: 280,
+        price: 220,
         currency: 'M',
         durationLabel: '30 Days',
         durationSeconds: 2592000,
         downloadSpeedMbps: 20.0,
         uploadSpeedMbps: 10.0,
         burstDownloadMbps: 35.0,
-        deviceLimit: 3,
+        deviceLimit: 0,
         enabled: true,
         badge: 'VIP Season Pass'
       }
@@ -1117,34 +1117,36 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           scope: updatedCfg.scope,
           config: updatedCfg,
           configs: nextAll,
-          applyToAllRouters: true
+          syncAccessModeAllScopes: false,
+          respectOverrides: true
         })
       });
       await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vertical: 'all',
+          vertical: updatedCfg.scope,
           accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
-          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          freeDurationMinutes: activeRouter?.freeDurationMinutes || 1440,
           freeRateLimit: computedGlobalRateLimit,
           speedCapsEnabled: enabled,
           dhcpRange,
           globalDownloadMbps,
           globalUploadMbps,
           globalBurstDownloadMbps,
-          globalBurstUploadMbps
+          globalBurstUploadMbps,
+          respectOverrides: true
         })
       });
       setSavedToast(
         enabled
-          ? `SPEED CAPS & BURSTS ON (${computedGlobalRateLimit})! Enforced on all live & new users in real time.`
-          : 'SPEED CAPS & BURSTS OFF (Uncapped 0/0)! All live & new users now have full uncapped Starlink speed.'
+          ? `SPEED CAPS & BURSTS ON (${computedGlobalRateLimit}) for ${updatedCfg.scopeLabel}!`
+          : `SPEED CAPS & BURSTS OFF (Uncapped 0/0) for ${updatedCfg.scopeLabel}!`
       );
       setTimeout(() => setSavedToast(null), 4500);
     } catch {
       setSavedToast(
-        enabled ? 'Speed Caps & Bursts enabled globally.' : 'Speed Caps & Bursts disabled (Uncapped 0/0).'
+        enabled ? 'Speed Caps & Bursts enabled for this scope.' : 'Speed Caps & Bursts disabled (Uncapped 0/0).'
       );
       setTimeout(() => setSavedToast(null), 3500);
     }
@@ -1208,31 +1210,25 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       globalBurstUploadMbps,
       globalRateLimit: computedGlobalRateLimit
     };
-    const nextAll: Record<VerticalType, ScopePortalConfig> = { ...scopeConfigs };
-    (Object.keys(nextAll) as VerticalType[]).forEach((k) => {
-      nextAll[k] = {
-        ...nextAll[k],
-        allowFreeAccess: updatedCfg.allowFreeAccess,
-        freeButtonX: updatedCfg.freeButtonX ?? 50,
-        freeButtonY: updatedCfg.freeButtonY ?? 88,
-        freeButtonText: updatedCfg.freeButtonText || 'Login for free',
-        allowVoucherCode: updatedCfg.allowVoucherCode,
-        allowOnlinePayment: updatedCfg.allowOnlinePayment,
-        speedCapsEnabled,
-        dhcpRange,
-        globalDownloadMbps,
-        globalUploadMbps,
-        globalBurstDownloadMbps,
-        globalBurstUploadMbps,
-        globalRateLimit: computedGlobalRateLimit
-      };
-      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-        try {
-          window.localStorage.setItem(`tconnect_portal_scope_${k}`, JSON.stringify(nextAll[k]));
-        } catch {}
-      }
-    });
+    const isVillagePair = updatedCfg.scope === 'community' || updatedCfg.scope === 'village';
+    const nextAll: Record<VerticalType, ScopePortalConfig> = {
+      ...scopeConfigs,
+      [updatedCfg.scope]: updatedCfg,
+      ...(isVillagePair ? { community: { ...updatedCfg, scope: 'community' }, village: { ...updatedCfg, scope: 'village' } } : {})
+    };
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      try {
+        window.localStorage.setItem(`tconnect_portal_scope_${updatedCfg.scope}`, JSON.stringify(updatedCfg));
+        if (isVillagePair) {
+          window.localStorage.setItem('tconnect_portal_scope_community', JSON.stringify({ ...updatedCfg, scope: 'community' }));
+          window.localStorage.setItem('tconnect_portal_scope_village', JSON.stringify({ ...updatedCfg, scope: 'village' }));
+        }
+      } catch {}
+    }
     setScopeConfigs(nextAll);
+
+    const freeDurationMins = Math.max(60, Number(updatedCfg.freeAccessDurationMinutes) || 1440);
+    const policyMode = updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY';
 
     try {
       await fetch('/api/portal/config', {
@@ -1242,45 +1238,50 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           scope: updatedCfg.scope,
           config: updatedCfg,
           configs: nextAll,
-          applyToAllRouters: true
+          syncAccessModeAllScopes: false,
+          respectOverrides: true
         })
       });
       await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vertical: 'all',
-          accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
-          freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
+          vertical: updatedCfg.scope,
+          accessMode: policyMode,
+          freeDurationMinutes: freeDurationMins,
           freeRateLimit: computedGlobalRateLimit,
           speedCapsEnabled,
           dhcpRange,
           globalDownloadMbps,
           globalUploadMbps,
           globalBurstDownloadMbps,
-          globalBurstUploadMbps
+          globalBurstUploadMbps,
+          respectOverrides: true
         })
       });
       storage.setRouterAccessPolicy('all', {
-        accessMode: updatedCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY',
-        freeDurationMinutes: activeRouter?.freeDurationMinutes || 30,
-        freeRateLimit: computedGlobalRateLimit
+        scope: updatedCfg.scope,
+        accessMode: policyMode,
+        freeDurationMinutes: freeDurationMins,
+        freeRateLimit: computedGlobalRateLimit,
+        respectOverrides: true
       });
       setSavedToast(
-        `Synced to ALL Routers! Mode + Capacity (1,012 Users) + Speed Caps (${speedCapsEnabled ? computedGlobalRateLimit : 'OFF / Uncapped'}) pushed live.`
+        `Synced ${updatedCfg.scopeLabel} routers (${updatedCfg.allowFreeAccess ? 'FREE MODE' : 'PAID MODE'})! Other scopes & individual router overrides stayed intact.`
       );
       setTimeout(() => setSavedToast(null), 4500);
     } catch {
-      setSavedToast(`Saved & queued sync (${speedCapsEnabled ? computedGlobalRateLimit : 'Uncapped'}) for all routers.`);
+      setSavedToast(`Saved & queued ${updatedCfg.scopeLabel} sync (${speedCapsEnabled ? computedGlobalRateLimit : 'Uncapped'}).`);
       setTimeout(() => setSavedToast(null), 3500);
     } finally {
       setIsSyncingAllRouters(false);
     }
   };
 
-  // Toggle strictly between FREE MODE (true) and PAID MODE (false) and push to all routers in real time
+  // Toggle strictly between FREE MODE (true) and PAID MODE (false) for the ACTIVE SCOPE only, keeping other scopes & per-router overrides intact
   const handleToggleFreeAccessRealtime = async (enableFree: boolean) => {
     const freeDurationMins = Math.max(60, Number(currentConfig.freeAccessDurationMinutes) || 1440);
+    const policyMode = enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
     handleUpdateCurrent({
       allowFreeAccess: enableFree,
       freeAccessDurationMinutes: freeDurationMins,
@@ -1299,17 +1300,19 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     });
     setPreviewStep('voucher');
     storage.setRouterAccessPolicy('all', {
-      accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
+      scope: selectedScope,
+      accessMode: policyMode,
       freeDurationMinutes: freeDurationMins,
-      freeRateLimit: computedGlobalRateLimit
+      freeRateLimit: computedGlobalRateLimit,
+      respectOverrides: true
     });
     try {
       await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vertical: 'all',
-          accessMode: enableFree ? 'COMPLETELY_FREE' : 'PAID_ONLY',
+          vertical: selectedScope,
+          accessMode: policyMode,
           freeDurationMinutes: freeDurationMins,
           freeRateLimit: computedGlobalRateLimit,
           speedCapsEnabled,
@@ -1317,13 +1320,14 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
           globalDownloadMbps,
           globalUploadMbps,
           globalBurstDownloadMbps,
-          globalBurstUploadMbps
+          globalBurstUploadMbps,
+          respectOverrides: true
         })
       });
       setSavedToast(
         enableFree
-          ? `FREE MODE ACTIVE (${formatDuration(freeDurationMins)} per guest)! Synced live to routers.`
-          : 'PAID MODE ACTIVE! Compact 2-step card with M-Pesa, EcoCash & 16-Digit OTT Voucher synced live.'
+          ? `${currentConfig.scopeLabel}: FREE MODE (${formatDuration(freeDurationMins)}) synced! Other scopes & individual router overrides preserved.`
+          : `${currentConfig.scopeLabel}: PAID MODE (M-Pesa, EcoCash & 16-Digit OTT) synced! Other scopes & individual router overrides preserved.`
       );
       setTimeout(() => setSavedToast(null), 4000);
     } catch {
@@ -1449,7 +1453,13 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     fetch('/api/portal/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: updated.scope, config: updated, configs: nextAll })
+      body: JSON.stringify({
+        scope: updated.scope,
+        config: updated,
+        configs: nextAll,
+        syncAccessModeAllScopes: false,
+        respectOverrides: true
+      })
     }).catch(() => {});
     setSavedToast(customMessage || `Saved & pushed ${updated.scopeLabel} policy to routers in real time!`);
     setTimeout(() => setSavedToast(null), 3000);
@@ -1615,31 +1625,79 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     };
   }, []);
 
-  // Pricing & Plans modifications for current scope (Bidirectionally synced with storage.getPlans())
+  // Pricing & Plans modifications (Synced automatically across all 5 scopes + Billing & Vouchers)
   const handleUpdatePlanPrice = (planId: string, newPrice: number) => {
     const safePrice = Math.max(0, newPrice);
     const targetPlan = currentConfig.plans.find((p) => p.id === planId);
-    const updatedPlans = currentConfig.plans.map((p) => {
-      if (p.id === planId) {
-        return { ...p, price: safePrice, deviceLimit: 0 };
-      }
-      return p;
-    });
-    handleUpdateCurrent({ plans: updatedPlans });
+    const targetDuration = targetPlan?.durationSeconds || 0;
+    const targetLower = (targetPlan?.name || '').toLowerCase();
+    const targetTier =
+      targetDuration >= 2000000 || targetLower.includes('month')
+        ? 'monthly'
+        : targetDuration >= 400000 || targetLower.includes('week')
+        ? 'weekly'
+        : 'daily';
 
-    // Also update master plans in storage so Plans & Vouchers view and OTT denominations update in real time
+    const nextAll: Record<VerticalType, ScopePortalConfig> = { ...scopeConfigs };
+    (Object.keys(nextAll) as VerticalType[]).forEach((scopeKey) => {
+      const cfg = nextAll[scopeKey];
+      if (!cfg) return;
+      nextAll[scopeKey] = {
+        ...cfg,
+        plans: (cfg.plans || []).map((p) => {
+          const pDur = p.durationSeconds || 0;
+          const pLower = (p.name || '').toLowerCase();
+          const pTier =
+            pDur >= 2000000 || pLower.includes('month')
+              ? 'monthly'
+              : pDur >= 400000 || pLower.includes('week')
+              ? 'weekly'
+              : 'daily';
+          if (p.id === planId || pTier === targetTier) {
+            return { ...p, price: safePrice, deviceLimit: 0 };
+          }
+          return { ...p, deviceLimit: 0 };
+        })
+      };
+      if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+        try {
+          window.localStorage.setItem(`tconnect_portal_scope_${scopeKey}`, JSON.stringify(nextAll[scopeKey]));
+        } catch {}
+      }
+    });
+    setScopeConfigs(nextAll);
+
+    // Update matching master plan in storage (which broadcasts across all 5 scopes + backend)
     const allMasterPlans = storage.getPlans();
-    const matchedMaster = allMasterPlans.find(
-      (mp) =>
-        mp.id === planId ||
-        (targetPlan && mp.name.toLowerCase() === targetPlan.name.toLowerCase()) ||
-        (targetPlan && Math.abs((mp.durationSeconds || 0) - (targetPlan.durationSeconds || 0)) < 60 && mp.vertical === selectedScope)
-    );
+    const matchedMaster = allMasterPlans.find((mp) => {
+      const mDur = mp.durationSeconds || 0;
+      const mLower = (mp.name || '').toLowerCase();
+      const mTier =
+        mDur >= 2000000 || mLower.includes('month')
+          ? 'monthly'
+          : mDur >= 400000 || mLower.includes('week')
+          ? 'weekly'
+          : 'daily';
+      return mp.id === planId || mTier === targetTier;
+    });
     if (matchedMaster) {
       storage.updatePlan(matchedMaster.id, { price: safePrice, deviceLimit: 0 });
     } else {
       storage.syncAllPlansEverywhere();
     }
+
+    fetch('/api/portal/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: selectedScope,
+        config: nextAll[selectedScope],
+        configs: nextAll,
+        syncPlansAcrossAllScopes: true,
+        syncAccessModeAllScopes: false,
+        respectOverrides: true
+      })
+    }).catch(() => {});
   };
 
   const handleTogglePlanEnabled = (planId: string) => {
@@ -2139,7 +2197,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         </span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-300">
-                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Enters contact details (Step 1 lead capture) &rarr; Enters 5-digit <strong>T-Connect Voucher (<code className="text-emerald-300">TC-xxxxx</code>)</strong> &amp; taps <strong>&ldquo;Log in&rdquo;</strong> &rarr; <strong>Uncapped High-Speed Internet</strong>.
+                        <strong>Guest Journey:</strong> Connects to <strong>T-Connect Hotspot</strong> &rarr; Enters contact details (Step 1 lead capture) &rarr; Taps <strong>&ldquo;Login for free&rdquo;</strong> &rarr; <strong>24-Hour Seamless High-Speed Internet</strong>.
                       </p>
                     </div>
                   </button>
@@ -3107,22 +3165,22 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                 <div className="space-y-0.5">
                   <div className="text-cyan-300 font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Denomination Standard: M10 (Daily) · M60 (Weekly) · M280 (Monthly)</span>
+                    <span>Denomination Standard: M10 (Daily) · M60 (Weekly) · M220 (Monthly) · Unlimited Devices</span>
                   </div>
                   <p className="text-slate-400 text-[11px]">
-                    Aligned with Econet EcoCash and OTT Voucher digital PINs. Each venue manages its prices independently, but defaults to this baseline.
+                    Aligned with Vodacom M-Pesa (62915), Econet EcoCash (63165430) &amp; 16-Digit OTT Voucher PINs. Price edits automatically sync across all 5 hotspot scopes.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     handleUpdateCurrent({ plans: DEFAULT_SCOPE_CONFIGS[selectedScope].plans });
-                    setSavedToast(`Reset ${activeMeta.label} to standard M10, M60, M280 denominations!`);
+                    setSavedToast(`Reset ${activeMeta.label} to standard M10, M60, M220 denominations!`);
                     setTimeout(() => setSavedToast(null), 2500);
                   }}
                   className="px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
                 >
-                  Apply M10 / M60 / M280 Baseline
+                  Apply M10 / M60 / M220 Baseline
                 </button>
               </div>
 
@@ -3134,7 +3192,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       {activeMeta.label} Pricing Matrix &amp; Plan Quotas
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Prices and bandwidth speed throttles configured here only appear when customers connect to {activeMeta.label} hotspots.
+                      Plan price changes sync live across all 5 hotspot scopes and checkout pages (Unlimited Devices nationwide).
                     </p>
                   </div>
                   <span

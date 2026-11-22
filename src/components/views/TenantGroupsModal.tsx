@@ -170,10 +170,10 @@ export const TenantGroupsModal: React.FC<TenantGroupsModalProps> = ({
               type="button"
               onClick={handleRestoreDefaults}
               className="px-2 py-1 bg-[#161d31] hover:bg-[#1f2942] border border-[#232d42] text-slate-300 hover:text-white rounded text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-              title="Restore default Lesotho partner & lab groups if deleted"
+              title="Ensure default T-Connect Internal Fleet group exists"
             >
               <RotateCcw className="w-3 h-3 text-cyan-400" />
-              <span>Restore Starter Groups</span>
+              <span>Restore Default Group</span>
             </button>
           </div>
 

@@ -158,7 +158,7 @@ export const STARTER_PLANS: HotspotPlan[] = [
     id: 'plan_monthly_m280',
     name: 'Monthly Pass',
     vertical: 'hotspot',
-    price: 280,
+    price: 220,
     currency: 'M',
     durationSeconds: 2592000, // 30 Days
     durationLabel: '30 Days',
@@ -367,96 +367,8 @@ export const INITIAL_CONTENT_FILTERS: ContentFilterRule[] = [
   }
 ];
 
-// Seeded Default & Well-Known Partner / Sponsor Groups
+// Default Sovereign Partner Group (Zero legacy hardcoded third-party company presets)
 export const STARTER_TENANT_GROUPS: TenantGroup[] = [
-  {
-    id: 'grp_alliance',
-    name: 'Alliance Insurance Lesotho',
-    tag: 'group:alliance-insurance',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
-    clientContact: 'marketing@alliance.co.ls',
-    accentColor: '#f05e17',
-    description: 'Sponsored motor, business & life cover hotspot network across Lesotho.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_vodacom_fdn',
-    name: 'Vodacom Lesotho Foundation',
-    tag: 'group:vodacom-foundation',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
-    clientContact: 'foundation@vodacom.co.ls',
-    accentColor: '#ef4444',
-    description: 'Community connectivity, education & M-Pesa digital inclusion hotspots.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_econet',
-    name: 'Econet Telecom Lesotho',
-    tag: 'group:econet-lesotho',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
-    clientContact: 'partners@etl.co.ls',
-    accentColor: '#3b82f6',
-    description: 'EcoCash & transit corridor Wi-Fi sponsorship across Lesotho districts.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_standard_bank',
-    name: 'Standard Lesotho Bank',
-    tag: 'group:standard-bank',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
-    clientContact: 'digital@stanbic.com',
-    accentColor: '#2563eb',
-    description: 'Commercial plaza, ATM & enterprise branch hotspot sponsor group.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_mmb',
-    name: 'Maluti Mountain Brewery',
-    tag: 'group:maluti-brewery',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
-    clientContact: 'brands@mmb.co.ls',
-    accentColor: '#eab308',
-    description: 'Hospitality, cafes, stadiums & entertainment venue Wi-Fi sponsor.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_fnb',
-    name: 'First National Bank Lesotho',
-    tag: 'group:fnb-lesotho',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
-    clientContact: 'info@fnb.co.ls',
-    accentColor: '#14b8a6',
-    description: 'Retail mall & SME hub sponsored Wi-Fi zones.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_metropolitan',
-    name: 'Metropolitan Lesotho',
-    tag: 'group:metropolitan-lesotho',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
-    clientContact: 'care@metropolitan.co.ls',
-    accentColor: '#ec4899',
-    description: 'Financial wellness & community hub hotspot sponsorship.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_lndc',
-    name: 'LNDC Lesotho',
-    tag: 'group:lndc-lesotho',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
-    clientContact: 'info@lndc.org.ls',
-    accentColor: '#10b981',
-    description: 'Industrial estate & commercial trade center connectivity.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
   {
     id: 'grp_internal',
     name: 'T-Connect Internal Fleet',
@@ -467,30 +379,21 @@ export const STARTER_TENANT_GROUPS: TenantGroup[] = [
     description: 'Sovereign T-Connect operated Starlink & MikroTik hotspot fleet.',
     createdAt: '2026-10-01',
     routerCount: 0
-  },
-  {
-    id: 'grp_lab_test',
-    name: 'Lab / Test (MIKROTIK-TC)',
-    tag: 'group:lab-test',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29__1__283ff412.jpeg',
-    clientContact: 'technical@tconnect.africa',
-    accentColor: '#f05e17',
-    description: 'Pre-configured Lab & Test group: SSID MIKROTIK-TC, FREE + PAID enabled, M10/M60/M280 packages, 3-slide sponsor carousel, PayLesotho + OTT gateways enabled.',
-    createdAt: '2026-10-01',
-    routerCount: 0
-  },
-  {
-    id: 'grp_quarantine',
-    name: 'Quarantine (Holding Group)',
-    tag: 'group:quarantine',
-    customBgUrl: '/assets/aistudio/WhatsApp_Image_2026-10-29_at_07.35.29_dd2550f9.jpeg',
-    clientContact: 'admin@tconnect.africa',
-    accentColor: '#64748b',
-    description: 'Safe holding group for newly adopted or unassigned routers: FREE OFF, PAID OFF, splash page displays "Hotspot being configured" until promoted.',
-    createdAt: '2026-10-01',
-    routerCount: 0
   }
 ];
+
+const LEGACY_REMOVED_TENANT_GROUP_NAMES = new Set([
+  'alliance insurance lesotho',
+  'vodacom lesotho foundation',
+  'econet telecom lesotho',
+  'standard lesotho bank',
+  'maluti mountain brewery',
+  'first national bank lesotho',
+  'metropolitan lesotho',
+  'lndc lesotho',
+  'lab / test (mikrotik-tc)',
+  'quarantine (holding group)'
+]);
 
 export const WALLED_GARDEN_DOMAINS = [
   // Payment Providers (PayLesotho, EcoCash & OTT Voucher Lesotho only — never whitelist OS captive probe domains!)
@@ -838,6 +741,13 @@ class StorageService {
             parsed.routers = [];
           }
 
+          if (Array.isArray(parsed.plans)) {
+            parsed.plans = parsed.plans.map((p: any) => ({
+              ...p,
+              deviceLimit: 0
+            }));
+          }
+
           if (!parsed.tenantGroupsInitialized) {
             const existingGroups = Array.isArray(parsed.tenantGroups) ? parsed.tenantGroups : [];
             const seeded = [...existingGroups];
@@ -849,7 +759,27 @@ class StorageService {
             parsed.tenantGroups = seeded;
             parsed.tenantGroupsInitialized = true;
           } else if (!Array.isArray(parsed.tenantGroups)) {
-            parsed.tenantGroups = [];
+            parsed.tenantGroups = [...STARTER_TENANT_GROUPS];
+          }
+
+          if (!parsed.tenantGroupsCleanedV2) {
+            const activeRouterPartnerNames = new Set(
+              (Array.isArray(parsed.routers) ? parsed.routers : [])
+                .map((r: any) => String(r.partnerName || '').trim().toLowerCase())
+                .filter(Boolean)
+            );
+            parsed.tenantGroups = (parsed.tenantGroups || []).filter((g: any) => {
+              const lower = String(g?.name || '').trim().toLowerCase();
+              if (!lower) return false;
+              if (LEGACY_REMOVED_TENANT_GROUP_NAMES.has(lower) && !activeRouterPartnerNames.has(lower)) {
+                return false;
+              }
+              return true;
+            });
+            if (parsed.tenantGroups.length === 0) {
+              parsed.tenantGroups = [...STARTER_TENANT_GROUPS];
+            }
+            parsed.tenantGroupsCleanedV2 = true;
           }
 
           if (!Array.isArray(parsed.contentFilters)) {
@@ -1314,13 +1244,7 @@ class StorageService {
       this.state.captiveLeads = data.captiveLeads;
     }
     if (data.tenantGroups !== undefined && data.tenantGroups.length > 0) {
-      const mergedGroups = [...STARTER_TENANT_GROUPS];
-      data.tenantGroups.forEach((g) => {
-        if (!mergedGroups.some((mg) => mg.name.toLowerCase() === g.name.toLowerCase())) {
-          mergedGroups.unshift(g);
-        }
-      });
-      this.state.tenantGroups = mergedGroups;
+      this.state.tenantGroups = [...data.tenantGroups];
     }
     this.saveState();
     this.checkVoucherStock();
@@ -1408,7 +1332,8 @@ class StorageService {
       tokenExpiresAt: expiresAt,
       accessMode: resolvedAccessMode,
       freeModeEnabled: resolvedAccessMode !== 'PAID_ONLY',
-      freeDurationMinutes: router.freeDurationMinutes || 30,
+      modeOverride: router.modeOverride ?? true,
+      freeDurationMinutes: router.freeDurationMinutes || 1440,
       freeRateLimit: router.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
       freeDailyQuotaMb: router.freeDailyQuotaMb || 500
     };
@@ -1464,34 +1389,53 @@ class StorageService {
       freeDurationMinutes?: number;
       freeRateLimit?: string;
       freeDailyQuotaMb?: number;
+      scope?: VerticalType | 'all';
+      respectOverrides?: boolean;
+      forceOverride?: boolean;
     }
   ) {
     const isFree = policy.accessMode !== 'PAID_ONLY';
     const now = new Date().toISOString();
+    const matchesScope = (rScope: string, targetScope: string) =>
+      rScope === targetScope ||
+      (rScope === 'community' && targetScope === 'village') ||
+      (rScope === 'village' && targetScope === 'community');
 
     if (routerId === 'all') {
-      this.state.routers = this.state.routers.map(r => ({
-        ...r,
-        accessMode: policy.accessMode,
-        freeModeEnabled: isFree,
-        freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
-        freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'),
-        freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
-        policyLastSyncedAt: now
-      }));
+      const targetScope = policy.scope && policy.scope !== 'all' ? policy.scope : null;
+      const respectOverrides = policy.respectOverrides !== false && !policy.forceOverride;
+      this.state.routers = this.state.routers.map(r => {
+        if (targetScope && !matchesScope(String(r.vertical || 'hotspot'), targetScope)) {
+          return r;
+        }
+        if (respectOverrides && r.modeOverride) {
+          return r;
+        }
+        return {
+          ...r,
+          accessMode: policy.accessMode,
+          freeModeEnabled: isFree,
+          modeOverride: policy.forceOverride ? false : r.modeOverride,
+          freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 1440),
+          freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'),
+          freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
+          policyLastSyncedAt: now
+        };
+      });
       this.logAudit({
         actor: 'Admin',
         role: 'Owner',
         action: 'fleet.access_policy',
-        target: 'Fleet All Routers',
-        details: `Updated fleet access mode to ${policy.accessMode} (${policy.accessMode === 'PAID_ONLY' ? 'Paid Vouchers Only' : `${policy.freeDurationMinutes || 30}m free trial`}).`
+        target: targetScope ? `Scope: ${targetScope}` : 'Fleet All Routers',
+        details: `Updated access mode for ${targetScope ? `scope '${targetScope}'` : 'fleet'} to ${policy.accessMode}${respectOverrides ? ' (preserving individual router overrides)' : ''}.`
       });
     } else {
       this.state.routers = this.state.routers.map(r => r.id === routerId ? ({
         ...r,
         accessMode: policy.accessMode,
         freeModeEnabled: isFree,
-        freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 30),
+        modeOverride: true,
+        freeDurationMinutes: policy.freeDurationMinutes ?? (r.freeDurationMinutes || 1440),
         freeRateLimit: policy.freeRateLimit ?? (r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s'),
         freeDailyQuotaMb: policy.freeDailyQuotaMb ?? (r.freeDailyQuotaMb || 500),
         policyLastSyncedAt: now
@@ -1503,7 +1447,7 @@ class StorageService {
           role: 'Owner',
           action: 'router.access_policy',
           target: target.name,
-          details: `Router access mode configured as ${policy.accessMode}. Policy pushed.`
+          details: `Router access mode configured as ${policy.accessMode} (individual override active). Policy pushed.`
         });
       }
     }
@@ -1851,12 +1795,10 @@ class StorageService {
     this.saveState();
     if (typeof window !== 'undefined') {
       fetch('/api/partner-groups', {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          oldName,
-          newName: target.name,
-          group: target
+          partnerGroups: this.state.tenantGroups.map((g) => g.name)
         })
       }).catch(() => {});
     }
@@ -2121,36 +2063,78 @@ class StorageService {
 
   syncAllPlansEverywhere(): void {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
-    const allPlans = this.getPlans();
+    const allPlans = this.getPlans().map((p) => ({ ...p, deviceLimit: 0 }));
     const scopes: VerticalType[] = ['hotspot', 'community', 'village', 'park', 'bus', 'stadium'];
     const updatedScopeConfigs: Record<string, any> = {};
+
+    const getTier = (p: any): 'daily' | 'weekly' | 'monthly' | null => {
+      const dur = Number(p?.durationSeconds) || 0;
+      const nm = String(p?.name || '').toLowerCase();
+      if (nm.includes('daily') || (dur > 0 && dur <= 86400)) return 'daily';
+      if (nm.includes('weekly') || (dur > 86400 && dur <= 604800)) return 'weekly';
+      if (nm.includes('monthly') || dur > 604800) return 'monthly';
+      return null;
+    };
+
+    const masterByTier = new Map<string, HotspotPlan>();
+    allPlans.forEach((p) => {
+      const tier = getTier(p);
+      if (tier && !masterByTier.has(tier)) {
+        masterByTier.set(tier, p);
+      }
+    });
 
     scopes.forEach((sc) => {
       try {
         const raw = window.localStorage.getItem(`tconnect_portal_scope_${sc}`);
         const parsed = raw ? JSON.parse(raw) : { scope: sc };
-        const scopedPlans = allPlans.filter(
-          (p) =>
-            p.vertical === sc ||
-            (sc === 'community' && p.vertical === 'village') ||
-            (sc === 'village' && p.vertical === 'community')
-        );
-        const effectivePlans = scopedPlans.length > 0 ? scopedPlans : allPlans;
-        parsed.plans = effectivePlans.map((p) => ({
-          id: p.id,
-          name: p.name,
-          price: p.price,
-          currency: p.currency || 'M',
-          durationLabel: p.durationLabel,
-          durationSeconds: p.durationSeconds,
-          downloadSpeedMbps: p.downloadSpeedMbps,
-          uploadSpeedMbps: p.uploadSpeedMbps,
-          burstDownloadMbps: p.burstDownloadMbps || Math.round(p.downloadSpeedMbps * 1.5),
-          deviceLimit: p.deviceLimit ?? 0,
-          enabled: true,
-          isPopular: Boolean(p.isPopular),
-          badge: p.isPopular ? 'Best Value' : p.durationLabel
-        }));
+        if (Array.isArray(parsed.plans) && parsed.plans.length > 0 && masterByTier.size > 0) {
+          // Preserve scope-specific plan metadata while syncing master prices/speeds/durations & zero device limit
+          parsed.plans = parsed.plans.map((existingPlan: any) => {
+            const tier = getTier(existingPlan);
+            const master = tier ? masterByTier.get(tier) : null;
+            if (!master) {
+              return { ...existingPlan, deviceLimit: 0 };
+            }
+            return {
+              ...existingPlan,
+              name: master.name,
+              price: master.price,
+              currency: master.currency || 'M',
+              durationLabel: master.durationLabel,
+              durationSeconds: master.durationSeconds,
+              downloadSpeedMbps: master.downloadSpeedMbps,
+              uploadSpeedMbps: master.uploadSpeedMbps,
+              burstDownloadMbps: master.burstDownloadMbps || Math.round(master.downloadSpeedMbps * 1.5),
+              deviceLimit: 0,
+              enabled: true,
+              isPopular: Boolean(master.isPopular)
+            };
+          });
+        } else {
+          const scopedPlans = allPlans.filter(
+            (p) =>
+              p.vertical === sc ||
+              (sc === 'community' && p.vertical === 'village') ||
+              (sc === 'village' && p.vertical === 'community')
+          );
+          const effectivePlans = scopedPlans.length > 0 ? scopedPlans : allPlans;
+          parsed.plans = effectivePlans.map((p) => ({
+            id: p.id,
+            name: p.name,
+            price: p.price,
+            currency: p.currency || 'M',
+            durationLabel: p.durationLabel,
+            durationSeconds: p.durationSeconds,
+            downloadSpeedMbps: p.downloadSpeedMbps,
+            uploadSpeedMbps: p.uploadSpeedMbps,
+            burstDownloadMbps: p.burstDownloadMbps || Math.round(p.downloadSpeedMbps * 1.5),
+            deviceLimit: 0,
+            enabled: true,
+            isPopular: Boolean(p.isPopular),
+            badge: p.isPopular ? 'Best Value' : p.durationLabel
+          }));
+        }
         window.localStorage.setItem(`tconnect_portal_scope_${sc}`, JSON.stringify(parsed));
         updatedScopeConfigs[sc] = parsed;
       } catch {}
@@ -2163,6 +2147,9 @@ class StorageService {
         scope: 'hotspot',
         config: updatedScopeConfigs.hotspot,
         configs: updatedScopeConfigs,
+        syncPlansAcrossAllScopes: true,
+        syncAccessModeAllScopes: false,
+        respectOverrides: true,
         applyToAllRouters: true
       })
     }).catch(() => {});
@@ -2175,7 +2162,7 @@ class StorageService {
   createPlan(plan: Omit<HotspotPlan, 'id'>) {
     const newPlan: HotspotPlan = {
       ...plan,
-      deviceLimit: plan.deviceLimit ?? 0,
+      deviceLimit: 0,
       id: `plan_${Date.now()}`
     };
     this.state.plans.push(newPlan);
@@ -2185,7 +2172,7 @@ class StorageService {
       role: 'Owner',
       action: 'plan.create',
       target: newPlan.name,
-      details: `Created plan: ${newPlan.currency}${newPlan.price} for ${newPlan.durationLabel} (${newPlan.deviceLimit && newPlan.deviceLimit > 0 ? `max ${newPlan.deviceLimit} devices` : 'Unlimited devices'}). Synced to Portal & Routers.`
+      details: `Created plan: ${newPlan.currency}${newPlan.price} for ${newPlan.durationLabel} (Unlimited devices). Synced across all 5 scopes, Portal & Routers.`
     });
     this.saveState();
     this.syncAllPlansEverywhere();
@@ -2198,6 +2185,7 @@ class StorageService {
     const updated: HotspotPlan = {
       ...this.state.plans[idx],
       ...updates,
+      deviceLimit: 0,
       id: planId
     };
     this.state.plans[idx] = updated;
@@ -2207,7 +2195,7 @@ class StorageService {
       role: 'Owner',
       action: 'plan.update',
       target: updated.name,
-      details: `Updated plan '${updated.name}' (${updated.currency}${updated.price}, ${updated.durationLabel}, ${updated.downloadSpeedMbps}M/${updated.uploadSpeedMbps}M) and pushed to Captive Portal & Routers in real time.`
+      details: `Updated plan '${updated.name}' (${updated.currency}${updated.price}, ${updated.durationLabel}, Unlimited devices) and synced across all 5 scopes & Routers in real time.`
     });
     this.saveState();
     this.syncAllPlansEverywhere();
@@ -2323,7 +2311,7 @@ class StorageService {
       price: entry.price || 10,
       currency: 'M',
       durationSeconds: entry.durationSeconds || 86400,
-      deviceLimit: 2,
+      deviceLimit: 0,
       status: 'used',
       generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
       firstUsedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
@@ -2373,11 +2361,11 @@ class StorageService {
         id: `vch_tc_${Date.now()}_${batch.length + 1}_${num}`,
         code,
         planId: plan?.id || planId || 'tc_free_reception_24h',
-        planName: plan ? plan.name : `T-Connect Reception Wi-Fi Voucher (24h · 3 Devices · Uncapped) — ${venueName}`,
+        planName: plan ? plan.name : `T-Connect Wi-Fi Voucher (24h · Unlimited Devices · Uncapped) — ${venueName}`,
         price: 0,
         currency: 'M',
         durationSeconds: 86400,
-        deviceLimit: 3,
+        deviceLimit: 0,
         status: 'active',
         generatedAt: nowStr,
         expiresAt: '',
@@ -2812,7 +2800,7 @@ class StorageService {
         dataCapMb: null,
         downloadSpeedMbps: planOverride.downloadSpeedMbps || 5.0,
         uploadSpeedMbps: planOverride.uploadSpeedMbps || 2.5,
-        deviceLimit: planOverride.deviceLimit || 2,
+        deviceLimit: 0,
         burstDownloadMbps: 10.0,
         burstUploadMbps: 5.0,
         fairUseThresholdMb: 5000,
@@ -2820,12 +2808,12 @@ class StorageService {
         isPopular: planOverride.price === 60,
       };
     } else if (!plan) {
-      if (planId.includes('monthly') || planId.includes('280') || planId.includes('30d')) {
-        plan = this.state.plans.find(p => p.price === 280) || this.state.plans[0];
+      if (planId.includes('monthly') || planId.includes('220') || planId.includes('280') || planId.includes('30d')) {
+        plan = this.state.plans.find(p => p.durationSeconds > 604800 || p.name.toLowerCase().includes('monthly')) || this.state.plans[0];
       } else if (planId.includes('weekly') || planId.includes('60') || planId.includes('7d')) {
-        plan = this.state.plans.find(p => p.price === 60) || this.state.plans[0];
+        plan = this.state.plans.find(p => (p.durationSeconds > 86400 && p.durationSeconds <= 604800) || p.name.toLowerCase().includes('weekly')) || this.state.plans[0];
       } else {
-        plan = this.state.plans.find(p => p.price === 10) || this.state.plans[0];
+        plan = this.state.plans.find(p => p.durationSeconds <= 86400 || p.name.toLowerCase().includes('daily')) || this.state.plans[0];
       }
     }
 
@@ -2933,7 +2921,7 @@ class StorageService {
       currency: tx.currency,
       durationSeconds: 86400,
       durationLabel: '24 Hours',
-      deviceLimit: 2,
+      deviceLimit: 0,
       vertical: tx.vertical
     };
 
@@ -2955,7 +2943,7 @@ class StorageService {
         price: tx.amount,
         currency: tx.currency,
         durationSeconds: (plan as any).durationSeconds || 86400,
-        deviceLimit: (plan as any).deviceLimit || 2,
+        deviceLimit: 0,
         status: 'active',
         generatedAt: now,
         expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),
@@ -3025,7 +3013,7 @@ class StorageService {
           price: pendingResult.transaction.amount,
           currency: pendingResult.transaction.currency,
           durationSeconds: 86400,
-          deviceLimit: 2,
+          deviceLimit: 0,
           status: 'active',
           generatedAt: new Date().toISOString(),
           expiresAt: new Date(Date.now() + 30 * 86400 * 1000).toISOString(),

@@ -96,6 +96,7 @@ export const BillingView: React.FC<BillingViewProps> = (props) => {
         <PlansVouchersView
           plans={props.plans}
           vouchers={props.vouchers}
+          transactions={props.transactions}
           onCreatePlan={props.onCreatePlan}
           onGenerateBatch={props.onGenerateBatch}
           onRedeemVoucher={props.onRedeemVoucher}

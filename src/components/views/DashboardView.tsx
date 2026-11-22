@@ -238,27 +238,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       await fetch('/api/portal/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ configs: configsPayload })
+        body: JSON.stringify({
+          configs: configsPayload,
+          syncAccessModeAllScopes: false,
+          respectOverrides: true
+        })
       });
       if (patch.allowFreeAccess !== undefined || patch.freeAccessDurationMinutes !== undefined) {
         const nextAllowFree = patch.allowFreeAccess ?? portalConfig.allowFreeAccess;
         const nextDurationMins = Math.max(60, Number(patch.freeAccessDurationMinutes ?? portalConfig.freeAccessDurationMinutes) || 1440);
         const nextPolicyMode = nextAllowFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
-        // Uncapped ("0/0") with FastTrack + PCQ fair queuing in Free Mode
+        // Uncapped ("0/0") with FastTrack + PCQ fair queuing in Free Mode — scoped & preserving per-router overrides
         await fetch('/api/devices/fleet/access-policy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            vertical: selectedVertical === 'all' ? undefined : selectedVertical,
+            vertical: selectedVertical === 'all' ? 'all' : selectedVertical,
             accessMode: nextPolicyMode,
             freeDurationMinutes: nextDurationMins,
-            freeRateLimit: '0/0'
+            freeRateLimit: '0/0',
+            respectOverrides: true
           })
         });
         storage.setRouterAccessPolicy('all', {
+          scope: selectedVertical,
           accessMode: nextPolicyMode,
           freeDurationMinutes: nextDurationMins,
-          freeRateLimit: '0/0'
+          freeRateLimit: '0/0',
+          respectOverrides: true
         });
       }
       if (toastLabel) {
@@ -610,6 +617,110 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [serverGuestRecords, selectedVertical, totalRevenue, transactions]);
 
+  // Real-time merged transactions list (settled local ledger + live paid guest checkouts from /api/portal/guest-connect)
+  // so Daily Transaction Trends & Revenue Growth updates immediately on every 5s telemetry poll
+  const liveTrendTransactions = useMemo<PaymentTransaction[]>(() => {
+    const merged: PaymentTransaction[] = [...completedTransactions];
+    const seenIds = new Set(
+      completedTransactions.map((t) =>
+        String(t.transactionRef || t.voucherCodeIssued || t.id || '').toLowerCase()
+      )
+    );
+
+    const matchesScope = (v?: string) => {
+      if (selectedVertical === 'all' || !v) return true;
+      if (selectedVertical === 'village' || selectedVertical === 'community') {
+        return v === 'village' || v === 'community';
+      }
+      return v === selectedVertical;
+    };
+
+    for (const ev of serverGuestRecords) {
+      const sc = String(ev.scope || ev.vertical || 'hotspot');
+      if (!matchesScope(sc)) continue;
+      const methodRaw = String(ev.paymentMethod || ev.mode || '').toLowerCase();
+      const amountVal = Number(ev.amount) || 0;
+      const isPaidEv =
+        ev.accessType === 'paid' ||
+        methodRaw === 'mpesa' ||
+        methodRaw === 'ecocash' ||
+        methodRaw === 'ottvoucher' ||
+        amountVal > 0;
+      if (!isPaidEv) continue;
+
+      const refKey = String(ev.transactionRef || ev.voucherCode || ev.transactionId || ev.id || '').toLowerCase();
+      if (refKey && seenIds.has(refKey)) continue;
+      if (refKey) seenIds.add(refKey);
+
+      const providerVal: PaymentTransaction['provider'] =
+        methodRaw === 'mpesa'
+          ? 'paylesotho'
+          : methodRaw === 'ecocash'
+          ? 'ecocash'
+          : 'ottvoucher';
+
+      const normalizedVertical: VerticalType =
+        sc === 'stadium' || sc === 'park' || sc === 'bus' || sc === 'community' || sc === 'village'
+          ? (sc as VerticalType)
+          : 'hotspot';
+
+      const ts = ev.connectedAt || ev.startedAt || new Date().toISOString();
+
+      merged.push({
+        id: `live_tx_${ev.id || refKey}`,
+        transactionRef: ev.transactionRef || ev.voucherCode || ev.transactionId || ev.id || `LIVE-${Date.now()}`,
+        provider: providerVal,
+        channel: methodRaw || 'ottvoucher',
+        planId: ev.planId || 'live_plan',
+        planName: ev.planName || 'Hotspot Pass',
+        amount: amountVal > 0 ? amountVal : 10,
+        currency,
+        phoneNumber: ev.phone || ev.guestPhone || '',
+        customerName: ev.guestName || undefined,
+        customerEmail: ev.email || ev.guestEmail || undefined,
+        siteName: ev.siteName || ev.venuePurchasedAt || 'T-Connect Hotspot',
+        voucherCodeIssued: ev.voucherCode || undefined,
+        status: 'completed',
+        debugLogs: {
+          requestTimestamp: ts,
+          endpoint: '/api/portal/guest-connect',
+          httpStatus: 200,
+          signatureVerified: true,
+          rawPayload: null,
+          rawResponse: null
+        },
+        createdAt: ts,
+        completedAt: ts,
+        vertical: normalizedVertical
+      });
+    }
+
+    return merged;
+  }, [completedTransactions, serverGuestRecords, selectedVertical, currency]);
+
+  const liveUsageEvents = useMemo(
+    () =>
+      unifiedDevices.map((d) => ({
+        id: d.id,
+        startedAt: d.startedAt,
+        authMode: d.authMode,
+        bytesTotal: d.bytesTotal || 0,
+        bytesDown: d.bytesDown || 0,
+        bytesUp: d.bytesUp || 0,
+        vertical: (
+          d.vertical === 'stadium' ||
+          d.vertical === 'park' ||
+          d.vertical === 'bus' ||
+          d.vertical === 'community' ||
+          d.vertical === 'village'
+            ? d.vertical
+            : 'hotspot'
+        ) as VerticalType,
+        status: d.status
+      })),
+    [unifiedDevices]
+  );
+
   return (
     <div className="space-y-6 font-sans">
       {/* Clean Header Bar */}
@@ -735,14 +846,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="bg-[#0f1422] border border-emerald-500/30 rounded-2xl p-4">
           <div className="flex items-center justify-between text-emerald-300 text-[11px] font-mono uppercase">
-            <span>Paid OTT &amp; Mobile Revenue</span>
+            <span>Mobile Revenue</span>
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 font-mono mt-1.5 tabular-nums">
             {currency}{commercialSummary.paidRevenue.toFixed(2)}
           </div>
           <div className="text-[11px] text-slate-400 font-mono mt-1">
-            {commercialSummary.paidCount} paid sessions
+            {commercialSummary.paidCount} paid sessions (M-Pesa, EcoCash &amp; OTT)
           </div>
         </div>
 
@@ -1207,9 +1318,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <thead>
                 <tr className="border-b border-[#1f283d] text-[10px] font-mono uppercase text-slate-400">
                   <th className="py-2.5 px-3">Router Node &amp; Venue</th>
+                  <th className="py-2.5 px-3">Scope</th>
                   <th className="py-2.5 px-3">Status &amp; Watchdog Timer</th>
                   <th className="py-2.5 px-3">WireGuard Tunnel</th>
-                  <th className="py-2.5 px-3">Access Policy &amp; QoS</th>
+                  <th className="py-2.5 px-3">Access Policy &amp; Mode</th>
                   <th className="py-2.5 px-3">CPU / RAM</th>
                   <th className="py-2.5 px-3 text-right">Connected Clients</th>
                 </tr>
@@ -1225,10 +1337,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   const liveClients = isOnline
                     ? Math.max(rt.activeSessions || 0, matchedConnected.length)
                     : 0;
+                  // Explicitly honor rt.accessMode first so PAID_ONLY routers never falsely display as Free Mode
                   const isFree =
-                    rt.accessMode === 'COMPLETELY_FREE' ||
-                    rt.accessMode === 'FREE_TRIAL_AND_PAID' ||
-                    rt.freeModeEnabled;
+                    rt.accessMode === 'PAID_ONLY'
+                      ? false
+                      : rt.accessMode === 'COMPLETELY_FREE' ||
+                        rt.accessMode === 'FREE_TRIAL_AND_PAID' ||
+                        Boolean(rt.freeModeEnabled);
+
+                  const scopeMeta: Record<string, { label: string; colorClass: string }> = {
+                    hotspot: {
+                      label: '☕ Hotspots',
+                      colorClass: 'bg-orange-500/15 border-orange-500/35 text-orange-300'
+                    },
+                    stadium: {
+                      label: '🏟️ Stadiums',
+                      colorClass: 'bg-purple-500/15 border-purple-500/35 text-purple-300'
+                    },
+                    community: {
+                      label: '🏡 Villages',
+                      colorClass: 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
+                    },
+                    village: {
+                      label: '🏡 Villages',
+                      colorClass: 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
+                    },
+                    bus: {
+                      label: '🚌 Buses',
+                      colorClass: 'bg-blue-500/15 border-blue-500/35 text-blue-300'
+                    },
+                    park: {
+                      label: '🌲 Parks',
+                      colorClass: 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                    }
+                  };
+                  const resolvedScope = scopeMeta[rt.vertical || 'hotspot'] || scopeMeta.hotspot;
 
                   return (
                     <tr key={rt.id} className="hover:bg-[#121829]/90 transition-colors">
@@ -1244,6 +1387,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <div className="text-[11px] text-slate-400 mt-0.5">
                           {rt.siteName || 'Maseru Hotspot'} · {rt.model || 'MikroTik hAP ax³'} ({rt.rosVersion || 'v7'})
                         </div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-extrabold whitespace-nowrap ${resolvedScope.colorClass}`}
+                        >
+                          {resolvedScope.label}
+                        </span>
                       </td>
 
                       <td className="py-3 px-3">
@@ -1275,15 +1426,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </td>
 
                       <td className="py-3 px-3">
-                        {isFree ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
-                            ⚡ FREE MODE (Uncapped + FastTrack + PCQ)
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
-                            🔒 PAID MODE (OTT &amp; PayLesotho + PCQ)
-                          </span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {isFree ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-extrabold">
+                              ⚡ FREE MODE
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/35 text-amber-300 text-[10px] font-extrabold">
+                              🔒 PAID MODE
+                            </span>
+                          )}
+                          {rt.modeOverride && (
+                            <span
+                              className="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 text-[9px] font-bold uppercase"
+                              title="Individual router mode override is active (protected from bulk scope toggles)"
+                            >
+                              Router Override
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {isFree ? '24h Free + FastTrack + PCQ' : 'M-Pesa, EcoCash & 16-Digit OTT + PCQ'}
+                        </div>
                       </td>
 
                       <td className="py-3 px-3">
@@ -1339,10 +1503,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       />
 
       {/* ================================================================= */}
-      {/* REAL VERIFIED REVENUE CHART                                       */}
+      {/* REAL-TIME REVENUE & USAGE TRENDS CHART                            */}
       {/* ================================================================= */}
       <TransactionTrendsChart
-        transactions={completedTransactions}
+        transactions={liveTrendTransactions}
+        usageEvents={liveUsageEvents}
         currency={currency}
         selectedVertical={selectedVertical}
         onNavigateTab={onNavigateTab}

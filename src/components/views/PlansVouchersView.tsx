@@ -24,7 +24,7 @@ import {
   FileText,
   Wifi
 } from 'lucide-react';
-import { HotspotPlan, Voucher, VerticalType } from '../../types';
+import { HotspotPlan, Voucher, VerticalType, PaymentTransaction } from '../../types';
 import { ExportService } from '../../services/exportService';
 import { storage } from '../../services/storage';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -32,6 +32,7 @@ import { copyToClipboard } from '../../utils/clipboard';
 interface PlansVouchersViewProps {
   plans: HotspotPlan[];
   vouchers: Voucher[];
+  transactions?: PaymentTransaction[];
   onCreatePlan: (plan: Omit<HotspotPlan, 'id'>) => void;
   onGenerateBatch: (planId: string, count: number) => Voucher[];
   onRedeemVoucher: (code: string, mac: string, hostname?: string) => any;
@@ -45,11 +46,14 @@ interface PlansVouchersViewProps {
 export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   plans,
   vouchers,
+  transactions = [],
   onCreatePlan,
   selectedVertical,
   currency,
 }) => {
   const [voucherSearch, setVoucherSearch] = useState('');
+  const [ledgerChannelFilter, setLedgerChannelFilter] = useState<'all' | 'mpesa' | 'ecocash' | 'ott'>('all');
+  const [liveGuestEvents, setLiveGuestEvents] = useState<any[]>([]);
   const [copiedVoucherId, setCopiedVoucherId] = useState<string | null>(null);
   const [showCreatePlanModal, setShowCreatePlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<HotspotPlan | null>(null);
@@ -57,113 +61,202 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const [confirmDeleteVoucherId, setConfirmDeleteVoucherId] = useState<string | null>(null);
   const [uniqueRefInput, setUniqueRefInput] = useState('');
 
-  // Plan form state
+  // Plan form state (Unlimited Devices enforced nationwide)
   const [planName, setPlanName] = useState('');
   const [planPrice, setPlanPrice] = useState(10);
   const [planVertical, setPlanVertical] = useState<VerticalType>('hotspot');
   const [planDurationHours, setPlanDurationHours] = useState(24);
   const [planDownMbps, setPlanDownMbps] = useState(4);
   const [planUpMbps, setPlanUpMbps] = useState(2);
-  const [planDeviceLimit, setPlanDeviceLimit] = useState(0);
   const [planDataCapGb, setPlanDataCapGb] = useState<number | ''>('');
   const [inlinePriceEdits, setInlinePriceEdits] = useState<Record<string, string>>({});
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
-  // T-Connect Reception Printable A4 Voucher Sheet (x300 TC-XXXXX) State
-  const [receptionVenueName, setReceptionVenueName] = useState('Maseru Golf Course Clubhouse');
-  const [receptionWifiSsid, setReceptionWifiSsid] = useState('T-Connect Hotspot');
-  const [receptionBatchSize, setReceptionBatchSize] = useState(300);
-  const [isGeneratingReceptionBatch, setIsGeneratingReceptionBatch] = useState(false);
-  const [showReceptionSheetModal, setShowReceptionSheetModal] = useState(false);
-  const [previewSheetPage, setPreviewSheetPage] = useState(0);
-
-  // Sync server vouchers on mount so any existing TC-XXXXX vouchers are loaded
+  // Sync live M-Pesa, EcoCash & 16-Digit OTT settlements from server
   useEffect(() => {
-    fetch('/api/vouchers')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d && d.success && Array.isArray(d.vouchers) && d.vouchers.length > 0) {
-          storage.mergeServerVouchers(d.vouchers);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const tcReceptionVouchers = vouchers.filter((v) =>
-    /^TC-\d{5}$/i.test(String(v.code || '').trim())
-  );
-
-  const handleGenerateReceptionBatch = async (countToGenerate = receptionBatchSize, openPreviewAfter = true) => {
-    setIsGeneratingReceptionBatch(true);
-    try {
-      const targetCount = Math.min(1000, Math.max(1, Number(countToGenerate) || 300));
-      const res = await fetch('/api/vouchers/generate-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          count: targetCount,
-          venueName: receptionVenueName.trim() || 'Maseru Golf Course Clubhouse',
-          durationSeconds: 86400,
-          deviceLimit: 3
+    let active = true;
+    const loadLiveBilling = () => {
+      fetch('/api/portal/guest-connect')
+        .then((r) => r.json())
+        .then((d) => {
+          if (active && d && d.success && Array.isArray(d.records)) {
+            setLiveGuestEvents(d.records);
+          }
         })
-      });
-      const data = await res.json();
-      if (data && data.success && Array.isArray(data.vouchers)) {
-        storage.mergeServerVouchers(data.vouchers);
-        setSyncNotice(
-          `Generated ${data.vouchers.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Up to 3 Devices · Uncapped Speed) & synced to live routers!`
-        );
-        setTimeout(() => setSyncNotice(null), 6000);
-        setPreviewSheetPage(0);
-        if (openPreviewAfter) {
-          setShowReceptionSheetModal(true);
-        }
-      } else {
-        const localBatch = storage.generateVoucherBatch(
-          'tc_free_reception_24h',
-          targetCount,
-          receptionVenueName.trim() || 'Maseru Golf Course Clubhouse'
-        );
-        setSyncNotice(`Generated ${localBatch.length} T-Connect Reception Vouchers (TC-XXXXX).`);
-        setTimeout(() => setSyncNotice(null), 5000);
-        setPreviewSheetPage(0);
-        if (openPreviewAfter) {
-          setShowReceptionSheetModal(true);
-        }
-      }
-    } catch {
-      const targetCount = Math.min(1000, Math.max(1, Number(countToGenerate) || 300));
-      const localBatch = storage.generateVoucherBatch(
-        'tc_free_reception_24h',
-        targetCount,
-        receptionVenueName.trim() || 'Maseru Golf Course Clubhouse'
-      );
-      setSyncNotice(`Generated ${localBatch.length} T-Connect Reception Vouchers (TC-XXXXX).`);
-      setTimeout(() => setSyncNotice(null), 5000);
-      setPreviewSheetPage(0);
-      if (openPreviewAfter) {
-        setShowReceptionSheetModal(true);
-      }
-    } finally {
-      setIsGeneratingReceptionBatch(false);
-    }
-  };
+        .catch(() => {});
+    };
+    loadLiveBilling();
+    const timer = setInterval(loadLiveBilling, 5000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   const filteredPlans = selectedVertical === 'all'
     ? plans
     : plans.filter(p => p.vertical === selectedVertical);
 
   const filteredVouchers = vouchers.filter(v => {
-    const isTcVoucher = /^TC-\d{5}$/i.test(String(v.code || '').trim());
     const matchesVertical =
       selectedVertical === 'all' ||
-      isTcVoucher ||
       plans.find(p => p.id === v.planId)?.vertical === selectedVertical;
     const matchesSearch = voucherSearch === '' || 
       v.code.toLowerCase().includes(voucherSearch.toLowerCase()) || 
       v.planName.toLowerCase().includes(voucherSearch.toLowerCase());
     return matchesVertical && matchesSearch;
   });
+
+  // Unified real-time M-Pesa, EcoCash & 16-Digit OTT Ledger (mirrors Fleet Overview)
+  const unifiedPaymentLedger = React.useMemo(() => {
+    type LedgerRow = {
+      id: string;
+      channel: 'mpesa' | 'ecocash' | 'ott';
+      channelLabel: string;
+      reference: string;
+      customer: string;
+      phone: string;
+      planName: string;
+      amount: number;
+      siteName: string;
+      vertical: string;
+      mac: string;
+      timestamp: string;
+      status: string;
+      durationHours: number;
+      voucherId?: string;
+    };
+
+    const rows: LedgerRow[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Live server guest-connect paid records (M-Pesa, EcoCash, OTT Voucher)
+    liveGuestEvents.forEach((ev: any) => {
+      const isFree = ev.accessType === 'free' || ev.mode === 'free' || ev.paymentMethod === 'free_wifi';
+      const amt = Number(ev.amount) || 0;
+      if (isFree && amt <= 0) return;
+
+      const rawMethod = String(ev.paymentMethod || ev.mode || '').toLowerCase();
+      const channel: 'mpesa' | 'ecocash' | 'ott' = rawMethod.includes('mpesa')
+        ? 'mpesa'
+        : rawMethod.includes('ecocash')
+          ? 'ecocash'
+          : 'ott';
+      const ref = String(ev.transactionRef || ev.ottVoucherPin || ev.voucherCode || ev.id || 'PAID');
+      const dedupeKey = `${channel}_${ref}_${String(ev.mac || ev.clientMac || '').toUpperCase()}`;
+      if (seenKeys.has(dedupeKey)) return;
+      seenKeys.add(dedupeKey);
+
+      const durSec = Number(ev.durationSeconds) || (amt >= 180 ? 2592000 : amt >= 50 ? 604800 : 86400);
+      rows.push({
+        id: `ev_${ev.id || dedupeKey}`,
+        channel,
+        channelLabel: channel === 'mpesa' ? 'M-Pesa' : channel === 'ecocash' ? 'EcoCash' : '16-Digit OTT',
+        reference: ref,
+        customer: String(ev.guestName || `${ev.firstName || ''} ${ev.lastName || ''}`.trim() || 'Hotspot Subscriber'),
+        phone: String(ev.guestPhone || ev.phone || '—'),
+        planName: String(ev.planName || (amt >= 180 ? 'Monthly Pass' : amt >= 50 ? 'Weekly Pass' : 'Daily Pass')),
+        amount: amt > 0 ? amt : 10,
+        siteName: String(ev.siteName || ev.routerName || 'T-Connect Hotspot'),
+        vertical: String(ev.scope || ev.vertical || 'hotspot').toLowerCase(),
+        mac: String(ev.mac || ev.clientMac || 'AUTO').toUpperCase(),
+        timestamp: String(ev.capturedAt || new Date().toISOString()),
+        status: 'SETTLED',
+        durationHours: Math.max(1, Math.round(durSec / 3600))
+      });
+    });
+
+    // 2. Completed PayLesotho / M-Pesa / EcoCash / OTT transactions
+    transactions.forEach((tx) => {
+      if (tx.status !== 'completed') return;
+      const rawProv = String(tx.channel || tx.provider || '').toLowerCase();
+      const channel: 'mpesa' | 'ecocash' | 'ott' = rawProv.includes('mpesa')
+        ? 'mpesa'
+        : rawProv.includes('ecocash')
+          ? 'ecocash'
+          : 'ott';
+      const ref = String(tx.transactionRef || tx.ottVoucherPin || tx.voucherCodeIssued || tx.id);
+      if (rows.some((r) => r.reference === ref)) return;
+      rows.push({
+        id: `tx_${tx.id}`,
+        channel,
+        channelLabel: channel === 'mpesa' ? 'M-Pesa' : channel === 'ecocash' ? 'EcoCash' : '16-Digit OTT',
+        reference: ref,
+        customer: String(tx.customerName || 'Mobile Subscriber'),
+        phone: String(tx.phoneNumber || '—'),
+        planName: String(tx.planName || 'Hotspot Pass'),
+        amount: Number(tx.amount) || 0,
+        siteName: String(tx.siteName || 'T-Connect Hotspot'),
+        vertical: String(tx.vertical || 'hotspot').toLowerCase(),
+        mac: 'WALLET',
+        timestamp: String(tx.completedAt || tx.createdAt || new Date().toISOString()),
+        status: 'SETTLED',
+        durationHours: 24
+      });
+    });
+
+    // 3. Redeemed 16-Digit OTT vouchers from storage
+    filteredVouchers.forEach((v) => {
+      if (rows.some((r) => r.reference.replace(/\D/g, '') === v.code.replace(/\D/g, '') && v.code.replace(/\D/g, '').length >= 8)) {
+        return;
+      }
+      rows.push({
+        id: `vch_${v.id}`,
+        channel: 'ott',
+        channelLabel: '16-Digit OTT',
+        reference: v.code,
+        customer: v.associatedDevices[0]?.hostname || 'OTT Subscriber',
+        phone: '—',
+        planName: v.planName,
+        amount: Number(v.price) || 0,
+        siteName: v.siteName || 'T-Connect Hotspot',
+        vertical: String(plans.find((p) => p.id === v.planId)?.vertical || 'hotspot'),
+        mac: v.associatedDevices[0]?.mac || 'UNBOUND',
+        timestamp: v.firstUsedAt || v.generatedAt,
+        status: v.status.toUpperCase(),
+        durationHours: Math.max(1, Math.round((v.durationSeconds || 86400) / 3600)),
+        voucherId: v.id
+      });
+    });
+
+    return rows
+      .filter((r) => selectedVertical === 'all' || r.vertical === selectedVertical)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [liveGuestEvents, transactions, filteredVouchers, plans, selectedVertical]);
+
+  const billingChannelSummary = React.useMemo(() => {
+    const mpesaRows = unifiedPaymentLedger.filter((r) => r.channel === 'mpesa');
+    const ecocashRows = unifiedPaymentLedger.filter((r) => r.channel === 'ecocash');
+    const ottRows = unifiedPaymentLedger.filter((r) => r.channel === 'ott');
+    const mpesaRev = mpesaRows.reduce((s, r) => s + r.amount, 0);
+    const ecocashRev = ecocashRows.reduce((s, r) => s + r.amount, 0);
+    const ottRev = ottRows.reduce((s, r) => s + r.amount, 0);
+    return {
+      totalMobileRevenue: mpesaRev + ecocashRev + ottRev,
+      totalCount: unifiedPaymentLedger.length,
+      mpesaRev,
+      mpesaCount: mpesaRows.length,
+      ecocashRev,
+      ecocashCount: ecocashRows.length,
+      ottRev,
+      ottCount: ottRows.length
+    };
+  }, [unifiedPaymentLedger]);
+
+  const displayedLedgerRows = React.useMemo(() => {
+    return unifiedPaymentLedger.filter((r) => {
+      const matchesChannel = ledgerChannelFilter === 'all' || r.channel === ledgerChannelFilter;
+      const q = voucherSearch.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        r.reference.toLowerCase().includes(q) ||
+        r.customer.toLowerCase().includes(q) ||
+        r.phone.toLowerCase().includes(q) ||
+        r.planName.toLowerCase().includes(q) ||
+        r.siteName.toLowerCase().includes(q);
+      return matchesChannel && matchesSearch;
+    });
+  }, [unifiedPaymentLedger, ledgerChannelFilter, voucherSearch]);
 
   // 16-Digit OTT Voucher Live Inspector State
   const [ottPin, setOttPin] = useState('');
@@ -252,7 +345,6 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     setPlanDurationHours(24);
     setPlanDownMbps(10);
     setPlanUpMbps(5);
-    setPlanDeviceLimit(0);
     setPlanDataCapGb('');
     setShowCreatePlanModal(true);
   };
@@ -265,7 +357,6 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
     setPlanDurationHours(Math.max(1, Math.round(plan.durationSeconds / 3600)));
     setPlanDownMbps(plan.downloadSpeedMbps);
     setPlanUpMbps(plan.uploadSpeedMbps);
-    setPlanDeviceLimit(plan.deviceLimit ?? 0);
     setPlanDataCapGb(plan.dataCapMb ? Math.round(plan.dataCapMb / 1024) : '');
     setShowCreatePlanModal(true);
   };
@@ -273,14 +364,14 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
   const handleInlinePriceCommit = (plan: HotspotPlan, rawVal: string) => {
     const parsed = Number(rawVal);
     if (isNaN(parsed) || parsed < 0) return;
-    storage.updatePlan(plan.id, { price: parsed });
+    storage.updatePlan(plan.id, { price: parsed, deviceLimit: 0 });
     setInlinePriceEdits((prev) => {
       const next = { ...prev };
       delete next[plan.id];
       return next;
     });
     setSyncNotice(
-      `Synced ${plan.name} (${currency}${parsed.toFixed(2)}) in real time across OTT Denomination Policy, Captive Portal Builder, Guest Splash Page & Live Routers!`
+      `Synced ${plan.name} (${currency}${parsed.toFixed(2)}) automatically across all 5 hotspot scopes, OTT Denominations, Captive Portal & Live Routers!`
     );
     setTimeout(() => setSyncNotice(null), 5000);
   };
@@ -299,7 +390,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
       dataCapMb: planDataCapGb ? Number(planDataCapGb) * 1024 : null,
       downloadSpeedMbps: planDownMbps,
       uploadSpeedMbps: planUpMbps,
-      deviceLimit: Math.max(0, Number(planDeviceLimit) || 0),
+      deviceLimit: 0,
       burstDownloadMbps: planDownMbps * 2,
       burstUploadMbps: planUpMbps * 2,
     };
@@ -407,9 +498,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                   <span className="uppercase">{plan.vertical}</span>
                   <div className="flex items-center gap-1.5">
                     <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-[10px] font-bold">
-                      {!plan.deviceLimit || plan.deviceLimit <= 0 || plan.deviceLimit >= 1000
-                        ? 'Unlimited Devices'
-                        : `${plan.deviceLimit} Devices`}
+                      Unlimited Devices
                     </span>
                     <button
                       type="button"
@@ -703,11 +792,7 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                     {plan.name} ({plan.durationLabel})
                   </span>
                   <span className="text-[10px] text-slate-400">
-                    {plan.downloadSpeedMbps}M/{plan.uploadSpeedMbps}M &middot;{' '}
-                    {!plan.deviceLimit || plan.deviceLimit <= 0 || plan.deviceLimit >= 1000
-                      ? 'Unlimited devices'
-                      : `${plan.deviceLimit} devices`}{' '}
-                    &middot; Exact {currency}{plan.price.toFixed(2)} OTT PIN
+                    {plan.downloadSpeedMbps}M/{plan.uploadSpeedMbps}M &middot; Unlimited devices &middot; Exact {currency}{plan.price.toFixed(2)} OTT PIN
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -729,15 +814,91 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
         </div>
       </div>
 
-      {/* 16-Digit OTT Voucher Ledger Table */}
+      {/* Mobile Revenue KPI Strip (Mirrors Fleet Overview: Total Mobile Revenue, M-Pesa, EcoCash, 16-Digit OTT) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-[#0f1422] border border-emerald-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between text-emerald-300 text-[11px] font-mono uppercase">
+            <span>Mobile Revenue</span>
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-2xl font-black text-emerald-400 font-mono mt-1.5 tabular-nums">
+            {currency}{billingChannelSummary.totalMobileRevenue.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {billingChannelSummary.totalCount} total paid settlements
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-red-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between text-red-300 text-[11px] font-mono uppercase">
+            <span>M-Pesa (62915)</span>
+            <Smartphone className="w-4 h-4 text-red-400" />
+          </div>
+          <div className="text-2xl font-black text-red-400 font-mono mt-1.5 tabular-nums">
+            {currency}{billingChannelSummary.mpesaRev.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {billingChannelSummary.mpesaCount} M-Pesa settlements
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-blue-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between text-blue-300 text-[11px] font-mono uppercase">
+            <span>EcoCash (63165430)</span>
+            <Smartphone className="w-4 h-4 text-blue-400" />
+          </div>
+          <div className="text-2xl font-black text-blue-400 font-mono mt-1.5 tabular-nums">
+            {currency}{billingChannelSummary.ecocashRev.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {billingChannelSummary.ecocashCount} EcoCash settlements
+          </div>
+        </div>
+
+        <div className="bg-[#0f1422] border border-amber-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between text-amber-300 text-[11px] font-mono uppercase">
+            <span>16-Digit OTT Vouchers</span>
+            <Ticket className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-2xl font-black text-amber-400 font-mono mt-1.5 tabular-nums">
+            {currency}{billingChannelSummary.ottRev.toFixed(2)}
+          </div>
+          <div className="text-[11px] text-slate-400 font-mono mt-1">
+            {billingChannelSummary.ottCount} OTT PIN redemptions
+          </div>
+        </div>
+      </div>
+
+      {/* Unified Mobile Money (M-Pesa & EcoCash) & 16-Digit OTT Voucher Ledger Table */}
       <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-sm font-extrabold text-white">16-Digit OTT Voucher Redemptions Ledger</h3>
-            <p className="text-xs text-slate-400 font-mono">Live audit trail of official OTT Lesotho voucher PINs redeemed on Starlink hotspots</p>
+            <h3 className="text-sm font-extrabold text-white">M-Pesa, EcoCash &amp; 16-Digit OTT Voucher Ledger</h3>
+            <p className="text-xs text-slate-400 font-mono">Live audit trail of M-Pesa, EcoCash, and official 16-digit OTT Voucher settlements across all Lesotho hotspots</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-[#161d31] border border-[#232d42] rounded-lg p-0.5 text-[11px] font-mono">
+              {([
+                { id: 'all', label: `All (${billingChannelSummary.totalCount})` },
+                { id: 'mpesa', label: `M-Pesa (${billingChannelSummary.mpesaCount})` },
+                { id: 'ecocash', label: `EcoCash (${billingChannelSummary.ecocashCount})` },
+                { id: 'ott', label: `OTT (${billingChannelSummary.ottCount})` }
+              ] as const).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setLedgerChannelFilter(tab.id)}
+                  className={`px-2.5 py-1 rounded-md font-bold transition-colors cursor-pointer ${
+                    ledgerChannelFilter === tab.id
+                      ? 'bg-[#f05e17] text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={handleExportOttLedger}
               className="px-3 py-1 bg-[#161d31] hover:bg-[#1e263b] text-slate-200 border border-[#232d42] rounded-lg text-xs font-mono flex items-center gap-1.5 cursor-pointer"
@@ -745,146 +906,127 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               <Download className="w-3.5 h-3.5 text-slate-400" />
               <span>Export CSV</span>
             </button>
-            <div className="relative w-56">
+            <div className="relative w-52">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={voucherSearch}
                 onChange={(e) => setVoucherSearch(e.target.value)}
-                placeholder="Search OTT PIN or plan..."
+                placeholder="Search phone, PIN, ref..."
                 className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
               />
             </div>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
           <table className="w-full text-left text-xs font-mono">
-            <thead>
+            <thead className="sticky top-0 bg-[#0f1422] z-10">
               <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#232d42] pb-2">
-                <th className="py-2.5">VOUCHER CODE</th>
+                <th className="py-2.5">CHANNEL</th>
+                <th className="py-2.5">REFERENCE / OTT PIN</th>
+                <th className="py-2.5">SUBSCRIBER &amp; SITE</th>
                 <th className="py-2.5">PLAN ENTITLEMENT</th>
-                <th className="py-2.5">PRICE</th>
-                <th className="py-2.5">REGISTERED DEVICES</th>
+                <th className="py-2.5">AMOUNT</th>
                 <th className="py-2.5">STATUS</th>
                 <th className="py-2.5 text-right">ACTION</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b233a] text-slate-300">
-              {filteredVouchers.length > 0 ? (
-                filteredVouchers.map((voucher) => (
-                  <tr key={voucher.id}>
+              {displayedLedgerRows.length > 0 ? (
+                displayedLedgerRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-[#121829]/70">
+                    <td className="py-3">
+                      <span
+                        className={`text-[10px] font-extrabold px-2 py-0.5 rounded border ${
+                          row.channel === 'mpesa'
+                            ? 'bg-red-500/15 text-red-300 border-red-500/40'
+                            : row.channel === 'ecocash'
+                              ? 'bg-blue-500/15 text-blue-300 border-blue-500/40'
+                              : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                        }`}
+                      >
+                        {row.channelLabel}
+                      </span>
+                    </td>
                     <td className="py-3 font-bold text-white tracking-wider">
                       <div className="flex items-center gap-1.5">
-                        <span>{voucher.code}</span>
+                        <span className="truncate max-w-[180px]" title={row.reference}>{row.reference}</span>
                         <button
                           type="button"
                           onClick={() => {
-                            void copyToClipboard(voucher.code);
-                            setCopiedVoucherId(voucher.id);
+                            void copyToClipboard(row.reference);
+                            setCopiedVoucherId(row.id);
                             setTimeout(() => setCopiedVoucherId(null), 1800);
                           }}
                           className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#1e263b] transition-colors cursor-pointer"
-                          title="Copy Voucher Code"
+                          title="Copy Reference / PIN"
                         >
-                          {copiedVoucherId === voucher.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedVoucherId === row.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
+                      </div>
+                      <div className="text-[10px] text-slate-500">{row.timestamp.replace('T', ' ').slice(0, 19)}</div>
+                    </td>
+                    <td className="py-3">
+                      <div className="text-slate-200 font-bold">{row.customer}</div>
+                      <div className="text-[10px] text-slate-400">
+                        {row.phone} &middot; {row.siteName}
                       </div>
                     </td>
                     <td className="py-3">
-                      <div>{voucher.planName}</div>
-                      <div className="text-[10px] text-slate-500">{voucher.durationSeconds / 3600} Hours Validity</div>
-                      {voucher.status === 'used' && voucher.expiresAt && (
-                        <div className="text-[10px] text-cyan-400 font-bold mt-0.5">
-                          {(() => {
-                            const sec = Math.max(0, Math.floor((new Date(voucher.expiresAt).getTime() - Date.now()) / 1000));
-                            if (sec <= 0) return <span className="text-rose-400 font-bold">Package Expired</span>;
-                            const h = Math.floor(sec / 3600);
-                            const m = Math.floor((sec % 3600) / 60);
-                            return `${h}h ${m}m left on package`;
-                          })()}
-                        </div>
-                      )}
+                      <div>{row.planName}</div>
+                      <div className="text-[10px] text-slate-500">{row.durationHours}h Validity &middot; Unlimited Devices</div>
                     </td>
-                    <td className="py-3 text-emerald-400 font-bold">
-                      {currency}{voucher.price.toFixed(2)}
+                    <td className="py-3 text-emerald-400 font-bold tabular-nums">
+                      {currency}{row.amount.toFixed(2)}
                     </td>
                     <td className="py-3">
-                      {voucher.associatedDevices.length === 0 ? (
-                        <span className="text-slate-500">None (Unlimited)</span>
-                      ) : (
-                        <div className="space-y-0.5">
-                          <span className="text-slate-200 font-bold">
-                            {voucher.associatedDevices.length} active device(s)
-                          </span>
-                          <div className="text-[10px] text-slate-400">
-                            {voucher.associatedDevices.map(d => d.mac).join(', ')}
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                        voucher.status === 'active'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : voucher.status === 'used'
-                          ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                          : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      }`}>
-                        {voucher.status.toUpperCase()}
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        {row.status}
                       </span>
                     </td>
                     <td className="py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOttPin(voucher.code.replace(/\D/g, ''));
-                          }}
-                          className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-emerald-400 hover:text-white cursor-pointer"
-                        >
-                          Inspect PIN
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextStatus = voucher.status === 'expired' ? 'active' : 'expired';
-                            storage.updateVoucher(voucher.id, { status: nextStatus });
-                          }}
-                          className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-amber-300 hover:text-white cursor-pointer"
-                          title={voucher.status === 'expired' ? 'Re-activate Voucher' : 'Revoke / Expire Voucher'}
-                        >
-                          {voucher.status === 'expired' ? 'Activate' : 'Revoke'}
-                        </button>
-                        {confirmDeleteVoucherId === voucher.id ? (
-                          <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                storage.deleteVoucher(voucher.id);
-                                setConfirmDeleteVoucherId(null);
-                              }}
-                              className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteVoucherId(null)}
-                              className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
+                        {row.channel === 'ott' && (
                           <button
                             type="button"
-                            onClick={() => setConfirmDeleteVoucherId(voucher.id)}
-                            className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
-                            title="Delete Voucher Record"
+                            onClick={() => setOttPin(row.reference.replace(/\D/g, ''))}
+                            className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-emerald-400 hover:text-white cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            Inspect PIN
                           </button>
+                        )}
+                        {row.voucherId && (
+                          confirmDeleteVoucherId === row.voucherId ? (
+                            <div className="flex items-center gap-1 bg-rose-950/80 border border-rose-500/50 rounded px-1.5 py-0.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  storage.deleteVoucher(row.voucherId!);
+                                  setConfirmDeleteVoucherId(null);
+                                }}
+                                className="text-[10px] font-bold text-rose-300 hover:text-white cursor-pointer"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteVoucherId(null)}
+                                className="text-[10px] text-slate-400 hover:text-white ml-1 cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteVoucherId(row.voucherId!)}
+                              className="p-1 text-rose-400 hover:text-white hover:bg-rose-500/20 rounded transition-colors cursor-pointer"
+                              title="Delete Voucher Record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )
                         )}
                       </div>
                     </td>
@@ -892,12 +1034,12 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-500">
+                  <td colSpan={7} className="py-8 text-center text-slate-500">
                     <div className="max-w-sm mx-auto space-y-2">
                       <Ticket className="w-6 h-6 mx-auto text-slate-600" />
-                      <p className="text-slate-400 font-medium">No 16-Digit OTT Vouchers Redeemed Yet</p>
+                      <p className="text-slate-400 font-medium">No M-Pesa, EcoCash or OTT Payments Recorded Yet</p>
                       <p className="text-[11px] text-slate-500">
-                        Official 16-digit OTT Lesotho Vouchers will appear here automatically as guests redeem them on captive portals across Lesotho.
+                        Live M-Pesa, EcoCash, and 16-digit OTT Voucher settlements will appear here automatically in real time.
                       </p>
                     </div>
                   </td>
@@ -1004,21 +1146,9 @@ export const PlansVouchersView: React.FC<PlansVouchersViewProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Device Limit (0 = Unlimited)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={planDeviceLimit}
-                    onChange={(e) => setPlanDeviceLimit(Math.max(0, Number(e.target.value)))}
-                    placeholder="0 = Unlimited Devices"
-                    className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                  />
-                  <span className="text-[10px] text-emerald-400 mt-1 block">
-                    {!planDeviceLimit || planDeviceLimit <= 0
-                      ? 'Unlimited devices (National Rollout)'
-                      : `${planDeviceLimit} concurrent devices allowed`}
-                  </span>
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex flex-col justify-center">
+                  <span className="text-[10px] uppercase tracking-wider text-emerald-300 font-bold">Public Rollout Policy</span>
+                  <span className="text-xs font-extrabold text-white mt-0.5">Unlimited Devices (No Limit)</span>
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Data Cap (GB, blank = unlimited)</label>

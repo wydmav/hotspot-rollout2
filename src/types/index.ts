@@ -66,6 +66,7 @@ export interface RouterDevice {
   activeSessions: number;
   accessMode?: RouterAccessMode;
   freeModeEnabled?: boolean;
+  modeOverride?: boolean;
   freeDurationMinutes?: number;
   freeRateLimit?: string;
   globalDownloadMbps?: number;

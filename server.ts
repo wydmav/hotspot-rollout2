@@ -504,6 +504,57 @@ function normalizeScopeTermsText(text?: string): string {
 const portalConfigFilePath = path.resolve(persistentDataDir, 'portal-configs.json');
 const legacyPortalConfigFilePath = path.resolve(__dirname, 'public/portal-configs.json');
 
+function normalizePlanTierKey(plan: any): 'daily' | 'weekly' | 'monthly' | null {
+  const dur = Number(plan?.durationSeconds) || 0;
+  const name = String(plan?.name || '').toLowerCase();
+  if (name.includes('daily') || (dur > 0 && dur <= 86400)) return 'daily';
+  if (name.includes('weekly') || (dur > 86400 && dur <= 604800)) return 'weekly';
+  if (name.includes('monthly') || dur > 604800) return 'monthly';
+  return null;
+}
+
+function syncPlanPricesAcrossAllScopeConfigs(configs: Record<string, any>, sourcePlans?: any[]): Record<string, any> {
+  if (!configs || typeof configs !== 'object') return configs;
+  const masterPlans =
+    Array.isArray(sourcePlans) && sourcePlans.length > 0
+      ? sourcePlans
+      : (Array.isArray(configs.hotspot?.plans) ? configs.hotspot.plans : []);
+  const tierMap = new Map<string, any>();
+  masterPlans.forEach((p: any) => {
+    const tier = normalizePlanTierKey(p);
+    if (tier && !tierMap.has(tier)) {
+      tierMap.set(tier, p);
+    }
+  });
+  const allScopes = Array.from(new Set([...Object.keys(configs), 'hotspot', 'community', 'village', 'park', 'bus', 'stadium']));
+  allScopes.forEach((scopeKey) => {
+    const sc = configs[scopeKey];
+    if (!sc || typeof sc !== 'object') return;
+    if (Array.isArray(sc.plans) && sc.plans.length > 0) {
+      sc.plans = sc.plans.map((p: any) => {
+        const tier = normalizePlanTierKey(p);
+        const master = tier ? tierMap.get(tier) : null;
+        const resolvedPrice = master && Number.isFinite(Number(master.price))
+          ? Number(master.price)
+          : (tier === 'monthly' && Number(p.price) === 280 ? 220 : Number(p.price));
+        return {
+          ...p,
+          name: master?.name || p.name,
+          price: resolvedPrice,
+          durationLabel: master?.durationLabel || p.durationLabel,
+          durationSeconds: Number(master?.durationSeconds || p.durationSeconds || 86400),
+          downloadSpeedMbps: Number(master?.downloadSpeedMbps || p.downloadSpeedMbps || 10),
+          uploadSpeedMbps: Number(master?.uploadSpeedMbps || p.uploadSpeedMbps || 5),
+          deviceLimit: 0
+        };
+      });
+    }
+  });
+  return configs;
+}
+
+const portalPricesMigratedFlagPath = path.resolve(persistentDataDir, '.portal-prices-migrated-v2');
+
 function loadSavedPortalConfigs(): Record<string, any> {
   try {
     let parsed: Record<string, any> | null = null;
@@ -513,11 +564,43 @@ function loadSavedPortalConfigs(): Record<string, any> {
       parsed = JSON.parse(fs.readFileSync(legacyPortalConfigFilePath, 'utf-8'));
     }
     if (parsed && typeof parsed === 'object') {
+      const needsOneTimePriceMigration = !fs.existsSync(portalPricesMigratedFlagPath);
+      let mutated = false;
+
       Object.keys(parsed).forEach((k) => {
         if (parsed![k] && typeof parsed![k] === 'object') {
           parsed![k].termsText = normalizeScopeTermsText(parsed![k].termsText);
+          if (Array.isArray(parsed![k].plans)) {
+            parsed![k].plans = parsed![k].plans.map((p: any) => {
+              const tier = normalizePlanTierKey(p);
+              let nextPrice = Number(p.price);
+              if (needsOneTimePriceMigration && tier === 'monthly' && nextPrice === 280) {
+                nextPrice = 220;
+                mutated = true;
+              }
+              if (Number(p.deviceLimit) !== 0) {
+                mutated = true;
+              }
+              return {
+                ...p,
+                price: nextPrice,
+                deviceLimit: 0
+              };
+            });
+          }
         }
       });
+
+      syncPlanPricesAcrossAllScopeConfigs(parsed);
+
+      if (needsOneTimePriceMigration || mutated) {
+        try {
+          savePortalConfigsToDisk(parsed);
+          if (needsOneTimePriceMigration) {
+            fs.writeFileSync(portalPricesMigratedFlagPath, new Date().toISOString(), 'utf-8');
+          }
+        } catch {}
+      }
       return parsed;
     }
   } catch {}
@@ -530,6 +613,12 @@ function savePortalConfigsToDisk(configs: Record<string, any>) {
       Object.keys(configs).forEach((k) => {
         if (configs[k] && typeof configs[k] === 'object') {
           configs[k].termsText = normalizeScopeTermsText(configs[k].termsText);
+          if (Array.isArray(configs[k].plans)) {
+            configs[k].plans = configs[k].plans.map((p: any) => ({
+              ...p,
+              deviceLimit: 0
+            }));
+          }
         }
       });
     }
@@ -560,10 +649,17 @@ function resolveControllerBaseUrl(host?: string, protocol?: string): string {
   return `${cleanProto}://${rawHost}`;
 }
 
-function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot'): string {
+function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot', routerId?: string): string {
   const allConfigs = loadSavedPortalConfigs();
   const cfg = allConfigs[scope] || allConfigs['hotspot'] || {};
   const baseUrl = resolveControllerBaseUrl(host, protocol);
+
+  const matchedRouter = routerId
+    ? monitoredRouters.get(routerId) ||
+      Array.from(monitoredRouters.values()).find(
+        (r) => r.id === routerId || String(r.name || '').toLowerCase() === String(routerId).toLowerCase()
+      )
+    : undefined;
 
   const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
   const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'HOTSPOT';
@@ -572,7 +668,10 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const freeButtonColor = cfg.freeButtonColor || accentColor || '#f05e17';
   const freeButtonTextColor = cfg.freeButtonTextColor || '#ffffff';
   const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 25;
-  const allowFreeAccess = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
+  const scopeAllowFree = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
+  const allowFreeAccess = matchedRouter && matchedRouter.accessMode
+    ? matchedRouter.accessMode !== 'PAID_ONLY'
+    : scopeAllowFree;
   const freeButtonX = typeof cfg.freeButtonX === 'number' ? cfg.freeButtonX : 50;
   const freeButtonY = typeof cfg.freeButtonY === 'number' ? cfg.freeButtonY : 88;
   const freeButtonText = cfg.freeButtonText ? String(cfg.freeButtonText).trim() : 'Login for free';
@@ -583,14 +682,15 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const bgImage = resolveServerWalledGardenMediaUrl(rawBgImage, baseUrl, brandTitle, welcomeHeadline);
 
   const defaultPlans = [
-    { id: 'hs_1d', name: 'Daily Unlimited', price: 10, durationLabel: 'Daily Unlimited', durationSeconds: 86400, downloadSpeedMbps: 20, enabled: true },
-    { id: 'hs_7d', name: 'Weekly Pass', price: 60, durationLabel: 'Weekly Pass', durationSeconds: 604800, downloadSpeedMbps: 25, enabled: true, isPopular: true },
-    { id: 'hs_30d', name: 'Monthly Pass', price: 280, durationLabel: 'Monthly Pass', durationSeconds: 2592000, downloadSpeedMbps: 35, enabled: true }
+    { id: 'hs_1d', name: 'Daily Unlimited', price: 10, durationLabel: 'Daily Unlimited', durationSeconds: 86400, downloadSpeedMbps: 20, deviceLimit: 0, enabled: true },
+    { id: 'hs_7d', name: 'Weekly Pass', price: 60, durationLabel: 'Weekly Pass', durationSeconds: 604800, downloadSpeedMbps: 25, deviceLimit: 0, enabled: true, isPopular: true },
+    { id: 'hs_30d', name: 'Monthly Pass', price: 220, durationLabel: 'Monthly Pass', durationSeconds: 2592000, downloadSpeedMbps: 35, deviceLimit: 0, enabled: true }
   ];
   const plans = Array.isArray(cfg.plans) && cfg.plans.length > 0
     ? cfg.plans.filter((p: any) => p.enabled !== false).map((p: any) => ({
         ...p,
-        durationSeconds: Number(p.durationSeconds) || (Number(p.price) >= 200 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400)
+        deviceLimit: 0,
+        durationSeconds: Number(p.durationSeconds) || (Number(p.price) >= 180 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400)
       }))
     : defaultPlans;
 
@@ -1746,13 +1846,19 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 </html>`;
 }
 
-// Serve compiled On-Router Splash Page HTML directly to MikroTik (/tool fetch) — supports both query (?scope=) and question-mark-free path (/router-login/hotspot.html)
-app.get(['/api/portal/router-login.html', '/api/portal/router-login/:scopeFile'], (req: Request, res: Response) => {
+// Serve compiled On-Router Splash Page HTML directly to MikroTik (/tool fetch) — supports query (?scope=&routerId=) and question-mark-free paths (/router-login/:scope.html and /router-login/:scope/:routerId.html)
+app.get(['/api/portal/router-login.html', '/api/portal/router-login/:scopeFile', '/api/portal/router-login/:scope/:routerFile'], (req: Request, res: Response) => {
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-  const rawParam = String(req.params.scopeFile || '').replace(/\.html$/i, '').trim();
-  const scope = (req.query.scope as string) || rawParam || 'hotspot';
-  const html = compileRouterSplashHtml(host, protocol, scope);
+  const rawScope = req.params.scope
+    ? String(req.params.scope).replace(/\.html$/i, '').trim()
+    : String(req.params.scopeFile || '').replace(/\.html$/i, '').trim();
+  const scope = (req.query.scope as string) || rawScope || 'hotspot';
+  const rawRouterParam = req.params.routerFile
+    ? String(req.params.routerFile).replace(/\.html$/i, '').trim()
+    : '';
+  const routerId = (req.query.routerId as string) || rawRouterParam || undefined;
+  const html = compileRouterSplashHtml(host, protocol, scope, routerId);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(html);
 });
@@ -2458,18 +2564,20 @@ app.post('/api/portal/video-ads', (req: Request, res: Response) => {
 const DEFAULT_SUPABASE_URL = 'https://uxglqtcuedelmyhvgghw.supabase.co';
 const DEFAULT_OPERATOR_ID = '00000000-0000-0000-0000-000000000001';
 const DEFAULT_PARTNER_GROUP_NAMES = [
-  'Alliance Insurance Lesotho',
-  'Vodacom Lesotho Foundation',
-  'Econet Telecom Lesotho',
-  'Standard Lesotho Bank',
-  'Maluti Mountain Brewery',
-  'First National Bank Lesotho',
-  'Metropolitan Lesotho',
-  'LNDC Lesotho',
-  'T-Connect Internal Fleet',
-  'Lab / Test (MIKROTIK-TC)',
-  'Quarantine (Holding Group)'
+  'T-Connect Internal Fleet'
 ];
+const LEGACY_REMOVED_PARTNER_NAMES = new Set([
+  'alliance insurance lesotho',
+  'vodacom lesotho foundation',
+  'econet telecom lesotho',
+  'standard lesotho bank',
+  'maluti mountain brewery',
+  'first national bank lesotho',
+  'metropolitan lesotho',
+  'lndc lesotho',
+  'lab / test (mikrotik-tc)',
+  'quarantine (holding group)'
+]);
 
 function normalizeServerSupabaseUrl(rawUrl?: string): string {
   const trimmed = String(rawUrl || DEFAULT_SUPABASE_URL).trim();
@@ -2643,6 +2751,25 @@ app.post('/api/supabase/sync-all', async (req: Request, res: Response) => {
 app.get('/api/partner-groups', (_req: Request, res: Response) => {
   if (!Array.isArray((serverStore as any).partnerGroups)) {
     (serverStore as any).partnerGroups = [...DEFAULT_PARTNER_GROUP_NAMES];
+    (serverStore as any).partnerGroupsCleanedV2 = true;
+    saveServerPortalStore(serverStore);
+  } else if (!(serverStore as any).partnerGroupsCleanedV2) {
+    // One-time cleanup of old hardcoded Lesotho presets unless actively assigned to an adopted router
+    const activeRouterPartners = new Set(
+      Array.from(monitoredRouters.values())
+        .map((r) => String(r.partnerName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const cleaned = ((serverStore as any).partnerGroups as string[]).filter((n) => {
+      const lower = String(n || '').trim().toLowerCase();
+      if (!lower) return false;
+      if (LEGACY_REMOVED_PARTNER_NAMES.has(lower) && !activeRouterPartners.has(lower)) {
+        return false;
+      }
+      return true;
+    });
+    (serverStore as any).partnerGroups = cleaned.length > 0 ? cleaned : [...DEFAULT_PARTNER_GROUP_NAMES];
+    (serverStore as any).partnerGroupsCleanedV2 = true;
     saveServerPortalStore(serverStore);
   }
   res.json({
@@ -2655,6 +2782,7 @@ app.post('/api/partner-groups', async (req: Request, res: Response) => {
   const { name, group, partnerGroups } = req.body || {};
   if (Array.isArray(partnerGroups)) {
     (serverStore as any).partnerGroups = partnerGroups.map((n: any) => String(n || '').trim()).filter(Boolean);
+    (serverStore as any).partnerGroupsCleanedV2 = true;
     saveServerPortalStore(serverStore);
     return res.json({
       success: true,
@@ -3443,7 +3571,7 @@ async function verify16DigitOttVoucher(
   const primaryAmt = expectedAmount;
   const amountCandidates = strictExact
     ? [String(primaryAmt)]
-    : Array.from(new Set([primaryAmt, 10, 5, 15, 20, 30, 50, 60, 100, 280])).map(String);
+    : Array.from(new Set([primaryAmt, 10, 5, 15, 20, 30, 50, 60, 100, 220])).map(String);
 
   let lastUpstreamError = '';
   let saw401Only = true;
@@ -5145,7 +5273,7 @@ app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
     planId = 'tc_free_reception_24h',
     planName = 'T-Connect Reception Wi-Fi Voucher (24h · 3 Devices · Uncapped)',
     durationSeconds = 86400,
-    deviceLimit = 3,
+    deviceLimit = 0,
     venueName = 'Clubhouse & Reception'
   } = req.body || {};
 
@@ -5178,7 +5306,7 @@ app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
       price: 0,
       currency: 'M',
       durationSeconds: Math.max(3600, Number(durationSeconds) || 86400),
-      deviceLimit: Math.max(1, Number(deviceLimit) || 3),
+      deviceLimit: 0,
       speedLimit: 'Uncapped',
       venueName,
       status: 'active',
@@ -5196,12 +5324,11 @@ app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
     count: generatedBatch.length,
     vouchers: generatedBatch,
     allVouchersCount: serverStore.vouchers.length,
-    message: `Generated ${generatedBatch.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Up to 3 Devices · Uncapped Speed).`
+    message: `Generated ${generatedBatch.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Unlimited Devices · Uncapped Speed).`
   });
 });
 
 // Verify & redeem a T-Connect Free Mode Reception Voucher (TC-XXXXX where XXXXX is 5 numeric digits)
-// Enforces up to 3 devices per voucher, 24-hour validity from first login, and uncapped speed.
 app.post('/api/vouchers/redeem-tconnect', (req: Request, res: Response) => {
   const {
     code,
@@ -5261,7 +5388,7 @@ app.post('/api/vouchers/redeem-tconnect', (req: Request, res: Response) => {
   }
 
   const voucherDurationSec = Math.max(3600, Number(voucher.durationSeconds) || Number(durationSeconds) || 86400);
-  const maxDevices = Math.max(1, Number(voucher.deviceLimit) || 3);
+  const maxDevices = 0;
 
   // Check 24-hour expiration from firstUsedAt
   if (voucher.firstUsedAt) {
@@ -6272,9 +6399,9 @@ app.delete('/api/portal/vouchers/:id', (req: Request, res: Response) => {
 
 app.get('/api/portal/config', (_req: Request, res: Response) => {
   try {
-    if (fs.existsSync(portalConfigFilePath)) {
-      const raw = fs.readFileSync(portalConfigFilePath, 'utf-8');
-      return res.json({ success: true, configs: JSON.parse(raw) });
+    const normalized = loadSavedPortalConfigs();
+    if (normalized && Object.keys(normalized).length > 0) {
+      return res.json({ success: true, configs: normalized });
     }
     res.json({ success: true, configs: null });
   } catch (err: any) {
@@ -6284,16 +6411,28 @@ app.get('/api/portal/config', (_req: Request, res: Response) => {
 
 app.post('/api/portal/config', (req: Request, res: Response) => {
   try {
-    const { scope, config, configs, applyToAllRouters } = req.body || {};
+    const {
+      scope,
+      config,
+      configs,
+      applyToAllRouters,
+      syncPlansAcrossAllScopes,
+      syncAccessModeAllScopes,
+      respectOverrides = true
+    } = req.body || {};
     const host = req.get('host') || '169.58.98.92:3000';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
 
     let existing: Record<string, any> = loadSavedPortalConfigs();
     if (configs && typeof configs === 'object') {
-      existing = { ...existing, ...configs };
+      Object.keys(configs).forEach((k) => {
+        if (configs[k] && typeof configs[k] === 'object') {
+          existing[k] = { ...(existing[k] || {}), ...configs[k] };
+        }
+      });
     } else if (scope && config) {
-      existing[scope] = config;
+      existing[scope] = { ...(existing[scope] || {}), ...config };
     }
 
     const targetScope = String(scope || 'hotspot').toLowerCase();
@@ -6310,7 +6449,12 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
         activeCfg.globalBurstDownloadMbps ?? 30
       );
 
-    if (applyToAllRouters) {
+    // Always synchronize updated plan prices across all 5 scopes when plans are edited or syncPlansAcrossAllScopes is set
+    if (syncPlansAcrossAllScopes || (Array.isArray(activeCfg.plans) && activeCfg.plans.length > 0)) {
+      syncPlanPricesAcrossAllScopeConfigs(existing, activeCfg.plans);
+    }
+
+    if (applyToAllRouters && syncAccessModeAllScopes) {
       Object.keys(existing).forEach((k) => {
         if (existing[k] && typeof existing[k] === 'object') {
           if (typeof activeCfg.allowFreeAccess === 'boolean') {
@@ -6339,11 +6483,24 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       dhcpRange
     );
 
+    const isSameScope = (a: string, b: string) =>
+      a === b || (a === 'community' && b === 'village') || (a === 'village' && b === 'community');
+
+    let syncedCount = 0;
     for (const router of monitoredRouters.values()) {
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
-      if (applyToAllRouters || !scope || rScope === targetScope) {
+      const shouldSyncRouter = Boolean(applyToAllRouters || syncPlansAcrossAllScopes || !scope || isSameScope(rScope, targetScope));
+      if (shouldSyncRouter) {
         const scopedCfg = existing[rScope] || activeCfg;
-        const routerAllowFree = scopedCfg?.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : allowFree;
+        // Preserve each router's individual mode when modeOverride is true or when only syncing plans across all scopes
+        const hasOverride = Boolean((router as any).modeOverride);
+        const keepRouterMode =
+          (respectOverrides && hasOverride) ||
+          (syncPlansAcrossAllScopes && !syncAccessModeAllScopes && Boolean(router.accessMode)) ||
+          (!isSameScope(rScope, targetScope) && !syncAccessModeAllScopes && Boolean(router.accessMode));
+        const routerAllowFree = keepRouterMode
+          ? router.accessMode !== 'PAID_ONLY'
+          : (scopedCfg?.allowFreeAccess !== undefined ? Boolean(scopedCfg.allowFreeAccess) : allowFree);
         const routerSpeedCapsEnabled = scopedCfg?.speedCapsEnabled !== undefined ? Boolean(scopedCfg.speedCapsEnabled) : speedCapsEnabled;
         const routerDhcpRange = scopedCfg?.dhcpRange || dhcpRange;
         const routerRateLimit =
@@ -6357,20 +6514,28 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
           rScope,
           routerRateLimit,
           routerSpeedCapsEnabled,
-          routerDhcpRange
+          routerDhcpRange,
+          scopedCfg?.freeButtonColor || '#f05e17',
+          scopedCfg?.freeButtonTextColor || '#ffffff',
+          true,
+          Number(scopedCfg?.freeAccessDurationMinutes) || 1440,
+          router.id
         );
         const routerCmds = routerScript
           .split('\n')
           .map((line: string) => line.trim())
           .filter((line: string) => line.length > 0 && !line.startsWith('#'));
-        router.accessMode = routerAllowFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
-        router.freeModeEnabled = routerAllowFree;
+        if (!keepRouterMode) {
+          router.accessMode = routerAllowFree ? 'COMPLETELY_FREE' : 'PAID_ONLY';
+          router.freeModeEnabled = routerAllowFree;
+        }
         router.freeRateLimit = routerRateLimit;
         (router as any).globalRateLimit = routerRateLimit;
         (router as any).speedCapsEnabled = routerSpeedCapsEnabled;
         (router as any).dhcpRange = routerDhcpRange;
         router.pendingCommands = routerCmds;
         router.policyLastSyncedAt = new Date().toISOString();
+        syncedCount++;
       }
     }
     persistMonitoredRoutersToStore();
@@ -6382,7 +6547,7 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
       speedCapsEnabled,
       dhcpRange,
       globalRateLimit: effectiveRateLimit,
-      syncedRouters: monitoredRouters.size,
+      syncedRouters: syncedCount,
       cliScript: fullSyncScript
     });
   } catch (err: any) {
@@ -6391,28 +6556,53 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
 });
 
 // Safe One-Click Splash HTML & 24h Seamless Auto-Reconnect Sync Endpoint
-// Updates hotspot/login.html AND applies in-place 24-hour MAC-cookie/lease-time=1d rules without resetting bridges, WireGuard, or active guest connections
+// Updates hotspot/login.html per router (respecting each router's exact scope & Paid/Free mode) without resetting bridges, WireGuard, or active guest connections
 app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
   try {
     const host = req.get('host') || '169.58.98.92:3000';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
+    const savedConfigs = loadSavedPortalConfigs();
     const nowIso = new Date().toISOString();
     let queuedRouters = 0;
+    let freeRoutersCount = 0;
+    let paidRoutersCount = 0;
 
     for (const router of monitoredRouters.values()) {
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
-      const loginUrl = `${portalBaseUrl}/api/portal/router-login/${encodeURIComponent(rScope)}.html`;
+      const scopeCfg = savedConfigs[rScope] || savedConfigs.hotspot || {};
+      const isRouterFree = router.accessMode
+        ? router.accessMode !== 'PAID_ONLY'
+        : Boolean(scopeCfg.allowFreeAccess);
+      if (isRouterFree) freeRoutersCount++;
+      else paidRoutersCount++;
+
+      const loginUrl = `${portalBaseUrl}/api/portal/router-login/${encodeURIComponent(rScope)}/${encodeURIComponent(router.id)}.html`;
+      const aloginUrl = `${portalBaseUrl}/api/portal/router-alogin/${encodeURIComponent(rScope)}.html`;
+
       const safeSplashCmds = [
         `:do { /ip dhcp-server set [find interface="bridgeLocal"] lease-time=1d } on-error={}`,
         `:do { /ip hotspot profile set [find name="tc-hotspot-profile"] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`,
         `:do { /ip hotspot profile set [find default=yes] login-by=http-chap,http-pap,cookie,mac-cookie } on-error={}`,
         `:do { /ip hotspot set [find interface="bridgeLocal"] idle-timeout=none keepalive-timeout=2m } on-error={}`,
-        `:do { /ip hotspot user profile set [find name="tc-free-trial"] session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } on-error={}`,
-        `:do { /ip hotspot user profile set [find name="tc-speed-cap"] session-timeout=0s idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=30d } on-error={}`,
+        // Free Mode profile: 24h seamless session + 24h MAC-cookie auto-reconnect + 1,024 shared users
+        `:do { :if ([:len [/ip hotspot user profile find name="tc-free-trial"]] = 0) do={ /ip hotspot user profile add name="tc-free-trial" rate-limit="" transparent-proxy=no session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } else={ /ip hotspot user profile set [find name="tc-free-trial"] session-timeout=1d idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=1d } } on-error={}`,
+        // Paid Mode profile: session-timeout=0s so each voucher uses its exact subscribed duration (24h / 7d / 30d)
+        `:do { :if ([:len [/ip hotspot user profile find name="tc-speed-cap"]] = 0) do={ /ip hotspot user profile add name="tc-speed-cap" rate-limit="" transparent-proxy=no session-timeout=0s idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=30d } else={ /ip hotspot user profile set [find name="tc-speed-cap"] session-timeout=0s idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=30d } } on-error={}`,
         `:do { /ip hotspot user profile set [find default=yes] session-timeout=0s idle-timeout=none shared-users=1024 add-mac-cookie=yes mac-cookie-timeout=30d } on-error={}`,
-        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=hotspot/login.html check-certificate=no } on-error={}`,
-        `:do { /tool fetch url="${loginUrl}" mode=http dst-path=flash/hotspot/login.html check-certificate=no } on-error={}`
+        // Ensure Paid auth user ("test") always exists in-place without dropping active sessions
+        `:do { :if ([:len [/ip hotspot user find name="test"]] = 0) do={ /ip hotspot user add name="test" password="123" profile="tc-speed-cap" comment="T-Connect Verified Paid & OTT Voucher User" } else={ /ip hotspot user set [find name="test"] password="123" profile="tc-speed-cap" disabled=no } } on-error={}`,
+        // Align Free Mode auth user ("T-TRIAL") strictly to this router's own Paid vs Free mode
+        isRouterFree
+          ? `:do { :if ([:len [/ip hotspot user find name="T-TRIAL"]] = 0) do={ /ip hotspot user add name="T-TRIAL" password="123" profile="tc-free-trial" comment="T-Connect Free Opt-In Auth User (1d)" } else={ /ip hotspot user set [find name="T-TRIAL"] password="123" profile="tc-free-trial" disabled=no } } on-error={}`
+          : `:do { /ip hotspot user set [find name="T-TRIAL"] disabled=yes } on-error={}`,
+        // Fetch per-router splash HTML (both login.html & rlogin.html + alogin.html) onto whichever storage folder exists
+        `:do { /tool fetch url="${loginUrl}" dst-path="hotspot/login.html" check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" dst-path="hotspot/rlogin.html" check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${aloginUrl}" dst-path="hotspot/alogin.html" check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" dst-path="flash/hotspot/login.html" check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${loginUrl}" dst-path="flash/hotspot/rlogin.html" check-certificate=no } on-error={}`,
+        `:do { /tool fetch url="${aloginUrl}" dst-path="flash/hotspot/alogin.html" check-certificate=no } on-error={}`
       ];
       const existingPending = Array.isArray(router.pendingCommands) ? router.pendingCommands : [];
       router.pendingCommands = [...existingPending, ...safeSplashCmds];
@@ -6424,8 +6614,10 @@ app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
     res.json({
       success: true,
       syncedRouters: queuedRouters,
+      freeRouters: freeRoutersCount,
+      paidRouters: paidRoutersCount,
       syncedAt: nowIso,
-      message: `Queued safe non-disruptive hotspot/login.html + 24-Hour Seamless Auto-Reconnect (lease-time=1d, mac-cookie-timeout=1d, idle-timeout=none) for ${queuedRouters} adopted router(s). Active Wi-Fi sessions, iOS CNA, and WireGuard tunnels remain untouched.`
+      message: `Queued safe non-disruptive per-router splash sync for ${queuedRouters} router(s) (${paidRoutersCount} Paid · ${freeRoutersCount} Free). Each router keeps its own mode, updated M220 pricing, and active Wi-Fi sessions remain untouched.`
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -7499,6 +7691,7 @@ interface MonitoredRouter {
   tokenExpiresAt?: string;
   adoptedAt?: string;
   freeModeEnabled?: boolean;
+  modeOverride?: boolean;
   keepAliveAdopted?: boolean;
   status: 'online' | 'offline' | 'pending_adoption';
   publicWanIp: string;
@@ -7945,7 +8138,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           district: r.district || 'Maseru',
           physicalAddress: r.physicalAddress || r.siteName || 'Hotspot Site',
           partnerName: r.partnerName || 'T-Connect Internal Fleet',
-          tenantGroupId: r.tenantGroupId || 'grp_lab_test',
+          tenantGroupId: r.tenantGroupId || 'grp_internal',
           policyName: r.policyName || 'PayLesotho (M-Pesa / EcoCash / Card) + 16-Digit OTT Policy',
           tags: Array.isArray(r.tags) ? r.tags : [],
           model: r.model || 'MikroTik hAP ax³ (v7)',
@@ -7958,6 +8151,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
           adoptedAt: resolvedAdoptedAt,
           accessMode: r.accessMode || 'FREE_TRIAL_AND_PAID',
           freeModeEnabled: r.freeModeEnabled !== undefined ? Boolean(r.freeModeEnabled) : (r.accessMode || 'FREE_TRIAL_AND_PAID') !== 'PAID_ONLY',
+          modeOverride: Boolean(r.modeOverride),
           freeDurationMinutes: r.freeDurationMinutes ?? 30,
           freeRateLimit: r.freeRateLimit || '10M/20M 15M/30M 8M/16M 15s/15s',
           freeDailyQuotaMb: r.freeDailyQuotaMb ?? 500,
@@ -7999,6 +8193,7 @@ app.post('/api/devices/sync', (req: Request, res: Response) => {
         existing.wireguardIp = assignedWgIp;
         if (r.accessMode) existing.accessMode = r.accessMode;
         if (typeof r.freeModeEnabled === 'boolean') existing.freeModeEnabled = r.freeModeEnabled;
+        if (typeof r.modeOverride === 'boolean') existing.modeOverride = r.modeOverride;
         if (typeof r.freeDurationMinutes === 'number') existing.freeDurationMinutes = r.freeDurationMinutes;
         if (r.freeRateLimit) existing.freeRateLimit = r.freeRateLimit;
         changed = true;
@@ -9060,6 +9255,7 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, n
   if (router) {
     router.accessMode = validMode;
     (router as any).freeModeEnabled = allowFree;
+    router.modeOverride = true;
     router.freeDurationMinutes = duration;
     router.freeRateLimit = rateLimit;
     (router as any).speedCapsEnabled = speedCapsEnabled;
@@ -9074,7 +9270,12 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, n
     routerScope,
     rateLimit,
     speedCapsEnabled,
-    dhcpRange
+    dhcpRange,
+    scopedCfg.freeButtonColor || '#f05e17',
+    scopedCfg.freeButtonTextColor || '#ffffff',
+    true,
+    Number(scopedCfg.freeAccessDurationMinutes) || 1440,
+    routerId
   );
 
   const commands = splashSyncScript
@@ -9087,25 +9288,8 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, n
     persistMonitoredRoutersToStore();
   }
 
-  // Synchronize allowFreeAccess, speedCapsEnabled, dhcpRange and globalRateLimit in portal-configs.json
-  try {
-    const existingConfigs = loadSavedPortalConfigs();
-    if (existingConfigs[routerScope] && typeof existingConfigs[routerScope] === 'object') {
-      existingConfigs[routerScope].allowFreeAccess = allowFree;
-      existingConfigs[routerScope].globalRateLimit = rateLimit;
-      existingConfigs[routerScope].speedCapsEnabled = speedCapsEnabled;
-      existingConfigs[routerScope].dhcpRange = dhcpRange;
-    }
-    if (existingConfigs.hotspot && typeof existingConfigs.hotspot === 'object') {
-      existingConfigs.hotspot.allowFreeAccess = allowFree;
-      existingConfigs.hotspot.globalRateLimit = rateLimit;
-      existingConfigs.hotspot.speedCapsEnabled = speedCapsEnabled;
-      existingConfigs.hotspot.dhcpRange = dhcpRange;
-    } else if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit, speedCapsEnabled, dhcpRange };
-    }
-    savePortalConfigsToDisk(existingConfigs);
-  } catch {}
+  // Note: Single-router override does NOT overwrite other scopes' or other routers' allowFreeAccess!
+  // Only persist per-router state above; /api/portal/router-login/:scope/:routerId.html serves this router's exact mode.
 
   recordServerAudit({
     category: 'router_config',
@@ -9218,7 +9402,12 @@ app.post('/api/devices/:routerId/sync-realtime', (req: Request, res: Response) =
     routerScope,
     effectiveRateLimit,
     speedCapsEnabled,
-    dhcpRange
+    dhcpRange,
+    scopedCfg.freeButtonColor || '#f05e17',
+    scopedCfg.freeButtonTextColor || '#ffffff',
+    true,
+    Number(scopedCfg.freeAccessDurationMinutes) || 1440,
+    routerId
   );
   const syncCommands = fullSyncScript
     .split('\n')
@@ -9274,18 +9463,21 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
     globalDownloadMbps,
     globalUploadMbps,
     globalBurstDownloadMbps,
-    globalBurstUploadMbps
+    globalBurstUploadMbps,
+    respectOverrides = true,
+    forceOverride = false
   } = req.body || {};
   const host = req.get('host') || '169.58.98.92:3000';
   const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
 
   const existingConfigs = loadSavedPortalConfigs();
-  const fleetScope = vertical && vertical !== 'all' ? String(vertical).toLowerCase() : 'hotspot';
+  const isAllScopes = !vertical || vertical === 'all';
+  const fleetScope = !isAllScopes ? String(vertical).toLowerCase() : 'hotspot';
   const currentScopeCfg = existingConfigs[fleetScope] || existingConfigs.hotspot || {};
   const rawMode = accessMode || accessPolicy || (typeof freeModeEnabled === 'boolean' ? (freeModeEnabled ? 'COMPLETELY_FREE' : 'PAID_ONLY') : (currentScopeCfg.allowFreeAccess ? 'COMPLETELY_FREE' : 'PAID_ONLY'));
   const validMode = rawMode === 'COMPLETELY_FREE' || rawMode === 'FREE_TRIAL_AND_PAID' ? 'COMPLETELY_FREE' : 'PAID_ONLY';
-  const duration = Number(freeDurationMinutes) || 30;
+  const duration = Number(freeDurationMinutes) || 1440;
   const speedCapsEnabled = typeof bodySpeedCaps === 'boolean'
     ? bodySpeedCaps
     : (currentScopeCfg.speedCapsEnabled !== undefined ? Boolean(currentScopeCfg.speedCapsEnabled) : true);
@@ -9302,23 +9494,29 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   const now = new Date().toISOString();
   const allowFree = validMode !== 'PAID_ONLY';
 
-  // Synchronize allowFreeAccess, speedCapsEnabled, dhcpRange and speed/burst caps in portal-configs.json
+  const matchesScope = (scopeA: string, scopeB: string) =>
+    scopeA === scopeB ||
+    (scopeA === 'community' && scopeB === 'village') ||
+    (scopeA === 'village' && scopeB === 'community');
+
+  // Synchronize ONLY the targeted scope(s) in portal-configs.json
   try {
-    Object.keys(existingConfigs).forEach((k) => {
-      if ((!vertical || vertical === 'all' || k === fleetScope) && existingConfigs[k] && typeof existingConfigs[k] === 'object') {
-        existingConfigs[k].allowFreeAccess = allowFree;
-        existingConfigs[k].globalRateLimit = rateLimit;
-        existingConfigs[k].speedCapsEnabled = speedCapsEnabled;
-        existingConfigs[k].dhcpRange = dhcpRange;
-        if (globalDownloadMbps !== undefined) existingConfigs[k].globalDownloadMbps = Number(globalDownloadMbps);
-        if (globalUploadMbps !== undefined) existingConfigs[k].globalUploadMbps = Number(globalUploadMbps);
-        if (globalBurstDownloadMbps !== undefined) existingConfigs[k].globalBurstDownloadMbps = Number(globalBurstDownloadMbps);
-        if (globalBurstUploadMbps !== undefined) existingConfigs[k].globalBurstUploadMbps = Number(globalBurstUploadMbps);
+    const keysToUpdate = isAllScopes
+      ? Object.keys(existingConfigs)
+      : Array.from(new Set([fleetScope, ...(fleetScope === 'community' ? ['village'] : fleetScope === 'village' ? ['community'] : [])]));
+    keysToUpdate.forEach((k) => {
+      if (!existingConfigs[k] || typeof existingConfigs[k] !== 'object') {
+        existingConfigs[k] = { scope: k };
       }
+      existingConfigs[k].allowFreeAccess = allowFree;
+      existingConfigs[k].globalRateLimit = rateLimit;
+      existingConfigs[k].speedCapsEnabled = speedCapsEnabled;
+      existingConfigs[k].dhcpRange = dhcpRange;
+      if (globalDownloadMbps !== undefined) existingConfigs[k].globalDownloadMbps = Number(globalDownloadMbps);
+      if (globalUploadMbps !== undefined) existingConfigs[k].globalUploadMbps = Number(globalUploadMbps);
+      if (globalBurstDownloadMbps !== undefined) existingConfigs[k].globalBurstDownloadMbps = Number(globalBurstDownloadMbps);
+      if (globalBurstUploadMbps !== undefined) existingConfigs[k].globalBurstUploadMbps = Number(globalBurstUploadMbps);
     });
-    if (!existingConfigs.hotspot) {
-      existingConfigs.hotspot = { allowFreeAccess: allowFree, globalRateLimit: rateLimit, speedCapsEnabled, dhcpRange };
-    }
     savePortalConfigsToDisk(existingConfigs);
   } catch {}
 
@@ -9332,25 +9530,38 @@ app.post('/api/devices/fleet/access-policy', (req: Request, res: Response) => {
   );
 
   let affectedRouters: MonitoredRouter[] = [];
+  let skippedOverrideRouters: string[] = [];
 
   for (const router of monitoredRouters.values()) {
+    const rScope = String(router.vertical || 'hotspot').toLowerCase();
     const idMatch = !routerIds || routerIds.length === 0 || routerIds.includes(router.id);
-    const verticalMatch = !vertical || vertical === 'all' || router.vertical === vertical;
+    const verticalMatch = isAllScopes || matchesScope(rScope, fleetScope);
     if (idMatch && verticalMatch) {
-      const rScope = String(router.vertical || fleetScope).toLowerCase();
+      // Respect per-router manual override unless forceOverride is explicitly requested
+      if (respectOverrides && !forceOverride && router.modeOverride) {
+        skippedOverrideRouters.push(router.name);
+        continue;
+      }
+      const rCfg = existingConfigs[rScope] || currentScopeCfg;
       const rCmds = RouterOSRenderer.buildSplashPageFileCommands(
         portalBaseUrl,
         allowFree,
         rScope,
         rateLimit,
         speedCapsEnabled,
-        dhcpRange
+        dhcpRange,
+        rCfg?.freeButtonColor || '#f05e17',
+        rCfg?.freeButtonTextColor || '#ffffff',
+        true,
+        duration,
+        router.id
       )
         .split('\n')
         .map((line: string) => line.trim())
         .filter((line: string) => line.length > 0 && !line.startsWith('#'));
       router.accessMode = validMode;
       router.freeModeEnabled = allowFree;
+      if (forceOverride) router.modeOverride = false;
       router.freeDurationMinutes = duration;
       router.freeRateLimit = rateLimit;
       (router as any).globalRateLimit = rateLimit;
@@ -11491,7 +11702,7 @@ app.post('/api/vouchers/verify', async (req: Request, res: Response) => {
       code: digitsOnly,
       planName: ottCheck.planName || 'Daily Pass',
       durationHours: Math.round((ottCheck.durationSeconds || 86400) / 3600),
-      deviceLimit: 2,
+      deviceLimit: 0,
       rateLimitDown: '25M',
       rateLimitUp: '10M'
     });
@@ -11509,7 +11720,7 @@ app.post('/api/vouchers/verify', async (req: Request, res: Response) => {
     code: cleanCode,
     planName: matched.planName || 'Day Pass (Standard)',
     durationHours: Math.round((matched.durationSeconds || 86400) / 3600),
-    deviceLimit: 2,
+    deviceLimit: 0,
     rateLimitDown: '25M',
     rateLimitUp: '10M'
   });

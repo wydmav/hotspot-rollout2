@@ -9,20 +9,33 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { 
-  TrendingUp, 
-  CreditCard, 
-  DollarSign, 
-  Calendar, 
-  Layers, 
+import {
+  TrendingUp,
+  CreditCard,
+  DollarSign,
+  Calendar,
   ArrowUpRight,
   Sparkles,
-  Info
+  Info,
+  Wifi,
+  HardDrive
 } from 'lucide-react';
 import { PaymentTransaction, VerticalType } from '../../types';
 
+export interface UsageTrendEvent {
+  id: string;
+  startedAt: string;
+  authMode: 'paid' | 'free';
+  bytesTotal: number;
+  bytesDown?: number;
+  bytesUp?: number;
+  vertical: VerticalType;
+  status: 'connected' | 'disconnected';
+}
+
 interface TransactionTrendsChartProps {
   transactions: PaymentTransaction[];
+  usageEvents?: UsageTrendEvent[];
   currency: string;
   selectedVertical: VerticalType | 'all';
   onNavigateTab?: (tab: string) => void;
@@ -37,6 +50,10 @@ interface DailyTrendData {
   dailyRevenue: number;
   cumulativeRevenue: number;
   projectedRevenue: number;
+  sessionsCount: number;
+  freeSessionsCount: number;
+  paidSessionsCount: number;
+  dataConsumedMb: number;
   isProjectedOnly?: boolean;
 }
 
@@ -47,17 +64,37 @@ interface CustomTooltipProps {
   currency: string;
 }
 
+function formatDataFromMb(mb: number): string {
+  const safe = Math.max(0, Number(mb) || 0);
+  if (safe >= 1024) {
+    return `${(safe / 1024).toFixed(2)} GB`;
+  }
+  return `${safe.toFixed(1)} MB`;
+}
+
+function toLocalDateKey(isoOrDate: string | Date): string {
+  const d = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
+  if (Number.isNaN(d.getTime())) {
+    const raw = String(isoOrDate || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, currency }) => {
   if (!active || !payload || !payload.length) return null;
 
   const dataPoint = payload[0]?.payload as DailyTrendData | undefined;
 
   return (
-    <div className="bg-[#121829]/95 border border-[#232d42] backdrop-blur-md rounded-xl p-3.5 shadow-2xl min-w-[220px] font-mono text-xs">
+    <div className="bg-[#121829]/95 border border-[#232d42] backdrop-blur-md rounded-xl p-3.5 shadow-2xl min-w-[245px] font-mono text-xs">
       <div className="flex items-center justify-between pb-2 border-b border-[#232d42] mb-2.5">
         <span className="text-white font-bold">{dataPoint?.fullDate || label}</span>
-        <span className="text-[10px] text-slate-400 px-1.5 py-0.5 rounded bg-[#1e273e]">
-          {dataPoint?.isProjectedOnly ? 'Forecast Point' : 'Daily Metric'}
+        <span className="text-[10px] text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
+          {dataPoint?.isProjectedOnly ? 'Forecast Point' : 'Live Telemetry'}
         </span>
       </div>
 
@@ -95,10 +132,33 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, c
         <div className="flex items-center justify-between text-cyan-400 pt-1 border-t border-[#1b233a]">
           <span className="flex items-center gap-1.5 text-slate-400">
             <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-            Transactions:
+            Paid Checkouts:
           </span>
           <span className="font-bold tabular-nums">
             {dataPoint?.txCount || 0} ({dataPoint?.completedCount || 0} Settled)
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-sky-300 pt-1 border-t border-[#1b233a]">
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+            Guest Sessions:
+          </span>
+          <span className="font-bold tabular-nums">
+            {dataPoint?.sessionsCount || 0}{' '}
+            <span className="text-[10px] text-slate-400">
+              ({dataPoint?.freeSessionsCount || 0} Free · {dataPoint?.paidSessionsCount || 0} Paid)
+            </span>
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-amber-300">
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+            Data Consumed:
+          </span>
+          <span className="font-bold tabular-nums">
+            {formatDataFromMb(dataPoint?.dataConsumedMb || 0)}
           </span>
         </div>
       </div>
@@ -108,6 +168,7 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, c
 
 export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
   transactions,
+  usageEvents = [],
   currency,
   selectedVertical,
   onNavigateTab
@@ -117,55 +178,87 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
     cumulative: true,
     projected: true,
     daily: true,
-    volume: true
+    volume: true,
+    sessions: true,
+    dataMb: false
   });
 
-  // Filter transactions by selected vertical
+  const matchesVertical = (v?: string) => {
+    if (selectedVertical === 'all' || !v) return true;
+    if (selectedVertical === 'village' || selectedVertical === 'community') {
+      return v === 'village' || v === 'community';
+    }
+    return v === selectedVertical;
+  };
+
+  // Filter transactions and usage events by selected vertical
   const scopedTransactions = useMemo(() => {
-    return selectedVertical === 'all'
-      ? transactions
-      : transactions.filter(t => t.vertical === selectedVertical);
+    return transactions.filter((t) => matchesVertical(t.vertical));
   }, [transactions, selectedVertical]);
 
-  // Aggregate daily metrics over the selected timeframe + Linear Regression Forecast
-  const { 
-    chartData, 
-    totalPeriodRevenue, 
-    totalPeriodTx, 
-    maxDailyRevenue, 
-    averageDailyRevenue, 
+  const scopedUsageEvents = useMemo(() => {
+    return usageEvents.filter((u) => matchesVertical(u.vertical));
+  }, [usageEvents, selectedVertical]);
+
+  // Aggregate daily revenue + usage metrics over the selected timeframe + Linear Regression Forecast
+  const {
+    chartData,
+    totalPeriodRevenue,
+    totalPeriodTx,
+    totalPeriodSessions,
+    totalPeriodFreeSessions,
+    totalPeriodPaidSessions,
+    totalPeriodDataMb,
+    maxDailyRevenue,
+    averageDailyRevenue,
     projectedTotalPeriodRevenue,
-    growthSlope,
-    hasData 
+    hasData
   } = useMemo(() => {
     const days: DailyTrendData[] = [];
     const now = new Date();
 
-    // Map existing transactions by YYYY-MM-DD
+    // Map transactions by local YYYY-MM-DD
     const txByDate = new Map<string, PaymentTransaction[]>();
     scopedTransactions.forEach((tx) => {
-      const datePart = (tx.createdAt || '').slice(0, 10);
+      const datePart = toLocalDateKey(tx.createdAt || tx.completedAt || '');
       if (datePart) {
-        if (!txByDate.has(datePart)) {
-          txByDate.set(datePart, []);
-        }
+        if (!txByDate.has(datePart)) txByDate.set(datePart, []);
         txByDate.get(datePart)!.push(tx);
+      }
+    });
+
+    // Map live guest usage sessions by local YYYY-MM-DD
+    const usageByDate = new Map<string, UsageTrendEvent[]>();
+    scopedUsageEvents.forEach((ev) => {
+      const datePart = toLocalDateKey(ev.startedAt || '');
+      if (datePart) {
+        if (!usageByDate.has(datePart)) usageByDate.set(datePart, []);
+        usageByDate.get(datePart)!.push(ev);
       }
     });
 
     let runningCumulativeRevenue = 0;
 
-    // 1. Gather historical sequence
     for (let i = timeframeDays - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const dateKey = d.toISOString().slice(0, 10);
-      
+      const dateKey = toLocalDateKey(d);
+
       const dayTxList = txByDate.get(dateKey) || [];
       const txCount = dayTxList.length;
-      const completedList = dayTxList.filter(t => t.status === 'completed');
+      const completedList = dayTxList.filter((t) => t.status === 'completed');
       const completedCount = completedList.length;
-      const dailyRevenue = completedList.reduce((sum, t) => sum + (t.amount || 0), 0);
+      const dailyRevenue = completedList.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+      const dayUsageList = usageByDate.get(dateKey) || [];
+      const freeSessionsCount = dayUsageList.filter((u) => u.authMode === 'free').length;
+      const paidSessionsCount = Math.max(
+        dayUsageList.filter((u) => u.authMode === 'paid').length,
+        completedCount
+      );
+      const sessionsCount = freeSessionsCount + paidSessionsCount;
+      const totalBytes = dayUsageList.reduce((sum, u) => sum + Math.max(0, Number(u.bytesTotal) || 0), 0);
+      const dataConsumedMb = Number((totalBytes / (1024 * 1024)).toFixed(2));
 
       runningCumulativeRevenue += dailyRevenue;
 
@@ -187,14 +280,17 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
         fullDate,
         txCount,
         completedCount,
-        dailyRevenue,
-        cumulativeRevenue: runningCumulativeRevenue,
-        projectedRevenue: runningCumulativeRevenue
+        dailyRevenue: Number(dailyRevenue.toFixed(2)),
+        cumulativeRevenue: Number(runningCumulativeRevenue.toFixed(2)),
+        projectedRevenue: Number(runningCumulativeRevenue.toFixed(2)),
+        sessionsCount,
+        freeSessionsCount,
+        paidSessionsCount,
+        dataConsumedMb
       });
     }
 
-    // 2. Perform 7-Day Linear Regression on daily revenue
-    // x = day index [0 ... N-1], y = dailyRevenue
+    // 7-Day Linear Regression on daily revenue
     const n = days.length;
     let sumX = 0;
     let sumY = 0;
@@ -211,45 +307,48 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
     }
 
     const denominator = n * sumXX - sumX * sumX;
-    // Slope (growth per day) and Intercept
     let slope = denominator !== 0 ? (n * sumXY - sumX * sumY) / denominator : 0;
     let intercept = (sumY - slope * sumX) / n;
 
-    // Baseline fallback if starting with 0 transactions so graph displays sensible trajectory
     if (sumY === 0) {
-      slope = 15; // default gentle projection based on starter tier
-      intercept = 10;
+      slope = 0;
+      intercept = 0;
     }
 
-    // 3. Populate projected cumulative curve
     let runningProjected = 0;
     for (let i = 0; i < n; i++) {
       const estimatedDaily = Math.max(0, slope * i + intercept);
       runningProjected += estimatedDaily;
-      // Anchor projected line smoothly to realistic baseline
       days[i].projectedRevenue = Number(runningProjected.toFixed(2));
     }
 
     const totalRev = days.reduce((sum, d) => sum + d.dailyRevenue, 0);
     const totalTx = days.reduce((sum, d) => sum + d.txCount, 0);
-    const maxRev = Math.max(...days.map(d => d.dailyRevenue), 0);
+    const totalSessions = days.reduce((sum, d) => sum + d.sessionsCount, 0);
+    const totalFree = days.reduce((sum, d) => sum + d.freeSessionsCount, 0);
+    const totalPaid = days.reduce((sum, d) => sum + d.paidSessionsCount, 0);
+    const totalMb = days.reduce((sum, d) => sum + d.dataConsumedMb, 0);
+    const maxRev = Math.max(...days.map((d) => d.dailyRevenue), 0);
     const avgRev = days.length > 0 ? totalRev / days.length : 0;
-    const dataExists = totalTx > 0;
+    const dataExists = totalTx > 0 || totalSessions > 0 || totalMb > 0;
 
     return {
       chartData: days,
       totalPeriodRevenue: totalRev,
       totalPeriodTx: totalTx,
+      totalPeriodSessions: totalSessions,
+      totalPeriodFreeSessions: totalFree,
+      totalPeriodPaidSessions: totalPaid,
+      totalPeriodDataMb: totalMb,
       maxDailyRevenue: maxRev,
       averageDailyRevenue: avgRev,
       projectedTotalPeriodRevenue: runningProjected,
-      growthSlope: slope,
       hasData: dataExists
     };
-  }, [scopedTransactions, timeframeDays]);
+  }, [scopedTransactions, scopedUsageEvents, timeframeDays]);
 
   const toggleLine = (key: keyof typeof visibleLines) => {
-    setVisibleLines(prev => ({ ...prev, [key]: !prev[key] }));
+    setVisibleLines((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
@@ -262,26 +361,30 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
               <TrendingUp className="w-4 h-4" />
             </span>
             <h2 className="text-sm font-extrabold text-white tracking-tight">
-              Daily Transaction Trends &amp; Revenue Growth
+              Daily Transaction Trends, Revenue Growth &amp; Usage Stats
             </h2>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[10px] font-mono font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE
+            </span>
           </div>
           <p className="text-xs text-slate-400 font-mono mt-1">
-            Visualizing real-time checkout velocity, daily settlement values, and cumulative revenue curve
+            Real-time mobile revenue (M-Pesa, EcoCash &amp; OTT), daily guest sessions (Free vs Paid), and bandwidth usage
           </p>
         </div>
 
         {/* Action Controls & Filters */}
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Series Visibility Toggles */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#161d31] border border-[#232d42] rounded-lg text-[11px] font-mono text-slate-300">
+          <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-1 bg-[#161d31] border border-[#232d42] rounded-lg text-[11px] font-mono text-slate-300">
             <span className="text-slate-500 mr-1 hidden sm:inline">Series:</span>
-            
+
             <button
               type="button"
               onClick={() => toggleLine('cumulative')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
-                visibleLines.cumulative 
-                  ? 'bg-[#f05e17]/20 text-[#f05e17] font-semibold border border-[#f05e17]/40' 
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.cumulative
+                  ? 'bg-[#f05e17]/20 text-[#f05e17] font-semibold border border-[#f05e17]/40'
                   : 'text-slate-500 hover:text-slate-400'
               }`}
             >
@@ -292,9 +395,9 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
             <button
               type="button"
               onClick={() => toggleLine('projected')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
-                visibleLines.projected 
-                  ? 'bg-purple-500/20 text-purple-400 font-semibold border border-purple-500/40' 
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.projected
+                  ? 'bg-purple-500/20 text-purple-400 font-semibold border border-purple-500/40'
                   : 'text-slate-500 hover:text-slate-400'
               }`}
               title="Projected revenue curve based on 7-day linear regression"
@@ -306,9 +409,9 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
             <button
               type="button"
               onClick={() => toggleLine('daily')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
-                visibleLines.daily 
-                  ? 'bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/40' 
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.daily
+                  ? 'bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/40'
                   : 'text-slate-500 hover:text-slate-400'
               }`}
             >
@@ -319,14 +422,40 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
             <button
               type="button"
               onClick={() => toggleLine('volume')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors ${
-                visibleLines.volume 
-                  ? 'bg-cyan-500/20 text-cyan-400 font-semibold border border-cyan-500/40' 
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.volume
+                  ? 'bg-cyan-500/20 text-cyan-400 font-semibold border border-cyan-500/40'
                   : 'text-slate-500 hover:text-slate-400'
               }`}
             >
               <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
-              <span>Volume</span>
+              <span>Paid Tx</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => toggleLine('sessions')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.sessions
+                  ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/40'
+                  : 'text-slate-500 hover:text-slate-400'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+              <span>Sessions</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => toggleLine('dataMb')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer ${
+                visibleLines.dataMb
+                  ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/40'
+                  : 'text-slate-500 hover:text-slate-400'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span>Data (MB)</span>
             </button>
           </div>
 
@@ -335,8 +464,9 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
             {([7, 14, 30] as const).map((days) => (
               <button
                 key={days}
+                type="button"
                 onClick={() => setTimeframeDays(days)}
-                className={`px-2.5 py-1 rounded-md transition-all ${
+                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
                   timeframeDays === days
                     ? 'bg-[#f05e17] text-white font-bold shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -349,8 +479,8 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
         </div>
       </div>
 
-      {/* Metric Highlights Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-1">
+      {/* Metric Highlights Strip (Revenue + Real-Time Usage Stats) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
             <span>Period Revenue</span>
@@ -366,14 +496,14 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
 
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Peak Daily Revenue</span>
+            <span>Peak Daily Rev</span>
             <TrendingUp className="w-3 h-3 text-emerald-400" />
           </div>
           <div className="text-base font-bold text-emerald-400 mt-1 tabular-nums">
             {currency}{maxDailyRevenue.toFixed(2)}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            Single day record
+            Avg {currency}{averageDailyRevenue.toFixed(2)}/day
           </div>
         </div>
 
@@ -392,27 +522,40 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
 
         <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Total Volume</span>
+            <span>Paid Checkouts</span>
             <CreditCard className="w-3 h-3 text-cyan-400" />
           </div>
           <div className="text-base font-bold text-cyan-400 mt-1 tabular-nums">
             {totalPeriodTx} Tx
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            Completed checkouts
+            Settled checkouts
           </div>
         </div>
 
-        <div className="bg-[#161d31]/70 border border-[#232d42] rounded-lg p-2.5 font-mono">
-          <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Daily Average</span>
-            <Calendar className="w-3 h-3 text-amber-400" />
+        <div className="bg-[#161d31]/70 border border-sky-500/30 rounded-lg p-2.5 font-mono">
+          <div className="text-[10px] text-sky-300 uppercase tracking-wider flex items-center justify-between">
+            <span>Usage Sessions</span>
+            <Wifi className="w-3 h-3 text-sky-400" />
           </div>
-          <div className="text-base font-bold text-white mt-1 tabular-nums">
-            {currency}{averageDailyRevenue.toFixed(2)}
+          <div className="text-base font-bold text-sky-300 mt-1 tabular-nums">
+            {totalPeriodSessions}
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">
-            Run-rate per 24 hours
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            {totalPeriodFreeSessions} Free · {totalPeriodPaidSessions} Paid
+          </div>
+        </div>
+
+        <div className="bg-[#161d31]/70 border border-amber-500/30 rounded-lg p-2.5 font-mono">
+          <div className="text-[10px] text-amber-300 uppercase tracking-wider flex items-center justify-between">
+            <span>Data Consumed</span>
+            <HardDrive className="w-3 h-3 text-amber-400" />
+          </div>
+          <div className="text-base font-bold text-amber-300 mt-1 tabular-nums">
+            {formatDataFromMb(totalPeriodDataMb)}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            Past {timeframeDays}d total traffic
           </div>
         </div>
       </div>
@@ -466,7 +609,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
                 }}
               />
 
-              {/* Cumulative Revenue Line (Primary Growth Curve) */}
+              {/* Cumulative Revenue Line */}
               {visibleLines.cumulative && (
                 <Line
                   yAxisId="revenue"
@@ -480,7 +623,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
                 />
               )}
 
-              {/* Projected Revenue Line (7-Day Linear Regression Growth Trend) */}
+              {/* Projected Revenue Line */}
               {visibleLines.projected && (
                 <Line
                   yAxisId="revenue"
@@ -501,7 +644,7 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
                   yAxisId="revenue"
                   type="monotone"
                   dataKey="dailyRevenue"
-                  name="Daily Settled Revenue"
+                  name="Daily Mobile Revenue"
                   stroke="#10b981"
                   strokeWidth={2}
                   strokeDasharray="4 4"
@@ -510,48 +653,70 @@ export const TransactionTrendsChart: React.FC<TransactionTrendsChartProps> = ({
                 />
               )}
 
-              {/* Transaction Volume Line */}
+              {/* Paid Transaction Volume Line */}
               {visibleLines.volume && (
                 <Line
                   yAxisId="count"
                   type="monotone"
                   dataKey="txCount"
-                  name="Transaction Volume (Tx)"
+                  name="Paid Checkouts (Tx)"
                   stroke="#06b6d4"
                   strokeWidth={2}
                   dot={{ r: 3, fill: '#06b6d4', stroke: '#0f1422', strokeWidth: 1.5 }}
                   activeDot={{ r: 5, fill: '#06b6d4', stroke: '#ffffff', strokeWidth: 2 }}
                 />
               )}
+
+              {/* Live Guest Sessions Line (Free + Paid) */}
+              {visibleLines.sessions && (
+                <Line
+                  yAxisId="count"
+                  type="monotone"
+                  dataKey="sessionsCount"
+                  name="Guest Sessions (Free + Paid)"
+                  stroke="#38bdf8"
+                  strokeWidth={2}
+                  dot={{ r: 3, fill: '#38bdf8', stroke: '#0f1422', strokeWidth: 1.5 }}
+                  activeDot={{ r: 5, fill: '#38bdf8', stroke: '#ffffff', strokeWidth: 2 }}
+                />
+              )}
+
+              {/* Daily Data Consumed Line (MB) */}
+              {visibleLines.dataMb && (
+                <Line
+                  yAxisId="count"
+                  type="monotone"
+                  dataKey="dataConsumedMb"
+                  name="Data Consumed (MB)"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  dot={{ r: 2.5, fill: '#f59e0b', stroke: '#0f1422', strokeWidth: 1 }}
+                  activeDot={{ r: 5, fill: '#f59e0b', stroke: '#ffffff', strokeWidth: 2 }}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Empty state informative note when zero transactions recorded yet */}
+        {/* Empty state informative note when zero sessions and zero transactions recorded yet */}
         {!hasData && (
           <div className="mt-3 p-3 bg-[#161d31]/80 border border-[#232d42] rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
             <div className="flex items-center gap-2 text-slate-400">
               <Info className="w-4 h-4 text-[#f05e17] shrink-0" />
               <span>
-                Zero transactions recorded in current view. Checkout transactions through the Captive Portal or Gateways will dynamically plot here.
+                Waiting for live guest sessions or mobile payments. Free Mode logins, M-Pesa, EcoCash, and OTT checkouts plot here automatically every 5 seconds.
               </span>
             </div>
             {onNavigateTab && (
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('transactions')}
-                  className="px-2.5 py-1 bg-[#232d42] hover:bg-[#2e3b55] text-white rounded transition-colors text-[11px] flex items-center gap-1 font-bold"
+                  onClick={() => onNavigateTab('billing')}
+                  className="px-2.5 py-1 bg-[#232d42] hover:bg-[#2e3b55] text-white rounded transition-colors text-[11px] flex items-center gap-1 font-bold cursor-pointer"
                 >
-                  <span>Open Ledger</span>
+                  <span>Open Billing Ledger</span>
                   <ArrowUpRight className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab('gateways')}
-                  className="px-2.5 py-1 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded transition-colors text-[11px] font-bold"
-                >
-                  Test Sandbox
                 </button>
               </div>
             )}

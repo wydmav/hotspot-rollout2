@@ -146,11 +146,10 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   // Add Router Form State (Mandatory 5-Attribute Map Binding: Scope, Partner/Group, Policy, District, Venue)
   const [newName, setNewName] = useState('');
   const [newVertical, setNewVertical] = useState<VerticalType>('hotspot');
-  const [newPartnerName, setNewPartnerName] = useState('Alliance Insurance Lesotho');
+  const [newPartnerName, setNewPartnerName] = useState('T-Connect Internal Fleet');
   const [newTenantGroupId, setNewTenantGroupId] = useState('');
   const [isAddingCustomPartner, setIsAddingCustomPartner] = useState(false);
   const [customPartnerInput, setCustomPartnerInput] = useState('');
-  const [serverPartnerNames, setServerPartnerNames] = useState<string[]>([]);
   const [syncingRouterId, setSyncingRouterId] = useState<string | null>(null);
   const [newPolicyName, setNewPolicyName] = useState('Hybrid Trial + PayLesotho 16-Digit OTT Policy');
   const [newAccessMode, setNewAccessMode] = useState<RouterAccessMode>('FREE_TRIAL_AND_PAID');
@@ -164,14 +163,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   const refreshPartnerGroups = React.useCallback(() => {
     const currentGroups = storage.getTenantGroups();
     setTenantGroups([...currentGroups]);
-    fetch('/api/partner-groups')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.success && Array.isArray(d.partnerGroups)) {
-          setServerPartnerNames(d.partnerGroups);
-        }
+    // Keep server /api/partner-groups strictly synchronized with the exact Client Groups list
+    fetch('/api/partner-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        partnerGroups: currentGroups.map((g) => g.name)
       })
-      .catch(() => {});
+    }).catch(() => {});
   }, []);
 
   React.useEffect(() => {
@@ -179,19 +178,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   }, [refreshPartnerGroups]);
 
   const allPartnerGroupNames = React.useMemo(() => {
-    const names = [
-      ...tenantGroups.map((g) => g.name),
-      ...serverPartnerNames
-    ];
     const unique: string[] = [];
-    names.forEach((n) => {
-      const clean = String(n || '').trim();
+    tenantGroups.forEach((g) => {
+      const clean = String(g.name || '').trim();
       if (clean && !unique.some((u) => u.toLowerCase() === clean.toLowerCase())) {
         unique.push(clean);
       }
     });
     return unique.length > 0 ? unique : ['T-Connect Internal Fleet'];
-  }, [tenantGroups, serverPartnerNames]);
+  }, [tenantGroups]);
 
   const handleSaveCustomPartnerGroup = () => {
     const clean = customPartnerInput.trim();
@@ -204,12 +199,12 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       accentColor: '#f05e17',
       description: `Custom partner / sponsor group: ${clean}`
     });
-    setServerPartnerNames((prev) => Array.from(new Set([clean, ...prev])));
+    refreshPartnerGroups();
     setNewPartnerName(clean);
     setNewTenantGroupId(createdGroup.id);
     setCustomPartnerInput('');
     setIsAddingCustomPartner(false);
-    triggerToast(`Added Partner / Sponsor Group "${clean}" and selected it!`, 'success');
+    triggerToast(`Added Partner / Sponsor Group "${clean}" and synced everywhere!`, 'success');
   };
 
   const handleLiveRouterAccessPolicy = async (router: RouterDevice, mode: RouterAccessMode, e?: React.MouseEvent) => {
@@ -503,13 +498,14 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     setBulkPushToast(null);
 
     try {
+      const targetScope = syncAllFleet || localVerticalFilter === 'all' ? 'all' : localVerticalFilter;
       const targetRouterIds = syncAllFleet ? routers.map((r) => r.id) : filteredRouters.map((r) => r.id);
       const res = await fetch('/api/devices/fleet/access-policy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           routerIds: targetRouterIds,
-          vertical: syncAllFleet || localVerticalFilter === 'all' ? 'all' : localVerticalFilter,
+          vertical: targetScope,
           accessMode: bulkAccessMode,
           freeDurationMinutes: bulkFreeMinutes,
           freeRateLimit: bulkRateLimit,
@@ -518,7 +514,8 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
           globalDownloadMbps: fleetDownloadMbps,
           globalUploadMbps: fleetUploadMbps,
           globalBurstDownloadMbps: fleetBurstDownloadMbps,
-          globalBurstUploadMbps: fleetBurstUploadMbps
+          globalBurstUploadMbps: fleetBurstUploadMbps,
+          respectOverrides: true
         })
       });
 
@@ -527,14 +524,16 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         storage.setRouterAccessPolicy('all', {
           accessMode: bulkAccessMode,
           freeDurationMinutes: bulkFreeMinutes,
-          freeRateLimit: bulkRateLimit
+          freeRateLimit: bulkRateLimit,
+          scope: targetScope as VerticalType | 'all',
+          respectOverrides: true
         });
         if (data.cliScript) {
           setSyncedFleetCliScript(data.cliScript);
         }
         setBulkPushToast({
           type: 'success',
-          message: `Synced to All Routers! Mode '${bulkAccessMode}', Capacity (1,012 Users), & Speed Caps (${fleetSpeedCapsEnabled ? bulkRateLimit : 'OFF / Uncapped'}) pushed to ${data.updatedCount} router(s)!`
+          message: `Synced ${targetScope === 'all' ? 'Fleet' : `${targetScope.toUpperCase()} Scope`}! Mode '${bulkAccessMode}' & Speed Caps (${fleetSpeedCapsEnabled ? bulkRateLimit : 'OFF / Uncapped'}) pushed to ${data.updatedCount} router(s) (individual overrides preserved).`
         });
         setTimeout(() => setBulkPushToast(null), 5000);
       } else {
@@ -659,10 +658,11 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   };
 
   const openCreateRouterModal = () => {
+    refreshPartnerGroups();
     setEditingRouter(null);
     setNewName('');
     setNewVertical('hotspot');
-    setNewPartnerName(allPartnerGroupNames[0] || 'Alliance Insurance Lesotho');
+    setNewPartnerName(allPartnerGroupNames[0] || 'T-Connect Internal Fleet');
     setNewTenantGroupId(tenantGroups[0]?.id || '');
     setNewPolicyName('Hybrid Trial + PayLesotho 16-Digit OTT Policy');
     setNewAccessMode('FREE_TRIAL_AND_PAID');
@@ -676,10 +676,11 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
   };
 
   const openEditRouterModal = (router: RouterDevice) => {
+    refreshPartnerGroups();
     setEditingRouter(router);
     setNewName(router.name);
     setNewVertical(router.vertical || 'hotspot');
-    setNewPartnerName(router.partnerName || allPartnerGroupNames[0] || 'Alliance Insurance Lesotho');
+    setNewPartnerName(router.partnerName || allPartnerGroupNames[0] || 'T-Connect Internal Fleet');
     setNewTenantGroupId(router.tenantGroupId || '');
     setNewPolicyName(router.policyName || 'Hybrid Trial + PayLesotho 16-Digit OTT Policy');
     setNewAccessMode(router.accessMode || (router.freeModeEnabled ? 'FREE_TRIAL_AND_PAID' : 'PAID_ONLY'));
@@ -711,6 +712,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
         policyName: newPolicyName.trim(),
         accessMode: newAccessMode,
         freeModeEnabled: newAccessMode !== 'PAID_ONLY',
+        modeOverride: true,
         tags: [partnerTag, `scope:${newVertical}`, `district:${newDistrict.toLowerCase()}`],
         model: newModel,
         boardName: newModel.includes('ax3') ? 'hAP ax3' : 'RouterBOARD',
@@ -722,10 +724,19 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       const updatedObj = updatedList.find((r) => r.id === editingRouter.id);
       if (updatedObj) {
         setSelectedRouter(updatedObj);
+        fetch(`/api/devices/${editingRouter.id}/access-policy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessMode: newAccessMode,
+            freeModeEnabled: newAccessMode !== 'PAID_ONLY',
+            router: updatedObj
+          })
+        }).catch(() => {});
       }
       setEditingRouter(null);
       setShowAddModal(false);
-      triggerToast(`Updated router "${newName.trim()}" details and synced to controller.`, 'success');
+      triggerToast(`Updated router "${newName.trim()}" details and synced its exact mode to controller.`, 'success');
       return;
     }
 
@@ -739,6 +750,7 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
       tenantGroupId: matchedGroup?.id || newTenantGroupId || undefined,
       policyName: newPolicyName.trim(),
       accessMode: newAccessMode,
+      modeOverride: true,
       tags: [partnerTag, `scope:${newVertical}`, `district:${newDistrict.toLowerCase()}`],
       model: newModel,
       boardName: newModel.includes('ax3') ? 'hAP ax3' : 'RouterBOARD',
@@ -750,6 +762,15 @@ export const AdoptionView: React.FC<AdoptionViewProps> = ({
     });
 
     if (created) {
+      fetch(`/api/devices/${created.id}/access-policy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessMode: newAccessMode,
+          freeModeEnabled: newAccessMode !== 'PAID_ONLY',
+          router: created
+        })
+      }).catch(() => {});
       setSelectedRouter(created);
       setShowAddModal(false);
       setNewName('');
