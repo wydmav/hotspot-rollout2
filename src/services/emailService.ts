@@ -1,4 +1,19 @@
+import crypto from 'crypto';
 import nodemailer, { Transporter } from 'nodemailer';
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeAppHost(raw?: string): string {
+  const clean = String(raw || 'localhost:3000').trim().replace(/^https?:\/\//i, '');
+  return clean.replace(/[^a-zA-Z0-9.:/_-]/g, '') || 'localhost:3000';
+}
 
 export interface EmailAlertLog {
   id: string;
@@ -100,7 +115,15 @@ export class EmailService {
     secondsSinceHeartbeat?: number;
     missedBeats?: number;
   }): Promise<EmailAlertLog> {
-    const subject = `🚨 [CRITICAL ALERT] MikroTik Router Offline: ${router.name} (Starlink/WAN Disconnected)`;
+    const safeName = escapeHtml(router.name);
+    const safeId = escapeHtml(router.id);
+    const safeSite = escapeHtml(router.siteName || 'Hotspot Site');
+    const safeWgIp = escapeHtml(router.wireguardIp || '10.99.1.50');
+    const safeWanIp = escapeHtml(router.publicWanIp || 'Unknown');
+    const safeSeconds = escapeHtml(router.secondsSinceHeartbeat || 30);
+    const safeAppHost = escapeHtml(sanitizeAppHost(process.env.APP_URL));
+
+    const subject = `🚨 [CRITICAL ALERT] MikroTik Router Offline: ${String(router.name || '').replace(/[\r\n]+/g, ' ')} (Starlink/WAN Disconnected)`;
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; border-radius: 12px; overflow: hidden; border: 1px solid #334155;">
         <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); padding: 24px; text-align: left;">
@@ -112,34 +135,34 @@ export class EmailService {
           <div style="background: #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 20px; border-left: 4px solid #ef4444;">
             <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: #ffffff;">Incident Summary:</p>
             <p style="margin: 0; font-size: 14px; color: #cbd5e1; line-height: 1.5;">
-              Router <strong>${router.name}</strong> (${router.id}) at <strong>${router.siteName || 'Hotspot Site'}</strong> stopped communicating with the T-Connect Control Tower. Uplink cable (e.g. Starlink terminal, LTE, or POE fiber) may be disconnected or powered off.
+              Router <strong>${safeName}</strong> (${safeId}) at <strong>${safeSite}</strong> stopped communicating with the T-Connect Control Tower. Uplink cable (e.g. Starlink terminal, LTE, or POE fiber) may be disconnected or powered off.
             </p>
           </div>
 
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Router Name:</td>
-              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${router.name}</td>
+              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${safeName}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Site Location:</td>
-              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${router.siteName || 'Hotspot Site'}</td>
+              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${safeSite}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">WireGuard Management IP:</td>
-              <td style="padding: 10px 0; font-family: monospace; color: #38bdf8; text-align: right;">${router.wireguardIp || '10.99.1.50'}</td>
+              <td style="padding: 10px 0; font-family: monospace; color: #38bdf8; text-align: right;">${safeWgIp}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Public WAN IP:</td>
-              <td style="padding: 10px 0; font-family: monospace; color: #cbd5e1; text-align: right;">${router.publicWanIp || 'Unknown'}</td>
+              <td style="padding: 10px 0; font-family: monospace; color: #cbd5e1; text-align: right;">${safeWanIp}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Elapsed Silence:</td>
-              <td style="padding: 10px 0; font-weight: 700; color: #f87171; text-align: right;">~${router.secondsSinceHeartbeat || 30}s (2 missed heartbeats)</td>
+              <td style="padding: 10px 0; font-weight: 700; color: #f87171; text-align: right;">~${safeSeconds}s (2 missed heartbeats)</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Detected At:</td>
-              <td style="padding: 10px 0; color: #cbd5e1; text-align: right;">${new Date().toLocaleString('en-US', { timeZone: 'Africa/Maseru' })} (Lesotho Time)</td>
+              <td style="padding: 10px 0; color: #cbd5e1; text-align: right;">${escapeHtml(new Date().toLocaleString('en-US', { timeZone: 'Africa/Maseru' }))} (Lesotho Time)</td>
             </tr>
           </table>
 
@@ -153,7 +176,7 @@ export class EmailService {
           </div>
 
           <div style="text-align: center; margin-top: 24px;">
-            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">Open T-Connect Control Tower</a>
+            <a href="http://${safeAppHost}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">Open T-Connect Control Tower</a>
           </div>
         </div>
 
@@ -188,7 +211,14 @@ export class EmailService {
       ? `${Math.floor(router.downtimeSeconds / 60)}m ${router.downtimeSeconds % 60}s`
       : 'under 1 minute';
 
-    const subject = `✅ [RESOLVED] MikroTik Router Restored Online: ${router.name} (Starlink Uplink Restored)`;
+    const safeName = escapeHtml(router.name);
+    const safeId = escapeHtml(router.id);
+    const safeSite = escapeHtml(router.siteName || 'Hotspot Site');
+    const safeDowntime = escapeHtml(downtimeDesc);
+    const safeWgIp = escapeHtml(router.wireguardIp || '10.99.1.50');
+    const safeAppHost = escapeHtml(sanitizeAppHost(process.env.APP_URL));
+
+    const subject = `✅ [RESOLVED] MikroTik Router Restored Online: ${String(router.name || '').replace(/[\r\n]+/g, ' ')} (Starlink Uplink Restored)`;
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; border-radius: 12px; overflow: hidden; border: 1px solid #334155;">
         <div style="background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); padding: 24px; text-align: left;">
@@ -200,31 +230,31 @@ export class EmailService {
           <div style="background: #1e293b; border-radius: 8px; padding: 18px; margin-bottom: 20px; border-left: 4px solid #22c55e;">
             <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: #ffffff;">Recovery Confirmation:</p>
             <p style="margin: 0; font-size: 14px; color: #cbd5e1; line-height: 1.5;">
-              Router <strong>${router.name}</strong> (${router.id}) at <strong>${router.siteName || 'Hotspot Site'}</strong> is back online. Starlink / WAN uplink has resumed communication.
+              Router <strong>${safeName}</strong> (${safeId}) at <strong>${safeSite}</strong> is back online. Starlink / WAN uplink has resumed communication.
             </p>
           </div>
 
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Router Name:</td>
-              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${router.name}</td>
+              <td style="padding: 10px 0; font-weight: 600; color: #ffffff; text-align: right;">${safeName}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Total Outage Duration:</td>
-              <td style="padding: 10px 0; font-weight: 700; color: #4ade80; text-align: right;">${downtimeDesc}</td>
+              <td style="padding: 10px 0; font-weight: 700; color: #4ade80; text-align: right;">${safeDowntime}</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">WireGuard Tunnel:</td>
-              <td style="padding: 10px 0; font-family: monospace; color: #38bdf8; text-align: right;">${router.wireguardIp || '10.99.1.50'} (CONNECTED)</td>
+              <td style="padding: 10px 0; font-family: monospace; color: #38bdf8; text-align: right;">${safeWgIp} (CONNECTED)</td>
             </tr>
             <tr style="border-bottom: 1px solid #334155;">
               <td style="padding: 10px 0; color: #94a3b8;">Recovery Time:</td>
-              <td style="padding: 10px 0; color: #cbd5e1; text-align: right;">${new Date().toLocaleString('en-US', { timeZone: 'Africa/Maseru' })} (Lesotho Time)</td>
+              <td style="padding: 10px 0; color: #cbd5e1; text-align: right;">${escapeHtml(new Date().toLocaleString('en-US', { timeZone: 'Africa/Maseru' }))} (Lesotho Time)</td>
             </tr>
           </table>
 
           <div style="text-align: center; margin-top: 24px;">
-            <a href="http://${process.env.APP_URL || 'localhost:3000'}" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">View In Control Tower</a>
+            <a href="http://${safeAppHost}" style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 14px;">View In Control Tower</a>
           </div>
         </div>
 
@@ -250,6 +280,7 @@ export class EmailService {
    */
   public async sendTestAlert(recipient?: string): Promise<EmailAlertLog> {
     const target = recipient || this.config.recipientEmail;
+    const safeTarget = escapeHtml(target);
     const subject = `🔔 [TEST NOTIFICATION] T-Connect Sentinel Email System Verification`;
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; color: #f8fafc; border-radius: 12px; overflow: hidden; border: 1px solid #334155;">
@@ -260,10 +291,10 @@ export class EmailService {
         <div style="padding: 24px;">
           <p style="font-size: 14px; line-height: 1.5; color: #cbd5e1;">
             This is a test notification from the <strong>T-Connect Control Tower</strong> deadman watchdog.
-            Router offline and uplink disconnection notifications will be delivered instantly to <strong>${target}</strong> within 30 seconds of an outage.
+            Router offline and uplink disconnection notifications will be delivered instantly to <strong>${safeTarget}</strong> within 30 seconds of an outage.
           </p>
           <div style="background: #1e293b; border-radius: 8px; padding: 16px; margin: 20px 0; font-family: monospace; font-size: 13px; color: #38bdf8;">
-            Deadman Interval: 15s | Max Missed Beats: 2 (30s) | Target: ${target}
+            Deadman Interval: 15s | Max Missed Beats: 2 (30s) | Target: ${safeTarget}
           </div>
         </div>
         <div style="background: #090d16; padding: 16px; text-align: center; border-top: 1px solid #1e293b; font-size: 12px; color: #64748b;">
@@ -291,7 +322,7 @@ export class EmailService {
     details: Record<string, any>;
   }): Promise<EmailAlertLog> {
     const logEntry: EmailAlertLog = {
-      id: `mail_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `mail_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
       timestamp: new Date().toISOString(),
       recipient: options.recipient,
       subject: options.subject,

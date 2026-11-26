@@ -17,9 +17,26 @@ import {
   ConnectionAttemptLog,
   SponsorAdConfig,
   VideoAdItem,
-  PlatformRole
+  PlatformRole,
+  PermissionTabId,
+  DepartmentName
 } from '../types';
 import { supabaseService } from './supabase';
+import {
+  getInMemoryAuthSession,
+  setInMemoryAuthSession,
+  installAuthFetchInterceptor
+} from './authToken';
+import {
+  SUPER_ADMIN_NAME,
+  SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_USERNAME,
+  PERMISSION_TABS,
+  SESSION_IDLE_TIMEOUT_MS,
+  isTrueSuperAdminAccount
+} from '../utils/permissions';
+
+installAuthFetchInterceptor();
 
 export const STARTER_VIDEO_AD_LIBRARY: VideoAdItem[] = [
   {
@@ -202,7 +219,7 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
     ecocashMerchantId: '63165430',
     xpaymentsAppId: '',
     xpaymentsCertId: '',
-    webhookSecret: 'whsec_paylesotho_tconnect_2026',
+    webhookSecret: '',
     webhookUrl: 'http://169.58.98.92:3000/api/gateways/paylesotho/webhook',
     successRate24h: 99.8,
     avgLatencyMs: 240,
@@ -232,99 +249,23 @@ export const UNCONFIGURED_GATEWAYS: GatewayConfig[] = [
   }
 ];
 
-export const DESIGNATED_ROLE_CREDENTIALS: Record<string, { role: TeamMember['role']; password: string; name: string; description: string }> = {
-  'rphooko@tconnect.africa': {
-    role: 'Owner',
-    password: 'TConnected#4321',
-    name: 'Raphooko Phooko',
-    description: 'Owner (Master Access & Switchboard)'
-  },
-  'admin@tconnect.africa': {
-    role: 'Super Admin',
-    password: 'TConnected%4321',
-    name: 'Super Administrator',
-    description: 'Super Admin (All Tabs & Infrastructure)'
-  },
-  'collab@tconnect.africa': {
-    role: 'Collaborator',
-    password: 'TConnected*4321',
-    name: 'Portal Collaborator',
-    description: 'Collaborator (Captive Portal & Ads Only)'
-  },
-  'operations@tconnect.africa': {
-    role: 'Finance',
-    password: 'TConnected@4321',
-    name: 'Finance Operations',
-    description: 'Finance (Billing & Vouchers Only)'
-  },
-  'technical@tconnect.africa': {
-    role: 'Tech',
-    password: 'TConnected!4321',
-    name: 'Technical Engineer',
-    description: 'Tech (Routers & Adoption Only)'
-  }
-};
-
+// Server-authenticated team roster metadata (passwords are hashed server-side via scrypt — never stored in browser code)
 export const INITIAL_TEAM: TeamMember[] = [
   {
-    id: 'tm_owner',
-    name: 'Raphooko Phooko',
-    email: 'rphooko@tconnect.africa',
-    role: 'Owner',
-    scopedSites: [],
-    mfaEnabled: true,
-    status: 'active',
-    invitedAt: '2026-10-02',
-    lastLoginAt: 'Just now',
-    password: 'TConnected#4321'
-  },
-  {
-    id: 'tm_super_admin',
-    name: 'Super Administrator',
-    email: 'admin@tconnect.africa',
+    id: 'tm_super_admin_boss',
+    name: SUPER_ADMIN_NAME,
+    username: SUPER_ADMIN_USERNAME,
+    email: SUPER_ADMIN_EMAIL,
+    department: 'Super Admin',
     role: 'Super Admin',
+    isSuperAdmin: true,
+    allowedTabs: PERMISSION_TABS.map((t) => t.id),
     scopedSites: [],
     mfaEnabled: true,
+    hasPasswordConfigured: true,
     status: 'active',
     invitedAt: '2026-10-02',
-    lastLoginAt: 'Just now',
-    password: 'TConnected%4321'
-  },
-  {
-    id: 'tm_collab',
-    name: 'Portal Collaborator',
-    email: 'collab@tconnect.africa',
-    role: 'Collaborator',
-    scopedSites: [],
-    mfaEnabled: false,
-    status: 'active',
-    invitedAt: '2026-10-05',
-    lastLoginAt: 'Just now',
-    password: 'TConnected*4321'
-  },
-  {
-    id: 'tm_finance',
-    name: 'Finance Operations',
-    email: 'operations@tconnect.africa',
-    role: 'Finance',
-    scopedSites: [],
-    mfaEnabled: false,
-    status: 'active',
-    invitedAt: '2026-10-10',
-    lastLoginAt: 'Just now',
-    password: 'TConnected@4321'
-  },
-  {
-    id: 'tm_tech',
-    name: 'Technical Engineer',
-    email: 'technical@tconnect.africa',
-    role: 'Tech',
-    scopedSites: [],
-    mfaEnabled: true,
-    status: 'active',
-    invitedAt: '2026-10-12',
-    lastLoginAt: 'Just now',
-    password: 'TConnected!4321'
+    lastLoginAt: 'Never'
   }
 ];
 
@@ -1250,28 +1191,21 @@ class StorageService {
     this.checkVoucherStock();
   }
 
-  async syncTeamWithServer(): Promise<void> {
+  async syncTeamWithServer(): Promise<TeamMember[]> {
     try {
       const res = await fetch('/api/team');
       if (res.ok) {
         const data = await res.json();
-        if (data.success && Array.isArray(data.team) && data.team.length > 0) {
-          const merged = [...this.state.team];
-          data.team.forEach((sm: TeamMember) => {
-            const idx = merged.findIndex(m => m.email.toLowerCase() === sm.email.toLowerCase());
-            if (idx >= 0) {
-              merged[idx] = { ...merged[idx], ...sm };
-            } else {
-              merged.push(sm);
-            }
-          });
-          this.state.team = merged;
+        if (data.success && Array.isArray(data.team)) {
+          this.state.team = data.team;
           this.saveState();
+          return data.team;
         }
       }
     } catch {
       // offline fallback
     }
+    return this.state.team;
   }
 
   // Router Methods
@@ -3054,17 +2988,55 @@ class StorageService {
   }
 
   // Team, RBAC & Invites
+  private generateCryptoHex(byteLen: number): string {
+    const bytes = new Uint8Array(byteLen);
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < byteLen; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private generateCryptoTempPassword(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint8Array(10);
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    }
+    const digits = 1000 + (((bytes[0] << 8) | bytes[1]) % 9000);
+    let alpha = '';
+    for (let i = 2; i < 8; i++) {
+      alpha += chars[bytes[i] % chars.length];
+    }
+    return `TC-${digits}-${alpha}!`;
+  }
+
   inviteTeamMember(name: string, email: string, role: TeamMember['role'], scopedSites: string[], customPassword?: string) {
-    const inviteToken = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const inviteToken = `inv_${this.generateCryptoHex(24)}`;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const cleanEmail = email.trim().toLowerCase();
-    const randCode = Math.floor(1000 + Math.random() * 9000);
-    const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : `TC-${randCode}-${alphaCode}!`;
-    
+    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : this.generateCryptoTempPassword();
+
+    // Sync cryptographic invite token and scrypt-hashed temp password to server
+    if (typeof window !== 'undefined') {
+      fetch('/api/team/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: cleanEmail,
+          role,
+          scopedSites,
+          inviteToken,
+          tempPassword
+        })
+      }).catch(() => {});
+    }
+
     // Check if member already exists by email
     const existingIndex = this.state.team.findIndex((m) => m.email.toLowerCase() === cleanEmail);
-    
+
     if (existingIndex >= 0) {
       const existing = this.state.team[existingIndex];
       existing.name = name.trim();
@@ -3073,7 +3045,6 @@ class StorageService {
       existing.inviteToken = inviteToken;
       existing.inviteTokenExpiresAt = expiresAt;
       existing.invitedBy = 'Raphooko Phooko';
-      existing.tempPassword = tempPassword;
       existing.tempPasswordIssuedAt = new Date().toISOString();
       existing.status = 'invited';
       this.logAudit({
@@ -3084,11 +3055,11 @@ class StorageService {
         details: `Re-issued invitation for role '${role}' with temporary credentials.`
       });
       this.saveState();
-      return existing;
+      return { ...existing, tempPassword };
     }
 
     const newMember: TeamMember = {
-      id: `tm_${Date.now()}`,
+      id: `tm_${this.generateCryptoHex(6)}`,
       name: name.trim(),
       email: cleanEmail,
       role,
@@ -3099,7 +3070,6 @@ class StorageService {
       inviteToken,
       inviteTokenExpiresAt: expiresAt,
       invitedBy: 'Raphooko Phooko',
-      tempPassword,
       tempPasswordIssuedAt: new Date().toISOString()
     };
 
@@ -3114,7 +3084,7 @@ class StorageService {
     });
 
     this.saveState();
-    return newMember;
+    return { ...newMember, tempPassword };
   }
 
   getSponsorAdConfig(): SponsorAdConfig {
@@ -3222,103 +3192,295 @@ class StorageService {
     return updated;
   }
 
-  redeemInviteToken(token: string, emailHint?: string, roleHint?: string, nameHint?: string): { success: boolean; session?: AuthSession; member?: TeamMember; message: string } {
-    if (!token && !emailHint) {
-      return { success: false, message: 'Missing invitation token or email.' };
-    }
-
-    const cleanToken = token ? token.trim() : '';
-    const cleanEmail = emailHint ? emailHint.trim().toLowerCase() : '';
-
-    // Find member by inviteToken or by email if invited
-    let member = this.state.team.find((m) => {
-      if (cleanToken && m.inviteToken && m.inviteToken.toLowerCase() === cleanToken.toLowerCase()) {
-        return true;
-      }
-      if (cleanToken && m.id.toLowerCase() === cleanToken.toLowerCase()) {
-        return true;
-      }
-      if (cleanEmail && m.email.toLowerCase() === cleanEmail) {
-        return true;
-      }
-      return false;
-    });
-
-    // If still not found, check if token matches an invited member id
-    if (!member && cleanToken) {
-      member = this.state.team.find((m) => m.id === cleanToken);
-    }
-
-    // Auto-provision if valid email present (e.g. mobile or new browser session)
-    if (!member && cleanEmail) {
-      const randCode = Math.floor(1000 + Math.random() * 9000);
-      const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-      member = {
-        id: `tm_${Date.now()}`,
-        name: nameHint || (cleanEmail === 'bernphooko@proton.me' ? 'Raphooko Backup' : cleanEmail.split('@')[0]),
-        email: cleanEmail,
-        role: (roleHint as any) || (cleanEmail === 'bernphooko@proton.me' ? 'Viewer' : 'Collaborator'),
-        scopedSites: cleanEmail === 'bernphooko@proton.me' ? ['Maseru Golf Course'] : [],
-        mfaEnabled: false,
-        status: 'active',
-        invitedAt: new Date().toISOString().slice(0, 10),
-        inviteToken: cleanToken || `inv_${Date.now()}`,
-        tempPassword: 'TC-2849-BKUP!'
-      };
-      this.state.team.push(member);
-    }
-
-    if (!member) {
-      return {
-        success: false,
-        message: 'Invalid or expired invitation token. Please request a new invitation from your administrator.'
-      };
-    }
-
-    // Activate member
-    member.status = 'active';
-    member.lastLoginAt = 'Just now';
-    member.hasPendingReset = false;
-
-    // Issue instant authenticated session
-    const session: AuthSession = {
-      user: member,
-      token: `sess_invite_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      loggedInAt: new Date().toISOString(),
-      effectiveRole: member.role
-    };
-
-    this.setAuthSession(session);
-
-    // Sync to server backend
+  // ---------------------------------------------------------------------------
+  // Server-Backed Team Management, @tconnect.tower Invites, Resets & Audit Logs
+  // ---------------------------------------------------------------------------
+  async createServerInvite(payload: {
+    name?: string;
+    department: DepartmentName;
+    allowedTabs: PermissionTabId[];
+    scopedSites?: string[];
+  }): Promise<{
+    success: boolean;
+    member?: TeamMember;
+    inviteToken?: string;
+    inviteUrl?: string;
+    expiresAt?: string;
+    message?: string;
+  }> {
     try {
-      fetch('/api/team/redeem-invite', {
+      const res = await fetch('/api/team/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: cleanToken,
-          email: cleanEmail,
-          role: member.role,
-          name: member.name
-        })
-      }).catch(() => {});
-    } catch {}
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data?.member) {
+        return {
+          success: false,
+          message: data?.message || 'Unable to create teammate invitation.'
+        };
+      }
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const invitePath = data.invitePath || `/#invite?token=${data.inviteToken}`;
+      const inviteUrl = `${origin}${invitePath}`;
+      await this.syncTeamWithServer();
+      return {
+        success: true,
+        member: data.member,
+        inviteToken: data.inviteToken,
+        inviteUrl,
+        expiresAt: data.expiresAt
+      };
+    } catch {
+      return { success: false, message: 'Could not reach the server to create this invite.' };
+    }
+  }
 
-    this.logAudit({
-      actor: member.name,
-      role: member.role,
-      action: 'team.invite_accepted',
-      target: member.email,
-      details: `Accepted teammate invitation and instantly authenticated into controller as ${member.role}.`
-    });
+  async updateServerMember(
+    memberId: string,
+    updates: {
+      name?: string;
+      department?: DepartmentName;
+      allowedTabs?: PermissionTabId[];
+      scopedSites?: string[];
+      status?: TeamMember['status'];
+    }
+  ): Promise<{ success: boolean; member?: TeamMember; message?: string }> {
+    try {
+      const res = await fetch(`/api/team/${encodeURIComponent(memberId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data?.member) {
+        return { success: false, message: data?.message || 'Unable to update member access.' };
+      }
+      await this.syncTeamWithServer();
+      return { success: true, member: data.member };
+    } catch {
+      return { success: false, message: 'Could not reach the server to update member access.' };
+    }
+  }
 
-    this.saveState();
+  async deleteServerMember(memberId: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const res = await fetch(`/api/team/${encodeURIComponent(memberId)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        return { success: false, message: data?.message || 'Unable to remove team member.' };
+      }
+      await this.syncTeamWithServer();
+      return { success: true, message: data.message };
+    } catch {
+      return { success: false, message: 'Could not reach the server to remove member.' };
+    }
+  }
 
+  async createServerResetLink(memberId: string): Promise<{
+    success: boolean;
+    resetUrl?: string;
+    expiresAt?: string;
+    message?: string;
+  }> {
+    try {
+      const res = await fetch(`/api/team/${encodeURIComponent(memberId)}/reset-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success || !data?.resetPath) {
+        return { success: false, message: data?.message || 'Unable to generate password reset link.' };
+      }
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      return {
+        success: true,
+        resetUrl: `${origin}${data.resetPath}`,
+        expiresAt: data.expiresAt
+      };
+    } catch {
+      return { success: false, message: 'Could not reach the server to create a reset link.' };
+    }
+  }
+
+  async fetchServerAuditLogs(filters?: {
+    actor?: string;
+    department?: string;
+    category?: string;
+    search?: string;
+    limit?: number;
+  }): Promise<{ success: boolean; logs: AuditLogEntry[]; total?: number; message?: string }> {
+    try {
+      const params = new URLSearchParams();
+      if (filters?.actor) params.set('actor', filters.actor);
+      if (filters?.department) params.set('department', filters.department);
+      if (filters?.category) params.set('category', filters.category);
+      if (filters?.search) params.set('search', filters.search);
+      if (filters?.limit) params.set('limit', String(filters.limit));
+      const query = params.toString();
+      const res = await fetch(`/api/audit-logs${query ? `?${query}` : ''}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        return { success: false, logs: [], message: data?.message || 'Unable to load activity logs.' };
+      }
+      return {
+        success: true,
+        logs: Array.isArray(data.logs) ? data.logs : [],
+        total: typeof data.total === 'number' ? data.total : undefined
+      };
+    } catch {
+      return { success: false, logs: [], message: 'Could not reach server for activity logs.' };
+    }
+  }
+
+  async previewInviteOrReset(token: string): Promise<{
+    success: boolean;
+    mode?: 'invite' | 'reset';
+    towerDomain?: string;
+    suggestedName?: string;
+    name?: string;
+    username?: string;
+    email?: string;
+    department?: DepartmentName;
+    role?: TeamMember['role'];
+    isSuperAdmin?: boolean;
+    allowedTabs?: PermissionTabId[];
+    invitedBy?: string;
+    expiresAt?: string;
+    message?: string;
+  }> {
+    try {
+      const res = await fetch(`/api/team/invite-preview?token=${encodeURIComponent(token.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        return { success: false, message: data?.message || 'This link is invalid or has already been used.' };
+      }
+      return data;
+    } catch {
+      return { success: false, message: 'Could not reach the server to verify this link.' };
+    }
+  }
+
+  async checkHandleAvailability(prefix: string): Promise<{
+    available: boolean;
+    fullEmail?: string;
+    reason?: string;
+  }> {
+    try {
+      const res = await fetch(`/api/team/check-handle?prefix=${encodeURIComponent(prefix.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        return { available: false, reason: 'Could not verify handle availability.' };
+      }
+      return {
+        available: Boolean(data.available),
+        fullEmail: data.fullEmail,
+        reason: data.reason
+      };
+    } catch {
+      return { available: false, reason: 'Could not reach server to check handle.' };
+    }
+  }
+
+  async completeInviteActivation(payload: {
+    token: string;
+    fullName: string;
+    handlePrefix: string;
+    password: string;
+    confirmPassword: string;
+  }): Promise<{ success: boolean; session?: AuthSession; member?: TeamMember; message: string }> {
+    try {
+      const resp = await fetch('/api/team/redeem-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success || !data?.token || !(data?.user || data?.member)) {
+        return {
+          success: false,
+          message: data?.message || 'Unable to activate your invitation. Please check your details and try again.'
+        };
+      }
+      const member: TeamMember = data.user || data.member;
+      const session: AuthSession = {
+        user: member,
+        token: String(data.token),
+        loggedInAt: new Date().toISOString(),
+        expiresAt: data.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+        idleTimeoutMs: data.idleTimeoutMs || SESSION_IDLE_TIMEOUT_MS,
+        effectiveRole: member.role
+      };
+      this.setAuthSession(session);
+      this.notify();
+      return {
+        success: true,
+        session,
+        member,
+        message: `Account activated! Welcome aboard, ${member.name}.`
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Could not reach the authentication server to activate your account.'
+      };
+    }
+  }
+
+  async completePasswordReset(payload: {
+    token: string;
+    password: string;
+    confirmPassword: string;
+  }): Promise<{ success: boolean; session?: AuthSession; message: string }> {
+    try {
+      const resp = await fetch('/api/auth/complete-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success || !data?.token || !data?.user) {
+        return {
+          success: false,
+          message: data?.message || 'Unable to complete password reset.'
+        };
+      }
+      const member: TeamMember = data.user;
+      const session: AuthSession = {
+        user: member,
+        token: String(data.token),
+        loggedInAt: new Date().toISOString(),
+        expiresAt: data.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+        idleTimeoutMs: data.idleTimeoutMs || SESSION_IDLE_TIMEOUT_MS,
+        effectiveRole: member.role
+      };
+      this.setAuthSession(session);
+      this.notify();
+      return {
+        success: true,
+        session,
+        message: data.message || `Password updated. Welcome back, ${member.name}.`
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Could not reach the authentication server.'
+      };
+    }
+  }
+
+  async redeemInviteToken(token: string, _emailHint?: string): Promise<{ success: boolean; session?: AuthSession; member?: TeamMember; message: string }> {
+    // Legacy hook preserved for compatibility; invite tokens now open the interactive self-setup screen on LoginView
+    const preview = await this.previewInviteOrReset(token);
+    if (!preview.success) {
+      return { success: false, message: preview.message || 'Invalid or expired invitation link.' };
+    }
     return {
-      success: true,
-      session,
-      member,
-      message: `Welcome aboard, ${member.name}! Signed in as ${member.role}.`
+      success: false,
+      message: 'Please enter your name, @tconnect.tower handle, and password to activate this invite.'
     };
   }
 
@@ -3332,7 +3494,6 @@ class StorageService {
       member.scopedSites = scopedSites;
     }
 
-    // If currently logged-in user is this member, sync active session
     const currentSession = this.getAuthSession();
     if (currentSession && (currentSession.user.id === memberId || currentSession.user.email.toLowerCase() === member.email.toLowerCase())) {
       currentSession.user.role = role;
@@ -3344,10 +3505,8 @@ class StorageService {
     }
 
     this.logAudit({
-      actor: 'Raphooko Phooko',
-      role: 'Owner',
       action: 'team.role_upgrade',
-      target: member.email,
+      target: member.email || member.name,
       details: `Upgraded role from ${oldRole} to ${role} (Effective immediately).`
     });
 
@@ -3369,11 +3528,9 @@ class StorageService {
     }
 
     this.logAudit({
-      actor: 'Raphooko Phooko',
-      role: 'Owner',
       action: 'team.member_update',
-      target: member.email,
-      details: `Updated team member profile for ${member.name} (${member.role}).`
+      target: member.email || member.name,
+      details: `Updated team member profile for ${member.name} (${member.department || member.role}).`
     });
     this.saveState();
     return member;
@@ -3385,187 +3542,170 @@ class StorageService {
     (this.state as any).teamInitialized = true;
     if (member) {
       this.logAudit({
-        actor: 'Raphooko Phooko',
-        role: 'Owner',
         action: 'team.revoke',
-        target: member.email,
-        details: 'Revoked team access and invalidated all active bearer tokens.'
+        target: member.email || member.name,
+        details: 'Revoked team access and invalidated all active sessions.'
       });
     }
     this.saveState();
   }
 
   // ---------------------------------------------------------------------------
-  // User Authentication, Password Issuance & Session Management
+  // User Authentication, First-Run Super Admin Setup & Cookie Session Restoration
   // ---------------------------------------------------------------------------
   getAuthSession(): AuthSession | null {
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-      try {
-        const stored = window.localStorage.getItem('tconnect_auth_session_v2');
-        if (stored) return JSON.parse(stored);
-      } catch {}
-    }
-    return null;
+    return getInMemoryAuthSession();
   }
 
   setAuthSession(session: AuthSession | null): void {
-    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
-      try {
-        if (session) {
-          window.localStorage.setItem('tconnect_auth_session_v2', JSON.stringify(session));
-        } else {
-          window.localStorage.removeItem('tconnect_auth_session_v2');
-        }
-      } catch {}
+    setInMemoryAuthSession(session);
+  }
+
+  async restoreSessionFromServer(): Promise<AuthSession | null> {
+    if (typeof window === 'undefined') return null;
+    try {
+      const resp = await fetch('/api/auth/me', {
+        method: 'GET',
+        credentials: 'include'
+      });
+      if (!resp.ok) {
+        this.setAuthSession(null);
+        return null;
+      }
+      const data = await resp.json().catch(() => ({}));
+      if (!data?.success || !data?.user) {
+        this.setAuthSession(null);
+        return null;
+      }
+      const user: TeamMember = data.user;
+      const session: AuthSession = {
+        user,
+        token: String(data.token || ''),
+        loggedInAt: user.lastLoginAt || new Date().toISOString(),
+        expiresAt: data.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+        idleTimeoutMs: data.idleTimeoutMs || SESSION_IDLE_TIMEOUT_MS,
+        effectiveRole: user.isSuperAdmin ? 'Super Admin' : user.role
+      };
+      this.setAuthSession(session);
+      this.notify();
+      return session;
+    } catch {
+      return this.getAuthSession();
     }
   }
 
-  login(email: string, password?: string): { success: boolean; session?: AuthSession; message: string } {
-    const cleanEmail = email.trim().toLowerCase();
-    const inputPass = password ? password.trim() : '';
+  async logout(): Promise<void> {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {}
+    this.setAuthSession(null);
+  }
 
-    if (!inputPass) {
-      return {
-        success: false,
-        message: 'Password is required to authenticate.'
-      };
+  async setupOwnerAccount(
+    email: string,
+    password: string,
+    confirmPassword: string
+  ): Promise<{ success: boolean; session?: AuthSession; message: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!password || password.length < 10) {
+      return { success: false, message: 'Super Admin password must be at least 10 characters long.' };
     }
-    
-    // Check if email matches one of the 5 designated role accounts
-    const designated = DESIGNATED_ROLE_CREDENTIALS[cleanEmail];
-    if (designated) {
-      if (inputPass !== designated.password) {
+    if (password !== confirmPassword) {
+      return { success: false, message: 'Passwords do not match.' };
+    }
+    try {
+      const resp = await fetch('/api/auth/setup-super-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password, confirmPassword })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success || !data?.token || !data?.user) {
         return {
           success: false,
-          message: 'Invalid email or password.'
+          message: data?.message || 'Unable to complete Super Admin password setup.'
+        };
+      }
+      const user: TeamMember = data.user;
+      const session: AuthSession = {
+        user,
+        token: String(data.token),
+        loggedInAt: new Date().toISOString(),
+        expiresAt: data.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+        idleTimeoutMs: data.idleTimeoutMs || SESSION_IDLE_TIMEOUT_MS,
+        effectiveRole: user.role
+      };
+      this.setAuthSession(session);
+      this.saveState();
+      return {
+        success: true,
+        session,
+        message: data.message || `Super Admin account secured. Welcome, ${user.name}.`
+      };
+    } catch {
+      return { success: false, message: 'Could not reach the authentication server.' };
+    }
+  }
+
+  async login(identifier: string, password?: string): Promise<{ success: boolean; session?: AuthSession; message: string }> {
+    const cleanId = identifier.trim().toLowerCase();
+    const inputPass = password ? password : '';
+
+    if (!cleanId || !inputPass) {
+      return {
+        success: false,
+        message: 'Login handle and password are required to sign in.'
+      };
+    }
+
+    try {
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: cleanId, email: cleanId, password: inputPass })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.success || !data?.token || !data?.user) {
+        return {
+          success: false,
+          message: data?.message || 'Invalid login handle or password.'
         };
       }
 
-      let member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
-      if (!member) {
-        member = {
-          id: `tm_${designated.role.toLowerCase().replace(/\s+/g, '_')}`,
-          name: designated.name,
-          email: cleanEmail,
-          role: designated.role,
-          scopedSites: [],
-          mfaEnabled: designated.role === 'Owner' || designated.role === 'Super Admin' || designated.role === 'Tech',
-          status: 'active',
-          invitedAt: '2026-10-02',
-          lastLoginAt: 'Just now',
-          password: designated.password
-        };
-        this.state.team.push(member);
+      const member: TeamMember = data.user;
+      const idx = this.state.team.findIndex((m) => m.id === member.id || (m.email && m.email.toLowerCase() === member.email.toLowerCase()));
+      if (idx >= 0) {
+        this.state.team[idx] = { ...this.state.team[idx], ...member, status: 'active' };
       } else {
-        member.role = designated.role;
-        member.name = designated.name;
-        member.password = designated.password;
-        member.status = 'active';
-        member.lastLoginAt = 'Just now';
-        delete member.tempPassword;
-        member.hasPendingReset = false;
+        this.state.team.push({ ...member, status: 'active' });
       }
       this.saveState();
 
       const session: AuthSession = {
         user: member,
-        token: `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        token: String(data.token),
         loggedInAt: new Date().toISOString(),
-        effectiveRole: member.role
+        expiresAt: data.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+        idleTimeoutMs: data.idleTimeoutMs || SESSION_IDLE_TIMEOUT_MS,
+        effectiveRole: member.isSuperAdmin ? 'Super Admin' : member.role
       };
       this.setAuthSession(session);
-      this.logAudit({
-        actor: member.name,
-        role: member.role,
-        action: 'auth.login_success',
-        target: member.email,
-        details: `Signed in as designated ${member.role} to T-Connect controller.`
-      });
+
       return {
         success: true,
         session,
-        message: `Welcome, ${member.name} (${member.role}).`
+        message: `Welcome back, ${member.name}.`
       };
-    }
-
-    // Look up non-designated team member by email
-    const member = this.state.team.find((m) => m.email.toLowerCase() === cleanEmail);
-    if (!member) {
+    } catch {
       return {
         success: false,
-        message: 'Invalid email or password.'
+        message: 'Unable to reach authentication server. Please retry.'
       };
     }
-
-    let isAuthenticated = false;
-    let loggedInViaTemp = false;
-
-    // Non-designated team members authenticate strictly via their assigned password or admin-issued temp password
-    if (member.password && inputPass === member.password.trim()) {
-      isAuthenticated = true;
-    } else if (member.tempPassword && inputPass === member.tempPassword.trim()) {
-      isAuthenticated = true;
-      loggedInViaTemp = true;
-    }
-
-    if (!isAuthenticated) {
-      return {
-        success: false,
-        message: 'Invalid email or password.'
-      };
-    }
-
-    // Retain password permanently so refreshing doesn't lock out the user
-    if (loggedInViaTemp) {
-      if (!member.password && member.tempPassword) {
-        member.password = member.tempPassword;
-      }
-      member.hasPendingReset = false;
-      this.clearPasswordResetAlert(member.id);
-      this.logAudit({
-        actor: member.name,
-        role: member.role,
-        action: 'auth.temp_password_redeemed',
-        target: member.email,
-        details: 'User authenticated using admin-issued temporary password.'
-      });
-      this.saveState();
-    }
-
-    // Update last login timestamp
-    member.lastLoginAt = 'Just now';
-    member.status = 'active';
-    this.saveState();
-
-    const session: AuthSession = {
-      user: member,
-      token: `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      loggedInAt: new Date().toISOString(),
-      effectiveRole: member.role
-    };
-
-    this.setAuthSession(session);
-
-    this.logAudit({
-      actor: member.name,
-      role: member.role,
-      action: 'auth.login_success',
-      target: member.email,
-      details: loggedInViaTemp
-        ? 'Signed in with admin-issued temporary credential.'
-        : `Signed in as ${member.role} to T-Connect controller.`
-    });
-
-    return {
-      success: true,
-      session,
-      message: `Welcome, ${member.name} (${member.role}).`
-    };
   }
 
   /**
-   * Allows the Owner (master account) to switch into any role at will
-   * (Super Admin, Collaborator, Finance, Tech, Management) to test permissions in real-time.
+   * Allows the Super Admin to preview department/role interfaces in real time.
    */
   switchRole(targetRole: TeamMember['role']): { success: boolean; session?: AuthSession; message: string } {
     const currentSession = this.getAuthSession();
@@ -3573,12 +3713,8 @@ class StorageService {
       return { success: false, message: 'No active session' };
     }
 
-    const isOwnerOrMaster = 
-      currentSession.user.role === 'Owner' || 
-      currentSession.user.email.toLowerCase() === 'rphooko@tconnect.africa';
-
-    if (!isOwnerOrMaster) {
-      return { success: false, message: 'Only the Owner can switch active roles at will.' };
+    if (!isTrueSuperAdminAccount(currentSession.user)) {
+      return { success: false, message: 'Only the Super Admin can preview other roles.' };
     }
 
     currentSession.effectiveRole = targetRole;
@@ -3586,15 +3722,16 @@ class StorageService {
     this.logAudit({
       actor: currentSession.user.name,
       role: targetRole,
+      category: 'authentication',
       action: 'auth.role_switch',
       target: currentSession.user.email,
-      details: `Owner switched effective role to '${targetRole}'. Navigation and permissions updated in real time.`
+      details: `Super Admin switched interface preview to '${targetRole}'.`
     });
     this.notify();
     return {
       success: true,
       session: currentSession,
-      message: `Active role switched to ${targetRole}.`
+      message: `Previewing interface as ${targetRole}.`
     };
   }
 
@@ -3714,14 +3851,23 @@ class StorageService {
       return { success: false, tempPassword: '', message: 'Team member not found' };
     }
 
-    const randCode = Math.floor(1000 + Math.random() * 9000);
-    const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : `TC-${randCode}-${alphaCode}!`;
+    const tempPassword = customPassword && customPassword.trim() ? customPassword.trim() : this.generateCryptoTempPassword();
 
-    member.tempPassword = tempPassword;
     member.tempPasswordIssuedAt = new Date().toISOString();
     member.hasPendingReset = false; // Mark fulfilled by admin
     this.clearPasswordResetAlert(member.id);
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/team/issue-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          memberId: member.id,
+          email: member.email,
+          tempPassword
+        })
+      }).catch(() => {});
+    }
 
     this.logAudit({
       actor: 'Raphooko Phooko',
@@ -3854,18 +4000,50 @@ class StorageService {
     this.saveState();
   }
 
-  // Audit Logging
-  public logAudit(entry: Partial<AuditLogEntry> & { action: string; target: string; details: string; actor?: string; role?: string }) {
+  // Audit Logging (auto-attributes signed-in user and mirrors to Super Admin server audit log)
+  public logAudit(
+    entry: Partial<AuditLogEntry> & { action: string; target: string; details: string; actor?: string; role?: string },
+    skipServerMirror = false
+  ) {
+    const activeSession = this.getAuthSession();
+    const resolvedActor = activeSession?.user?.name || entry.actor || 'System';
+    const resolvedEmail = activeSession?.user?.email || entry.actorEmail;
+    const resolvedDept = activeSession?.user?.department || activeSession?.user?.role || entry.actorDepartment;
+    const resolvedRole = activeSession?.user?.role || entry.role || 'Super Admin';
+    const inferredCategory =
+      entry.category ||
+      (entry.action.startsWith('exports.')
+        ? 'exports'
+        : entry.action.startsWith('router.adopt')
+          ? 'router_adoption'
+          : entry.action.startsWith('router.reboot')
+            ? 'router_reboot'
+            : entry.action.startsWith('router.terminal')
+              ? 'terminal_command'
+              : entry.action.startsWith('router.')
+                ? 'router_config'
+                : entry.action.startsWith('plan.') || entry.action.startsWith('voucher.') || entry.action.startsWith('gateway.') || entry.action.startsWith('billing.')
+                  ? 'billing'
+                  : entry.action.startsWith('portal.')
+                    ? 'captive_portal'
+                    : entry.action.startsWith('team.') || entry.action.startsWith('admin.')
+                      ? 'team'
+                      : entry.action.startsWith('auth.')
+                        ? 'authentication'
+                        : 'system');
+
     const newLog: AuditLogEntry = {
       id: entry.id || `aud_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      actor: entry.actor || 'Admin',
-      role: entry.role || 'Owner',
+      actor: resolvedActor,
+      actorEmail: resolvedEmail,
+      actorDepartment: resolvedDept,
+      role: resolvedRole,
       action: entry.action,
       target: entry.target,
       details: entry.details,
-      ipAddress: entry.ipAddress || '197.234.12.89',
+      ipAddress: entry.ipAddress || (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1'),
       timestamp: entry.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19),
-      category: entry.category,
+      category: inferredCategory,
       routerId: entry.routerId,
       routerName: entry.routerName,
       command: entry.command,
@@ -3880,6 +4058,15 @@ class StorageService {
       this.state.auditLogs.pop();
     }
     this.saveState();
+
+    // Mirror every authenticated user action to the persistent Super Admin server audit log
+    if (!skipServerMirror && activeSession && typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch('/api/audit-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newLog)
+      }).catch(() => {});
+    }
     return newLog;
   }
 

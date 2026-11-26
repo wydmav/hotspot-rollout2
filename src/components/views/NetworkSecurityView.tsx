@@ -21,6 +21,14 @@ import { SecurityAuthView } from './SecurityAuthView';
 import { CaptivePortalLeadsView } from './CaptivePortalLeadsView';
 import { SessionDurationTrackingDisplay, computeSessionStats } from '../common/SessionDurationTrackingDisplay';
 import { storage } from '../../services/storage';
+import {
+  canAccessNetworkSubTab,
+  getFirstAllowedNetworkSubTab,
+  isUserSuperAdmin,
+  isTrueSuperAdminAccount
+} from '../../utils/permissions';
+
+type NetworkSubTab = 'portal' | 'terminal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security';
 
 interface NetworkSecurityViewProps {
   plans: HotspotPlan[];
@@ -55,18 +63,39 @@ interface NetworkSecurityViewProps {
   onIssuePassword?: (memberId: string, customPass?: string) => void;
   currentUser?: TeamMember;
   effectiveRole?: TeamMember['role'];
+  requestedSubTab?: NetworkSubTab | null;
+  onConsumeRequestedSubTab?: () => void;
 }
 
 export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) => {
-  const isCollaborator = props.effectiveRole === 'Collaborator';
-  const [activeSubTab, setActiveSubTab] = useState<'portal' | 'terminal' | 'roaming' | 'bandwidth' | 'sessions' | 'leads' | 'team' | 'security'>('portal');
+  const isSuperAdmin = isUserSuperAdmin(props.currentUser, props.effectiveRole);
+  const isBoss = isTrueSuperAdminAccount(props.currentUser);
+  const canSee = (subTab: NetworkSubTab) => canAccessNetworkSubTab(props.currentUser, subTab, props.effectiveRole);
 
-  // Enforce portal subtab for Collaborator
-  React.useEffect(() => {
-    if (isCollaborator && activeSubTab !== 'portal') {
-      setActiveSubTab('portal');
+  const [activeSubTab, setActiveSubTab] = useState<NetworkSubTab>(() => {
+    if (props.requestedSubTab && canAccessNetworkSubTab(props.currentUser, props.requestedSubTab, props.effectiveRole)) {
+      return props.requestedSubTab;
     }
-  }, [isCollaborator, activeSubTab]);
+    return getFirstAllowedNetworkSubTab(props.currentUser, props.effectiveRole) || 'portal';
+  });
+
+  // Honor direct navigation requests (e.g., UserMenuDropdown -> Team Dashboard)
+  React.useEffect(() => {
+    if (props.requestedSubTab && canAccessNetworkSubTab(props.currentUser, props.requestedSubTab, props.effectiveRole)) {
+      setActiveSubTab(props.requestedSubTab);
+      props.onConsumeRequestedSubTab?.();
+    }
+  }, [props.requestedSubTab, props.currentUser, props.effectiveRole, props.onConsumeRequestedSubTab]);
+
+  // Ensure user never sits on an unauthorized sub-tab
+  React.useEffect(() => {
+    if (!canAccessNetworkSubTab(props.currentUser, activeSubTab, props.effectiveRole)) {
+      const firstAllowed = getFirstAllowedNetworkSubTab(props.currentUser, props.effectiveRole);
+      if (firstAllowed) {
+        setActiveSubTab(firstAllowed);
+      }
+    }
+  }, [props.currentUser, props.effectiveRole, activeSubTab]);
 
   const sessionStats = useMemo(() => {
     return computeSessionStats(props.vouchers, props.transactions || [], props.selectedVertical);
@@ -74,180 +103,172 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
 
   return (
     <div className="space-y-5">
-      {/* Sub-navigation Tabs */}
+      {/* Sub-navigation Tabs (Strictly Filtered by Member Permissions) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap rounded-xl bg-[#121829] p-1 border border-[#1f283d] text-xs font-mono">
+          {canSee('portal') && (
+            <button
+              onClick={() => setActiveSubTab('portal')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'portal' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Captive Portal</span>
+            </button>
+          )}
+
+          {canSee('terminal') && (
+            <button
+              onClick={() => setActiveSubTab('terminal')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'terminal' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Router Terminal</span>
+            </button>
+          )}
+
+          {canSee('roaming') && (
+            <button
+              onClick={() => setActiveSubTab('roaming')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'roaming' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Repeat className="w-3.5 h-3.5" />
+              <span>Roaming Engine</span>
+            </button>
+          )}
+
+          {canSee('bandwidth') && (
+            <button
+              onClick={() => setActiveSubTab('bandwidth')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'bandwidth' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              <span>Bandwidth &amp; DNS</span>
+            </button>
+          )}
+
+          {canSee('sessions') && (
+            <button
+              onClick={() => setActiveSubTab('sessions')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'sessions' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Session Duration</span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-950/60 text-cyan-300 border border-cyan-500/30">
+                {sessionStats.averageShortFormatted}
+              </span>
+            </button>
+          )}
+
+          {canSee('leads') && (
+            <button
+              onClick={() => setActiveSubTab('leads')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'leads' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>Guest Leads</span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-950/60 text-amber-300 border border-amber-500/30">
+                {storage.getCaptiveLeads().length}
+              </span>
+            </button>
+          )}
+
+          {isBoss && canSee('team') && (
+            <button
+              onClick={() => setActiveSubTab('team')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'team' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Team Dashboard</span>
+            </button>
+          )}
+
+          {isBoss && canSee('security') && (
+            <button
+              onClick={() => setActiveSubTab('security')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                activeSubTab === 'security' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Security &amp; Passkeys</span>
+            </button>
+          )}
+        </div>
+
+        {/* Database Shortcut Button (Super Admin Exclusive) */}
+        {isBoss && (
           <button
-            onClick={() => setActiveSubTab('portal')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'portal' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+            onClick={props.onOpenDatabaseModal}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-colors cursor-pointer ${
+              props.isSupabaseConnected
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>{isCollaborator ? 'Captive Portal, Images & Ads' : 'Captive Portal'}</span>
+            <Database className="w-3.5 h-3.5" />
+            <span>{props.isSupabaseConnected ? 'Supabase Active' : 'Configure Supabase DB'}</span>
           </button>
+        )}
+      </div>
 
-          {!isCollaborator && (
-            <>
-
-          <button
-            onClick={() => setActiveSubTab('terminal')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'terminal' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Router Terminal</span>
-            <span className="px-1.5 py-0.5 rounded text-[9px] bg-orange-950/60 text-orange-300 border border-orange-500/30">
-              4 Options
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('roaming')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'roaming' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Repeat className="w-3.5 h-3.5" />
-            <span>Roaming Engine</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('bandwidth')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'bandwidth' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Bandwidth &amp; DNS</span>
-          </button>
+      {/* Session Duration Telemetry Quick-Glance Ribbon (Only if Sessions tab is allowed) */}
+      {canSee('sessions') && activeSubTab !== 'team' && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#0f1422] border border-[#232d42] text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-cyan-400" />
+              <span className="text-slate-300 font-bold">SESSION TRACKING:</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Avg Duration:</span>
+              <span className="text-white font-extrabold text-sm">{sessionStats.averageFormatted}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Max Connection:</span>
+              <span className="text-purple-300 font-extrabold text-sm">{sessionStats.maximumFormatted}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Total Leases:</span>
+              <span className="text-cyan-300 font-bold">{sessionStats.totalSessions}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">Live Active:</span>
+              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                {sessionStats.activeCount}
+              </span>
+            </div>
+          </div>
 
           <button
             onClick={() => setActiveSubTab('sessions')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'sessions' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              activeSubTab === 'sessions'
+                ? 'bg-[#f05e17] text-white shadow-sm'
+                : 'bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200'
             }`}
           >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Session Duration</span>
-            <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-950/60 text-cyan-300 border border-cyan-500/30">
-              {sessionStats.averageShortFormatted}
-            </span>
+            <span>{activeSubTab === 'sessions' ? 'Viewing Logs Tab' : 'View Full Session Logs →'}</span>
           </button>
-
-          <button
-            onClick={() => setActiveSubTab('leads')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'leads' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Guest Leads</span>
-            <span className="px-1.5 py-0.5 rounded text-[9px] bg-amber-950/60 text-amber-300 border border-amber-500/30">
-              {storage.getCaptiveLeads().length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('team')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'team' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Team &amp; RBAC</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('security')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold transition-colors ${
-              activeSubTab === 'security' ? 'bg-[#f05e17] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Security &amp; Passkeys</span>
-          </button>
-        </>
+        </div>
       )}
-    </div>
 
-    {/* Database Shortcut Button (Super Admin Exclusive) */}
-    {!isCollaborator && (
-      <button
-        onClick={props.onOpenDatabaseModal}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
-          props.isSupabaseConnected
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-            : 'bg-[#121829] border-[#1f283d] text-slate-300 hover:border-slate-500'
-        }`}
-      >
-        <Database className="w-3.5 h-3.5" />
-        <span>{props.isSupabaseConnected ? 'Supabase Active' : 'Configure Supabase DB'}</span>
-      </button>
-    )}
-  </div>
-
-    {/* Collaborator Role Context Banner */}
-    {isCollaborator && (
-      <div className="bg-[#121829] border border-[#1f283d] rounded-xl p-3.5 flex items-center justify-between font-mono text-xs">
-        <div className="flex items-center gap-2.5">
-          <Smartphone className="w-4 h-4 text-[#f05e17]" />
-          <div>
-            <span className="font-bold text-white block">Collaborator Creative Studio</span>
-            <span className="text-[10px] text-slate-400 block font-normal">Design guest captive portal appearance, upload branded backgrounds, and configure connected sponsor ad banners.</span>
-          </div>
-        </div>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30 shrink-0">
-          Collaborator Tier
-        </span>
-      </div>
-    )}
-
-    {/* Session Duration Telemetry Quick-Glance Ribbon (Super Admin Exclusive) */}
-    {!isCollaborator && (
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#0f1422] border border-[#232d42] text-xs font-mono">
-        <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-cyan-400" />
-            <span className="text-slate-300 font-bold">SESSION TRACKING:</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">Avg Duration:</span>
-            <span className="text-white font-extrabold text-sm">{sessionStats.averageFormatted}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">Max Connection:</span>
-            <span className="text-purple-300 font-extrabold text-sm">{sessionStats.maximumFormatted}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">Total Leases:</span>
-            <span className="text-cyan-300 font-bold">{sessionStats.totalSessions}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">Live Active:</span>
-            <span className="text-emerald-400 font-bold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              {sessionStats.activeCount}
-            </span>
-          </div>
-        </div>
-
-        <button
-          onClick={() => setActiveSubTab('sessions')}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-            activeSubTab === 'sessions'
-              ? 'bg-[#f05e17] text-white shadow-sm'
-              : 'bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200'
-          }`}
-        >
-          <span>{activeSubTab === 'sessions' ? 'Viewing Logs Tab' : 'View Full Session Logs →'}</span>
-        </button>
-      </div>
-    )}
-
-      {/* Sub-view Content */}
-      {activeSubTab === 'portal' && (
+      {/* Sub-view Content (Strictly Permission-Gated) */}
+      {activeSubTab === 'portal' && canSee('portal') && (
         <CaptivePortalView
           plans={props.plans}
           routers={props.routers}
@@ -261,7 +282,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'terminal' && (
+      {activeSubTab === 'terminal' && canSee('terminal') && (
         <RouterTerminalSubTab
           routers={props.routers}
           selectedVertical={props.selectedVertical}
@@ -269,7 +290,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'roaming' && (
+      {activeSubTab === 'roaming' && canSee('roaming') && (
         <RoamingView
           routers={props.routers}
           vouchers={props.vouchers}
@@ -278,7 +299,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'bandwidth' && (
+      {activeSubTab === 'bandwidth' && canSee('bandwidth') && (
         <BandwidthFilterView
           contentFilters={props.contentFilters}
           onToggleFilter={props.onToggleFilter}
@@ -287,7 +308,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'sessions' && (
+      {activeSubTab === 'sessions' && canSee('sessions') && (
         <SessionDurationTrackingDisplay
           vouchers={props.vouchers}
           transactions={props.transactions || []}
@@ -298,14 +319,14 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'leads' && (
+      {activeSubTab === 'leads' && canSee('leads') && (
         <CaptivePortalLeadsView
           selectedVertical={props.selectedVertical}
           currency={props.currency}
         />
       )}
 
-      {activeSubTab === 'team' && (
+      {activeSubTab === 'team' && isBoss && (
         <TeamRbacView
           team={props.team}
           auditLogs={props.auditLogs}
@@ -318,7 +339,7 @@ export const NetworkSecurityView: React.FC<NetworkSecurityViewProps> = (props) =
         />
       )}
 
-      {activeSubTab === 'security' && (
+      {activeSubTab === 'security' && isBoss && (
         <SecurityAuthView
           biometricActive={props.biometricActive}
           onToggleBiometric={props.onToggleBiometric}

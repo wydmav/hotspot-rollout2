@@ -31,6 +31,11 @@ echo -e "${YELLOW}[2/4] Packaging self-contained VPS release: ${ARCHIVE_NAME}...
 tar --exclude='./node_modules' \
     --exclude='./.git' \
     --exclude='./.aistudio' \
+    --exclude='./.env' \
+    --exclude='./.env.*' \
+    --exclude='./data' \
+    --exclude='./public/server-portal-store.json' \
+    --exclude='./public/portal-configs.json' \
     --exclude='./*.tar.gz' \
     --exclude='./coverage' \
     --exclude='./.DS_Store' \

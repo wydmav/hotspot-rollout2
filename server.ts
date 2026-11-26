@@ -1,8 +1,10 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import dns from 'dns';
+import net from 'net';
 import dotenv from 'dotenv';
 import { RouterOSRenderer } from './src/services/routerosRenderer.js';
 import { emailService } from './src/services/emailService.js';
@@ -34,11 +36,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-// Parse JSON and URL-encoded bodies with 60mb limit for photo and short video ad uploads
-app.use(express.json({ limit: '60mb' }));
-app.use(express.urlencoded({ extended: true, limit: '60mb' }));
-
-// Persistent & static images/videos directories for captive portal splash backgrounds & sponsor ads
+// Persistent & static directories for captive portal splash backgrounds, sponsor ads, and private server state
 const persistentDataDir = path.resolve(__dirname, 'data');
 if (!fs.existsSync(persistentDataDir)) {
   fs.mkdirSync(persistentDataDir, { recursive: true });
@@ -51,8 +49,6 @@ const publicImagesDir = path.resolve(__dirname, 'public/images');
 if (!fs.existsSync(publicImagesDir)) {
   fs.mkdirSync(publicImagesDir, { recursive: true });
 }
-app.use('/images', express.static(persistentImagesDir), express.static(publicImagesDir));
-
 const persistentVideosDir = path.resolve(persistentDataDir, 'videos');
 if (!fs.existsSync(persistentVideosDir)) {
   fs.mkdirSync(persistentVideosDir, { recursive: true });
@@ -61,38 +57,787 @@ const publicVideosDir = path.resolve(__dirname, 'public/videos');
 if (!fs.existsSync(publicVideosDir)) {
   fs.mkdirSync(publicVideosDir, { recursive: true });
 }
-app.use('/videos', express.static(persistentVideosDir), express.static(publicVideosDir));
-app.use('/assets', express.static(path.resolve(__dirname, 'public/assets')));
-app.use(express.static(path.resolve(__dirname, 'public')));
-
+const publicAssetsDir = path.resolve(__dirname, 'public/assets');
 const mediaCacheDir = path.resolve(persistentDataDir, 'media-cache');
 if (!fs.existsSync(mediaCacheDir)) {
   fs.mkdirSync(mediaCacheDir, { recursive: true });
 }
 
-// CORS for captive portals and mobile money webhook gateways
+// -----------------------------------------------------------------------------
+// SECURITY HELPERS: ESCAPING, SSRF PROTECTION, RATE LIMITING, SCRYPT & SESSIONS
+// -----------------------------------------------------------------------------
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeJsJson(value: unknown): string {
+  return JSON.stringify(value ?? '')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function sanitizeHexColor(value: unknown, fallback = '#f05e17'): string {
+  const clean = String(value || '').trim();
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(clean)) {
+    return clean;
+  }
+  return fallback;
+}
+
+function sanitizeCssUrl(value: unknown, fallback = ''): string {
+  const clean = String(value || '').trim();
+  if (!clean) return fallback;
+  if (/^(https?:\/\/|\/|data:image\/(png|jpeg|jpg|webp|gif);base64,)/i.test(clean)) {
+    return clean.replace(/['"()\\\r\n<>]/g, '');
+  }
+  return fallback;
+}
+
+function isPrivateOrReservedIp(rawIp: string): boolean {
+  let ip = String(rawIp || '').trim().toLowerCase();
+  if (!ip) return true;
+  if (ip.startsWith('::ffff:')) {
+    ip = ip.slice(7);
+  }
+  const ipVer = net.isIP(ip);
+  if (ipVer === 4) {
+    const parts = ip.split('.').map(Number);
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+    const [a, b] = parts;
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  if (ipVer === 6) {
+    if (ip === '::' || ip === '::1') return true;
+    if (/^(fc|fd|fe8|fe9|fea|feb|ff)/i.test(ip)) return true;
+    return false;
+  }
+  return true;
+}
+
+async function assertPublicOutboundUrl(
+  rawUrl: string,
+  opts: { allowedHostSuffixes?: string[]; requireHttps?: boolean } = {}
+): Promise<URL> {
+  const parsed = new URL(String(rawUrl || '').trim());
+  const proto = parsed.protocol.toLowerCase();
+  if (opts.requireHttps) {
+    if (proto !== 'https:') {
+      throw new Error('Only HTTPS URLs are permitted for this endpoint.');
+    }
+  } else if (proto !== 'http:' && proto !== 'https:') {
+    throw new Error('Only HTTP/HTTPS URLs are permitted.');
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    !hostname ||
+    hostname === 'localhost' ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.localhost')
+  ) {
+    throw new Error('Private, loopback, or internal hostnames are forbidden.');
+  }
+
+  if (Array.isArray(opts.allowedHostSuffixes) && opts.allowedHostSuffixes.length > 0) {
+    const matchesAllowed = opts.allowedHostSuffixes.some(
+      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)
+    );
+    if (!matchesAllowed) {
+      throw new Error(`Outbound host "${hostname}" is not in the trusted allowlist.`);
+    }
+  }
+
+  if (net.isIP(hostname)) {
+    if (isPrivateOrReservedIp(hostname)) {
+      throw new Error('Outbound requests to private, loopback, or metadata IP addresses are forbidden.');
+    }
+    return parsed;
+  }
+
+  const resolved = await dns.promises.lookup(hostname, { all: true });
+  if (!resolved || resolved.length === 0) {
+    throw new Error('Unable to resolve outbound host.');
+  }
+  for (const entry of resolved) {
+    if (isPrivateOrReservedIp(entry.address)) {
+      throw new Error('Resolved IP address belongs to a private, loopback, or reserved network range.');
+    }
+  }
+  return parsed;
+}
+
+function createRateLimiter(options: {
+  windowMs: number;
+  maxAttempts: number;
+  keyPrefix: string;
+  keyExtractor?: (req: Request) => string;
+}) {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+  return (req: Request, res: Response, next: NextFunction) => {
+    const now = Date.now();
+    const rawKey = options.keyExtractor ? options.keyExtractor(req) : (req.ip || 'unknown');
+    const key = `${options.keyPrefix}:${rawKey}`;
+    const existing = buckets.get(key);
+    if (!existing || existing.resetAt <= now) {
+      buckets.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    existing.count += 1;
+    if (existing.count > options.maxAttempts) {
+      const retryAfterSec = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Too many requests. Please wait ${retryAfterSec} seconds and try again.`
+        },
+        message: `Too many requests. Please wait ${retryAfterSec} seconds and try again.`
+      });
+    }
+    return next();
+  };
+}
+
+function verifySecretTimingSafe(a: string, b: string): boolean {
+  const hashA = crypto.createHash('sha256').update(String(a || ''), 'utf8').digest();
+  const hashB = crypto.createHash('sha256').update(String(b || ''), 'utf8').digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+function hashPasswordScrypt(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${derived}`;
+}
+
+function verifyPasswordScrypt(password: string, storedHash?: string): boolean {
+  if (!storedHash || !storedHash.startsWith('scrypt$')) return false;
+  const parts = storedHash.split('$');
+  if (parts.length !== 3) return false;
+  const [, salt, hexDigest] = parts;
+  if (!salt || !hexDigest) return false;
+  try {
+    const derived = crypto.scryptSync(password, salt, 64);
+    const expected = Buffer.from(hexDigest, 'hex');
+    if (derived.length !== expected.length) return false;
+    return crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+const adminSessionSecretFilePath = path.resolve(persistentDataDir, '.admin-session-secret');
+function resolveAdminSessionSecret(): string {
+  const envSecret = String(process.env.ADMIN_SESSION_SECRET || '').trim();
+  if (envSecret && envSecret.length >= 24 && !envSecret.startsWith('<')) {
+    return envSecret;
+  }
+  try {
+    if (fs.existsSync(adminSessionSecretFilePath)) {
+      const existing = fs.readFileSync(adminSessionSecretFilePath, 'utf-8').trim();
+      if (existing.length >= 32) return existing;
+    }
+    const generated = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(adminSessionSecretFilePath, generated, { encoding: 'utf-8', mode: 0o600 });
+    return generated;
+  } catch {
+    return crypto.randomBytes(32).toString('hex');
+  }
+}
+const ADMIN_SESSION_SECRET = resolveAdminSessionSecret();
+const SESSION_COOKIE_NAME = 'tconnect_sid';
+const SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // Strict 2-hour sliding inactivity timeout
+const authSessionsFilePath = path.resolve(persistentDataDir, 'auth-sessions.json');
+const revokedAdminSessionIds = new Set<string>();
+
+interface ActiveSessionRecord {
+  sessionId: string;
+  userId: string;
+  email: string;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+const activeSessions = new Map<string, ActiveSessionRecord>();
+let lastSessionsFlushAt = 0;
+
+function saveActiveSessionsToDisk(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastSessionsFlushAt < 15000) return;
+  lastSessionsFlushAt = now;
+  try {
+    // Prune expired sessions before persisting
+    for (const [sid, sess] of activeSessions.entries()) {
+      if (now - sess.lastActivityAt > SESSION_IDLE_TIMEOUT_MS) {
+        activeSessions.delete(sid);
+      }
+    }
+    fs.writeFileSync(
+      authSessionsFilePath,
+      JSON.stringify({ updatedAt: new Date(now).toISOString(), sessions: Array.from(activeSessions.values()) }, null, 2),
+      { encoding: 'utf-8', mode: 0o600 }
+    );
+  } catch (err) {
+    console.warn('[Session Store] Failed to persist active sessions:', err);
+  }
+}
+
+function loadActiveSessionsFromDisk(): void {
+  try {
+    if (!fs.existsSync(authSessionsFilePath)) return;
+    const parsed = JSON.parse(fs.readFileSync(authSessionsFilePath, 'utf-8'));
+    const list: ActiveSessionRecord[] = Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+    const now = Date.now();
+    for (const sess of list) {
+      if (sess?.sessionId && typeof sess.lastActivityAt === 'number' && now - sess.lastActivityAt <= SESSION_IDLE_TIMEOUT_MS) {
+        activeSessions.set(sess.sessionId, sess);
+      }
+    }
+  } catch {}
+}
+loadActiveSessionsFromDisk();
+
+function parseCookieHeader(req: Request): Record<string, string> {
+  const header = String(req.headers.cookie || '');
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.slice(0, eq).trim();
+    const val = part.slice(eq + 1).trim();
+    if (key) {
+      try {
+        out[key] = decodeURIComponent(val);
+      } catch {
+        out[key] = val;
+      }
+    }
+  }
+  return out;
+}
+
+function isRequestHttps(req: Request): boolean {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || '').toLowerCase();
+  return proto.includes('https') || Boolean((req as any).secure);
+}
+
+function setSessionCookie(req: Request, res: Response, token: string): void {
+  const maxAgeSec = Math.floor(SESSION_IDLE_TIMEOUT_MS / 1000);
+  const https = isRequestHttps(req);
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    `Max-Age=${maxAgeSec}`
+  ];
+  if (https) {
+    parts.push('Secure', 'SameSite=None', 'Partitioned');
+  } else {
+    parts.push('SameSite=Lax');
+  }
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function clearSessionCookie(req: Request, res: Response): void {
+  const https = isRequestHttps(req);
+  const parts = [
+    `${SESSION_COOKIE_NAME}=`,
+    'Path=/',
+    'HttpOnly',
+    'Max-Age=0'
+  ];
+  if (https) {
+    parts.push('Secure', 'SameSite=None', 'Partitioned');
+  } else {
+    parts.push('SameSite=Lax');
+  }
+  res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function revokeSessionsForUser(userIdOrEmail: string): void {
+  const target = String(userIdOrEmail || '').trim().toLowerCase();
+  if (!target) return;
+  let removed = false;
+  for (const [sid, sess] of activeSessions.entries()) {
+    if (sess.userId.toLowerCase() === target || sess.email.toLowerCase() === target) {
+      activeSessions.delete(sid);
+      revokedAdminSessionIds.add(sid);
+      removed = true;
+    }
+  }
+  if (removed) saveActiveSessionsToDisk(true);
+}
+
+interface AdminSessionPayload {
+  sub: string;
+  email: string;
+  username?: string;
+  name: string;
+  role: string;
+  department?: string;
+  isSuperAdmin?: boolean;
+  allowedTabs?: string[];
+  jti: string;
+  iat: number;
+  exp: number;
+  authSource?: 'bearer' | 'cookie';
+  expiresAt?: string;
+}
+
+// Late-bound user lookup filled when serverTeamStore initializes
+let lookupMemberForSession: ((emailOrId: string) => any | undefined) | null = null;
+
+function signAdminSessionToken(user: {
+  id: string;
+  email: string;
+  username?: string;
+  name: string;
+  role: string;
+  department?: string;
+  isSuperAdmin?: boolean;
+  allowedTabs?: string[];
+}): string {
+  const nowMs = Date.now();
+  const nowSec = Math.floor(nowMs / 1000);
+  const jti = crypto.randomBytes(20).toString('hex');
+  const payload: AdminSessionPayload = {
+    sub: user.id,
+    email: user.email.toLowerCase(),
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    department: user.department,
+    isSuperAdmin: Boolean(user.isSuperAdmin || user.role === 'Super Admin' || user.role === 'Owner'),
+    allowedTabs: Array.isArray(user.allowedTabs) ? user.allowedTabs : undefined,
+    jti,
+    iat: nowSec,
+    // Absolute token lifetime 24h; actual activity gated by strict 2-hour sliding idle timeout
+    exp: nowSec + 24 * 3600
+  };
+
+  activeSessions.set(jti, {
+    sessionId: jti,
+    userId: user.id,
+    email: user.email.toLowerCase(),
+    createdAt: nowMs,
+    lastActivityAt: nowMs
+  });
+  saveActiveSessionsToDisk(true);
+
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sigB64 = crypto
+    .createHmac('sha256', ADMIN_SESSION_SECRET)
+    .update(payloadB64, 'utf8')
+    .digest('base64url');
+  return `tc_sess.${payloadB64}.${sigB64}`;
+}
+
+function verifyAdminSessionToken(token: string): { payload: AdminSessionPayload | null; expired?: boolean } {
+  const clean = String(token || '').trim();
+  if (!clean.startsWith('tc_sess.')) return { payload: null };
+  const parts = clean.split('.');
+  if (parts.length !== 3) return { payload: null };
+  const [, payloadB64, sigB64] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', ADMIN_SESSION_SECRET)
+    .update(payloadB64, 'utf8')
+    .digest('base64url');
+  if (!verifySecretTimingSafe(sigB64, expectedSig)) return { payload: null };
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as AdminSessionPayload;
+    if (!payload || !payload.email || !payload.role || !payload.jti) return { payload: null };
+    if (revokedAdminSessionIds.has(payload.jti)) return { payload: null, expired: true };
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp !== 'number' || payload.exp < nowSec) {
+      activeSessions.delete(payload.jti);
+      return { payload: null, expired: true };
+    }
+
+    const nowMs = Date.now();
+    const sess = activeSessions.get(payload.jti);
+    if (!sess) {
+      return { payload: null, expired: true };
+    }
+    if (nowMs - sess.lastActivityAt > SESSION_IDLE_TIMEOUT_MS) {
+      activeSessions.delete(payload.jti);
+      revokedAdminSessionIds.add(payload.jti);
+      saveActiveSessionsToDisk(true);
+      return { payload: null, expired: true };
+    }
+
+    // Refresh sliding 2-hour inactivity window
+    sess.lastActivityAt = nowMs;
+    saveActiveSessionsToDisk(false);
+
+    // Hydrate live role/department/allowedTabs/status from user store so permission edits apply immediately
+    if (lookupMemberForSession) {
+      const liveMember = lookupMemberForSession(payload.email) || lookupMemberForSession(payload.sub);
+      if (!liveMember || liveMember.status === 'suspended' || liveMember.status === 'expired') {
+        activeSessions.delete(payload.jti);
+        return { payload: null, expired: true };
+      }
+      payload.name = liveMember.name;
+      payload.username = liveMember.username;
+      payload.email = liveMember.email;
+      payload.role = liveMember.role;
+      payload.department = liveMember.department;
+      payload.isSuperAdmin = Boolean(
+        liveMember.isSuperAdmin || liveMember.role === 'Super Admin' || liveMember.role === 'Owner'
+      );
+      payload.allowedTabs = Array.isArray(liveMember.allowedTabs) ? liveMember.allowedTabs : undefined;
+    }
+
+    payload.expiresAt = new Date(sess.lastActivityAt + SESSION_IDLE_TIMEOUT_MS).toISOString();
+    return { payload };
+  } catch {
+    return { payload: null };
+  }
+}
+
+function extractAdminBearerToken(req: Request): { token: string; source: 'bearer' | 'cookie' | null } {
+  const authHeader = String(req.headers.authorization || '').trim();
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    const t = authHeader.slice(7).trim();
+    if (t) return { token: t, source: 'bearer' };
+  }
+  const cookies = parseCookieHeader(req);
+  if (cookies[SESSION_COOKIE_NAME]) {
+    return { token: cookies[SESSION_COOKIE_NAME], source: 'cookie' };
+  }
+  return { token: '', source: null };
+}
+
+function getOptionalAdminUser(req: Request, res?: Response): AdminSessionPayload | null {
+  const { token, source } = extractAdminBearerToken(req);
+  if (!token) return null;
+  const { payload, expired } = verifyAdminSessionToken(token);
+  if (!payload) {
+    if (expired) {
+      (req as any).sessionExpired = true;
+      if (res) clearSessionCookie(req, res);
+    }
+    return null;
+  }
+  payload.authSource = source || 'bearer';
+  // Keep sliding HttpOnly cookie fresh on active requests
+  if (res && source === 'cookie') {
+    setSessionCookie(req, res, token);
+  }
+  return payload;
+}
+
+function passesCookieCsrfCheck(req: Request): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase())) return true;
+  if (req.headers['x-requested-with']) return true;
+  const expectedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase();
+  const origin = String(req.headers.origin || '').trim();
+  if (origin) {
+    try {
+      return new URL(origin).host.toLowerCase() === expectedHost;
+    } catch {
+      return false;
+    }
+  }
+  const referer = String(req.headers.referer || '').trim();
+  if (referer) {
+    try {
+      return new URL(referer).host.toLowerCase() === expectedHost;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function roleMatchesAllowedTabs(user: AdminSessionPayload, allowedRoles?: string[]): boolean {
+  if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) return true;
+  const normalizedAllowed = new Set(allowedRoles.map((r) => r.toLowerCase()));
+  const userRole = String(user.role || '').toLowerCase();
+  if (normalizedAllowed.has(userRole)) return true;
+
+  const tabs = new Set((user.allowedTabs || []).map((t) => String(t).toLowerCase()));
+  if (tabs.size === 0) return false;
+  if (normalizedAllowed.has('finance') && tabs.has('billing')) return true;
+  if ((normalizedAllowed.has('tech') || normalizedAllowed.has('technical')) && (tabs.has('fleet') || tabs.has('terminal') || tabs.has('roaming'))) return true;
+  if (normalizedAllowed.has('collaborator') && (tabs.has('portal') || tabs.has('leads'))) return true;
+  if (normalizedAllowed.has('management') && tabs.has('dashboard')) return true;
+  return false;
+}
+
+function requireAdminAuth(allowedRoles?: string[], requiredTab?: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = getOptionalAdminUser(req, res);
+    if (!user) {
+      const wasExpired = Boolean((req as any).sessionExpired);
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: wasExpired ? 'SESSION_EXPIRED' : 'UNAUTHORIZED',
+          message: wasExpired
+            ? 'Your session expired after 2 hours of inactivity. Please sign in again.'
+            : 'Authentication required. Please sign in to the T-Connect Control Tower.'
+        },
+        message: wasExpired
+          ? 'Your session expired after 2 hours of inactivity. Please sign in again.'
+          : 'Authentication required.'
+      });
+    }
+
+    if (user.authSource === 'cookie' && !passesCookieCsrfCheck(req)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CSRF_ORIGIN_MISMATCH',
+          message: 'Blocked cross-origin mutation request.'
+        },
+        message: 'Cross-origin request blocked.'
+      });
+    }
+
+    const isSuper = Boolean(user.isSuperAdmin || user.role === 'Super Admin' || user.role === 'Owner');
+    if (!isSuper) {
+      if (requiredTab) {
+        const tabs = Array.isArray(user.allowedTabs) ? user.allowedTabs : [];
+        if (!tabs.includes(requiredTab)) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'FORBIDDEN_TAB',
+              message: `Your account does not have access to the "${requiredTab}" module.`
+            },
+            message: `Access denied: "${requiredTab}" tab is not enabled for your account.`
+          });
+        }
+      } else if (!roleMatchesAllowedTabs(user, allowedRoles)) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'FORBIDDEN_ROLE',
+            message: `Your account (${user.department || user.role}) is not authorized for this action.`
+          },
+          message: `Access denied for ${user.department || user.role}.`
+        });
+      }
+    }
+
+    (req as any).adminUser = user;
+    return next();
+  };
+}
+
+function requireSuperAdmin() {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = getOptionalAdminUser(req, res);
+    if (!user) {
+      const wasExpired = Boolean((req as any).sessionExpired);
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: wasExpired ? 'SESSION_EXPIRED' : 'UNAUTHORIZED',
+          message: wasExpired
+            ? 'Your session expired after 2 hours of inactivity. Please sign in again.'
+            : 'Super Admin authentication required.'
+        },
+        message: wasExpired
+          ? 'Your session expired after 2 hours of inactivity. Please sign in again.'
+          : 'Super Admin authentication required.'
+      });
+    }
+    if (user.authSource === 'cookie' && !passesCookieCsrfCheck(req)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'CSRF_ORIGIN_MISMATCH', message: 'Blocked cross-origin request.' },
+        message: 'Blocked cross-origin request.'
+      });
+    }
+    const isSuper = Boolean(user.isSuperAdmin || user.role === 'Super Admin' || user.role === 'Owner');
+    if (!isSuper) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN_SUPER_ADMIN_ONLY',
+          message: 'This section is restricted exclusively to the Super Admin.'
+        },
+        message: 'Super Admin privileges required.'
+      });
+    }
+    (req as any).adminUser = user;
+    return next();
+  };
+}
+
+function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
+  if (!buffer || buffer.length < 12) return false;
+  const e = ext.toLowerCase();
+  if (e === '.jpg' || e === '.jpeg') {
+    return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (e === '.png') {
+    return (
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    );
+  }
+  if (e === '.gif') {
+    const sig = buffer.subarray(0, 6).toString('ascii');
+    return sig === 'GIF87a' || sig === 'GIF89a';
+  }
+  if (e === '.webp') {
+    return (
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    );
+  }
+  return false;
+}
+
+function validateVideoMagicBytes(buffer: Buffer, ext: string): boolean {
+  if (!buffer || buffer.length < 12) return false;
+  const e = ext.toLowerCase();
+  if (e === '.webm') {
+    return buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
+  }
+  if (e === '.mp4' || e === '.mov' || e === '.m4v') {
+    const boxType = buffer.subarray(4, 8).toString('ascii');
+    return boxType === 'ftyp' || boxType === 'moov' || boxType === 'wide' || boxType === 'mdat';
+  }
+  return false;
+}
+
+function verifyWebhookHmacHeader(req: Request, secret: string): { present: boolean; valid: boolean } {
+  const rawHeader = String(
+    req.headers['x-signature'] ||
+      req.headers['x-paylesotho-signature'] ||
+      req.headers['x-hub-signature-256'] ||
+      req.headers['x-tconnect-signature'] ||
+      ''
+  ).trim();
+  if (!rawHeader) {
+    return { present: false, valid: false };
+  }
+  const providedSig = rawHeader.replace(/^sha256=/i, '').trim().toLowerCase();
+  if (!providedSig || !secret) {
+    return { present: true, valid: false };
+  }
+  const rawBuf: Buffer = Buffer.isBuffer((req as any).rawBody)
+    ? (req as any).rawBody
+    : Buffer.from(JSON.stringify(req.body || {}), 'utf8');
+  const expectedHex = crypto.createHmac('sha256', secret).update(rawBuf).digest('hex').toLowerCase();
+  return {
+    present: true,
+    valid: verifySecretTimingSafe(providedSig, expectedHex)
+  };
+}
+
+// Security headers & scoped body size limits (2MB global; 60MB strictly on upload routes)
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
+
+const uploadBodyParser = express.json({ limit: '60mb' });
+const defaultJsonParser = express.json({
+  limit: '2mb',
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+});
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === '/api/upload-photo' || req.path === '/api/upload-video') {
+    return next();
+  }
+  return defaultJsonParser(req, res, next);
+});
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+app.use('/images', express.static(persistentImagesDir), express.static(publicImagesDir));
+app.use('/videos', express.static(persistentVideosDir), express.static(publicVideosDir));
+app.use('/assets', express.static(publicAssetsDir));
+app.use(express.static(path.resolve(__dirname, 'public')));
+
+// Scoped CORS: Wildcard origin allowed ONLY on public captive portal, partner API, voucher, payment, and router routes
+const PUBLIC_CORS_PREFIXES = [
+  '/api/health',
+  '/api/portal/router-login',
+  '/api/portal/router-alogin',
+  '/api/portal/video-ad',
+  '/api/portal/cna-close',
+  '/api/portal/media-proxy',
+  '/api/portal/guest-connect',
+  '/api/portal/check-roaming',
+  '/api/portal/config',
+  '/api/v1/partner/',
+  '/api/vouchers/verify',
+  '/api/vouchers/redeem-tconnect',
+  '/api/gateways/paylesotho/initiate',
+  '/api/gateways/paylesotho/status',
+  '/api/gateways/paylesotho/webhook',
+  '/api/gateways/ottvoucher/redeem',
+  '/api/webhooks/',
+  '/api/devices/'
+];
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Signature');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+  const isPublicCorsRoute =
+    PUBLIC_CORS_PREFIXES.some((prefix) => req.path.startsWith(prefix)) &&
+    !req.path.includes('/terminal');
+
+  if (isPublicCorsRoute) {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Signature, X-API-Key, X-Router-Token');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+  } else if (req.headers.origin) {
+    const allowedOrigins = new Set(
+      [
+        process.env.ADMIN_ORIGIN,
+        process.env.PORTAL_ORIGIN,
+        `http://${req.get('host') || ''}`,
+        `https://${req.get('host') || ''}`
+      ].filter(Boolean)
+    );
+    if (allowedOrigins.has(req.headers.origin)) {
+      res.header('Access-Control-Allow-Origin', req.headers.origin);
+      res.header('Vary', 'Origin');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+    }
   }
   next();
 });
 
 // Helper to build a sleek fallback SVG poster so Captive Wi-Fi popups never show a broken [?] icon
 function buildFallbackSlideSvg(title = 'T-Connect Lesotho', subtitle = 'High-Speed Starlink Wi-Fi Partner Offer'): string {
-  const safeTitle = String(title || 'T-Connect Lesotho')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-  const safeSub = String(subtitle || 'Exclusive Partner Offer')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  const safeTitle = escapeHtml(title || 'T-Connect Lesotho');
+  const safeSub = escapeHtml(subtitle || 'Exclusive Partner Offer');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
     <defs>
       <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -116,13 +861,23 @@ function buildFallbackSlideSvg(title = 'T-Connect Lesotho', subtitle = 'High-Spe
   </svg>`;
 }
 
+const ALLOWED_PROXY_IMAGE_MIMES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif'
+]);
+
 // Walled-Garden Media Proxy: Serves external ad & wallpaper images directly from the Control Tower
-// origin (169.58.98.92:3000) with disk caching so unauthenticated MikroTik Captive Wi-Fi popups
-// load 100% of images without ever being blocked by the router firewall.
+// origin with strict path boundary checks, DNS-resolved SSRF blocking, and raster image MIME allowlisting.
 app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (req: Request, res: Response) => {
   const rawUrl = String(req.query.url || '').trim();
   const title = String(req.query.title || 'T-Connect Sponsor').trim();
   const subtitle = String(req.query.subtitle || '').trim();
+
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (!rawUrl) {
     res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
@@ -130,27 +885,42 @@ app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (re
     return res.send(buildFallbackSlideSvg(title, subtitle));
   }
 
-  // If URL is a local /images/... file, serve from persistentImagesDir or publicImagesDir
+  // Local /images/... file — strictly bounded inside persistentImagesDir / publicImagesDir
   if (rawUrl.startsWith('/images/')) {
-    const fileName = path.basename(rawUrl.split('?')[0]);
+    const cleanRel = rawUrl.split('?')[0].replace(/^\/images\//, '');
+    if (cleanRel.includes('..') || cleanRel.includes('/') || cleanRel.includes('\\')) {
+      return res.status(403).json({ success: false, error: { code: 'PATH_TRAVERSAL_BLOCKED', message: 'Invalid image path.' } });
+    }
+    const fileName = path.basename(cleanRel);
     const persistCandidate = path.resolve(persistentImagesDir, fileName);
     const pubCandidate = path.resolve(publicImagesDir, fileName);
-    if (fs.existsSync(persistCandidate)) {
+    if (persistCandidate.startsWith(persistentImagesDir + path.sep) && fs.existsSync(persistCandidate) && fs.statSync(persistCandidate).isFile()) {
       return res.sendFile(persistCandidate);
     }
-    if (fs.existsSync(pubCandidate)) {
+    if (pubCandidate.startsWith(publicImagesDir + path.sep) && fs.existsSync(pubCandidate) && fs.statSync(pubCandidate).isFile()) {
       return res.sendFile(pubCandidate);
     }
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Image not found.' } });
   }
 
-  // If URL is a local /assets/ or assets/ file, serve directly from public/assets
+  // Local /assets/ or assets/ file — strictly normalized and verified inside public/assets
   if (rawUrl.startsWith('/assets/') || rawUrl.startsWith('assets/')) {
-    const rel = rawUrl.replace(/^\/?assets\//, '');
-    const candidate = path.resolve(__dirname, 'public/assets', rel);
-    if (fs.existsSync(candidate)) {
+    const rel = rawUrl.split('?')[0].replace(/^\/?assets\//, '');
+    const candidate = path.resolve(publicAssetsDir, rel);
+    if (!candidate.startsWith(publicAssetsDir + path.sep)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'PATH_TRAVERSAL_BLOCKED',
+          message: 'Requested asset path resolves outside the allowed public/assets directory.'
+        }
+      });
+    }
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
       res.setHeader('Cache-Control', 'public, max-age=604800');
       return res.sendFile(candidate);
     }
+    return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Asset not found.' } });
   }
 
   if (!/^https?:\/\//i.test(rawUrl)) {
@@ -158,40 +928,15 @@ app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (re
     return res.send(buildFallbackSlideSvg(title, subtitle));
   }
 
-  // E9 & AT-15 SSRF Protection: Block private, loopback, link-local, CGNAT, and cloud metadata addresses
+  // DNS-resolved SSRF Protection (Blocks IPv4/IPv6 private, loopback, link-local, CGNAT, ULA, IPv4-mapped)
   try {
-    const parsedUrl = new URL(rawUrl);
-    const hostname = parsedUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    const isBlockedHost =
-      hostname === 'localhost' ||
-      hostname === '::1' ||
-      hostname === '0.0.0.0' ||
-      hostname.endsWith('.local') ||
-      hostname.endsWith('.internal') ||
-      /^127\./.test(hostname) ||
-      /^10\./.test(hostname) ||
-      /^192\.168\./.test(hostname) ||
-      /^169\.254\./.test(hostname) ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||
-      /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(hostname) ||
-      /^fc00:/i.test(hostname) ||
-      /^fe80:/i.test(hostname);
-
-    if (isBlockedHost) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'SSRF_BLOCKED',
-          message: 'Media proxy forbids requests to loopback, private RFC1918, link-local, WireGuard, or metadata addresses.'
-        }
-      });
-    }
-  } catch {
-    return res.status(400).json({
+    await assertPublicOutboundUrl(rawUrl);
+  } catch (err: any) {
+    return res.status(403).json({
       success: false,
       error: {
-        code: 'INVALID_MEDIA_URL',
-        message: 'Invalid media URL provided.'
+        code: 'SSRF_BLOCKED',
+        message: err?.message || 'Media proxy forbids requests to private, loopback, link-local, or metadata addresses.'
       }
     });
   }
@@ -203,9 +948,12 @@ app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (re
   try {
     if (fs.existsSync(cacheDataPath) && fs.existsSync(cacheMetaPath)) {
       const meta = JSON.parse(fs.readFileSync(cacheMetaPath, 'utf-8'));
-      res.setHeader('Content-Type', meta.contentType || 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-      return res.send(fs.readFileSync(cacheDataPath));
+      const cachedMime = String(meta.contentType || 'image/jpeg').split(';')[0].trim().toLowerCase();
+      if (ALLOWED_PROXY_IMAGE_MIMES.has(cachedMime)) {
+        res.setHeader('Content-Type', cachedMime);
+        res.setHeader('Cache-Control', 'public, max-age=604800');
+        return res.send(fs.readFileSync(cacheDataPath));
+      }
     }
   } catch {}
 
@@ -214,21 +962,26 @@ app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (re
       redirect: 'error',
       headers: {
         'User-Agent': 'T-Connect-Control-Tower/1.0',
-        Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.9'
       },
       signal: AbortSignal.timeout(6500)
     });
 
     if (upstream.ok) {
-      const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+      const rawContentType = String(upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!ALLOWED_PROXY_IMAGE_MIMES.has(rawContentType)) {
+        res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        return res.send(buildFallbackSlideSvg(title, subtitle));
+      }
       const arrayBuf = await upstream.arrayBuffer();
       const buffer = Buffer.from(arrayBuf);
       if (buffer.length > 0 && buffer.length <= 25 * 1024 * 1024) {
         try {
           fs.writeFileSync(cacheDataPath, buffer);
-          fs.writeFileSync(cacheMetaPath, JSON.stringify({ contentType, url: rawUrl, cachedAt: new Date().toISOString() }), 'utf-8');
+          fs.writeFileSync(cacheMetaPath, JSON.stringify({ contentType: rawContentType, url: rawUrl, cachedAt: new Date().toISOString() }), 'utf-8');
         } catch {}
-        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Type', rawContentType);
         res.setHeader('Cache-Control', 'public, max-age=604800');
         return res.send(buffer);
       }
@@ -240,7 +993,7 @@ app.get(['/api/portal/media-proxy', '/api/portal/media-proxy/:scope'], async (re
   return res.send(buildFallbackSlideSvg(title, subtitle));
 });
 
-// Photo listing & physical upload endpoints for captive portal backgrounds & sponsor ad slides
+// Photo listing & authenticated upload endpoints for captive portal backgrounds & sponsor ad slides
 app.get('/api/photos', (_req: Request, res: Response) => {
   try {
     const fileMap = new Map<string, { name: string; url: string; path: string; mtimeMs: number }>();
@@ -248,7 +1001,7 @@ app.get('/api/photos', (_req: Request, res: Response) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      const files = fs.readdirSync(dir).filter(f => /\.(jpg|jpeg|png|webp|svg|gif)$/i.test(f));
+      const files = fs.readdirSync(dir).filter((f) => /\.(jpg|jpeg|png|webp|gif)$/i.test(f));
       for (const f of files) {
         try {
           const full = path.resolve(dir, f);
@@ -272,46 +1025,67 @@ app.get('/api/photos', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/upload-photo', (req: Request, res: Response) => {
-  try {
-    const { filename, base64Data } = req.body;
-    if (!base64Data) {
-      return res.status(400).json({ success: false, error: 'No image data provided' });
-    }
-    if (!fs.existsSync(persistentImagesDir)) {
-      fs.mkdirSync(persistentImagesDir, { recursive: true });
-    }
-    if (!fs.existsSync(publicImagesDir)) {
-      fs.mkdirSync(publicImagesDir, { recursive: true });
-    }
-    const ext = filename?.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.jpg';
-    const cleanBase = filename ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_') : `splash_${Date.now()}`;
-    const cleanName = `${cleanBase}${ext}`;
-    const persistPath = path.resolve(persistentImagesDir, cleanName);
-    const publicPath = path.resolve(publicImagesDir, cleanName);
+const ALLOWED_IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
 
-    const base64Clean = String(base64Data).replace(/^data:[^;]+;base64,/, '');
-    const buffer = Buffer.from(base64Clean, 'base64');
-    fs.writeFileSync(persistPath, buffer);
+app.post(
+  '/api/upload-photo',
+  requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Collaborator']),
+  uploadBodyParser,
+  (req: Request, res: Response) => {
     try {
-      fs.writeFileSync(publicPath, buffer);
-    } catch {}
+      const { filename, base64Data } = req.body || {};
+      if (!base64Data || typeof base64Data !== 'string') {
+        return res.status(400).json({ success: false, error: 'No image data provided' });
+      }
 
-    console.log(`[Photo Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to /data/images/ and /public/images/`);
+      const rawExt = String(filename || '').match(/\.[a-zA-Z0-9]+$/)?.[0]?.toLowerCase() || '.jpg';
+      if (!ALLOWED_IMAGE_EXTS.has(rawExt)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Unsupported image format. Only .jpg, .jpeg, .png, .webp, and .gif files are permitted.'
+        });
+      }
 
-    res.json({
-      success: true,
-      filename: cleanName,
-      url: `/images/${cleanName}`,
-      message: 'Photo saved permanently to server images storage'
-    });
-  } catch (err: any) {
-    console.error('Failed to save photo:', err);
-    res.status(500).json({ success: false, error: err.message });
+      const base64Clean = base64Data.replace(/^data:[^;]+;base64,/, '').trim();
+      const buffer = Buffer.from(base64Clean, 'base64');
+      if (buffer.length === 0 || buffer.length > 20 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: 'Image size must be between 1 byte and 20 MB.' });
+      }
+      if (!validateImageMagicBytes(buffer, rawExt)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Uploaded file signature does not match the declared binary image format.'
+        });
+      }
+
+      if (!fs.existsSync(persistentImagesDir)) fs.mkdirSync(persistentImagesDir, { recursive: true });
+      if (!fs.existsSync(publicImagesDir)) fs.mkdirSync(publicImagesDir, { recursive: true });
+
+      const cleanName = `photo_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${rawExt}`;
+      const persistPath = path.resolve(persistentImagesDir, cleanName);
+      const publicPath = path.resolve(publicImagesDir, cleanName);
+
+      fs.writeFileSync(persistPath, buffer);
+      try {
+        fs.writeFileSync(publicPath, buffer);
+      } catch {}
+
+      console.log(`[Photo Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB)`);
+
+      res.json({
+        success: true,
+        filename: cleanName,
+        url: `/images/${cleanName}`,
+        message: 'Photo saved permanently to server images storage'
+      });
+    } catch (err: any) {
+      console.error('Failed to save photo:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
-});
+);
 
-// Video listing & physical upload endpoints for post-auth & 3h / 2GB recurring video ads
+// Video listing & authenticated upload endpoints for post-auth & 3h / 2GB recurring video ads
 app.get('/api/videos', (_req: Request, res: Response) => {
   try {
     const videoMap = new Map<string, any>();
@@ -319,7 +1093,7 @@ app.get('/api/videos', (_req: Request, res: Response) => {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      const files = fs.readdirSync(dir).filter(f => /\.(mp4|webm|mov|m4v)$/i.test(f));
+      const files = fs.readdirSync(dir).filter((f) => /\.(mp4|webm|mov|m4v)$/i.test(f));
       for (const f of files) {
         try {
           const stat = fs.statSync(path.resolve(dir, f));
@@ -342,53 +1116,71 @@ app.get('/api/videos', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/upload-video', (req: Request, res: Response) => {
-  try {
-    const { filename, base64Data } = req.body || {};
-    if (!base64Data) {
-      return res.status(400).json({ success: false, error: 'No video file data provided' });
-    }
-    if (!fs.existsSync(persistentVideosDir)) {
-      fs.mkdirSync(persistentVideosDir, { recursive: true });
-    }
-    if (!fs.existsSync(publicVideosDir)) {
-      fs.mkdirSync(publicVideosDir, { recursive: true });
-    }
-    const extMatch = filename?.match(/\.(mp4|webm|mov|m4v)$/i);
-    const ext = extMatch ? extMatch[0].toLowerCase() : '.mp4';
-    const cleanBase = filename
-      ? filename.replace(/\.[a-zA-Z0-9]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-      : `video_ad_${Date.now()}`;
-    const cleanName = `${cleanBase}${ext}`;
-    const persistPath = path.resolve(persistentVideosDir, cleanName);
-    const targetPath = path.resolve(publicVideosDir, cleanName);
+const ALLOWED_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 
-    const base64Clean = String(base64Data).replace(/^data:[^;]+;base64,/, '');
-    const buffer = Buffer.from(base64Clean, 'base64');
-    fs.writeFileSync(persistPath, buffer);
+app.post(
+  '/api/upload-video',
+  requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Collaborator']),
+  uploadBodyParser,
+  (req: Request, res: Response) => {
     try {
-      fs.writeFileSync(targetPath, buffer);
-    } catch {}
+      const { filename, base64Data } = req.body || {};
+      if (!base64Data || typeof base64Data !== 'string') {
+        return res.status(400).json({ success: false, error: 'No video file data provided' });
+      }
 
-    console.log(`[Video Ad Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB) to /data/videos/ and /public/videos/`);
+      const rawExt = String(filename || '').match(/\.[a-zA-Z0-9]+$/)?.[0]?.toLowerCase() || '.mp4';
+      if (!ALLOWED_VIDEO_EXTS.has(rawExt)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Unsupported video format. Only .mp4, .webm, .mov, and .m4v files are permitted.'
+        });
+      }
 
-    res.json({
-      success: true,
-      filename: cleanName,
-      url: `/videos/${cleanName}`,
-      sizeKb: Math.round(buffer.length / 1024),
-      message: 'Video ad uploaded and saved to persistent storage'
-    });
-  } catch (err: any) {
-    console.error('Failed to save video ad:', err);
-    res.status(500).json({ success: false, error: err.message });
+      const base64Clean = base64Data.replace(/^data:[^;]+;base64,/, '').trim();
+      const buffer = Buffer.from(base64Clean, 'base64');
+      if (buffer.length === 0 || buffer.length > 55 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: 'Video size must be between 1 byte and 55 MB.' });
+      }
+      if (!validateVideoMagicBytes(buffer, rawExt)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Uploaded video signature does not match the declared binary video format.'
+        });
+      }
+
+      if (!fs.existsSync(persistentVideosDir)) fs.mkdirSync(persistentVideosDir, { recursive: true });
+      if (!fs.existsSync(publicVideosDir)) fs.mkdirSync(publicVideosDir, { recursive: true });
+
+      const cleanName = `video_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${rawExt}`;
+      const persistPath = path.resolve(persistentVideosDir, cleanName);
+      const targetPath = path.resolve(publicVideosDir, cleanName);
+
+      fs.writeFileSync(persistPath, buffer);
+      try {
+        fs.writeFileSync(targetPath, buffer);
+      } catch {}
+
+      console.log(`[Video Ad Uploaded] Saved ${cleanName} (${Math.round(buffer.length / 1024)} KB)`);
+
+      res.json({
+        success: true,
+        filename: cleanName,
+        url: `/videos/${cleanName}`,
+        sizeKb: Math.round(buffer.length / 1024),
+        message: 'Video ad uploaded and saved to persistent storage'
+      });
+    } catch (err: any) {
+      console.error('Failed to save video ad:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
-});
+);
 
 // -----------------------------------------------------------------------------
 // 1. HEALTH CHECK ENDPOINT (Docker Compose & Caddy/Nginx)
 // -----------------------------------------------------------------------------
-app.get('/api/health', (req: Request, res: Response) => {
+app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     system: 'T-Connect Control Tower',
@@ -396,12 +1188,6 @@ app.get('/api/health', (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     environment: isProd ? 'production' : 'development'
   });
-});
-
-// Direct Production Archive Download for VPS Deployment
-app.get('/api/download/bundle.tar.gz', (req: Request, res: Response) => {
-  const archivePath = path.resolve(__dirname, 'tconnect-production-vps.tar.gz');
-  res.download(archivePath, 'tconnect-production-vps.tar.gz');
 });
 
 // Global Partner Key Isolation Guard (E11, AT-18, AT-19):
@@ -624,7 +1410,12 @@ function savePortalConfigsToDisk(configs: Record<string, any>) {
     }
     const serialized = JSON.stringify(configs, null, 2);
     fs.writeFileSync(portalConfigFilePath, serialized, 'utf-8');
-    fs.writeFileSync(legacyPortalConfigFilePath, serialized, 'utf-8');
+    // Never write runtime portal configs into public/ static directory; remove legacy copy if present
+    try {
+      if (fs.existsSync(legacyPortalConfigFilePath)) {
+        fs.unlinkSync(legacyPortalConfigFilePath);
+      }
+    } catch {}
   } catch {}
 }
 
@@ -664,22 +1455,25 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
   const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'HOTSPOT';
   const welcomeHeadline = cfg.welcomeHeadline !== undefined ? String(cfg.welcomeHeadline) : 'GET CONNECTED THIS SUMMER.';
-  const accentColor = cfg.accentColor || '#f05e17';
-  const freeButtonColor = cfg.freeButtonColor || accentColor || '#f05e17';
-  const freeButtonTextColor = cfg.freeButtonTextColor || '#ffffff';
-  const bgDarken = typeof cfg.bgDarken === 'number' ? cfg.bgDarken : 25;
+  const accentColor = sanitizeHexColor(cfg.accentColor, '#f05e17');
+  const freeButtonColor = sanitizeHexColor(cfg.freeButtonColor || accentColor, '#f05e17');
+  const freeButtonTextColor = sanitizeHexColor(cfg.freeButtonTextColor, '#ffffff');
+  const bgDarken = typeof cfg.bgDarken === 'number' && Number.isFinite(cfg.bgDarken) ? Math.min(100, Math.max(0, cfg.bgDarken)) : 25;
   const scopeAllowFree = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
   const allowFreeAccess = matchedRouter && matchedRouter.accessMode
     ? matchedRouter.accessMode !== 'PAID_ONLY'
     : scopeAllowFree;
-  const freeButtonX = typeof cfg.freeButtonX === 'number' ? cfg.freeButtonX : 50;
-  const freeButtonY = typeof cfg.freeButtonY === 'number' ? cfg.freeButtonY : 88;
+  const freeButtonX = typeof cfg.freeButtonX === 'number' && Number.isFinite(cfg.freeButtonX) ? Math.min(95, Math.max(5, cfg.freeButtonX)) : 50;
+  const freeButtonY = typeof cfg.freeButtonY === 'number' && Number.isFinite(cfg.freeButtonY) ? Math.min(95, Math.max(5, cfg.freeButtonY)) : 88;
   const freeButtonText = cfg.freeButtonText ? String(cfg.freeButtonText).trim() : 'Login for free';
   const termsEnabled = cfg.termsEnabled !== undefined ? Boolean(cfg.termsEnabled) : true;
   const termsText = normalizeScopeTermsText(cfg.termsText);
 
   const rawBgImage = cfg.bgImage || '/assets/aistudio/87A4AC3A-4C95-4CCE-B54B-5CA2518126F2_ac27e2cc.png';
-  const bgImage = resolveServerWalledGardenMediaUrl(rawBgImage, baseUrl, brandTitle, welcomeHeadline);
+  const bgImage = sanitizeCssUrl(
+    resolveServerWalledGardenMediaUrl(rawBgImage, baseUrl, brandTitle, welcomeHeadline),
+    `${baseUrl}/assets/aistudio/87A4AC3A-4C95-4CCE-B54B-5CA2518126F2_ac27e2cc.png`
+  );
 
   const defaultPlans = [
     { id: 'hs_1d', name: 'Daily Unlimited', price: 10, durationLabel: 'Daily Unlimited', durationSeconds: 86400, downloadSpeedMbps: 20, deviceLimit: 0, enabled: true },
@@ -689,6 +1483,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const plans = Array.isArray(cfg.plans) && cfg.plans.length > 0
     ? cfg.plans.filter((p: any) => p.enabled !== false).map((p: any) => ({
         ...p,
+        price: Number.isFinite(Number(p.price)) ? Number(p.price) : 10,
         deviceLimit: 0,
         durationSeconds: Number(p.durationSeconds) || (Number(p.price) >= 180 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400)
       }))
@@ -702,21 +1497,26 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const postAuthDst = `${baseUrl}/api/portal/video-ad.html?scope=${encodeURIComponent(scope)}&reason=post_auth`;
 
   const firstPlan = plans[0] || defaultPlans[0];
-  const firstPlanNameClean = String(firstPlan.name || 'Daily Pass').replace(/'/g, '');
+  const firstPlanPriceNum = Number.isFinite(Number(firstPlan.price)) ? Number(firstPlan.price) : 10;
+  const firstPlanNameRaw = String(firstPlan.name || 'Daily Pass');
+  const firstPlanNameHtml = escapeHtml(firstPlanNameRaw);
 
   const plansCardsHtml = plans.map((p: any, idx: number) => {
-    const cleanName = String(p.name || 'Hotspot Pass').replace(/'/g, '');
-    const durSec = Number(p.durationSeconds) || (Number(p.price) >= 200 ? 2592000 : Number(p.price) >= 50 ? 604800 : 86400);
+    const cleanName = String(p.name || 'Hotspot Pass');
+    const safePrice = Number.isFinite(Number(p.price)) ? Number(p.price) : 10;
+    const durSec = Number(p.durationSeconds) || (safePrice >= 200 ? 2592000 : safePrice >= 50 ? 604800 : 86400);
     const shortSub = cleanName.toLowerCase().includes('daily')
       ? 'Daily<br/>Unlimited'
       : cleanName.toLowerCase().includes('weekly')
       ? 'Weekly<br/>Pass'
       : cleanName.toLowerCase().includes('monthly')
       ? 'Monthly<br/>Pass'
-      : cleanName;
+      : escapeHtml(cleanName);
+    const safePlanIdAttr = escapeHtml(String(p.id || `plan_${idx}`));
+    const safePlanNameAttr = escapeHtml(cleanName);
     return `
-      <button type="button" class="pkg-card ${idx === 0 ? 'selected' : ''}" onclick="selectPlan('${p.id}', ${p.price}, '${cleanName}', ${durSec}, this)">
-        <div class="pkg-price">M${p.price}</div>
+      <button type="button" class="pkg-card ${idx === 0 ? 'selected' : ''}" data-plan-id="${safePlanIdAttr}" data-plan-price="${safePrice}" data-plan-name="${safePlanNameAttr}" data-plan-dur="${durSec}" onclick="selectPlan(this.dataset.planId, Number(this.dataset.planPrice), this.dataset.planName, Number(this.dataset.planDur), this)">
+        <div class="pkg-price">M${safePrice}</div>
         <div class="pkg-label">${shortSub}</div>
       </button>
     `;
@@ -727,7 +1527,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>${brandTitle || 'T-Connect Hotspot'} Wi-Fi Portal</title>
+<title>${escapeHtml(brandTitle || 'T-Connect Hotspot')} Wi-Fi Portal</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body {
@@ -1183,7 +1983,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 <div id="termsModalBackdrop" class="tc-modal-backdrop" onclick="if(event.target===this)closeTermsModal(false)">
   <div class="tc-modal">
     <h3>Terms &amp; Conditions</h3>
-    <div class="tc-modal-body">${termsText}</div>
+    <div class="tc-modal-body">${escapeHtml(termsText)}</div>
     <div style="display:flex;gap:8px;">
       <button type="button" class="btn-orange" onclick="closeTermsModal(true)">Agree &amp; Continue</button>
       <button type="button" style="padding:10px 14px;border-radius:999px;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;font-size:11px;font-weight:800;cursor:pointer;" onclick="closeTermsModal(false)">Close</button>
@@ -1203,8 +2003,8 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     <form id="freeForm" action="$(link-login-only)" method="post" onsubmit="return handleFreeSubmit(event)">
       <input type="hidden" name="username" value="T-TRIAL">
       <input type="hidden" name="password" value="123">
-      <input type="hidden" name="dst" value="${postAuthDst}">
-      <button type="submit" id="freeSubmitBtn" class="btn-free-login">${freeButtonText}</button>
+      <input type="hidden" name="dst" value="${escapeHtml(postAuthDst)}">
+      <button type="submit" id="freeSubmitBtn" class="btn-free-login">${escapeHtml(freeButtonText)}</button>
     </form>
   </div>
   ` : ''}
@@ -1334,7 +2134,7 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
         </div>
 
         <button type="submit" id="buySubmitBtn" class="btn-orange">
-          Proceed with ${firstPlanNameClean} (M${firstPlan.price}) &rarr;
+          Proceed with ${firstPlanNameHtml} (M${firstPlanPriceNum}) &rarr;
         </button>
       </form>
     </div>
@@ -1353,9 +2153,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
 
 <script>
   var isFreeAccessMode = ${allowFreeAccess ? 'true' : 'false'};
-  var selectedPlanId = '${firstPlan.id}';
-  var selectedPlanPrice = ${firstPlan.price || 10};
-  var selectedPlanName = '${firstPlanNameClean}';
+  var selectedPlanId = ${safeJsJson(String(firstPlan.id || 'hs_1d'))};
+  var selectedPlanPrice = ${firstPlanPriceNum};
+  var selectedPlanName = ${safeJsJson(firstPlanNameRaw)};
   var selectedPlanDurationSec = ${Number(firstPlan.durationSeconds) || 86400};
   var selectedGw = 'mpesa';
   var activeTxId = '';
@@ -2005,7 +2805,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
 
   const slidesTrackHtml = rawSlides.map((s: any, idx: number) => `
     <div class="slide-frame" data-idx="${idx}">
-      <img class="slide-img" src="${s.imageUrl}" alt="" draggable="false" />
+      <img class="slide-img" src="${escapeHtml(sanitizeCssUrl(s.imageUrl))}" alt="" draggable="false" />
     </div>
   `).join('');
 
@@ -2014,7 +2814,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>${chosenAd?.sponsorName || 'T-Connect Hotspot'}</title>
+<title>${escapeHtml(chosenAd?.sponsorName || 'T-Connect Hotspot')}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
   html,body{width:100%;height:100vh;height:100dvh;overflow:hidden;background:#050811;color:#fff}
@@ -2040,7 +2840,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
       <span class="status-dot"></span>
       <span>Wi-Fi Connected</span>
     </div>
-    <a href="${cnaCloseUrl}" id="topProceedInternetBtn" class="top-proceed-btn" onclick="return handleProceedToInternet(event)">
+    <a href="${escapeHtml(cnaCloseUrl)}" id="topProceedInternetBtn" class="top-proceed-btn" onclick="return handleProceedToInternet(event)">
       <span>Proceed to internet</span>
       <span>&rarr;</span>
     </a>
@@ -2051,7 +2851,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
   </div>
 
   <div class="bottom-proceed-bar">
-    <a href="${cnaCloseUrl}" id="proceedInternetBtn" class="proceed-bottom-btn" onclick="return handleProceedToInternet(event)">
+    <a href="${escapeHtml(cnaCloseUrl)}" id="proceedInternetBtn" class="proceed-bottom-btn" onclick="return handleProceedToInternet(event)">
       <span>Proceed to internet</span>
       <span>&rarr;</span>
     </a>
@@ -2059,11 +2859,11 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
 </div>
 
 <script>
-  var slides = ${JSON.stringify(rawSlides)};
+  var slides = ${safeJsJson(rawSlides)};
   var slideIdx = ${initialIdx};
-  var defaultDest = '${defaultDest.replace(/'/g, "\\'")}';
-  var proceedMode = '${proceedActionMode}';
-  var cnaCloseUrl = '${cnaCloseUrl}';
+  var defaultDest = ${safeJsJson(defaultDest)};
+  var proceedMode = ${safeJsJson(proceedActionMode)};
+  var cnaCloseUrl = ${safeJsJson(cnaCloseUrl)};
   var touchStartX = 0;
   var touchDragged = false;
 
@@ -2260,22 +3060,8 @@ function loadServerPortalStore(): ServerPortalStore {
     }
   } catch {}
 
-  const defaultPartnerKeys: PartnerApiKeyRecord[] = [
-    {
-      id: 'pk_alliance_ls',
-      companyName: 'Alliance Insurance Lesotho',
-      campaignName: 'Hotspot & Stadium Sponsor Campaign',
-      apiKey: 'tc_live_9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c',
-      allowedScopes: ['hotspot', 'stadium'],
-      allowedRouterIds: ['*'],
-      allowedSites: ['*'],
-      webhookUrl: '',
-      webhookSecret: 'whsec_tconnect_alliance_2026',
-      status: 'active',
-      createdAt: '2026-10-01T08:00:00.000Z',
-      totalRequests: 0
-    }
-  ];
+  // Never seed predictable hardcoded partner API keys or webhook secrets in source code
+  const defaultPartnerKeys: PartnerApiKeyRecord[] = [];
 
   const defaultServerSponsorAd = {
     enabled: true,
@@ -2397,7 +3183,7 @@ function loadServerPortalStore(): ServerPortalStore {
       ecocashMerchantId: envPlEcocashMerchant,
       xpaymentsAppId: envPlXpaymentsAppId,
       xpaymentsCertId: envPlXpaymentsCertId,
-      webhookSecret: process.env.PAYLESOTHO_WEBHOOK_SECRET || 'whsec_paylesotho_tconnect_2026',
+      webhookSecret: (process.env.PAYLESOTHO_WEBHOOK_SECRET || '').trim(),
       webhookUrl: 'http://169.58.98.92:3000/api/gateways/paylesotho/webhook',
       successRate24h: 99.8,
       avgLatencyMs: 240,
@@ -2490,8 +3276,11 @@ function loadServerPortalStore(): ServerPortalStore {
 
   try {
     const serialized = JSON.stringify(store, null, 2);
-    fs.writeFileSync(serverStoreFilePath, serialized, 'utf-8');
-    fs.writeFileSync(legacyServerStoreFilePath, serialized, 'utf-8');
+    fs.writeFileSync(serverStoreFilePath, serialized, { encoding: 'utf-8', mode: 0o600 });
+    // Security hardening: never store runtime secrets or customer PII inside public/
+    if (fs.existsSync(legacyServerStoreFilePath)) {
+      fs.unlinkSync(legacyServerStoreFilePath);
+    }
   } catch {}
 
   return store;
@@ -2500,8 +3289,10 @@ function loadServerPortalStore(): ServerPortalStore {
 function saveServerPortalStore(store: ServerPortalStore) {
   try {
     const serialized = JSON.stringify(store, null, 2);
-    fs.writeFileSync(serverStoreFilePath, serialized, 'utf-8');
-    fs.writeFileSync(legacyServerStoreFilePath, serialized, 'utf-8');
+    fs.writeFileSync(serverStoreFilePath, serialized, { encoding: 'utf-8', mode: 0o600 });
+    if (fs.existsSync(legacyServerStoreFilePath)) {
+      fs.unlinkSync(legacyServerStoreFilePath);
+    }
   } catch {}
 }
 
@@ -2515,7 +3306,7 @@ app.get('/api/portal/video-ads', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/portal/video-ads', (req: Request, res: Response) => {
+app.post('/api/portal/video-ads', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Collaborator']), (req: Request, res: Response) => {
   try {
     const { sponsorAd } = req.body || {};
     if (sponsorAd && typeof sponsorAd === 'object') {
@@ -2652,21 +3443,39 @@ async function wipeLiveRecordsFromSupabase(): Promise<void> {
   );
 }
 
-app.get('/api/supabase/status', (_req: Request, res: Response) => {
+app.get('/api/supabase/status', (req: Request, res: Response) => {
   const { url, key } = getSupabaseCredentials();
+  const adminUser = getOptionalAdminUser(req);
   res.json({
     success: true,
     url: url || DEFAULT_SUPABASE_URL,
-    anonKey: serverStore.supabaseConfig?.anonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+    anonKey: adminUser
+      ? (serverStore.supabaseConfig?.anonKey || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '')
+      : '',
     isConfigured: Boolean(url && key),
     projectRef: 'uxglqtcuedelmyhvgghw'
   });
 });
 
-app.post('/api/supabase/config', (req: Request, res: Response) => {
+app.post('/api/supabase/config', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), async (req: Request, res: Response) => {
   const { url, anonKey } = req.body || {};
   const cleanUrl = normalizeServerSupabaseUrl(url || DEFAULT_SUPABASE_URL);
   const cleanKey = String(anonKey || '').trim();
+  try {
+    const allowedSupabaseHosts = ['supabase.co'];
+    const envSbUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    if (envSbUrl) {
+      try {
+        allowedSupabaseHosts.push(new URL(normalizeServerSupabaseUrl(envSbUrl)).hostname.toLowerCase());
+      } catch {}
+    }
+    await assertPublicOutboundUrl(cleanUrl, { allowedHostSuffixes: allowedSupabaseHosts, requireHttps: true });
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || 'Supabase URL must be a valid HTTPS *.supabase.co endpoint.'
+    });
+  }
   if (cleanUrl && cleanKey) {
     serverStore.supabaseConfig = { url: cleanUrl, anonKey: cleanKey };
     saveServerPortalStore(serverStore);
@@ -2678,11 +3487,20 @@ app.post('/api/supabase/config', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/supabase/sync-all', async (req: Request, res: Response) => {
+app.post('/api/supabase/sync-all', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), async (req: Request, res: Response) => {
   const { url, anonKey } = req.body || {};
   if (url && anonKey) {
+    const cleanUrl = normalizeServerSupabaseUrl(url);
+    try {
+      await assertPublicOutboundUrl(cleanUrl, { allowedHostSuffixes: ['supabase.co'], requireHttps: true });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        message: err?.message || 'Supabase URL must be a valid HTTPS *.supabase.co endpoint.'
+      });
+    }
     serverStore.supabaseConfig = {
-      url: normalizeServerSupabaseUrl(url),
+      url: cleanUrl,
       anonKey: String(anonKey).trim()
     };
     saveServerPortalStore(serverStore);
@@ -2894,9 +3712,9 @@ app.get('/api/gateways', (_req: Request, res: Response) => {
 });
 
 // Audited Owner-only Secret Reveal endpoint (E1 Control 3)
-app.post('/api/gateways/:provider/reveal-secret', (req: Request, res: Response) => {
+app.post('/api/gateways/:provider/reveal-secret', requireAdminAuth(['Owner']), (req: Request, res: Response) => {
   const provider = String(req.params.provider || '').toLowerCase();
-  const { actorEmail, actorRole } = req.body || {};
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
   const gw = serverStore.gateways.find((g: any) => g.provider === provider);
   if (!gw) {
     return res.status(404).json({ success: false, message: 'Gateway not found.' });
@@ -2910,7 +3728,7 @@ app.post('/api/gateways/:provider/reveal-secret', (req: Request, res: Response) 
   const unmaskedApiKey = (!isMaskedSecretInput(gw.apiKey) ? String(gw.apiKey || '').trim() : '') ||
     unmaskedBearer;
 
-  console.log(`[SECURITY AUDIT] Secret reveal requested for gateway=${provider} by actor=${actorEmail || 'Owner'} role=${actorRole || 'Owner'} ip=${req.ip}`);
+  console.log(`[SECURITY AUDIT] Secret reveal requested for gateway=${provider} by actor=${adminUser.email} role=${adminUser.role} ip=${req.ip}`);
   res.json({
     success: true,
     provider,
@@ -2931,9 +3749,10 @@ app.post('/api/gateways/:provider/reveal-secret', (req: Request, res: Response) 
 });
 
 // Audited Gateway Kill Switch (E1 Control 4) — immediately disables/enables payment initiation for a gateway
-app.post('/api/gateways/:provider/kill-switch', (req: Request, res: Response) => {
+app.post('/api/gateways/:provider/kill-switch', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
   const provider = String(req.params.provider || '').toLowerCase();
-  const { active, reason, actorEmail } = req.body || {};
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const { active, reason } = req.body || {};
   const gw = serverStore.gateways.find((g: any) => g.provider === provider);
   if (!gw) {
     return res.status(404).json({ success: false, message: 'Gateway not found.' });
@@ -2943,7 +3762,7 @@ app.post('/api/gateways/:provider/kill-switch', (req: Request, res: Response) =>
   gw.killSwitchUpdatedAt = new Date().toISOString();
   gw.status = gw.killSwitchActive ? 'degraded' : 'operational';
   saveServerPortalStore(serverStore);
-  console.log(`[SECURITY AUDIT] Gateway Kill Switch for ${provider} set to ${gw.killSwitchActive} by ${actorEmail || 'Admin'}`);
+  console.log(`[SECURITY AUDIT] Gateway Kill Switch for ${provider} set to ${gw.killSwitchActive} by ${adminUser.email}`);
   res.json({
     success: true,
     provider,
@@ -2955,7 +3774,7 @@ app.post('/api/gateways/:provider/kill-switch', (req: Request, res: Response) =>
 });
 
 // Dedicated endpoint for explicitly saving PayLesotho & XPayments credentials from Payment Gateways UI
-app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) => {
+app.post('/api/gateways/paylesotho/credentials', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), (req: Request, res: Response) => {
   const {
     bearerToken,
     apiKey,
@@ -3049,7 +3868,7 @@ app.post('/api/gateways/paylesotho/credentials', (req: Request, res: Response) =
 });
 
 // Dedicated endpoint for explicitly saving OTT Lesotho credentials from Payment Gateways UI
-app.post('/api/gateways/ottvoucher/credentials', async (req: Request, res: Response) => {
+app.post('/api/gateways/ottvoucher/credentials', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), async (req: Request, res: Response) => {
   const { apiKey, apiPassword, username, merchantId, vendorId, endpointUrl, isLive } = req.body || {};
   persistOttCredentials({
     apiKey,
@@ -3070,7 +3889,7 @@ app.post('/api/gateways/ottvoucher/credentials', async (req: Request, res: Respo
 
 // Sync gateways, vouchers, and Supabase config from Admin Dashboard to backend server
 // Protected against stale localStorage or guest phone browsers overwriting newer OTT credentials
-app.post('/api/gateways/sync', (req: Request, res: Response) => {
+app.post('/api/gateways/sync', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), (req: Request, res: Response) => {
   const { gateways, vouchers, supabaseConfig, explicitCredentialUpdate } = req.body || {};
   if (Array.isArray(gateways)) {
     const filtered = gateways.filter(
@@ -5063,44 +5882,117 @@ app.post('/api/gateways/paylesotho/ott-voucher/mark-copied', (req: Request, res:
   });
 });
 
-// POST /api/gateways/paylesotho/webhook — Instant IPN Webhook callback from PayLesotho / XPayments
+// POST /api/gateways/paylesotho/webhook — Verified IPN Webhook callback from PayLesotho / XPayments
+// Verifies HMAC-SHA256 signature when present AND cross-verifies transaction settlement directly with PayLesotho API before activating sessions.
 app.post('/api/gateways/paylesotho/webhook', async (req: Request, res: Response) => {
   const body = req.body || {};
+  const payGw = serverStore.gateways.find((g: any) => g.provider === 'paylesotho');
+  const webhookSecret = String(payGw?.webhookSecret || process.env.PAYLESOTHO_WEBHOOK_SECRET || '').trim();
+
+  // 1. If an upstream HMAC signature header is sent, verify it strictly via timingSafeEqual
+  const sigCheck = verifyWebhookHmacHeader(req, webhookSecret);
+  if (sigCheck.present && webhookSecret && !sigCheck.valid) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'INVALID_WEBHOOK_SIGNATURE', message: 'Invalid PayLesotho webhook signature.' }
+    });
+  }
+
   const ref = String(body.reference || body.merchant_reference || body.order_id || body.transactionRef || '').trim();
   const status = String(body.status || body.status_code || body.event || '').toLowerCase();
 
   const tx = serverStore.transactions.find(
     (t: any) => t.transactionRef === ref || t.upstreamReference === ref || t.id === ref
   );
-  if (tx) {
-    if (
-      status.includes('ins-0') ||
-      status === '200' ||
-      status === '0' ||
-      status.includes('approved') ||
-      status.includes('success') ||
-      status.includes('complete') ||
-      status.includes('paid')
-    ) {
-      tx.status = 'completed';
-      (tx as any).walletDebitedConfirmed = true;
-      tx.completedAt = new Date().toISOString();
-      tx.upstreamResponse = body;
-      authorizeDirectPayLesothoSession(tx);
-      saveServerPortalStore(serverStore);
-    } else if (status.includes('fail') || status.includes('reject')) {
-      tx.status = 'failed';
-      (tx as any).failureReason = body.message || 'Payment rejected by subscriber or provider.';
-      tx.errorMessage = (tx as any).failureReason;
-      saveServerPortalStore(serverStore);
+  if (!tx) {
+    return res.status(200).json({ received: true, reference: ref, status: 'ignored_unknown_reference' });
+  }
+
+  const indicatesPaid =
+    status.includes('ins-0') ||
+    status === '200' ||
+    status === '0' ||
+    status.includes('approved') ||
+    status.includes('success') ||
+    status.includes('complete') ||
+    status.includes('paid');
+
+  if (indicatesPaid) {
+    // 2. Cross-verify settlement directly with PayLesotho upstream verify API before activating Paid access
+    const bearer = (
+      (!isMaskedSecretInput(payGw?.bearerToken) ? String(payGw?.bearerToken || '').replace(/^Bearer\s+/i, '').trim() : '') ||
+      (!isMaskedSecretInput(payGw?.apiKey) ? String(payGw?.apiKey || '').replace(/^Bearer\s+/i, '').trim() : '') ||
+      (process.env.PAYLESOTHO_BEARER_TOKEN || process.env.PAYLESOTHO_API_KEY || '').trim()
+    ).trim();
+
+    let upstreamConfirmed = false;
+    if (bearer) {
+      try {
+        const cleanBase = 'https://api.paylesotho.co.ls';
+        const isMpesa = String(tx.provider || tx.paymentMethod || '').toLowerCase().includes('mpesa');
+        const verifyRef = encodeURIComponent(String(tx.upstreamReference || tx.transactionRef || ref));
+        const mpesaMerchant = encodeURIComponent(String(payGw?.mpesaMerchantId || process.env.PAYLESOTHO_MPESA_MERCHANT_ID || '62915'));
+        const verifyUrl = isMpesa
+          ? `${cleanBase}/api/v1/vcl/verify/${verifyRef}/${mpesaMerchant}`
+          : `${cleanBase}/api/v2/econet/verify/${verifyRef}`;
+
+        const vResp = await fetch(verifyUrl, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json' },
+          signal: AbortSignal.timeout(8000)
+        });
+        const vData: any = await vResp.json().catch(() => ({}));
+        const vStr = JSON.stringify(vData).toLowerCase();
+        if (
+          vResp.ok &&
+          (vStr.includes('verification successful') ||
+            vStr.includes('ins-0') ||
+            vStr.includes('completed') ||
+            vStr.includes('success') ||
+            vStr.includes('paid')) &&
+          !vStr.includes('not found') &&
+          !vStr.includes('failed') &&
+          !vStr.includes('pending') &&
+          !vStr.includes('unauthenticated')
+        ) {
+          upstreamConfirmed = true;
+        }
+      } catch {}
+    } else if (sigCheck.present && sigCheck.valid) {
+      // Allow verified HMAC-signed webhook when bearer is not configured in local dev
+      upstreamConfirmed = true;
     }
+
+    if (!upstreamConfirmed) {
+      return res.status(202).json({
+        received: true,
+        reference: ref,
+        status: 'pending_upstream_verification',
+        message: 'Webhook logged; waiting for PayLesotho API settlement verification before authorizing session.'
+      });
+    }
+
+    tx.status = 'completed';
+    (tx as any).walletDebitedConfirmed = true;
+    tx.completedAt = new Date().toISOString();
+    tx.upstreamResponse = body;
+    authorizeDirectPayLesothoSession(tx);
+    saveServerPortalStore(serverStore);
+  } else if (status.includes('fail') || status.includes('reject')) {
+    if (sigCheck.present && !sigCheck.valid && webhookSecret) {
+      return res.status(401).json({ success: false, message: 'Invalid signature.' });
+    }
+    tx.status = 'failed';
+    (tx as any).failureReason = body.message || 'Payment rejected by subscriber or provider.';
+    tx.errorMessage = (tx as any).failureReason;
+    saveServerPortalStore(serverStore);
   }
 
   res.json({ received: true, reference: ref, status: 'processed' });
 });
 
-// POST /api/gateways/paylesotho/test — Live Bearer Token & Endpoint Verification against api.paylesotho.co.ls
-app.post('/api/gateways/paylesotho/test', async (req: Request, res: Response) => {
+// POST /api/gateways/paylesotho/test — Authenticated Bearer Token & Endpoint Verification against trusted paylesotho.co.ls hosts only
+app.post('/api/gateways/paylesotho/test', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), async (req: Request, res: Response) => {
   const {
     bearerToken,
     apiKey,
@@ -5149,6 +6041,16 @@ app.post('/api/gateways/paylesotho/test', async (req: Request, res: Response) =>
   const cleanOttUrl = String(
     ottVoucherEndpointUrl || payGw?.ottVoucherEndpointUrl || 'https://api.paylesotho.co.ls/api/ott/voucher/get'
   ).trim();
+
+  // SSRF Guard: Restrict PayLesotho test probe strictly to official HTTPS *.paylesotho.co.ls domains
+  try {
+    await assertPublicOutboundUrl(cleanApiBase, { allowedHostSuffixes: ['paylesotho.co.ls'], requireHttps: true });
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      message: err?.message || 'PayLesotho endpoint URL must be an HTTPS paylesotho.co.ls domain.'
+    });
+  }
 
   if (!resolvedBearer || isMaskedSecretInput(resolvedBearer)) {
     return res.status(400).json({
@@ -5266,12 +6168,19 @@ app.get('/api/vouchers', (_req: Request, res: Response) => {
   });
 });
 
-// Generate a batch of T-Connect Free Mode Reception Vouchers (TC-XXXXX, 5 numeric digits, up to 3 devices, 24h validity, uncapped speed)
-app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
+const voucherRedeemRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  maxAttempts: 20,
+  keyPrefix: 'voucher_redeem',
+  keyExtractor: (req) => `${req.ip || 'unknown'}:${String(req.body?.mac || req.body?.clientMac || '').toLowerCase()}`
+});
+
+// Generate a batch of T-Connect Free Mode Reception Vouchers using cryptographically secure randomness
+app.post('/api/vouchers/generate-batch', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance'], 'billing'), (req: Request, res: Response) => {
   const {
     count = 300,
     planId = 'tc_free_reception_24h',
-    planName = 'T-Connect Reception Wi-Fi Voucher (24h · 3 Devices · Uncapped)',
+    planName = 'T-Connect Reception Wi-Fi Voucher (24h · Unlimited Devices · Uncapped)',
     durationSeconds = 86400,
     deviceLimit = 0,
     venueName = 'Clubhouse & Reception'
@@ -5292,13 +6201,13 @@ app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
 
   while (generatedBatch.length < targetCount && safetyCounter < 95000) {
     safetyCounter++;
-    const num = Math.floor(10000 + Math.random() * 90000);
+    const num = crypto.randomInt(10000, 100000);
     const code = `TC-${num}`;
     if (existingCodes.has(code)) continue;
     existingCodes.add(code);
 
     const voucher = {
-      id: `vch_tc_${Date.now()}_${generatedBatch.length + 1}_${num}`,
+      id: `vch_tc_${Date.now()}_${generatedBatch.length + 1}_${crypto.randomBytes(3).toString('hex')}`,
       code,
       digits: String(num),
       planId,
@@ -5326,10 +6235,23 @@ app.post('/api/vouchers/generate-batch', (req: Request, res: Response) => {
     allVouchersCount: serverStore.vouchers.length,
     message: `Generated ${generatedBatch.length} T-Connect Reception Vouchers (TC-XXXXX · 24h · Unlimited Devices · Uncapped Speed).`
   });
+  const adminUser = (req as any).adminUser as AdminSessionPayload | undefined;
+  recordServerAudit({
+    actor: adminUser?.name || 'Admin',
+    actorEmail: adminUser?.email || '',
+    actorDepartment: adminUser?.department || adminUser?.role || '',
+    role: adminUser?.role || 'Admin',
+    category: 'billing',
+    action: 'vouchers.generate_batch',
+    target: venueName || 'Reception Vouchers',
+    details: `Generated ${generatedBatch.length} reception vouchers (${planName})`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
 });
 
-// Verify & redeem a T-Connect Free Mode Reception Voucher (TC-XXXXX where XXXXX is 5 numeric digits)
-app.post('/api/vouchers/redeem-tconnect', (req: Request, res: Response) => {
+// Verify & redeem a T-Connect Free Mode Reception Voucher (rate-limited per IP/MAC)
+app.post('/api/vouchers/redeem-tconnect', voucherRedeemRateLimiter, (req: Request, res: Response) => {
   const {
     code,
     digits,
@@ -6409,7 +7331,7 @@ app.get('/api/portal/config', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/portal/config', (req: Request, res: Response) => {
+app.post('/api/portal/config', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Collaborator', 'Finance', 'Tech', 'Technical'], 'portal'), (req: Request, res: Response) => {
   try {
     const {
       scope,
@@ -6540,6 +7462,20 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
     }
     persistMonitoredRoutersToStore();
 
+    const adminUser = (req as any).adminUser as AdminSessionPayload | undefined;
+    recordServerAudit({
+      actor: adminUser?.name || 'Admin',
+      actorEmail: adminUser?.email || '',
+      actorDepartment: adminUser?.department || adminUser?.role || '',
+      role: adminUser?.role || 'Admin',
+      category: 'portal',
+      action: 'portal.config_updated',
+      target: `Scope: ${targetScope}`,
+      details: `Updated Captive Portal config for "${targetScope}" (Free Access: ${allowFree ? 'ON' : 'OFF'}, Speed Caps: ${speedCapsEnabled ? 'ON' : 'OFF'}, Synced Routers: ${syncedCount})`,
+      severity: 'info',
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
     res.json({
       success: true,
       configs: existing,
@@ -6557,7 +7493,7 @@ app.post('/api/portal/config', (req: Request, res: Response) => {
 
 // Safe One-Click Splash HTML & 24h Seamless Auto-Reconnect Sync Endpoint
 // Updates hotspot/login.html per router (respecting each router's exact scope & Paid/Free mode) without resetting bridges, WireGuard, or active guest connections
-app.post('/api/portal/sync-splash-safe', (req: Request, res: Response) => {
+app.post('/api/portal/sync-splash-safe', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Collaborator', 'Finance', 'Tech', 'Technical'], 'portal'), (req: Request, res: Response) => {
   try {
     const host = req.get('host') || '169.58.98.92:3000';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
@@ -6869,7 +7805,7 @@ async function dispatchPartnerWebhooksForLead(ev: any, targetPartnerId?: string)
     const leadPayload = sanitizeLeadForPartner(ev, partner.campaignName);
     const bodyObj = {
       event: 'lead.captured',
-      webhookId: `evt_${Date.now()}_${Math.floor(100 + Math.random() * 899)}`,
+      webhookId: `evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
       dispatchedAt: new Date().toISOString(),
       partner: {
         companyName: partner.companyName,
@@ -6879,7 +7815,7 @@ async function dispatchPartnerWebhooksForLead(ev: any, targetPartnerId?: string)
     };
     const rawBody = JSON.stringify(bodyObj);
     const signature = crypto
-      .createHmac('sha256', partner.webhookSecret || 'whsec_tconnect_default')
+      .createHmac('sha256', partner.webhookSecret || crypto.randomBytes(16).toString('hex'))
       .update(rawBody, 'utf8')
       .digest('hex');
 
@@ -6888,8 +7824,10 @@ async function dispatchPartnerWebhooksForLead(ev: any, targetPartnerId?: string)
     let detail = '';
 
     try {
+      await assertPublicOutboundUrl(partner.webhookUrl.trim());
       const resp = await fetch(partner.webhookUrl.trim(), {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'Content-Type': 'application/json',
           'X-TConnect-Event': 'lead.captured',
@@ -6905,11 +7843,11 @@ async function dispatchPartnerWebhooksForLead(ev: any, targetPartnerId?: string)
     } catch (err: any) {
       status = 0;
       success = false;
-      detail = err?.message || 'Webhook endpoint unreachable';
+      detail = err?.message || 'Webhook endpoint blocked or unreachable';
     }
 
     const logItem: PartnerWebhookLogRecord = {
-      id: `whlog_${Date.now()}_${Math.floor(100 + Math.random() * 899)}`,
+      id: `whlog_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
       partnerId: partner.id,
       companyName: partner.companyName,
       leadId: leadPayload.leadId,
@@ -6966,13 +7904,55 @@ function authenticatePartnerRequest(req: Request, res: Response): PartnerApiKeyR
 }
 
 // Serve the root Markdown documentation file ("T-Connect Control Tower - REST API Documentation.md")
-app.get('/api/v1/partner/docs.md', (_req: Request, res: Response) => {
+app.get('/api/v1/partner/docs.md', (req: Request, res: Response) => {
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const liveBaseUrl = `${protocol}://${host}`;
   const docPath = path.resolve(__dirname, 'T-Connect Control Tower - REST API Documentation.md');
+
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   if (fs.existsSync(docPath)) {
-    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-    return res.send(fs.readFileSync(docPath, 'utf-8'));
+    const rawDoc = fs.readFileSync(docPath, 'utf-8');
+    return res.send(rawDoc.replace(/https:\/\/your-control-tower-domain\.com/g, liveBaseUrl));
   }
-  res.status(404).send('# T-Connect Control Tower - REST API Documentation not found');
+
+  return res.send(`# T-Connect Control Tower — Partner Lead REST API Documentation
+
+- **Base URL:** \`${liveBaseUrl}\`
+- **API Version:** \`v1\` (\`/api/v1/partner/*\`)
+- **Authentication:** Send your API key in the \`X-API-Key: tc_live_...\` header (or \`Authorization: Bearer tc_live_...\`)
+- **Scope Isolation:** Partner keys can only access \`/api/v1/partner/*\` lead endpoints and sanitized lead records for their assigned policies/sites.
+
+## Endpoints
+
+### 1. List Authorized Policies & Scopes
+\`GET ${liveBaseUrl}/api/v1/partner/policies\`
+
+\`\`\`bash
+curl -H "X-API-Key: YOUR_API_KEY" "${liveBaseUrl}/api/v1/partner/policies"
+\`\`\`
+
+### 2. Retrieve Live Leads (JSON)
+\`GET ${liveBaseUrl}/api/v1/partner/leads\`
+
+Optional query parameters: \`limit\`, \`offset\`, \`scope\`, \`site\`, \`since\` (ISO-8601).
+
+\`\`\`bash
+curl -H "X-API-Key: YOUR_API_KEY" "${liveBaseUrl}/api/v1/partner/leads?limit=100"
+\`\`\`
+
+### 3. Export Leads as CSV (RFC 4180)
+\`GET ${liveBaseUrl}/api/v1/partner/leads/export.csv\`
+
+\`\`\`bash
+curl -H "X-API-Key: YOUR_API_KEY" "${liveBaseUrl}/api/v1/partner/leads/export.csv" -o tconnect_leads.csv
+\`\`\`
+
+### 4. Submit / Capture Lead
+\`POST ${liveBaseUrl}/api/v1/partner/leads\`
+
+Required JSON fields: \`firstName\`, \`phone\` (or \`email\`), \`scope\` (e.g. \`hotspot\`).
+`);
 });
 
 // 1. GET /api/v1/partner/policies — Inspect partner's authorized hotspot policies & lead capture fields
@@ -7366,7 +8346,7 @@ app.get('/api/v1/partner/leads/export.csv', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // LIVE PRODUCTION RESET ENDPOINT (Resets Leads, Reconciled Revenue, Sessions & Auth)
 // -----------------------------------------------------------------------------
-app.post('/api/admin/reset-live-data', async (_req: Request, res: Response) => {
+app.post('/api/admin/reset-live-data', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), async (_req: Request, res: Response) => {
   const nowIso = new Date().toISOString();
   serverStore.cleanSlateAt = nowIso;
   serverStore.guestEvents = [];
@@ -7402,7 +8382,7 @@ app.post('/api/admin/reset-live-data', async (_req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // ADMIN ENDPOINTS FOR MANAGING SCOPED PARTNER API KEYS & WEBHOOKS
 // -----------------------------------------------------------------------------
-app.get('/api/admin/partner-keys', (_req: Request, res: Response) => {
+app.get('/api/admin/partner-keys', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (_req: Request, res: Response) => {
   const adoptedRouters = Array.from(monitoredRouters.values()).map((r) => ({
     id: r.id,
     name: r.name,
@@ -7423,7 +8403,7 @@ app.get('/api/admin/partner-keys', (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
+app.post('/api/admin/partner-keys', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
   const { companyName, campaignName, allowedScopes, allowedRouterIds, allowedSites, webhookUrl } = req.body || {};
   if (!companyName || !String(companyName).trim()) {
     return res.status(400).json({ success: false, message: 'Partner company name is required.' });
@@ -7477,7 +8457,7 @@ app.post('/api/admin/partner-keys', (req: Request, res: Response) => {
   });
 });
 
-app.put('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
+app.put('/api/admin/partner-keys/:id', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
   const keyId = String(req.params.id || '');
   const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
   if (!target) {
@@ -7507,7 +8487,7 @@ app.put('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
   res.json({ success: true, key: target, keys: keysWithCounts });
 });
 
-app.delete('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
+app.delete('/api/admin/partner-keys/:id', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
   const keyId = String(req.params.id || '');
   serverStore.partnerApiKeys = (serverStore.partnerApiKeys || []).filter((k) => k.id !== keyId);
   saveServerPortalStore(serverStore);
@@ -7520,7 +8500,7 @@ app.delete('/api/admin/partner-keys/:id', (req: Request, res: Response) => {
 });
 
 // Reset a specific Partner API Key's leads to a clean slate (0 leads before now)
-app.post('/api/admin/partner-keys/:id/reset-leads', (req: Request, res: Response) => {
+app.post('/api/admin/partner-keys/:id/reset-leads', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
   const keyId = String(req.params.id || '');
   const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
   if (!target) {
@@ -7546,7 +8526,7 @@ app.post('/api/admin/partner-keys/:id/reset-leads', (req: Request, res: Response
 });
 
 // Reset captured leads globally or per hotspot policy scope (and reset matching sponsor baselines)
-app.post('/api/admin/leads/reset', async (req: Request, res: Response) => {
+app.post('/api/admin/leads/reset', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), async (req: Request, res: Response) => {
   const { scope, partnerKeyId } = req.body || {};
   const nowIso = new Date().toISOString();
 
@@ -7627,7 +8607,7 @@ app.post('/api/admin/leads/reset', async (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/admin/partner-keys/:id/test-webhook', async (req: Request, res: Response) => {
+app.post('/api/admin/partner-keys/:id/test-webhook', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), async (req: Request, res: Response) => {
   const keyId = String(req.params.id || '');
   const target = (serverStore.partnerApiKeys || []).find((k) => k.id === keyId);
   if (!target) {
@@ -7877,7 +8857,7 @@ app.post('/api/portal/ad/complete', (req: Request, res: Response) => {
 });
 
 // E1 Control 2 & AT-25: Daily PayLesotho & OTT Voucher Reconciliation Job (CSV statement rows + /ott/voucher/check)
-app.post('/api/gateways/paylesotho/reconcile', async (req: Request, res: Response) => {
+app.post('/api/gateways/paylesotho/reconcile', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), async (req: Request, res: Response) => {
   const { statementRows } = req.body || {};
   const rows: Array<{ unique_reference: string; amount: number; channel?: string; status?: string }> = Array.isArray(statementRows)
     ? statementRows
@@ -8362,9 +9342,38 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     }
   }
 
-  // Generate valid 32-byte Base64 curve25519 WireGuard keys
-  const routerPrivateKey = crypto.randomBytes(32).toString('base64');
-  const hubPublicKey = crypto.randomBytes(32).toString('base64');
+  // Generate valid Curve25519 (X25519) WireGuard keypair for router and use persistent/env hub public key
+  const wgRouterKeys = crypto.generateKeyPairSync('x25519');
+  const routerPrivDer = wgRouterKeys.privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer;
+  const routerPrivateKey = routerPrivDer.subarray(routerPrivDer.length - 32).toString('base64');
+
+  const resolveHubWgPublicKey = (): string => {
+    const envHubPub = String(process.env.WIREGUARD_HUB_PUBLIC_KEY || '').trim();
+    if (envHubPub && !envHubPub.startsWith('<')) return envHubPub;
+    const hubKeyPath = path.resolve(persistentDataDir, '.wireguard-hub-key.json');
+    try {
+      if (fs.existsSync(hubKeyPath)) {
+        const parsed = JSON.parse(fs.readFileSync(hubKeyPath, 'utf-8'));
+        if (parsed?.publicKey) return String(parsed.publicKey);
+      }
+      const hubKeys = crypto.generateKeyPairSync('x25519');
+      const hubPubDer = hubKeys.publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+      const hubPrivDer = hubKeys.privateKey.export({ format: 'der', type: 'pkcs8' }) as Buffer;
+      const publicKey = hubPubDer.subarray(hubPubDer.length - 32).toString('base64');
+      const privateKey = hubPrivDer.subarray(hubPrivDer.length - 32).toString('base64');
+      fs.writeFileSync(hubKeyPath, JSON.stringify({ publicKey, privateKey, createdAt: new Date().toISOString() }), {
+        encoding: 'utf-8',
+        mode: 0o600
+      });
+      return publicKey;
+    } catch {
+      const hubPubDer = wgRouterKeys.publicKey.export({ format: 'der', type: 'spki' }) as Buffer;
+      return hubPubDer.subarray(hubPubDer.length - 32).toString('base64');
+    }
+  };
+  const hubPublicKey = resolveHubWgPublicKey();
+  const radiusSecret = String(process.env.RADIUS_SECRET || '').trim() || `radsec_${crypto.randomBytes(16).toString('hex')}`;
+  const routerApiPass = String(process.env.ROUTER_API_PASSWORD || '').trim() || crypto.randomBytes(18).toString('base64url');
 
   // Dynamic provisioning payload tailored for this router with unique assignedWgIp and current app options
   const script = RouterOSRenderer.renderProvisioningScript({
@@ -8401,8 +9410,8 @@ const handleAdoptRsc = (req: Request, res: Response) => {
     routerWgIp: assignedWgIp,
     routerPrivateKey,
     hubPublicKey,
-    radiusSecret: process.env.RADIUS_SECRET || 'radsec_tconnect_lesotho_99120',
-    apiPassword: process.env.ROUTER_API_PASSWORD || 'tc_pass_crypto_random_32char',
+    radiusSecret,
+    apiPassword: routerApiPass,
     walledGardenDomains: WALLED_GARDEN_DOMAINS,
     blockDoH: true,
     speedCapsEnabled: effectiveSpeedCapsEnabled,
@@ -8430,11 +9439,9 @@ app.all('/api/devices/:routerId/heartbeat', async (req: Request, res: Response) 
 
   // AT-11 Constant-time router token check when X-Router-Token header is provided
   const suppliedRouterToken = String(req.headers['x-router-token'] || '').trim();
-  const expectedRouterToken = String(process.env.ROUTER_API_PASSWORD || 'tc_pass_crypto_random_32char').trim();
-  if (suppliedRouterToken) {
-    const bufA = Buffer.from(suppliedRouterToken);
-    const bufB = Buffer.from(expectedRouterToken);
-    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+  const expectedRouterToken = String(process.env.ROUTER_API_PASSWORD || '').trim();
+  if (suppliedRouterToken && expectedRouterToken) {
+    if (!verifySecretTimingSafe(suppliedRouterToken, expectedRouterToken)) {
       return res.status(401).json({
         success: false,
         error: {
@@ -8771,7 +9778,7 @@ app.post('/api/devices/:routerId/verify-handshake', (req: Request, res: Response
   });
 });
 
-app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => {
+app.post('/api/devices/:routerId/force-adopt', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical'], 'fleet'), (req: Request, res: Response) => {
   const routerId = req.params.routerId;
   const now = Date.now();
   let router = monitoredRouters.get(routerId);
@@ -8861,6 +9868,22 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
   router.pendingCommands.push(splashProvisioningCmd);
   persistMonitoredRoutersToStore();
 
+  const adminUser = (req as any).adminUser as AdminSessionPayload | undefined;
+  recordServerAudit({
+    actor: adminUser?.name || 'Admin',
+    actorEmail: adminUser?.email || '',
+    actorDepartment: adminUser?.department || adminUser?.role || '',
+    role: adminUser?.role || 'Admin',
+    category: 'router_fleet',
+    action: 'router.force_adopt',
+    target: router.name,
+    routerId: router.id,
+    routerName: router.name,
+    details: `Adopted router "${router.name}" (${router.siteName || 'Site'}) into live fleet and queued 8-point Hotspot bundle.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
   res.json({
     success: true,
     status: 'online',
@@ -8878,6 +9901,8 @@ app.post('/api/devices/:routerId/force-adopt', (req: Request, res: Response) => 
 interface ServerAuditLogEntry {
   id: string;
   actor: string;
+  actorEmail?: string;
+  actorDepartment?: string;
   role: string;
   category: string;
   action: string;
@@ -8894,28 +9919,61 @@ interface ServerAuditLogEntry {
   metadata?: Record<string, any>;
 }
 
-const auditLogsStore: ServerAuditLogEntry[] = [
-  {
-    id: 'aud_init_sys',
-    actor: 'System Sentinel',
-    role: 'Owner',
-    category: 'system',
-    action: 'audit.system_init',
-    target: 'T-Connect Sentinel',
-    details: 'Audit logging engine initialized. Capturing all router reboots, configuration changes, and terminal CLI executions.',
-    severity: 'info',
-    status: 'success',
-    ipAddress: '127.0.0.1',
-    timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19)
+const auditLogsFilePath = path.resolve(persistentDataDir, 'audit-logs.json');
+const auditLogsStore: ServerAuditLogEntry[] = [];
+
+function loadAuditLogsFromDisk(): void {
+  try {
+    if (fs.existsSync(auditLogsFilePath)) {
+      const parsed = JSON.parse(fs.readFileSync(auditLogsFilePath, 'utf-8'));
+      const list = Array.isArray(parsed?.logs) ? parsed.logs : [];
+      for (const item of list) {
+        if (item && item.action) auditLogsStore.push(item);
+      }
+    }
+  } catch (err) {
+    console.warn('[Audit Store] Could not load persisted audit-logs.json:', err);
   }
-];
+  if (auditLogsStore.length === 0) {
+    auditLogsStore.push({
+      id: 'aud_init_sys',
+      actor: 'System Sentinel',
+      actorEmail: 'system@tconnect.tower',
+      actorDepartment: 'System',
+      role: 'Super Admin',
+      category: 'system',
+      action: 'audit.system_init',
+      target: 'T-Connect Control Tower',
+      details: 'Immutable Super Admin activity log initialized. Recording all sign-ins, config edits, router adoptions, terminal commands, and CSV exports.',
+      severity: 'info',
+      status: 'success',
+      ipAddress: '127.0.0.1',
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+loadAuditLogsFromDisk();
+
+function saveAuditLogsToDisk(): void {
+  try {
+    fs.writeFileSync(
+      auditLogsFilePath,
+      JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), logs: auditLogsStore.slice(0, 5000) }, null, 2),
+      { encoding: 'utf-8', mode: 0o600 }
+    );
+  } catch (err) {
+    console.warn('[Audit Store] Failed to persist audit-logs.json:', err);
+  }
+}
 
 function recordServerAudit(entry: Partial<ServerAuditLogEntry> & { action: string; target: string; details: string }) {
   const newEntry: ServerAuditLogEntry = {
-    id: entry.id || `aud_srv_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-    actor: entry.actor || 'Admin',
-    role: entry.role || 'Owner',
-    category: entry.category || 'router_config',
+    id: entry.id || `aud_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+    actor: entry.actor || 'System',
+    actorEmail: entry.actorEmail,
+    actorDepartment: entry.actorDepartment || entry.role || 'System',
+    role: entry.role || 'Super Admin',
+    category: entry.category || 'system',
     action: entry.action,
     target: entry.target,
     routerId: entry.routerId,
@@ -8926,13 +9984,14 @@ function recordServerAudit(entry: Partial<ServerAuditLogEntry> & { action: strin
     severity: entry.severity || 'info',
     status: entry.status || 'success',
     ipAddress: entry.ipAddress || '127.0.0.1',
-    timestamp: entry.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19),
+    timestamp: entry.timestamp || new Date().toISOString(),
     metadata: entry.metadata
   };
   auditLogsStore.unshift(newEntry);
-  if (auditLogsStore.length > 500) {
-    auditLogsStore.pop();
+  if (auditLogsStore.length > 5000) {
+    auditLogsStore.length = 5000;
   }
+  saveAuditLogsToDisk();
   return newEntry;
 }
 
@@ -9934,7 +10993,9 @@ async function tryQueryLiveRouterOSRestApi(
 ): Promise<string | null> {
   if (!router || router.status === 'offline') return null;
   const wgIp = String(router.wireguardIp || '').trim();
-  if (!wgIp || wgIp === '127.0.0.1' || wgIp.startsWith('10.99.1.50')) return null;
+  // Restrict live RouterOS REST API queries strictly to the WireGuard management subnet (10.99.x.x)
+  const validWgIp = /^10\.99\.(?:[0-9]|[1-9][0-9]|1\d\d|2[0-4]\d|25[0-5])\.(?:[1-9]|[1-9][0-9]|1\d\d|2[0-4]\d|25[0-4])$/.test(wgIp);
+  if (!validWgIp || wgIp === '10.99.1.50') return null;
 
   const cmd = rawCommand.trim().replace(/^\/+/, '').toLowerCase();
   let restPath = '';
@@ -11036,7 +12097,7 @@ Columns: DST-ADDRESS, GATEWAY, DISTANCE
       outputs.push(`Flags: X - disabled
 Columns: SERVICE, CALLED-ID, DOMAIN, ADDRESS, SECRET
 # SERVICE  CALLED-ID  DOMAIN  ADDRESS     SECRET
-0 hotspot                     10.99.0.1   radsec_tconnect_lesotho_99120`);
+0 hotspot                     10.99.0.1   ***REDACTED***`);
       continue;
     }
 
@@ -11205,7 +12266,8 @@ Status: OK (queued to live router ${wgIp} via T-Connect HTTP/WireGuard bridge)`)
 // -----------------------------------------------------------------------------
 // ALL-FLEET BROADCAST TERMINAL COMMAND EXECUTION
 // -----------------------------------------------------------------------------
-app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
+app.post('/api/devices/fleet/terminal', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical'], 'terminal'), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
   const { command, routerIds } = req.body;
   const cleanCmd = (command || '').trim();
 
@@ -11240,6 +12302,10 @@ app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
     const execResult = executeRouterOSCliCommand(cleanCmd, router.ref, router.id, portalBaseUrl);
 
     recordServerAudit({
+      actor: adminUser?.name || 'Admin',
+      actorEmail: adminUser?.email || '',
+      actorDepartment: adminUser?.department || adminUser?.role || '',
+      role: adminUser?.role || 'Admin',
       category: 'terminal_command',
       action: 'router.fleet_broadcast',
       target: router.name,
@@ -11275,7 +12341,8 @@ app.post('/api/devices/fleet/terminal', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // REMOTE ROUTER TERMINAL CLI EXECUTION (Live WireGuard REST API + Telemetry Fallback)
 // -----------------------------------------------------------------------------
-app.post('/api/devices/:routerId/terminal', async (req: Request, res: Response) => {
+app.post('/api/devices/:routerId/terminal', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical'], 'terminal'), async (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
   const routerId = req.params.routerId;
   const { command } = req.body;
   const router = monitoredRouters.get(routerId);
@@ -11298,6 +12365,10 @@ app.post('/api/devices/:routerId/terminal', async (req: Request, res: Response) 
   const durationMs = Math.max(18, Date.now() - startMs);
 
   recordServerAudit({
+    actor: adminUser?.name || 'Admin',
+    actorEmail: adminUser?.email || '',
+    actorDepartment: adminUser?.department || adminUser?.role || '',
+    role: adminUser?.role || 'Admin',
     category: 'terminal_command',
     action: 'router.terminal_command',
     target: routerName,
@@ -11324,253 +12395,1103 @@ app.post('/api/devices/:routerId/terminal', async (req: Request, res: Response) 
 });
 
 // -----------------------------------------------------------------------------
-// TEAM RBAC & CROSS-DEVICE AUTHENTICATION REGISTRY
-// Persists team members, invitations, and temporary passwords across all devices
-// (Desktops, Phones, and Tablets).
+// SUPER ADMIN TEAM RBAC, @tconnect.tower ONBOARDING & 2-HOUR SESSION AUTH
+// Persists hashed staff credentials (scrypt) in private /data/auth-users.json
+// with Phelane Phoma as primary Super Admin and per-tab checkbox permissions.
 // -----------------------------------------------------------------------------
+const TOWER_DOMAIN = 'tconnect.tower';
+const VALID_PERMISSION_TABS = ['dashboard', 'fleet', 'billing', 'portal', 'terminal', 'roaming', 'sessions', 'leads'] as const;
+
 interface ServerTeamMember {
   id: string;
   name: string;
+  username?: string;
   email: string;
+  department: string;
   role: 'Owner' | 'Super Admin' | 'Collaborator' | 'Finance' | 'Tech' | 'Management' | 'Admin' | 'Technical' | 'Viewer';
+  isSuperAdmin?: boolean;
+  allowedTabs: string[];
   scopedSites: string[];
   mfaEnabled: boolean;
-  status: 'active' | 'invited' | 'expired';
+  status: 'active' | 'invited' | 'expired' | 'suspended';
   invitedAt: string;
   lastLoginAt?: string;
   inviteToken?: string;
   inviteTokenExpiresAt?: string;
   invitedBy?: string;
-  tempPassword?: string;
+  passwordHash?: string;
+  tempPasswordHash?: string;
   tempPasswordIssuedAt?: string;
+  resetToken?: string;
+  resetTokenExpiresAt?: string;
   hasPendingReset?: boolean;
 }
 
+const SUPER_ADMIN_USERNAME = String(process.env.SUPER_ADMIN_USERNAME || 'phelane').trim().toLowerCase();
+const SUPER_ADMIN_EMAIL = String(process.env.SUPER_ADMIN_EMAIL || `${SUPER_ADMIN_USERNAME}@${TOWER_DOMAIN}`).trim().toLowerCase();
+const SUPER_ADMIN_NAME = String(process.env.SUPER_ADMIN_NAME || 'Phelane Phoma').trim();
+const authUsersFilePath = path.resolve(persistentDataDir, 'auth-users.json');
 const serverTeamStore = new Map<string, ServerTeamMember>();
 
-// Seed Designated 5 Roles and Accounts
-serverTeamStore.set('rphooko@tconnect.africa', {
-  id: 'tm_owner',
-  name: 'Raphooko Phooko',
-  email: 'rphooko@tconnect.africa',
-  role: 'Owner',
-  scopedSites: [],
-  mfaEnabled: true,
-  status: 'active',
-  invitedAt: '2026-10-02',
-  lastLoginAt: 'Just now'
-});
+const DEPARTMENT_DEFAULT_TABS: Record<string, { role: ServerTeamMember['role']; tabs: string[] }> = {
+  'super admin': { role: 'Super Admin', tabs: [...VALID_PERMISSION_TABS] },
+  finance: { role: 'Finance', tabs: ['dashboard', 'billing'] },
+  technical: { role: 'Tech', tabs: ['fleet', 'terminal', 'roaming', 'sessions'] },
+  'marketing & portal': { role: 'Collaborator', tabs: ['portal', 'leads'] },
+  management: { role: 'Management', tabs: ['dashboard', 'leads'] },
+  operations: { role: 'Collaborator', tabs: ['dashboard', 'fleet', 'portal', 'sessions'] }
+};
 
-serverTeamStore.set('admin@tconnect.africa', {
-  id: 'tm_super_admin',
-  name: 'Super Administrator',
-  email: 'admin@tconnect.africa',
+function resolveDepartmentRoleAndTabs(department?: string, requestedTabs?: unknown): { department: string; role: ServerTeamMember['role']; isSuperAdmin: boolean; allowedTabs: string[] } {
+  const cleanDept = String(department || 'Finance').trim();
+  const key = cleanDept.toLowerCase();
+  const preset = DEPARTMENT_DEFAULT_TABS[key] || { role: 'Collaborator' as const, tabs: ['dashboard'] };
+  const isSuper = key === 'super admin' || key === 'owner';
+  if (isSuper) {
+    return {
+      department: 'Super Admin',
+      role: 'Super Admin',
+      isSuperAdmin: true,
+      allowedTabs: [...VALID_PERMISSION_TABS]
+    };
+  }
+  const filteredTabs = Array.isArray(requestedTabs)
+    ? Array.from(
+        new Set(
+          requestedTabs
+            .map((t) => String(t).trim().toLowerCase())
+            .filter((t) => (VALID_PERMISSION_TABS as readonly string[]).includes(t))
+        )
+      )
+    : preset.tabs;
+  return {
+    department: cleanDept || 'Finance',
+    role: preset.role,
+    isSuperAdmin: false,
+    allowedTabs: filteredTabs.length > 0 ? filteredTabs : [...preset.tabs]
+  };
+}
+
+const DEFAULT_SUPER_ADMIN_RECORD: ServerTeamMember = {
+  id: 'tm_super_admin_primary',
+  name: SUPER_ADMIN_NAME,
+  username: SUPER_ADMIN_USERNAME,
+  email: SUPER_ADMIN_EMAIL,
+  department: 'Super Admin',
   role: 'Super Admin',
+  isSuperAdmin: true,
+  allowedTabs: [...VALID_PERMISSION_TABS],
   scopedSites: [],
   mfaEnabled: true,
   status: 'active',
   invitedAt: '2026-10-02',
-  lastLoginAt: 'Just now'
+  lastLoginAt: 'Never'
+};
+
+function saveAuthUsersToDisk(): void {
+  try {
+    const serialized = JSON.stringify(
+      {
+        version: 2,
+        updatedAt: new Date().toISOString(),
+        users: Array.from(serverTeamStore.values())
+      },
+      null,
+      2
+    );
+    fs.writeFileSync(authUsersFilePath, serialized, { encoding: 'utf-8', mode: 0o600 });
+  } catch (err) {
+    console.error('[Auth Store] Failed to persist auth-users.json:', err);
+  }
+}
+
+function loadAuthUsersFromDisk(): void {
+  serverTeamStore.set(DEFAULT_SUPER_ADMIN_RECORD.id, { ...DEFAULT_SUPER_ADMIN_RECORD });
+  try {
+    if (fs.existsSync(authUsersFilePath)) {
+      const parsed = JSON.parse(fs.readFileSync(authUsersFilePath, 'utf-8'));
+      const list: any[] = Array.isArray(parsed?.users) ? parsed.users : [];
+      for (const u of list) {
+        if (!u || (!u.id && !u.email)) continue;
+        // Skip old legacy placeholder accounts without passwords when migrating to version 2
+        if (
+          !parsed.version ||
+          parsed.version < 2
+        ) {
+          const legacyEmails = new Set([
+            'rphooko@tconnect.africa',
+            'admin@tconnect.africa',
+            'collab@tconnect.africa',
+            'operations@tconnect.africa',
+            'technical@tconnect.africa'
+          ]);
+          if (u.email && legacyEmails.has(String(u.email).toLowerCase()) && !u.passwordHash) {
+            continue;
+          }
+        }
+        const id = String(u.id || `tm_${crypto.randomBytes(6).toString('hex')}`);
+        const { tempPassword: _dropLegacy, ...cleanUser } = u;
+        const resolved = resolveDepartmentRoleAndTabs(cleanUser.department || cleanUser.role, cleanUser.allowedTabs);
+        const normalized: ServerTeamMember = {
+          id,
+          name: cleanUser.name || 'Team Member',
+          username: cleanUser.username,
+          email: String(cleanUser.email || '').trim().toLowerCase(),
+          department: resolved.department,
+          role: cleanUser.isSuperAdmin || cleanUser.role === 'Super Admin' || cleanUser.role === 'Owner' ? 'Super Admin' : resolved.role,
+          isSuperAdmin: Boolean(cleanUser.isSuperAdmin || cleanUser.role === 'Super Admin' || cleanUser.role === 'Owner' || id === DEFAULT_SUPER_ADMIN_RECORD.id),
+          allowedTabs: resolved.allowedTabs,
+          scopedSites: Array.isArray(cleanUser.scopedSites) ? cleanUser.scopedSites : [],
+          mfaEnabled: Boolean(cleanUser.mfaEnabled),
+          status: cleanUser.status || 'active',
+          invitedAt: cleanUser.invitedAt || new Date().toISOString().slice(0, 10),
+          lastLoginAt: cleanUser.lastLoginAt || 'Never',
+          inviteToken: cleanUser.inviteToken,
+          inviteTokenExpiresAt: cleanUser.inviteTokenExpiresAt,
+          invitedBy: cleanUser.invitedBy,
+          passwordHash: cleanUser.passwordHash,
+          tempPasswordHash: cleanUser.tempPasswordHash,
+          tempPasswordIssuedAt: cleanUser.tempPasswordIssuedAt,
+          resetToken: cleanUser.resetToken,
+          resetTokenExpiresAt: cleanUser.resetTokenExpiresAt,
+          hasPendingReset: Boolean(cleanUser.hasPendingReset)
+        };
+        serverTeamStore.set(id, normalized);
+      }
+    }
+  } catch (err) {
+    console.warn('[Auth Store] Could not read auth-users.json, using defaults:', err);
+  }
+}
+loadAuthUsersFromDisk();
+
+function findMemberByIdentifier(identifier: string): ServerTeamMember | undefined {
+  const clean = String(identifier || '').trim().toLowerCase();
+  if (!clean) return undefined;
+
+  // Accept Phelane's primary Super Admin aliases seamlessly
+  const superAliases = new Set([
+    SUPER_ADMIN_EMAIL,
+    SUPER_ADMIN_USERNAME,
+    `superadmin@${TOWER_DOMAIN}`,
+    'superadmin@tconnect.africa',
+    'superadmin'
+  ]);
+  if (superAliases.has(clean)) {
+    return serverTeamStore.get(DEFAULT_SUPER_ADMIN_RECORD.id);
+  }
+
+  const withDomain = clean.includes('@') ? clean : `${clean}@${TOWER_DOMAIN}`;
+  for (const m of serverTeamStore.values()) {
+    if (m.id.toLowerCase() === clean) return m;
+    if (m.email && (m.email.toLowerCase() === clean || m.email.toLowerCase() === withDomain)) return m;
+    if (m.username && m.username.toLowerCase() === clean) return m;
+  }
+  return undefined;
+}
+
+lookupMemberForSession = (emailOrId: string) => findMemberByIdentifier(emailOrId);
+
+function resolveSuperAdminEnvPassword(): string {
+  const candidate = String(process.env.SUPER_ADMIN_PASSWORD || process.env.OWNER_PASSWORD || '').trim();
+  if (!candidate || candidate.startsWith('<')) return '';
+  return candidate;
+}
+
+function isSuperAdminSetupRequired(): boolean {
+  if (resolveSuperAdminEnvPassword()) return false;
+  const boss = serverTeamStore.get(DEFAULT_SUPER_ADMIN_RECORD.id);
+  return !boss?.passwordHash;
+}
+
+function sanitizeTeamMember(m: ServerTeamMember, includeInviteToken = false) {
+  return {
+    id: m.id,
+    name: m.name,
+    username: m.username || (m.email?.endsWith(`@${TOWER_DOMAIN}`) ? m.email.split('@')[0] : undefined),
+    email: m.email,
+    department: m.department || m.role,
+    role: m.isSuperAdmin ? 'Super Admin' : m.role,
+    isSuperAdmin: Boolean(m.isSuperAdmin || m.role === 'Super Admin' || m.role === 'Owner'),
+    allowedTabs: m.isSuperAdmin ? [...VALID_PERMISSION_TABS] : Array.isArray(m.allowedTabs) ? m.allowedTabs : [],
+    scopedSites: Array.isArray(m.scopedSites) ? m.scopedSites : [],
+    mfaEnabled: Boolean(m.mfaEnabled),
+    status: m.status,
+    invitedAt: m.invitedAt,
+    lastLoginAt: m.lastLoginAt || 'Never',
+    inviteToken: includeInviteToken && m.status === 'invited' ? m.inviteToken : undefined,
+    inviteTokenExpiresAt: m.inviteTokenExpiresAt,
+    invitedBy: m.invitedBy,
+    hasPendingReset: Boolean(m.hasPendingReset || m.resetToken),
+    hasPasswordConfigured: Boolean(
+      m.passwordHash ||
+        m.tempPasswordHash ||
+        (m.id === DEFAULT_SUPER_ADMIN_RECORD.id && resolveSuperAdminEnvPassword())
+    )
+  };
+}
+
+function isHandlePrefixValid(prefix: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]{1,28}[a-z0-9]$/.test(prefix);
+}
+
+function isHandleTaken(prefix: string, excludeMemberId?: string): boolean {
+  const clean = prefix.trim().toLowerCase();
+  const fullEmail = `${clean}@${TOWER_DOMAIN}`;
+  if (clean === 'superadmin' || clean === 'system' || clean === 'root') return true;
+  for (const m of serverTeamStore.values()) {
+    if (excludeMemberId && m.id === excludeMemberId) continue;
+    if ((m.username && m.username.toLowerCase() === clean) || (m.email && m.email.toLowerCase() === fullEmail)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const authLoginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxAttempts: 25,
+  keyPrefix: 'auth_login',
+  keyExtractor: (req) =>
+    `${req.ip || 'unknown'}:${String(req.body?.identifier || req.body?.email || '').trim().toLowerCase()}`
 });
 
-serverTeamStore.set('collab@tconnect.africa', {
-  id: 'tm_collab',
-  name: 'Portal Collaborator',
-  email: 'collab@tconnect.africa',
-  role: 'Collaborator',
-  scopedSites: [],
-  mfaEnabled: false,
-  status: 'active',
-  invitedAt: '2026-10-05',
-  lastLoginAt: 'Just now'
+const authSetupRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxAttempts: 12,
+  keyPrefix: 'auth_setup'
 });
 
-serverTeamStore.set('operations@tconnect.africa', {
-  id: 'tm_finance',
-  name: 'Finance Operations',
-  email: 'operations@tconnect.africa',
-  role: 'Finance',
-  scopedSites: [],
-  mfaEnabled: false,
-  status: 'active',
-  invitedAt: '2026-10-10',
-  lastLoginAt: 'Just now'
+const inviteRedeemRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxAttempts: 20,
+  keyPrefix: 'invite_redeem'
 });
 
-serverTeamStore.set('technical@tconnect.africa', {
-  id: 'tm_tech',
-  name: 'Technical Engineer',
-  email: 'technical@tconnect.africa',
-  role: 'Tech',
-  scopedSites: [],
-  mfaEnabled: true,
-  status: 'active',
-  invitedAt: '2026-10-12',
-  lastLoginAt: 'Just now'
-});
-
-app.get('/api/team', (_req: Request, res: Response) => {
+app.get('/api/auth/status', (_req: Request, res: Response) => {
+  const needsSetup = isSuperAdminSetupRequired();
   res.json({
     success: true,
-    team: Array.from(serverTeamStore.values())
+    needsOwnerSetup: needsSetup,
+    needsSuperAdminSetup: needsSetup,
+    ownerEmail: SUPER_ADMIN_EMAIL,
+    superAdminEmail: SUPER_ADMIN_EMAIL,
+    superAdminUsername: SUPER_ADMIN_USERNAME,
+    superAdminName: SUPER_ADMIN_NAME,
+    towerDomain: TOWER_DOMAIN,
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS
   });
 });
 
-app.post('/api/team/sync', (req: Request, res: Response) => {
-  const { team } = req.body;
-  if (Array.isArray(team)) {
-    team.forEach((m: ServerTeamMember) => {
-      if (m && m.email) {
-        const clean = m.email.trim().toLowerCase();
-        const existing = serverTeamStore.get(clean);
-        serverTeamStore.set(clean, {
-          ...existing,
-          ...m,
-          email: clean
-        });
-      }
+const handleSuperAdminFirstRunSetup = (req: Request, res: Response) => {
+  if (!isSuperAdminSetupRequired()) {
+    return res.status(409).json({
+      success: false,
+      message: 'Super Admin password is already configured. Please sign in with your credentials.'
     });
   }
+
+  const { password, confirmPassword } = req.body || {};
+  if (typeof password !== 'string' || password.length < 10) {
+    return res.status(400).json({
+      success: false,
+      message: 'Super Admin password must be at least 10 characters long.'
+    });
+  }
+  if (confirmPassword !== undefined && password !== confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      message: 'Passwords do not match.'
+    });
+  }
+
+  const boss = serverTeamStore.get(DEFAULT_SUPER_ADMIN_RECORD.id) || { ...DEFAULT_SUPER_ADMIN_RECORD };
+  boss.name = SUPER_ADMIN_NAME;
+  boss.username = SUPER_ADMIN_USERNAME;
+  boss.email = SUPER_ADMIN_EMAIL;
+  boss.department = 'Super Admin';
+  boss.role = 'Super Admin';
+  boss.isSuperAdmin = true;
+  boss.allowedTabs = [...VALID_PERMISSION_TABS];
+  boss.passwordHash = hashPasswordScrypt(password);
+  boss.tempPasswordHash = undefined;
+  boss.status = 'active';
+  boss.lastLoginAt = new Date().toISOString();
+  boss.hasPendingReset = false;
+  serverTeamStore.set(boss.id, boss);
+  saveAuthUsersToDisk();
+
+  const token = signAdminSessionToken({
+    id: boss.id,
+    email: boss.email,
+    username: boss.username,
+    name: boss.name,
+    role: boss.role,
+    department: boss.department,
+    isSuperAdmin: true,
+    allowedTabs: boss.allowedTabs
+  });
+  setSessionCookie(req, res, token);
+
+  recordServerAudit({
+    actor: boss.name,
+    actorEmail: boss.email,
+    actorDepartment: 'Super Admin',
+    role: 'Super Admin',
+    category: 'authentication',
+    action: 'auth.super_admin_setup',
+    target: boss.email,
+    details: `Completed first-run Super Admin password setup for ${boss.name} (${boss.email}).`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
   res.json({
     success: true,
-    team: Array.from(serverTeamStore.values())
+    token,
+    expiresAt: new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS,
+    user: sanitizeTeamMember(boss),
+    message: `Super Admin account secured. Welcome, ${boss.name}.`
+  });
+};
+
+app.post('/api/auth/setup-owner', authSetupRateLimiter, handleSuperAdminFirstRunSetup);
+app.post('/api/auth/setup-super-admin', authSetupRateLimiter, handleSuperAdminFirstRunSetup);
+
+app.post('/api/auth/login', authLoginRateLimiter, (req: Request, res: Response) => {
+  const { email, identifier, password } = req.body || {};
+  const rawLogin = String(identifier || email || '').trim().toLowerCase();
+  const inputPass = typeof password === 'string' ? password : '';
+
+  if (!rawLogin || !inputPass) {
+    return res.status(400).json({
+      success: false,
+      message: 'Login handle/email and password are required.'
+    });
+  }
+
+  const member = findMemberByIdentifier(rawLogin);
+  if (member && member.id === DEFAULT_SUPER_ADMIN_RECORD.id && isSuperAdminSetupRequired()) {
+    return res.status(403).json({
+      success: false,
+      needsOwnerSetup: true,
+      needsSuperAdminSetup: true,
+      message: 'Super Admin password has not been set yet. Complete first-run setup first.'
+    });
+  }
+
+  if (!member || member.status === 'expired' || member.status === 'suspended' || member.status === 'invited') {
+    return res.status(401).json({
+      success: false,
+      message:
+        member?.status === 'suspended'
+          ? 'This account has been suspended by the Super Admin.'
+          : member?.status === 'invited'
+            ? 'This invite has not been activated yet. Open your invite link to choose your handle and password.'
+            : 'Invalid login handle or password.'
+    });
+  }
+
+  let authenticated = false;
+  let usedTempPassword = false;
+
+  const superEnvPass = member.id === DEFAULT_SUPER_ADMIN_RECORD.id ? resolveSuperAdminEnvPassword() : '';
+  if (superEnvPass && verifySecretTimingSafe(inputPass, superEnvPass)) {
+    authenticated = true;
+  } else if (member.passwordHash && verifyPasswordScrypt(inputPass, member.passwordHash)) {
+    authenticated = true;
+  } else if (member.tempPasswordHash && verifyPasswordScrypt(inputPass, member.tempPasswordHash)) {
+    authenticated = true;
+    usedTempPassword = true;
+  }
+
+  if (!authenticated) {
+    recordServerAudit({
+      actor: member.name,
+      actorEmail: member.email,
+      actorDepartment: member.department,
+      role: member.role,
+      category: 'authentication',
+      action: 'auth.login_failed',
+      target: member.email,
+      details: `Failed sign-in attempt for ${member.email}.`,
+      severity: 'warning',
+      status: 'failed',
+      ipAddress: req.ip || '127.0.0.1'
+    });
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid login handle or password.'
+    });
+  }
+
+  if (usedTempPassword) {
+    member.passwordHash = member.tempPasswordHash;
+    member.tempPasswordHash = undefined;
+    member.hasPendingReset = false;
+  }
+  member.status = 'active';
+  member.lastLoginAt = new Date().toISOString();
+  serverTeamStore.set(member.id, member);
+  saveAuthUsersToDisk();
+
+  const token = signAdminSessionToken({
+    id: member.id,
+    email: member.email,
+    username: member.username,
+    name: member.name,
+    role: member.isSuperAdmin ? 'Super Admin' : member.role,
+    department: member.department,
+    isSuperAdmin: Boolean(member.isSuperAdmin),
+    allowedTabs: member.allowedTabs
+  });
+  setSessionCookie(req, res, token);
+
+  recordServerAudit({
+    actor: member.name,
+    actorEmail: member.email,
+    actorDepartment: member.department,
+    role: member.isSuperAdmin ? 'Super Admin' : member.role,
+    category: 'authentication',
+    action: 'auth.login_success',
+    target: member.email,
+    details: `Signed in as ${member.name} (${member.department}). Session active with 2-hour inactivity timeout.`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    token,
+    expiresAt: new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS,
+    user: sanitizeTeamMember(member),
+    message: `Welcome back, ${member.name}.`
   });
 });
 
-app.post('/api/team/invite', (req: Request, res: Response) => {
-  const { name, email, role, scopedSites, tempPassword, inviteToken } = req.body;
-  if (!email) {
-    return res.status(400).json({ success: false, message: 'Email is required' });
+app.get('/api/auth/me', requireAdminAuth(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const member = findMemberByIdentifier(adminUser.email) || findMemberByIdentifier(adminUser.sub);
+  const { token } = extractAdminBearerToken(req);
+  res.json({
+    success: true,
+    token: token || undefined,
+    expiresAt: adminUser.expiresAt || new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS,
+    user: member
+      ? sanitizeTeamMember(member)
+      : {
+          id: adminUser.sub,
+          email: adminUser.email,
+          username: adminUser.username,
+          name: adminUser.name,
+          department: adminUser.department || adminUser.role,
+          role: adminUser.role,
+          isSuperAdmin: Boolean(adminUser.isSuperAdmin),
+          allowedTabs: adminUser.allowedTabs || [],
+          scopedSites: [],
+          mfaEnabled: true,
+          status: 'active'
+        }
+  });
+});
+
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const adminUser = getOptionalAdminUser(req);
+  if (adminUser?.jti) {
+    activeSessions.delete(adminUser.jti);
+    revokedAdminSessionIds.add(adminUser.jti);
+    saveActiveSessionsToDisk(true);
+    recordServerAudit({
+      actor: adminUser.name,
+      actorEmail: adminUser.email,
+      actorDepartment: adminUser.department || adminUser.role,
+      role: adminUser.role,
+      category: 'authentication',
+      action: 'auth.logout',
+      target: adminUser.email,
+      details: `Signed out of Control Tower session.`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+  }
+  clearSessionCookie(req, res);
+  res.json({ success: true, message: 'Signed out successfully.' });
+});
+
+app.post('/api/auth/change-password', requireAdminAuth(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof newPassword !== 'string' || newPassword.length < 10) {
+    return res.status(400).json({
+      success: false,
+      message: 'New password must be at least 10 characters long.'
+    });
+  }
+  const member = findMemberByIdentifier(adminUser.email) || findMemberByIdentifier(adminUser.sub);
+  if (!member) {
+    return res.status(404).json({ success: false, message: 'Account not found.' });
+  }
+  if (member.passwordHash && (!currentPassword || !verifyPasswordScrypt(String(currentPassword), member.passwordHash))) {
+    return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+  }
+  member.passwordHash = hashPasswordScrypt(newPassword);
+  member.tempPasswordHash = undefined;
+  member.hasPendingReset = false;
+  serverTeamStore.set(member.id, member);
+  saveAuthUsersToDisk();
+
+  recordServerAudit({
+    actor: member.name,
+    actorEmail: member.email,
+    actorDepartment: member.department,
+    role: member.role,
+    category: 'authentication',
+    action: 'auth.password_changed',
+    target: member.email,
+    details: 'Updated personal account password.',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({ success: true, message: 'Password updated successfully.' });
+});
+
+app.get('/api/team', requireSuperAdmin(), (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    towerDomain: TOWER_DOMAIN,
+    team: Array.from(serverTeamStore.values()).map((m) => sanitizeTeamMember(m, true))
+  });
+});
+
+app.post('/api/team/invite', requireSuperAdmin(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const { name, department, allowedTabs, scopedSites } = req.body || {};
+
+  const resolved = resolveDepartmentRoleAndTabs(department, allowedTabs);
+  if (!resolved.isSuperAdmin && (!Array.isArray(allowedTabs) || resolved.allowedTabs.length === 0)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Select at least one tab this teammate is allowed to access.'
+    });
   }
 
-  const cleanEmail = email.trim().toLowerCase();
-  const token = inviteToken || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  const pass = tempPassword || `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
+  const token = `inv_${crypto.randomBytes(24).toString('hex')}`;
+  const memberId = `tm_${crypto.randomBytes(6).toString('hex')}`;
+  const displayName = String(name || '').trim() || `Pending ${resolved.department} Member`;
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const member: ServerTeamMember = {
-    id: `tm_${Date.now()}`,
-    name: name || cleanEmail.split('@')[0],
-    email: cleanEmail,
-    role: role || 'Viewer',
+    id: memberId,
+    name: displayName,
+    username: undefined,
+    email: '',
+    department: resolved.department,
+    role: resolved.role,
+    isSuperAdmin: resolved.isSuperAdmin,
+    allowedTabs: resolved.allowedTabs,
     scopedSites: Array.isArray(scopedSites) ? scopedSites : [],
-    mfaEnabled: role === 'Owner' || role === 'Admin',
+    mfaEnabled: resolved.isSuperAdmin || resolved.department === 'Technical',
     status: 'invited',
-    invitedAt: new Date().toISOString().slice(0, 10),
+    invitedAt: new Date().toISOString(),
+    lastLoginAt: 'Never',
     inviteToken: token,
-    inviteTokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    invitedBy: 'Raphooko Phooko',
-    tempPassword: pass,
-    tempPasswordIssuedAt: new Date().toISOString()
+    inviteTokenExpiresAt: expiresAt,
+    invitedBy: adminUser.name,
+    hasPendingReset: false
   };
 
-  serverTeamStore.set(cleanEmail, member);
-  res.json({ success: true, member });
+  serverTeamStore.set(member.id, member);
+  saveAuthUsersToDisk();
+
+  recordServerAudit({
+    actor: adminUser.name,
+    actorEmail: adminUser.email,
+    actorDepartment: adminUser.department || 'Super Admin',
+    role: 'Super Admin',
+    category: 'team',
+    action: 'team.invite_created',
+    target: displayName,
+    details: `Created single-use @${TOWER_DOMAIN} invite for ${resolved.department} (${displayName}) with tabs: ${resolved.allowedTabs.join(', ')}.`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    member: sanitizeTeamMember(member, true),
+    inviteToken: token,
+    invitePath: `/#invite?token=${token}`,
+    expiresAt
+  });
 });
 
-app.post('/api/team/redeem-invite', (req: Request, res: Response) => {
-  const { token, email, role, name } = req.body;
-  const cleanToken = (token || '').trim();
-  const cleanEmail = (email || '').trim().toLowerCase();
-
-  let member: ServerTeamMember | undefined;
+app.get('/api/team/invite-preview', inviteRedeemRateLimiter, (req: Request, res: Response) => {
+  const cleanToken = String(req.query.token || '').trim();
+  if (!cleanToken || cleanToken.length < 16) {
+    return res.status(404).json({ success: false, message: 'Invalid link token.' });
+  }
 
   for (const m of serverTeamStore.values()) {
-    if (cleanToken && m.inviteToken && m.inviteToken.toLowerCase() === cleanToken.toLowerCase()) {
-      member = m;
-      break;
-    }
-    if (cleanEmail && m.email.toLowerCase() === cleanEmail) {
-      member = m;
-      break;
-    }
-  }
-
-  // If not found, auto-provision from invite parameters
-  if (!member && cleanEmail) {
-    member = {
-      id: `tm_${Date.now()}`,
-      name: name || cleanEmail.split('@')[0],
-      email: cleanEmail,
-      role: role || 'Viewer',
-      scopedSites: [],
-      mfaEnabled: false,
-      status: 'active',
-      invitedAt: new Date().toISOString().slice(0, 10),
-      lastLoginAt: 'Just now'
-    };
-    serverTeamStore.set(cleanEmail, member);
-  }
-
-  if (!member) {
-    return res.status(404).json({ success: false, message: 'Invite token not found' });
-  }
-
-  member.status = 'active';
-  member.lastLoginAt = 'Just now';
-  member.hasPendingReset = false;
-
-  res.json({ success: true, member });
-});
-
-app.post('/api/team/issue-password', (req: Request, res: Response) => {
-  const { memberId, email, tempPassword } = req.body;
-  const cleanEmail = (email || '').trim().toLowerCase();
-  let member: ServerTeamMember | undefined;
-
-  if (cleanEmail && serverTeamStore.has(cleanEmail)) {
-    member = serverTeamStore.get(cleanEmail);
-  } else if (memberId) {
-    for (const m of serverTeamStore.values()) {
-      if (m.id === memberId) {
-        member = m;
-        break;
+    if (m.inviteToken && verifySecretTimingSafe(m.inviteToken, cleanToken)) {
+      if (m.inviteTokenExpiresAt && Date.parse(m.inviteTokenExpiresAt) < Date.now()) {
+        m.inviteToken = undefined;
+        m.status = 'expired';
+        saveAuthUsersToDisk();
+        return res.status(410).json({ success: false, message: 'This invitation link has expired.' });
       }
+      return res.json({
+        success: true,
+        mode: 'invite',
+        towerDomain: TOWER_DOMAIN,
+        suggestedName: m.name.startsWith('Pending ') ? '' : m.name,
+        department: m.department,
+        role: m.role,
+        isSuperAdmin: Boolean(m.isSuperAdmin),
+        allowedTabs: m.allowedTabs,
+        invitedBy: m.invitedBy || SUPER_ADMIN_NAME,
+        expiresAt: m.inviteTokenExpiresAt
+      });
+    }
+    if (m.resetToken && verifySecretTimingSafe(m.resetToken, cleanToken)) {
+      if (m.resetTokenExpiresAt && Date.parse(m.resetTokenExpiresAt) < Date.now()) {
+        m.resetToken = undefined;
+        saveAuthUsersToDisk();
+        return res.status(410).json({ success: false, message: 'This password reset link has expired.' });
+      }
+      return res.json({
+        success: true,
+        mode: 'reset',
+        towerDomain: TOWER_DOMAIN,
+        name: m.name,
+        username: m.username,
+        email: m.email,
+        department: m.department,
+        expiresAt: m.resetTokenExpiresAt
+      });
     }
   }
 
-  if (member) {
-    member.tempPassword = tempPassword;
-    member.tempPasswordIssuedAt = new Date().toISOString();
-    return res.json({ success: true, member });
+  return res.status(404).json({
+    success: false,
+    message: 'This link is invalid or has already been used.'
+  });
+});
+
+app.get('/api/team/check-handle', inviteRedeemRateLimiter, (req: Request, res: Response) => {
+  const prefix = String(req.query.prefix || '').trim().toLowerCase();
+  if (!prefix) {
+    return res.json({ success: true, available: false, reason: 'Enter a login handle prefix.' });
+  }
+  if (!isHandlePrefixValid(prefix)) {
+    return res.json({
+      success: true,
+      available: false,
+      reason: 'Use 3–30 lowercase letters, numbers, dots, underscores, or hyphens.'
+    });
+  }
+  if (isHandleTaken(prefix)) {
+    return res.json({
+      success: true,
+      available: false,
+      reason: `${prefix}@${TOWER_DOMAIN} is already taken.`
+    });
+  }
+  return res.json({
+    success: true,
+    available: true,
+    fullEmail: `${prefix}@${TOWER_DOMAIN}`
+  });
+});
+
+app.post('/api/team/redeem-invite', inviteRedeemRateLimiter, (req: Request, res: Response) => {
+  const { token, fullName, handlePrefix, password, confirmPassword } = req.body || {};
+  const cleanToken = String(token || '').trim();
+  const cleanName = String(fullName || '').trim();
+  const cleanPrefix = String(handlePrefix || '').trim().toLowerCase().replace(/@.*$/, '');
+  const rawPassword = typeof password === 'string' ? password : '';
+
+  if (!cleanToken || cleanToken.length < 16) {
+    return res.status(403).json({
+      success: false,
+      message: 'A valid single-use invitation link is required.'
+    });
   }
 
-  res.status(404).json({ success: false, message: 'Member not found' });
+  let matchedMember: ServerTeamMember | undefined;
+  for (const m of serverTeamStore.values()) {
+    if (m.inviteToken && verifySecretTimingSafe(m.inviteToken, cleanToken)) {
+      matchedMember = m;
+      break;
+    }
+  }
+
+  if (!matchedMember) {
+    return res.status(403).json({
+      success: false,
+      message: 'Invalid or already used invitation link.'
+    });
+  }
+
+  if (matchedMember.inviteTokenExpiresAt && Date.parse(matchedMember.inviteTokenExpiresAt) < Date.now()) {
+    matchedMember.inviteToken = undefined;
+    matchedMember.status = 'expired';
+    saveAuthUsersToDisk();
+    return res.status(403).json({
+      success: false,
+      message: 'This invitation link has expired. Ask the Super Admin to send a fresh invite.'
+    });
+  }
+
+  if (cleanName.length < 2 || cleanName.length > 80) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please enter your full name (2–80 characters).'
+    });
+  }
+
+  if (!isHandlePrefixValid(cleanPrefix)) {
+    return res.status(400).json({
+      success: false,
+      message: `Handle prefix must be 3–30 characters using lowercase letters, numbers, dots, underscores, or hyphens before @${TOWER_DOMAIN}.`
+    });
+  }
+
+  if (isHandleTaken(cleanPrefix, matchedMember.id)) {
+    return res.status(409).json({
+      success: false,
+      message: `The handle ${cleanPrefix}@${TOWER_DOMAIN} is already taken. Please choose another.`
+    });
+  }
+
+  if (rawPassword.length < 10) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please create a password of at least 10 characters.'
+    });
+  }
+
+  if (confirmPassword !== undefined && rawPassword !== confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      message: 'Passwords do not match.'
+    });
+  }
+
+  const fullEmail = `${cleanPrefix}@${TOWER_DOMAIN}`;
+  matchedMember.name = cleanName;
+  matchedMember.username = cleanPrefix;
+  matchedMember.email = fullEmail;
+  matchedMember.passwordHash = hashPasswordScrypt(rawPassword);
+  matchedMember.tempPasswordHash = undefined;
+  matchedMember.inviteToken = undefined;
+  matchedMember.inviteTokenExpiresAt = undefined;
+  matchedMember.status = 'active';
+  matchedMember.lastLoginAt = new Date().toISOString();
+  matchedMember.hasPendingReset = false;
+
+  serverTeamStore.set(matchedMember.id, matchedMember);
+  saveAuthUsersToDisk();
+
+  const sessionToken = signAdminSessionToken({
+    id: matchedMember.id,
+    email: matchedMember.email,
+    username: matchedMember.username,
+    name: matchedMember.name,
+    role: matchedMember.isSuperAdmin ? 'Super Admin' : matchedMember.role,
+    department: matchedMember.department,
+    isSuperAdmin: Boolean(matchedMember.isSuperAdmin),
+    allowedTabs: matchedMember.allowedTabs
+  });
+  setSessionCookie(req, res, sessionToken);
+
+  recordServerAudit({
+    actor: matchedMember.name,
+    actorEmail: matchedMember.email,
+    actorDepartment: matchedMember.department,
+    role: matchedMember.role,
+    category: 'team',
+    action: 'team.invite_activated',
+    target: matchedMember.email,
+    details: `Activated ${matchedMember.department} account (${matchedMember.email}) with pre-assigned tabs: ${matchedMember.allowedTabs.join(', ')}.`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    token: sessionToken,
+    expiresAt: new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS,
+    member: sanitizeTeamMember(matchedMember),
+    user: sanitizeTeamMember(matchedMember)
+  });
+});
+
+app.patch('/api/team/:memberId', requireSuperAdmin(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const memberId = String(req.params.memberId || '').trim();
+  const member = serverTeamStore.get(memberId);
+  if (!member) {
+    return res.status(404).json({ success: false, message: 'Team member not found.' });
+  }
+
+  const { name, department, allowedTabs, status, scopedSites } = req.body || {};
+  const isPrimarySuperAdmin = member.id === DEFAULT_SUPER_ADMIN_RECORD.id;
+
+  if (typeof name === 'string' && name.trim().length >= 2) {
+    member.name = name.trim();
+  }
+
+  if (!isPrimarySuperAdmin && (department !== undefined || allowedTabs !== undefined)) {
+    const resolved = resolveDepartmentRoleAndTabs(
+      department ?? member.department,
+      allowedTabs ?? member.allowedTabs
+    );
+    member.department = resolved.department;
+    member.role = resolved.role;
+    member.isSuperAdmin = resolved.isSuperAdmin;
+    member.allowedTabs = resolved.allowedTabs;
+  }
+
+  if (Array.isArray(scopedSites)) {
+    member.scopedSites = scopedSites;
+  }
+
+  if (!isPrimarySuperAdmin && (status === 'active' || status === 'suspended')) {
+    member.status = status;
+    if (status === 'suspended') {
+      revokeSessionsForUser(member.id);
+      if (member.email) revokeSessionsForUser(member.email);
+    }
+  }
+
+  serverTeamStore.set(member.id, member);
+  saveAuthUsersToDisk();
+
+  recordServerAudit({
+    actor: adminUser.name,
+    actorEmail: adminUser.email,
+    actorDepartment: 'Super Admin',
+    role: 'Super Admin',
+    category: 'team',
+    action: 'team.permissions_updated',
+    target: member.email || member.name,
+    details: `Updated ${member.name} (${member.department}, status=${member.status}) allowed tabs: ${member.allowedTabs.join(', ')}.`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    member: sanitizeTeamMember(member, true)
+  });
+});
+
+app.delete('/api/team/:memberId', requireSuperAdmin(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const memberId = String(req.params.memberId || '').trim();
+  const member = serverTeamStore.get(memberId);
+  if (!member) {
+    return res.status(404).json({ success: false, message: 'Team member not found.' });
+  }
+  if (member.id === DEFAULT_SUPER_ADMIN_RECORD.id) {
+    return res.status(400).json({
+      success: false,
+      message: 'The primary Super Admin account cannot be removed.'
+    });
+  }
+
+  serverTeamStore.delete(member.id);
+  revokeSessionsForUser(member.id);
+  if (member.email) revokeSessionsForUser(member.email);
+  saveAuthUsersToDisk();
+
+  recordServerAudit({
+    actor: adminUser.name,
+    actorEmail: adminUser.email,
+    actorDepartment: 'Super Admin',
+    role: 'Super Admin',
+    category: 'team',
+    action: 'team.member_removed',
+    target: member.email || member.name,
+    details: `Removed ${member.name} (${member.department}) and revoked all active sessions.`,
+    severity: 'warning',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({ success: true, deletedId: member.id });
+});
+
+app.post('/api/team/:memberId/reset-link', requireSuperAdmin(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
+  const memberId = String(req.params.memberId || '').trim();
+  const member = serverTeamStore.get(memberId);
+  if (!member) {
+    return res.status(404).json({ success: false, message: 'Team member not found.' });
+  }
+  if (member.status === 'invited') {
+    return res.status(400).json({
+      success: false,
+      message: 'This teammate has not activated their invite yet. Copy their onboarding invite link instead.'
+    });
+  }
+
+  const resetToken = `rst_${crypto.randomBytes(24).toString('hex')}`;
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  member.resetToken = resetToken;
+  member.resetTokenExpiresAt = expiresAt;
+  member.hasPendingReset = true;
+  serverTeamStore.set(member.id, member);
+  saveAuthUsersToDisk();
+
+  recordServerAudit({
+    actor: adminUser.name,
+    actorEmail: adminUser.email,
+    actorDepartment: 'Super Admin',
+    role: 'Super Admin',
+    category: 'team',
+    action: 'team.password_reset_link_issued',
+    target: member.email || member.name,
+    details: `Issued 24-hour single-use password reset link for ${member.name} (${member.email}).`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    resetToken,
+    resetPath: `/#reset?token=${resetToken}`,
+    expiresAt,
+    member: sanitizeTeamMember(member, true)
+  });
+});
+
+app.post('/api/auth/complete-reset', inviteRedeemRateLimiter, (req: Request, res: Response) => {
+  const { token, password, confirmPassword } = req.body || {};
+  const cleanToken = String(token || '').trim();
+  const rawPassword = typeof password === 'string' ? password : '';
+
+  if (!cleanToken || cleanToken.length < 16) {
+    return res.status(403).json({ success: false, message: 'Invalid password reset token.' });
+  }
+  if (rawPassword.length < 10) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 10 characters long.' });
+  }
+  if (confirmPassword !== undefined && rawPassword !== confirmPassword) {
+    return res.status(400).json({ success: false, message: 'Passwords do not match.' });
+  }
+
+  let matched: ServerTeamMember | undefined;
+  for (const m of serverTeamStore.values()) {
+    if (m.resetToken && verifySecretTimingSafe(m.resetToken, cleanToken)) {
+      matched = m;
+      break;
+    }
+  }
+  if (!matched) {
+    return res.status(403).json({ success: false, message: 'Invalid or already used password reset link.' });
+  }
+  if (matched.resetTokenExpiresAt && Date.parse(matched.resetTokenExpiresAt) < Date.now()) {
+    matched.resetToken = undefined;
+    saveAuthUsersToDisk();
+    return res.status(403).json({ success: false, message: 'This password reset link has expired.' });
+  }
+
+  matched.passwordHash = hashPasswordScrypt(rawPassword);
+  matched.tempPasswordHash = undefined;
+  matched.resetToken = undefined;
+  matched.resetTokenExpiresAt = undefined;
+  matched.hasPendingReset = false;
+  matched.status = 'active';
+  matched.lastLoginAt = new Date().toISOString();
+  serverTeamStore.set(matched.id, matched);
+  revokeSessionsForUser(matched.id);
+  saveAuthUsersToDisk();
+
+  const sessionToken = signAdminSessionToken({
+    id: matched.id,
+    email: matched.email,
+    username: matched.username,
+    name: matched.name,
+    role: matched.isSuperAdmin ? 'Super Admin' : matched.role,
+    department: matched.department,
+    isSuperAdmin: Boolean(matched.isSuperAdmin),
+    allowedTabs: matched.allowedTabs
+  });
+  setSessionCookie(req, res, sessionToken);
+
+  recordServerAudit({
+    actor: matched.name,
+    actorEmail: matched.email,
+    actorDepartment: matched.department,
+    role: matched.role,
+    category: 'authentication',
+    action: 'auth.password_reset_completed',
+    target: matched.email,
+    details: `Completed single-use password reset and signed into new session.`,
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  res.json({
+    success: true,
+    token: sessionToken,
+    expiresAt: new Date(Date.now() + SESSION_IDLE_TIMEOUT_MS).toISOString(),
+    idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS,
+    user: sanitizeTeamMember(matched),
+    message: 'Password updated and signed in.'
+  });
 });
 
 // -----------------------------------------------------------------------------
-// HISTORICAL AUDIT LOGS QUERY & INGESTION ENDPOINTS
+// SUPER ADMIN-ONLY ACTIVITY & AUDIT LOG QUERY + IMMUTABLE INGESTION
 // -----------------------------------------------------------------------------
-app.get('/api/audit-logs', (req: Request, res: Response) => {
-  const { routerId, category, search, limit } = req.query;
+app.get('/api/audit-logs', requireSuperAdmin(), (req: Request, res: Response) => {
+  const { routerId, category, department, actor, search, limit } = req.query;
   let results = [...auditLogsStore];
 
-  if (routerId) {
-    results = results.filter(a => a.routerId === routerId || a.target === routerId);
+  if (routerId && typeof routerId === 'string') {
+    results = results.filter((a) => a.routerId === routerId || a.target === routerId);
   }
-  if (category) {
-    results = results.filter(a => a.category === category);
+  if (category && typeof category === 'string' && category !== 'all') {
+    const c = category.toLowerCase();
+    results = results.filter((a) => String(a.category || '').toLowerCase() === c);
   }
-  if (search && typeof search === 'string') {
-    const q = search.toLowerCase();
-    results = results.filter(a =>
-      a.target.toLowerCase().includes(q) ||
-      a.details.toLowerCase().includes(q) ||
-      (a.command && a.command.toLowerCase().includes(q)) ||
-      a.action.toLowerCase().includes(q) ||
-      a.actor.toLowerCase().includes(q)
+  if (department && typeof department === 'string' && department !== 'all') {
+    const d = department.toLowerCase();
+    results = results.filter(
+      (a) =>
+        String(a.actorDepartment || '').toLowerCase() === d ||
+        String(a.role || '').toLowerCase() === d
     );
   }
-  const maxLimit = limit ? parseInt(limit as string, 10) : 250;
+  if (actor && typeof actor === 'string' && actor !== 'all') {
+    const act = actor.toLowerCase();
+    results = results.filter(
+      (a) =>
+        String(a.actorEmail || '').toLowerCase() === act ||
+        String(a.actor || '').toLowerCase() === act
+    );
+  }
+  if (search && typeof search === 'string' && search.trim()) {
+    const q = search.trim().toLowerCase();
+    results = results.filter(
+      (a) =>
+        String(a.target || '').toLowerCase().includes(q) ||
+        String(a.details || '').toLowerCase().includes(q) ||
+        String(a.command || '').toLowerCase().includes(q) ||
+        String(a.action || '').toLowerCase().includes(q) ||
+        String(a.actor || '').toLowerCase().includes(q) ||
+        String(a.actorEmail || '').toLowerCase().includes(q) ||
+        String(a.actorDepartment || '').toLowerCase().includes(q)
+    );
+  }
+  const maxLimit = limit ? parseInt(limit as string, 10) : 500;
   res.json({
     success: true,
     count: results.length,
-    logs: results.slice(0, isNaN(maxLimit) ? 250 : maxLimit)
+    logs: results.slice(0, isNaN(maxLimit) ? 500 : Math.min(maxLimit, 2000))
   });
 });
 
-app.get('/api/devices/:routerId/audit-logs', (req: Request, res: Response) => {
+app.get('/api/devices/:routerId/audit-logs', requireSuperAdmin(), (req: Request, res: Response) => {
   const routerId = req.params.routerId;
-  const routerLogs = auditLogsStore.filter(a => a.routerId === routerId || a.target === routerId);
+  const routerLogs = auditLogsStore.filter((a) => a.routerId === routerId || a.target === routerId);
   res.json({
     success: true,
     routerId,
@@ -11579,14 +13500,20 @@ app.get('/api/devices/:routerId/audit-logs', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/audit-logs', (req: Request, res: Response) => {
+app.post('/api/audit-logs', requireAdminAuth(), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
   const entry = req.body;
   if (!entry || !entry.action) {
     return res.status(400).json({ success: false, message: 'Invalid audit entry' });
   }
+  // Always attribute actor identity strictly from the verified server session
   const recorded = recordServerAudit({
     ...entry,
-    ipAddress: req.ip || entry.ipAddress || '127.0.0.1'
+    actor: adminUser.name,
+    actorEmail: adminUser.email,
+    actorDepartment: adminUser.department || adminUser.role,
+    role: adminUser.role,
+    ipAddress: req.ip || '127.0.0.1'
   });
   res.json({ success: true, audit: recorded });
 });
@@ -11594,7 +13521,7 @@ app.post('/api/audit-logs', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // WEBFIG & WINBOX DIRECT TUNNEL INFO ENDPOINT
 // -----------------------------------------------------------------------------
-app.get('/api/devices/:routerId/webfig-info', (req: Request, res: Response) => {
+app.get('/api/devices/:routerId/webfig-info', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical']), (req: Request, res: Response) => {
   const routerId = req.params.routerId;
   const router = monitoredRouters.get(routerId);
   const wgIp = router?.wireguardIp || '10.99.1.50';
@@ -11619,7 +13546,7 @@ app.get('/api/devices/:routerId/webfig-info', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // EMAIL ALERTS API (History, Test Email, SMTP Config)
 // -----------------------------------------------------------------------------
-app.get('/api/alerts/history', (req: Request, res: Response) => {
+app.get('/api/alerts/history', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical']), (_req: Request, res: Response) => {
   res.json({
     success: true,
     count: emailService.getAlertLogs().length,
@@ -11627,7 +13554,7 @@ app.get('/api/alerts/history', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/alerts/test', async (req: Request, res: Response) => {
+app.post('/api/alerts/test', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical']), async (req: Request, res: Response) => {
   const { recipient } = req.body;
   try {
     const alertLog = await emailService.sendTestAlert(recipient);
@@ -11641,14 +13568,14 @@ app.post('/api/alerts/test', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/alerts/config', (req: Request, res: Response) => {
+app.get('/api/alerts/config', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical']), (_req: Request, res: Response) => {
   res.json({
     success: true,
     config: emailService.getConfig()
   });
 });
 
-app.post('/api/alerts/config', (req: Request, res: Response) => {
+app.post('/api/alerts/config', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical']), (req: Request, res: Response) => {
   const updated = emailService.updateConfig(req.body);
   res.json({
     success: true,
@@ -11679,7 +13606,7 @@ app.all('/api/devices/:routerId/failover', (req: Request, res: Response) => {
 // -----------------------------------------------------------------------------
 // 4. ATOMIC VOUCHER VERIFICATION API (Captive Portal & RADIUS Auth)
 // -----------------------------------------------------------------------------
-app.post('/api/vouchers/verify', async (req: Request, res: Response) => {
+app.post('/api/vouchers/verify', voucherRedeemRateLimiter, async (req: Request, res: Response) => {
   const { code } = req.body || {};
   const cleanCode = String(code || '').trim().toUpperCase();
   const digitsOnly = cleanCode.replace(/\D/g, '');
@@ -11730,7 +13657,7 @@ app.post('/api/vouchers/verify', async (req: Request, res: Response) => {
 // 5. PAYMENT GATEWAY API PROXIES & LIVE TESTING
 // Handles real Bearer Tokens, API Keys, and USSD push charges for Lesotho telecoms
 // -----------------------------------------------------------------------------
-app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => {
+app.post('/api/gateways/:provider/test', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Finance']), async (req: Request, res: Response) => {
   const provider = req.params.provider;
   const { apiKey, apiSecret, apiPassword, username, vendorId, endpointUrl, bearerToken, merchantId, isLive } = req.body;
 
@@ -11742,6 +13669,18 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
     const ottVendorId = (vendorId || '11, 1, TCONNECTLES1').trim();
     const rawEndpoint = (endpointUrl || 'https://api.ottlesotho.com').trim().replace(/\/+$/, '');
     const ottEndpoint = rawEndpoint.includes('portal.ottlesotho.com') ? 'https://api.ottlesotho.com' : rawEndpoint;
+    try {
+      await assertPublicOutboundUrl(ottEndpoint, {
+        requireHttps: true,
+        allowedHostSuffixes: ['ottlesotho.com']
+      });
+    } catch (ssrfErr: any) {
+      return res.status(403).json({
+        success: false,
+        provider: 'ottvoucher',
+        message: `Blocked untrusted OTT endpoint URL: ${ssrfErr?.message || 'Must target *.ottlesotho.com over HTTPS.'}`
+      });
+    }
     const hasKey = Boolean(apiKey && apiKey.trim().length >= 8);
     const hasPassword = Boolean(apiPassword && apiPassword.trim().length >= 4);
 
@@ -11822,8 +13761,15 @@ app.post('/api/gateways/:provider/test', async (req: Request, res: Response) => 
   });
 });
 
+const ottRedeemRateLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  maxAttempts: 25,
+  keyPrefix: 'ott_redeem',
+  keyExtractor: (req) => `${req.ip || 'unknown'}:${String(req.body?.mac || 'nomac').toUpperCase()}`
+});
+
 // Dedicated OTT Voucher 16-Digit PIN Redemption Endpoint (Strict External OTT Lesotho API Only)
-app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) => {
+app.post('/api/gateways/ottvoucher/redeem', ottRedeemRateLimiter, async (req: Request, res: Response) => {
   const {
     ottPin,
     voucherPin,
@@ -11862,6 +13808,26 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     });
   }
 
+  // Only authenticated admins may pass credential/endpoint overrides, and endpoints must target *.ottlesotho.com
+  const isAdminCaller = Boolean(getOptionalAdminUser(req));
+  let safeOverride: { apiKey?: string; apiPassword?: string; username?: string; merchantId?: string; vendorId?: string; endpointUrl?: string } | undefined;
+  if (isAdminCaller && (apiKey || apiPassword || vendorId || endpointUrl)) {
+    if (endpointUrl) {
+      try {
+        await assertPublicOutboundUrl(String(endpointUrl).trim(), {
+          requireHttps: true,
+          allowedHostSuffixes: ['ottlesotho.com']
+        });
+      } catch {
+        return res.status(403).json({
+          success: false,
+          message: 'Blocked untrusted OTT endpoint override.'
+        });
+      }
+    }
+    safeOverride = { apiKey, apiPassword, username, merchantId, vendorId, endpointUrl };
+  }
+
   // 2. Verify Strictly Against Live External OTT Lesotho API (api.ottlesotho.com)
   const subscriberMobile = phoneNumber || (phone ? `${countryCode || '+266'}${phone}` : '26658000000');
   const verification = await verify16DigitOttVoucher(
@@ -11869,9 +13835,7 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
     Number(amount),
     currency,
     subscriberMobile,
-    apiKey || apiPassword || vendorId || endpointUrl
-      ? { apiKey, apiPassword, username, merchantId, vendorId, endpointUrl }
-      : undefined
+    safeOverride
   );
 
   if (verification.alreadyUsed) {
@@ -12023,159 +13987,74 @@ app.post('/api/gateways/ottvoucher/redeem', async (req: Request, res: Response) 
   });
 });
 
-app.post('/api/gateways/:provider/charge', async (req: Request, res: Response) => {
-  const provider = req.params.provider;
-  const {
-    phoneNumber,
-    amount,
-    planId,
-    planName,
-    durationSeconds = 86400,
-    voucherCode,
-    ottPin,
-    mac,
-    ip,
-    guestName,
-    guestEmail,
-    firstName,
-    lastName,
-    countryCode,
-    phone,
-    scope,
-    currency = 'M'
-  } = req.body || {};
-
-  if (provider !== 'ecocash' && provider !== 'ottvoucher') {
-    return res.status(400).json({
-      success: false,
-      message: 'Unsupported payment provider. Only EcoCash and OTT Voucher are enabled.'
-    });
-  }
-
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ success: false, message: 'Invalid transaction amount.' });
-  }
-
-  const cleanDigits = String(phoneNumber || '').replace(/\D/g, '');
-  if (provider === 'ecocash' && cleanDigits.length < 8) {
-    return res.status(400).json({
-      success: false,
-      message: 'Please enter a valid 8-digit Lesotho EcoCash mobile number.'
-    });
-  }
-
-  const txRef = `TX-${provider.toUpperCase().slice(0, 3)}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
-  const cleanOttDigits = String(ottPin || voucherCode || '').replace(/\D/g, '');
-  let generated16Pin = cleanOttDigits.length === 16 ? cleanOttDigits : '';
-  if (!generated16Pin) {
-    let digits = '4';
-    while (digits.length < 16) digits += String(Math.floor(Math.random() * 10));
-    generated16Pin = digits.slice(0, 16);
-  }
-  const formattedPin = `${generated16Pin.slice(0, 4)}-${generated16Pin.slice(4, 8)}-${generated16Pin.slice(8, 12)}-${generated16Pin.slice(12, 16)}`;
-  const issuedCode = formattedPin;
-  const nowIso = new Date().toISOString();
-  const routerCtx = resolveAdoptedRouterForLead(req.body || {});
-
-  const txRecord = {
-    id: `tx_eco_${Date.now()}`,
-    transactionRef: txRef,
-    provider: 'ecocash',
-    amount: Number(amount),
-    currency,
-    phoneNumber: phoneNumber || '+266 Customer',
-    customerName: guestName || 'EcoCash Subscriber',
-    customerEmail: guestEmail || '',
-    ottVoucherPin: generated16Pin,
-    planId: planId || 'hs_1d',
-    planName: planName || 'Daily Pass',
-    vertical: scope || routerCtx.scope || 'hotspot',
-    siteName: routerCtx.siteName || 'T-Connect Hotspot',
-    district: routerCtx.district || 'Maseru',
-    voucherCodeIssued: issuedCode,
-    status: 'completed',
-    createdAt: nowIso.replace('T', ' ').slice(0, 19),
-    completedAt: nowIso.replace('T', ' ').slice(0, 19),
-    debugLogs: {
-      requestTimestamp: nowIso,
-      endpoint: 'https://api.paylesotho.co.ls/api/v2/econet/payment',
-      httpStatus: 200,
-      signatureVerified: true,
-      rawPayload: {
-        amount: String(amount),
-        mobileNumber: cleanDigits,
-        merchantname: 'Pay Lesotho',
-        client_reference: txRef
-      },
-      rawResponse: {
-        status_code: '200',
-        reference: txRef,
-        ott_voucher_pin: generated16Pin,
-        formatted_pin: formattedPin,
-        message: 'EcoCash payment verified and 16-digit OTT Voucher issued'
-      }
-    }
-  };
-  serverStore.transactions.unshift(txRecord);
-
-  const guestEntry = {
-    id: `guest_eco_${Date.now()}`,
-    firstName: firstName || '',
-    lastName: lastName || '',
-    guestName: guestName || 'EcoCash Customer',
-    countryCode: countryCode || '+266',
-    phone: phone || '',
-    guestPhone: phoneNumber || '',
-    email: guestEmail || '',
-    mac: mac || '',
-    ip: ip || '',
-    scope: scope || 'hotspot',
-    mode: 'ecocash',
-    voucherCode: issuedCode,
-    planName: planName || 'Daily Pass',
-    durationSeconds: Number(durationSeconds) || 86400,
-    amount: Number(amount),
-    transactionRef: txRef,
-    capturedAt: nowIso
-  };
-  serverStore.guestEvents.unshift(guestEntry);
-  saveServerPortalStore(serverStore);
-
-  res.status(200).json({
-    success: true,
-    transactionRef: txRef,
-    status: 'completed',
-    provider: 'ecocash',
-    amount: Number(amount),
-    currency,
-    voucherCode: issuedCode,
-    message: `EcoCash payment confirmed for ${phoneNumber}.`
+// Disabled legacy unverified direct charge endpoint — live payments MUST flow through
+// PayLesotho verified initiation (/api/gateways/paylesotho/initiate) or live OTT API (/api/gateways/ottvoucher/redeem).
+app.post('/api/gateways/:provider/charge', (_req: Request, res: Response) => {
+  return res.status(410).json({
+    success: false,
+    error: {
+      code: 'ENDPOINT_DISABLED',
+      message: 'Direct unverified charge endpoint is disabled. Use /api/gateways/paylesotho/initiate (M-Pesa/EcoCash) or /api/gateways/ottvoucher/redeem (16-digit OTT PIN).'
+    },
+    message: 'This unverified charge endpoint has been disabled.'
   });
 });
 
 // -----------------------------------------------------------------------------
-// 6. PAYMENT GATEWAY WEBHOOK INGESTION (EcoCash, MyWallet, OTT, xPayments)
+// 6. PAYMENT GATEWAY WEBHOOK INGESTION (HMAC-SHA256 Verified)
 // -----------------------------------------------------------------------------
 app.post('/api/webhooks/:provider', (req: Request, res: Response) => {
-  const provider = req.params.provider;
-  const signature = req.headers['x-signature'] || req.headers['authorization'];
-  const payload = req.body;
+  const provider = String(req.params.provider || '').toLowerCase();
+  const payload = req.body || {};
 
-  console.log(`[Webhook Received] Provider: ${provider.toUpperCase()} | Ref: ${payload?.reference || payload?.transaction_id || 'N/A'}`);
+  const gw = serverStore.gateways.find((g: any) => String(g.provider || '').toLowerCase() === provider);
+  const envSecretKey = `WEBHOOK_SECRET_${provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  const configuredSecret = String(
+    process.env[envSecretKey] ||
+      (provider === 'paylesotho' ? process.env.PAYLESOTHO_WEBHOOK_SECRET : '') ||
+      gw?.webhookSecret ||
+      ''
+  ).trim();
 
-  // Idempotent acknowledgement to payment gateway
+  if (!configuredSecret) {
+    return res.status(401).json({
+      success: false,
+      error: {
+        code: 'WEBHOOK_SECRET_NOT_CONFIGURED',
+        message: `Webhook signing secret is not configured for provider "${provider}".`
+      },
+      message: 'Webhook verification failed: signing secret not configured.'
+    });
+  }
+
+  const sigCheck = verifyWebhookHmacHeader(req, configuredSecret);
+  if (!sigCheck.present || !sigCheck.valid) {
+    return res.status(401).json({
+      success: false,
+      error: {
+        code: 'INVALID_WEBHOOK_SIGNATURE',
+        message: 'Missing or invalid HMAC-SHA256 webhook signature.'
+      },
+      message: 'Missing or invalid webhook signature.'
+    });
+  }
+
+  console.log(`[Webhook Verified] Provider: ${provider.toUpperCase()} | Ref: ${payload?.reference || payload?.transaction_id || 'N/A'}`);
+
   res.status(200).json({
     status: 'SUCCESS',
     provider,
+    signatureVerified: true,
     receivedAt: new Date().toISOString(),
     reconciled: true
   });
 });
 
 // -----------------------------------------------------------------------------
-// PRODUCTION ZERO-STATE RESET ENDPOINT (Wipes manual leads, partners, transactions & vouchers; ALWAYS preserves Payment Gateways)
+// PRODUCTION ZERO-STATE RESET ENDPOINT (Admin Auth Required; Preserves Gateways)
 // -----------------------------------------------------------------------------
-app.post('/api/admin/reset-production', (req: Request, res: Response) => {
+app.post('/api/admin/reset-production', requireAdminAuth(['Owner', 'Super Admin', 'Admin']), (req: Request, res: Response) => {
+  const adminUser = (req as any).adminUser as AdminSessionPayload;
   const wipeRouters = Boolean(req.body?.wipeRouters);
   serverStore.guestEvents = [];
   serverStore.transactions = [];
@@ -12191,6 +14070,17 @@ app.post('/api/admin/reset-production', (req: Request, res: Response) => {
     serverStore.routers = Array.from(monitoredRouters.values());
   }
   saveServerPortalStore(serverStore);
+
+  recordServerAudit({
+    actor: adminUser?.name || 'Owner',
+    role: adminUser?.role || 'Owner',
+    category: 'security',
+    action: 'admin.reset_production',
+    target: 'Platform Data Store',
+    details: `Production zero-state reset executed (wipeRouters=${wipeRouters}).`,
+    severity: 'warning',
+    ipAddress: req.ip || '127.0.0.1'
+  });
 
   res.status(200).json({
     success: true,

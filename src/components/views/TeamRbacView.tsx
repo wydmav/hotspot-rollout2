@@ -1,573 +1,917 @@
-import React, { useState } from 'react';
-import { 
-  Users, 
-  UserPlus, 
-  ShieldCheck, 
-  Key, 
-  Trash2, 
-  Check, 
-  Copy, 
-  Search, 
-  Lock, 
-  FileText, 
-  Sliders, 
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Users,
+  UserPlus,
+  ShieldCheck,
+  KeyRound,
+  Trash2,
+  Check,
+  Copy,
+  Search,
+  Download,
+  RefreshCw,
+  SlidersHorizontal,
+  Activity,
+  Clock,
+  Lock,
   CheckCircle2,
-  ArrowUpRight,
-  Mail,
-  ExternalLink,
-  Sparkles,
-  ArrowRight,
-  Download
+  AlertCircle,
+  PauseCircle,
+  PlayCircle
 } from 'lucide-react';
-import { TeamMember, AuditLogEntry, RouterDevice } from '../../types';
+import {
+  TeamMember,
+  AuditLogEntry,
+  RouterDevice,
+  DepartmentName,
+  PermissionTabId
+} from '../../types';
 import { auditService } from '../../services/audit';
 import { storage } from '../../services/storage';
 import { copyToClipboard } from '../../utils/clipboard';
+import {
+  DEPARTMENT_PRESETS,
+  TOWER_DOMAIN,
+  isTrueSuperAdminAccount,
+  getTabLabel,
+  formatLastLogin,
+  PERMISSION_TABS
+} from '../../utils/permissions';
+import { TabPermissionsSelector } from '../common/TabPermissionsSelector';
 
 interface TeamRbacViewProps {
   team: TeamMember[];
   auditLogs: AuditLogEntry[];
   routers: RouterDevice[];
-  onInviteMember: (name: string, email: string, role: TeamMember['role'], scopedSites: string[]) => void;
-  onUpdateRole: (memberId: string, role: TeamMember['role'], scopedSites?: string[]) => void;
-  onDeleteMember: (memberId: string) => void;
+  onInviteMember?: (name: string, email: string, role: TeamMember['role'], scopedSites: string[]) => void;
+  onUpdateRole?: (memberId: string, role: TeamMember['role'], scopedSites?: string[]) => void;
+  onDeleteMember?: (memberId: string) => void;
   onIssuePassword?: (memberId: string, customPass?: string) => void;
   currentUser?: TeamMember;
 }
 
+const AUDIT_CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'all', label: 'All Categories' },
+  { value: 'authentication', label: 'Authentication' },
+  { value: 'router_adoption', label: 'Router Adoptions' },
+  { value: 'router_config', label: 'Router Changes' },
+  { value: 'router_reboot', label: 'Router Reboots' },
+  { value: 'terminal_command', label: 'Terminal Commands' },
+  { value: 'billing', label: 'Billing & Vouchers' },
+  { value: 'portal', label: 'Portal & Media' },
+  { value: 'exports', label: 'CSV Exports' },
+  { value: 'team', label: 'Team & Permissions' }
+];
+
 export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
-  team,
-  auditLogs,
-  routers,
-  onInviteMember,
-  onUpdateRole,
-  onDeleteMember,
-  onIssuePassword,
-  currentUser,
+  team: propTeam,
+  auditLogs: propAuditLogs,
+  currentUser
 }) => {
-  const [activeTab, setActiveTab] = useState<'members' | 'matrix' | 'audit'>('members');
+  const isBoss = isTrueSuperAdminAccount(currentUser);
+
+  const [activeTab, setActiveTab] = useState<'members' | 'audit'>('members');
+  const [serverTeam, setServerTeam] = useState<TeamMember[]>(propTeam);
+  const [serverLogs, setServerLogs] = useState<AuditLogEntry[]>(propAuditLogs);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Member filters
+  const [memberSearch, setMemberSearch] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('All');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Invite Modal State
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [copiedInviteUrl, setCopiedInviteUrl] = useState<string | null>(null);
-
-  // Upgrade / Edit Role Modal State
-  const [upgradeRoleModalMember, setUpgradeRoleModalMember] = useState<TeamMember | null>(null);
-  const [editMemberName, setEditMemberName] = useState<string>('');
-  const [editMemberEmail, setEditMemberEmail] = useState<string>('');
-  const [targetUpgradeRole, setTargetUpgradeRole] = useState<TeamMember['role']>('Admin');
-  const [targetUpgradeSites, setTargetUpgradeSites] = useState<string[]>([]);
-  const [confirmDeleteMemberId, setConfirmDeleteMemberId] = useState<string | null>(null);
-
-  // Recently Invited Teammate Modal State
-  const [recentlyInvited, setRecentlyInvited] = useState<{ member: TeamMember; inviteUrl: string } | null>(null);
-  const [copiedRecentlyInvitedUrl, setCopiedRecentlyInvitedUrl] = useState(false);
-
-  // Password Issuance Modal State
-  const [passwordModalMember, setPasswordModalMember] = useState<TeamMember | null>(null);
-  const [issuedTempPass, setIssuedTempPass] = useState<string>('');
-  const [copiedTempPass, setCopiedTempPass] = useState<boolean>(false);
-
-  // Invite Form
   const [inviteName, setInviteName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<TeamMember['role']>('Super Admin');
-  const [selectedSites, setSelectedSites] = useState<string[]>([]);
+  const [inviteDepartment, setInviteDepartment] = useState<DepartmentName>('Finance');
+  const [inviteAllowedTabs, setInviteAllowedTabs] = useState<PermissionTabId[]>(['dashboard', 'billing']);
+  const [isCreatingInvite, setIsCreatingInvite] = useState(false);
+  const [createdInvite, setCreatedInvite] = useState<{
+    member: TeamMember;
+    inviteUrl: string;
+    expiresAt?: string;
+  } | null>(null);
+
+  // Edit Permissions Modal State
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDepartment, setEditDepartment] = useState<DepartmentName>('Finance');
+  const [editAllowedTabs, setEditAllowedTabs] = useState<PermissionTabId[]>([]);
+  const [isSavingMember, setIsSavingMember] = useState(false);
+
+  // Reset Link Modal State
+  const [resetLinkModal, setResetLinkModal] = useState<{
+    member: TeamMember;
+    resetUrl: string;
+    expiresAt?: string;
+  } | null>(null);
+
+  // Audit Filters
   const [auditSearch, setAuditSearch] = useState('');
+  const [auditActorFilter, setAuditActorFilter] = useState('all');
+  const [auditDepartmentFilter, setAuditDepartmentFilter] = useState('all');
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState('all');
 
-  const uniqueSites = Array.from(new Set(routers.map(r => r.siteName)));
+  const showFeedback = (type: 'success' | 'error', text: string) => {
+    setFeedback({ type, text });
+    window.setTimeout(() => setFeedback(null), 4000);
+  };
 
-  const isAdminOrOwner = 
-    !currentUser || 
-    currentUser.role === 'Owner' || 
-    currentUser.role === 'Admin' || 
-    currentUser.email.toLowerCase() === 'rphooko@tconnect.africa';
+  const loadTeamFromServer = useCallback(async () => {
+    if (!isBoss) return;
+    setIsLoadingTeam(true);
+    const updated = await storage.syncTeamWithServer();
+    setServerTeam(updated);
+    setIsLoadingTeam(false);
+  }, [isBoss]);
 
-  const handleInviteSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim()) return;
+  const loadAuditLogsFromServer = useCallback(async () => {
+    if (!isBoss) return;
+    setIsLoadingLogs(true);
+    const res = await storage.fetchServerAuditLogs({ limit: 500 });
+    if (res.success) {
+      setServerLogs(res.logs);
+    }
+    setIsLoadingLogs(false);
+  }, [isBoss]);
 
-    const trimmedName = inviteName.trim();
-    const trimmedEmail = inviteEmail.trim();
-    const token = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
-    const inviteUrl = `${origin}/#invite?token=${token}&email=${encodeURIComponent(trimmedEmail)}&role=${encodeURIComponent(inviteRole)}&name=${encodeURIComponent(trimmedName)}`;
+  useEffect(() => {
+    void loadTeamFromServer();
+    void loadAuditLogsFromServer();
+  }, [loadTeamFromServer, loadAuditLogsFromServer]);
 
-    onInviteMember(trimmedName, trimmedEmail, inviteRole, selectedSites);
-    
-    setRecentlyInvited({
-      member: {
-        id: `tm_${Date.now()}`,
-        name: trimmedName,
-        email: trimmedEmail,
-        role: inviteRole,
-        scopedSites: selectedSites,
-        mfaEnabled: inviteRole === 'Owner' || inviteRole === 'Admin' || inviteRole === 'Technical',
-        status: 'invited',
-        invitedAt: new Date().toISOString().slice(0, 10),
-        inviteToken: token,
-      },
-      inviteUrl
-    });
+  useEffect(() => {
+    if (propTeam.length > 0 && serverTeam.length === 0) {
+      setServerTeam(propTeam);
+    }
+  }, [propTeam, serverTeam.length]);
 
-    setShowInviteModal(false);
+  const openInviteModal = () => {
+    const financePreset = DEPARTMENT_PRESETS.find((d) => d.department === 'Finance');
     setInviteName('');
-    setInviteEmail('');
-    setSelectedSites([]);
+    setInviteDepartment('Finance');
+    setInviteAllowedTabs(financePreset ? [...financePreset.defaultTabs] : ['dashboard', 'billing']);
+    setShowInviteModal(true);
   };
 
-  const handleCopyInviteLink = (email: string, role?: string, token?: string, name?: string) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.tconnect.co.ls';
-    const resolvedToken = token || `inv_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const resolvedName = name || email.split('@')[0];
-    const inviteUrl = `${origin}/#invite?token=${resolvedToken}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role || 'Collaborator')}&name=${encodeURIComponent(resolvedName)}`;
-    copyToClipboard(inviteUrl);
-    setCopiedInviteUrl(email);
-    setTimeout(() => setCopiedInviteUrl(null), 2500);
+  const handleCreateInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inviteDepartment !== 'Super Admin' && inviteAllowedTabs.length === 0) {
+      showFeedback('error', 'Tick at least one tab for this team member before creating the invite.');
+      return;
+    }
+    setIsCreatingInvite(true);
+    const res = await storage.createServerInvite({
+      name: inviteName.trim() || undefined,
+      department: inviteDepartment,
+      allowedTabs: inviteDepartment === 'Super Admin' ? PERMISSION_TABS.map((t) => t.id) : inviteAllowedTabs
+    });
+    setIsCreatingInvite(false);
+    if (res.success && res.member && res.inviteUrl) {
+      setShowInviteModal(false);
+      setCreatedInvite({
+        member: res.member,
+        inviteUrl: res.inviteUrl,
+        expiresAt: res.expiresAt
+      });
+      await loadTeamFromServer();
+      await loadAuditLogsFromServer();
+    } else {
+      showFeedback('error', res.message || 'Unable to generate invite link.');
+    }
   };
 
-  const filteredAuditLogs = auditLogs.filter(log => {
-    return auditSearch === '' ||
-      log.actor.toLowerCase().includes(auditSearch.toLowerCase()) ||
-      log.action.toLowerCase().includes(auditSearch.toLowerCase()) ||
-      log.target.toLowerCase().includes(auditSearch.toLowerCase()) ||
-      log.details.toLowerCase().includes(auditSearch.toLowerCase());
-  });
+  const openEditMember = (member: TeamMember) => {
+    const dept = (member.department || (member.isSuperAdmin ? 'Super Admin' : 'Operations')) as DepartmentName;
+    setEditingMember(member);
+    setEditName(member.name);
+    setEditDepartment(dept);
+    setEditAllowedTabs(
+      member.isSuperAdmin
+        ? PERMISSION_TABS.map((t) => t.id)
+        : Array.isArray(member.allowedTabs)
+          ? [...member.allowedTabs]
+          : []
+    );
+  };
 
-  const permissionsMatrix = [
-    { module: 'Routers & WireGuard', permission: 'routers:adopt', owner: true, admin: true, technical: true, collaborator: false, viewer: false },
-    { module: 'Routers & WireGuard', permission: 'routers:reboot', owner: true, admin: true, technical: true, collaborator: false, viewer: false },
-    { module: 'Hotspot Plans', permission: 'plans:create_edit', owner: true, admin: true, technical: false, collaborator: true, viewer: false },
-    { module: 'Vouchers', permission: 'vouchers:generate', owner: true, admin: true, technical: false, collaborator: true, viewer: false },
-    { module: 'Payment Gateways', permission: 'gateways:edit_keys', owner: true, admin: true, technical: false, collaborator: false, viewer: false },
-    { module: 'Financial Ledger', permission: 'billing:view_revenue', owner: true, admin: true, technical: false, collaborator: false, viewer: false },
-    { module: 'Content Filtering', permission: 'dns:manage_rules', owner: true, admin: true, technical: true, collaborator: false, viewer: false },
-    { module: 'Team & RBAC', permission: 'team:invite_members', owner: true, admin: false, technical: false, collaborator: false, viewer: false },
-  ];
+  const handleSaveMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    if (editDepartment !== 'Super Admin' && editAllowedTabs.length === 0) {
+      showFeedback('error', 'Select at least one allowed tab.');
+      return;
+    }
+    setIsSavingMember(true);
+    const res = await storage.updateServerMember(editingMember.id, {
+      name: editName.trim() || editingMember.name,
+      department: editDepartment,
+      allowedTabs: editDepartment === 'Super Admin' ? PERMISSION_TABS.map((t) => t.id) : editAllowedTabs
+    });
+    setIsSavingMember(false);
+    if (res.success) {
+      setEditingMember(null);
+      showFeedback('success', `Updated access permissions for ${editName.trim() || editingMember.name}.`);
+      await loadTeamFromServer();
+      await loadAuditLogsFromServer();
+    } else {
+      showFeedback('error', res.message || 'Unable to save member changes.');
+    }
+  };
+
+  const handleToggleSuspend = async (member: TeamMember) => {
+    const nextStatus = member.status === 'suspended' ? 'active' : 'suspended';
+    const res = await storage.updateServerMember(member.id, { status: nextStatus });
+    if (res.success) {
+      showFeedback(
+        'success',
+        nextStatus === 'suspended'
+          ? `Suspended ${member.name} and ended their active sessions.`
+          : `Reactivated ${member.name}.`
+      );
+      await loadTeamFromServer();
+      await loadAuditLogsFromServer();
+    } else {
+      showFeedback('error', res.message || 'Could not update member status.');
+    }
+  };
+
+  const handleDeleteMember = async (member: TeamMember) => {
+    const res = await storage.deleteServerMember(member.id);
+    setConfirmDeleteId(null);
+    if (res.success) {
+      showFeedback('success', `Removed ${member.name} and invalidated all sessions.`);
+      await loadTeamFromServer();
+      await loadAuditLogsFromServer();
+    } else {
+      showFeedback('error', res.message || 'Could not remove team member.');
+    }
+  };
+
+  const handleGenerateResetLink = async (member: TeamMember) => {
+    const res = await storage.createServerResetLink(member.id);
+    if (res.success && res.resetUrl) {
+      setResetLinkModal({
+        member,
+        resetUrl: res.resetUrl,
+        expiresAt: res.expiresAt
+      });
+      await loadAuditLogsFromServer();
+    } else {
+      showFeedback('error', res.message || 'Unable to create reset link.');
+    }
+  };
+
+  const handleCopyText = (id: string, text: string) => {
+    void copyToClipboard(text);
+    setCopiedId(id);
+    window.setTimeout(() => setCopiedId((prev) => (prev === id ? null : prev)), 2200);
+  };
+
+  // Summary metrics
+  const teamStats = useMemo(() => {
+    const now = Date.now();
+    const activeCount = serverTeam.filter((m) => m.status === 'active').length;
+    const pendingCount = serverTeam.filter((m) => m.status === 'invited').length;
+    const signedIn24h = serverTeam.filter((m) => {
+      if (!m.lastLoginAt || m.lastLoginAt === 'Never') return false;
+      const ts = Date.parse(m.lastLoginAt);
+      return !Number.isNaN(ts) && now - ts <= 24 * 3600 * 1000;
+    }).length;
+    return {
+      total: serverTeam.length,
+      active: activeCount,
+      pending: pendingCount,
+      signedIn24h
+    };
+  }, [serverTeam]);
+
+  const filteredTeam = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    return serverTeam.filter((m) => {
+      if (departmentFilter !== 'All' && (m.department || m.role) !== departmentFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        m.name.toLowerCase().includes(q) ||
+        (m.email || '').toLowerCase().includes(q) ||
+        (m.username || '').toLowerCase().includes(q) ||
+        (m.department || m.role || '').toLowerCase().includes(q)
+      );
+    });
+  }, [serverTeam, memberSearch, departmentFilter]);
+
+  const distinctAuditActors = useMemo(() => {
+    const map = new Map<string, string>();
+    serverLogs.forEach((log) => {
+      const key = log.actorEmail || log.actor;
+      if (key && !map.has(key)) {
+        map.set(key, log.actorEmail ? `${log.actor} (${log.actorEmail})` : log.actor);
+      }
+    });
+    return Array.from(map.entries());
+  }, [serverLogs]);
+
+  const distinctAuditDepartments = useMemo(() => {
+    const set = new Set<string>();
+    serverLogs.forEach((log) => {
+      const d = log.actorDepartment || log.role;
+      if (d) set.add(d);
+    });
+    return Array.from(set);
+  }, [serverLogs]);
+
+  const filteredAuditLogs = useMemo(() => {
+    const q = auditSearch.trim().toLowerCase();
+    return serverLogs.filter((log) => {
+      if (auditActorFilter !== 'all') {
+        const key = log.actorEmail || log.actor;
+        if (key !== auditActorFilter) return false;
+      }
+      if (auditDepartmentFilter !== 'all') {
+        if ((log.actorDepartment || log.role) !== auditDepartmentFilter) return false;
+      }
+      if (auditCategoryFilter !== 'all') {
+        if ((log.category || 'general') !== auditCategoryFilter) return false;
+      }
+      if (!q) return true;
+      return (
+        log.actor.toLowerCase().includes(q) ||
+        (log.actorEmail || '').toLowerCase().includes(q) ||
+        (log.actorDepartment || '').toLowerCase().includes(q) ||
+        log.action.toLowerCase().includes(q) ||
+        log.target.toLowerCase().includes(q) ||
+        log.details.toLowerCase().includes(q)
+      );
+    });
+  }, [serverLogs, auditSearch, auditActorFilter, auditDepartmentFilter, auditCategoryFilter]);
+
+  if (!isBoss) {
+    return (
+      <div className="bg-[#0f1422] border border-[#232d42] rounded-xl p-8 text-center space-y-3">
+        <Lock className="w-8 h-8 text-[#f05e17] mx-auto" />
+        <h2 className="text-base font-bold text-white">Super Admin Access Required</h2>
+        <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+          Team management, tab permissions, and the full Activity &amp; Audit Log are exclusively reserved for the Super Admin account.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header Row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight">Team Management &amp; Role-Based Access Control</h1>
-          <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Strict tenant isolation, least-privilege scoping, and immutable audit logs
+          <h1 className="text-xl font-extrabold text-white tracking-tight">
+            Team Dashboard &amp; Activity Log
+          </h1>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Invite staff by department, tick exact tab access, track last login times, and inspect every user action.
           </p>
         </div>
 
-        <button
-          onClick={() => setShowInviteModal(true)}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors shadow-sm self-start sm:self-auto"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>+ Invite Member</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => {
+              void loadTeamFromServer();
+              void loadAuditLogsFromServer();
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#141b2e] hover:bg-[#1c2540] border border-[#232d42] text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingTeam || isLoadingLogs ? 'animate-spin text-[#f05e17]' : 'text-slate-400'}`} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
+            onClick={openInviteModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Invite Teammate</span>
+          </button>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex rounded-lg bg-[#161d31] p-1 border border-[#232d42] text-xs font-mono w-fit">
-        <button
-          onClick={() => setActiveTab('members')}
-          className={`px-3 py-1.5 rounded-md font-bold transition-colors ${
-            activeTab === 'members' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
+      {/* Feedback Banner */}
+      {feedback && (
+        <div
+          className={`p-3 rounded-xl border text-xs flex items-center gap-2.5 ${
+            feedback.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
           }`}
         >
-          Active Members ({team.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('matrix')}
-          className={`px-3 py-1.5 rounded-md font-bold transition-colors ${
-            activeTab === 'matrix' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Permissions Matrix
-        </button>
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-3 py-1.5 rounded-md font-bold transition-colors ${
-            activeTab === 'audit' ? 'bg-[#f05e17] text-white' : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Audit Trail ({auditLogs.length})
-        </button>
+          {feedback.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          )}
+          <span>{feedback.text}</span>
+        </div>
+      )}
+
+      {/* Summary KPI Strip (4 Flat Single-Elevation Hairline Cards) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-[#0f1422] border border-[#232d42] rounded-xl p-4">
+          <div className="text-[11px] font-medium text-slate-400">Total Staff</div>
+          <div className="text-2xl font-extrabold text-white tabular-nums mt-1">{teamStats.total}</div>
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5">@{TOWER_DOMAIN} directory</div>
+        </div>
+        <div className="bg-[#0f1422] border border-[#232d42] rounded-xl p-4">
+          <div className="text-[11px] font-medium text-slate-400">Active Accounts</div>
+          <div className="text-2xl font-extrabold text-emerald-400 tabular-nums mt-1">{teamStats.active}</div>
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5">Own passwords set</div>
+        </div>
+        <div className="bg-[#0f1422] border border-[#232d42] rounded-xl p-4">
+          <div className="text-[11px] font-medium text-slate-400">Pending Invites</div>
+          <div className="text-2xl font-extrabold text-amber-400 tabular-nums mt-1">{teamStats.pending}</div>
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5">Awaiting self-setup</div>
+        </div>
+        <div className="bg-[#0f1422] border border-[#232d42] rounded-xl p-4">
+          <div className="text-[11px] font-medium text-slate-400">Signed In (Last 24h)</div>
+          <div className="text-2xl font-extrabold text-white tabular-nums mt-1">{teamStats.signedIn24h}</div>
+          <div className="text-[11px] text-slate-500 font-mono mt-0.5">2h idle auto-logout</div>
+        </div>
       </div>
 
-      {/* Tab 1: Members Table */}
+      {/* Primary View Switcher */}
+      <div className="flex items-center justify-between flex-wrap gap-3 border-b border-[#1f283d] pb-3">
+        <div className="flex rounded-lg bg-[#121829] p-1 border border-[#232d42] text-xs font-semibold">
+          <button
+            type="button"
+            onClick={() => setActiveTab('members')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md transition-colors cursor-pointer ${
+              activeTab === 'members'
+                ? 'bg-[#f05e17] text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Team Members ({serverTeam.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('audit');
+              void loadAuditLogsFromServer();
+            }}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md transition-colors cursor-pointer ${
+              activeTab === 'audit'
+                ? 'bg-[#f05e17] text-white'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            <span>Activity &amp; Audit Log ({serverLogs.length})</span>
+          </button>
+        </div>
+      </div>
+
+      {/* TAB 1: TEAM MEMBERS */}
       {activeTab === 'members' && (
-        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
-              <thead>
-                <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#232d42] pb-2">
-                  <th className="py-2.5">NAME &amp; EMAIL</th>
-                  <th className="py-2.5">ASSIGNED ROLE</th>
-                  <th className="py-2.5">LOCATION SCOPE</th>
-                  <th className="py-2.5">MFA ENFORCED</th>
-                  <th className="py-2.5">STATUS</th>
-                  <th className="py-2.5 text-right">ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1b233a] text-slate-300">
-                {team.map((member) => (
-                  <tr key={member.id}>
-                    <td className="py-3">
-                      <div className="font-bold text-white">{member.name}</div>
-                      <div className="text-[11px] text-slate-400">{member.email}</div>
-                    </td>
-                    <td className="py-3">
-                      <select
-                        value={member.role}
-                        disabled={!isAdminOrOwner && (member.role === 'Owner' || member.role === 'Super Admin')}
-                        onChange={(e) => onUpdateRole(member.id, e.target.value as TeamMember['role'])}
-                        className="px-2 py-1 bg-[#161d31] border border-[#232d42] rounded text-white font-mono text-xs focus:outline-none focus:border-[#f05e17] disabled:opacity-60 cursor-pointer"
-                      >
-                        <option value="Super Admin">Super Admin (Full Access &amp; Gateways)</option>
-                        <option value="Collaborator">Collaborator (Captive Portal &amp; Ads)</option>
-                        <option value="Management">Management (Fleet Overview Only)</option>
-                        <option value="Owner">Owner (Root)</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Technical">Technical</option>
-                        <option value="Viewer">Viewer</option>
-                      </select>
-                    </td>
-                    <td className="py-3">
-                      {member.scopedSites.length === 0 ? (
-                        <span className="text-slate-400">All Locations</span>
-                      ) : (
-                        <div className="text-[11px] text-slate-300">
-                          {member.scopedSites.join(', ')}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        member.mfaEnabled
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {member.mfaEnabled ? 'TOTP ACTIVE' : 'OPTIONAL'}
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      <div className="flex flex-col gap-1 items-start">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                          member.status === 'active'
-                            ? 'bg-emerald-500/10 text-emerald-400'
-                            : 'bg-amber-500/10 text-amber-400'
-                        }`}>
-                          {member.status.toUpperCase()}
-                        </span>
-                        {member.hasPendingReset && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                            RESET REQUESTED
-                          </span>
-                        )}
-                        {member.tempPassword && !member.hasPendingReset && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                            <Key className="w-2.5 h-2.5" />
-                            TEMP PASS ACTIVE
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {/* Edit & Upgrade Role Button (Admin Action) */}
-                        {isAdminOrOwner && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setUpgradeRoleModalMember(member);
-                              setEditMemberName(member.name);
-                              setEditMemberEmail(member.email);
-                              setTargetUpgradeRole(member.role);
-                              setTargetUpgradeSites([...member.scopedSites]);
-                            }}
-                            className="px-2 py-1 rounded text-[11px] font-bold bg-[#161d31] hover:bg-[#202942] border border-[#232d42] hover:border-emerald-500/50 text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
-                            title={`Edit details, role & privileges for ${member.name}`}
-                          >
-                            <ArrowUpRight className="w-3 h-3 text-emerald-400" />
-                            <span>Edit / Role</span>
-                          </button>
-                        )}
-
-                        {/* Issue Temporary Password Button */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const rand = `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
-                            setIssuedTempPass(member.tempPassword || rand);
-                            setPasswordModalMember(member);
-                          }}
-                          className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors flex items-center gap-1 cursor-pointer ${
-                            member.hasPendingReset
-                              ? 'bg-[#f05e17] hover:bg-[#d94c0b] text-white border-transparent shadow-sm'
-                              : 'bg-[#161d31] hover:bg-[#202942] border-[#232d42] text-slate-300 hover:text-white'
-                          }`}
-                          title="Issue or Re-issue Temporary Password"
-                        >
-                          <Key className="w-3 h-3 text-[#f05e17] group-hover:text-white" />
-                          <span>{member.hasPendingReset ? 'Resolve Reset' : 'Issue Password'}</span>
-                        </button>
-
-                        {member.status === 'invited' && (
-                          <button
-                            type="button"
-                            onClick={() => handleCopyInviteLink(member.email, member.role, member.inviteToken, member.name)}
-                            className="px-2 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] rounded text-[11px] text-slate-300 hover:text-white cursor-pointer"
-                            title="Copy Instant Magic Login Link"
-                          >
-                            {copiedInviteUrl === member.email ? 'Copied!' : 'Copy Link'}
-                          </button>
-                        )}
-                        {member.role !== 'Owner' && (
-                          confirmDeleteMemberId === member.id ? (
-                            <div className="inline-flex items-center gap-1 bg-rose-950/60 border border-rose-500/40 rounded px-1.5 py-0.5">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  onDeleteMember(member.id);
-                                  setConfirmDeleteMemberId(null);
-                                }}
-                                className="px-1.5 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteMemberId(null)}
-                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteMemberId(member.id)}
-                              className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
-                              title="Revoke Member Access"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 2: Permissions Matrix */}
-      {activeTab === 'matrix' && (
-        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5 space-y-4">
-          <div>
-            <h3 className="text-sm font-extrabold text-white">System RBAC Permissions Matrix</h3>
-            <p className="text-xs text-slate-400 font-mono">
-              Server-enforced authorization rules. Technical roles cannot inspect financial ledger or gateway secrets.
-            </p>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
-              <thead>
-                <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#232d42] pb-2">
-                  <th className="py-2">MODULE</th>
-                  <th className="py-2">PERMISSION KEY</th>
-                  <th className="py-2 text-center">OWNER</th>
-                  <th className="py-2 text-center">ADMIN</th>
-                  <th className="py-2 text-center">TECHNICAL</th>
-                  <th className="py-2 text-center">COLLABORATOR</th>
-                  <th className="py-2 text-center">VIEWER</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1b233a] text-slate-300">
-                {permissionsMatrix.map((row, idx) => (
-                  <tr key={idx}>
-                    <td className="py-2.5 font-bold text-white">{row.module}</td>
-                    <td className="py-2.5 text-slate-400">{row.permission}</td>
-                    <td className="py-2.5 text-center">{row.owner ? '✅' : '—'}</td>
-                    <td className="py-2.5 text-center">{row.admin ? '✅' : '—'}</td>
-                    <td className="py-2.5 text-center">{row.technical ? '✅' : '—'}</td>
-                    <td className="py-2.5 text-center">{row.collaborator ? '✅' : '—'}</td>
-                    <td className="py-2.5 text-center">{row.viewer ? '✅' : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: Immutable Audit Log */}
-      {activeTab === 'audit' && (
-        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-extrabold text-white">Immutable Security Audit Trail</h3>
-              <p className="text-xs text-slate-400 font-mono">Records all administrative mutations, token generations, and router configurations</p>
+        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] overflow-hidden">
+          {/* Search & Department Filter Bar */}
+          <div className="p-4 border-b border-[#1f283d] flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="relative w-full md:w-72">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                placeholder="Search name, handle, or department..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#141b2e] border border-[#26324d] rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-[#f05e17]"
+              />
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative w-64">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              {['All', ...DEPARTMENT_PRESETS.map((d) => d.department)].map((dept) => (
+                <button
+                  key={dept}
+                  type="button"
+                  onClick={() => setDepartmentFilter(dept)}
+                  className={`px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+                    departmentFilter === dept
+                      ? 'bg-[#f05e17]/15 border-[#f05e17]/60 text-white font-semibold'
+                      : 'bg-[#121829] border-[#1f283d] text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {dept}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Roster Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-slate-400 uppercase tracking-wider text-[10px] font-mono border-b border-[#1f283d] bg-[#0c111e]">
+                  <th className="px-4 py-3">Member &amp; @{TOWER_DOMAIN} Handle</th>
+                  <th className="px-4 py-3">Department</th>
+                  <th className="px-4 py-3">Allowed Tabs</th>
+                  <th className="px-4 py-3">Last Login</th>
+                  <th className="px-4 py-3">Status &amp; Password</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1b233a] text-slate-300">
+                {filteredTeam.map((member) => {
+                  const lastLogin = formatLastLogin(member.lastLoginAt);
+                  const isPrimaryBoss = member.id === 'tm_super_admin_boss';
+                  const allowedList = member.isSuperAdmin
+                    ? ['All Tabs', 'Team Dashboard', 'Audit Log']
+                    : (member.allowedTabs || []).map((t) => getTabLabel(t));
+                  const pendingInviteUrl =
+                    member.status === 'invited' && member.inviteToken && typeof window !== 'undefined'
+                      ? `${window.location.origin}/#invite?token=${member.inviteToken}`
+                      : '';
+
+                  return (
+                    <tr key={member.id} className="hover:bg-[#131a2c]/60 transition-colors">
+                      {/* Name & Handle */}
+                      <td className="px-4 py-3.5 align-top">
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          <span>{member.name}</span>
+                          {isPrimaryBoss && (
+                            <span className="text-[10px] font-mono text-[#f05e17] font-semibold">
+                              (Primary)
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                          {member.email ? member.email : <span className="italic text-amber-400/90">Awaiting handle choice (@{TOWER_DOMAIN})</span>}
+                        </div>
+                      </td>
+
+                      {/* Department */}
+                      <td className="px-4 py-3.5 align-top whitespace-nowrap">
+                        <div className="font-semibold text-slate-200">{member.department || member.role}</div>
+                        {member.invitedBy && !isPrimaryBoss && (
+                          <div className="text-[10px] text-slate-500 mt-0.5">Invited by {member.invitedBy}</div>
+                        )}
+                      </td>
+
+                      {/* Allowed Tabs (Clean inline dot-separated text, no pill clutter) */}
+                      <td className="px-4 py-3.5 align-top max-w-xs">
+                        <div className="text-[11px] text-slate-300 leading-relaxed">
+                          {allowedList.length > 0 ? allowedList.join(' · ') : 'No tabs assigned'}
+                        </div>
+                      </td>
+
+                      {/* Last Login */}
+                      <td className="px-4 py-3.5 align-top whitespace-nowrap tabular-nums">
+                        <div className="text-xs text-slate-200 font-medium">
+                          {lastLogin.relative || lastLogin.primary}
+                        </div>
+                        {lastLogin.primary && lastLogin.primary !== lastLogin.relative && (
+                          <div className="text-[10px] font-mono text-slate-500 mt-0.5">{lastLogin.primary}</div>
+                        )}
+                      </td>
+
+                      {/* Status & Password State (Never shows plaintext password) */}
+                      <td className="px-4 py-3.5 align-top whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              member.status === 'active'
+                                ? 'bg-emerald-400'
+                                : member.status === 'invited'
+                                  ? 'bg-amber-400'
+                                  : 'bg-rose-400'
+                            }`}
+                          />
+                          <span className="font-semibold text-white capitalize">{member.status}</span>
+                        </div>
+                        <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                          {member.hasPasswordConfigured ? 'Password Set' : 'Awaiting Self-Setup'}
+                        </div>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-4 py-3.5 align-top text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {pendingInviteUrl && (
+                            <button
+                              type="button"
+                              onClick={() => handleCopyText(`inv_${member.id}`, pendingInviteUrl)}
+                              className="px-2.5 py-1 rounded-md bg-[#f05e17]/15 hover:bg-[#f05e17]/25 border border-[#f05e17]/40 text-[#f05e17] text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                              title="Copy single-use invite link"
+                            >
+                              {copiedId === `inv_${member.id}` ? (
+                                <>
+                                  <Check className="w-3 h-3" />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy Invite</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {!isPrimaryBoss && (
+                            <button
+                              type="button"
+                              onClick={() => openEditMember(member)}
+                              className="px-2.5 py-1 rounded-md bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-slate-200 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                              title="Edit department and allowed tabs"
+                            >
+                              <SlidersHorizontal className="w-3 h-3 text-[#f05e17]" />
+                              <span>Edit Tabs</span>
+                            </button>
+                          )}
+
+                          {member.status === 'active' && !isPrimaryBoss && (
+                            <button
+                              type="button"
+                              onClick={() => void handleGenerateResetLink(member)}
+                              className="px-2.5 py-1 rounded-md bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-slate-300 hover:text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+                              title="Generate a single-use password reset link"
+                            >
+                              <KeyRound className="w-3 h-3 text-slate-400" />
+                              <span>Reset Link</span>
+                            </button>
+                          )}
+
+                          {!isPrimaryBoss && member.status !== 'invited' && (
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleSuspend(member)}
+                              className="p-1.5 rounded-md bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-slate-400 hover:text-amber-300 cursor-pointer"
+                              title={member.status === 'suspended' ? 'Reactivate account' : 'Suspend account'}
+                            >
+                              {member.status === 'suspended' ? (
+                                <PlayCircle className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <PauseCircle className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+
+                          {!isPrimaryBoss && (
+                            confirmDeleteId === member.id ? (
+                              <div className="inline-flex items-center gap-1 bg-rose-950/60 border border-rose-500/40 rounded-md px-1.5 py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteMember(member)}
+                                  className="px-1.5 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(member.id)}
+                                className="p-1.5 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                                title="Remove member"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {filteredTeam.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      No team members match your current filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: SUPER ADMIN ACTIVITY & AUDIT LOG */}
+      {activeTab === 'audit' && (
+        <div className="bg-[#0f1422] rounded-xl border border-[#232d42] overflow-hidden">
+          {/* Filter Controls */}
+          <div className="p-4 border-b border-[#1f283d] space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-white">Super Admin Activity &amp; Audit Log</h2>
+                <p className="text-xs text-slate-400">
+                  Tracks sign-ins, config changes, router adoptions, terminal commands, team edits, and every CSV export.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  auditService.exportToCsv(
+                    filteredAuditLogs,
+                    `tconnect_activity_log_${new Date().toISOString().slice(0, 10)}.csv`
+                  )
+                }
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141b2e] hover:bg-[#1d2742] border border-[#26324d] text-slate-200 hover:text-white rounded-lg text-xs font-semibold cursor-pointer shrink-0 self-start sm:self-auto"
+              >
+                <Download className="w-3.5 h-3.5 text-[#f05e17]" />
+                <span>Export CSV ({filteredAuditLogs.length})</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <div className="relative">
                 <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={auditSearch}
                   onChange={(e) => setAuditSearch(e.target.value)}
-                  placeholder="Search audit trail..."
-                  className="w-full pl-8 pr-3 py-1 text-xs bg-[#161d31] border border-[#232d42] rounded-lg text-white font-mono focus:outline-none focus:border-[#f05e17]"
+                  placeholder="Search action, target, details..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#141b2e] border border-[#26324d] rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-[#f05e17]"
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={() => auditService.exportToCsv(filteredAuditLogs, `tconnect_audit_trail_${Date.now()}.csv`)}
-                className="flex items-center gap-1.5 px-3 py-1 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 hover:text-white rounded-lg text-xs font-bold transition-colors shrink-0"
-                title="Export filtered audit logs as CSV"
+              <select
+                value={auditActorFilter}
+                onChange={(e) => setAuditActorFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs bg-[#141b2e] border border-[#26324d] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
               >
-                <Download className="w-3.5 h-3.5 text-[#f05e17]" />
-                <span>Export CSV</span>
-              </button>
+                <option value="all">All Users</option>
+                {distinctAuditActors.map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={auditDepartmentFilter}
+                onChange={(e) => setAuditDepartmentFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs bg-[#141b2e] border border-[#26324d] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+              >
+                <option value="all">All Departments</option>
+                {distinctAuditDepartments.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={auditCategoryFilter}
+                onChange={(e) => setAuditCategoryFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs bg-[#141b2e] border border-[#26324d] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+              >
+                {AUDIT_CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="overflow-x-auto max-h-[500px]">
-            <table className="w-full text-left text-xs font-mono">
-              <thead>
-                <tr className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-[#232d42] pb-2">
-                  <th className="py-2">TIMESTAMP</th>
-                  <th className="py-2">ACTOR</th>
-                  <th className="py-2">ACTION</th>
-                  <th className="py-2">TARGET</th>
-                  <th className="py-2">DETAILS</th>
-                  <th className="py-2 text-right">IP</th>
+          {/* Audit Table */}
+          <div className="overflow-x-auto max-h-[540px]">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-[#0c111e] z-10">
+                <tr className="text-slate-400 uppercase tracking-wider text-[10px] font-mono border-b border-[#1f283d]">
+                  <th className="px-4 py-3">Timestamp</th>
+                  <th className="px-4 py-3">User &amp; Department</th>
+                  <th className="px-4 py-3">Action</th>
+                  <th className="px-4 py-3">Target</th>
+                  <th className="px-4 py-3">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1b233a] text-slate-300">
                 {filteredAuditLogs.map((log) => (
-                  <tr key={log.id}>
-                    <td className="py-2.5 text-slate-400 text-[11px] whitespace-nowrap">{log.timestamp}</td>
-                    <td className="py-2.5 font-bold text-white whitespace-nowrap">{log.actor} ({log.role})</td>
-                    <td className="py-2.5 text-[#f05e17] font-semibold whitespace-nowrap">
-                      {log.category === 'router_reboot' ? (
-                        <span className="text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/30">⚡ router.reboot</span>
-                      ) : log.category === 'terminal_command' ? (
-                        <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">⌘ router.terminal</span>
-                      ) : log.category === 'router_config' ? (
-                        <span className="text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/30">⚙ {log.action}</span>
-                      ) : (
-                        <span>{log.action}</span>
-                      )}
+                  <tr key={log.id} className="hover:bg-[#131a2c]/60 transition-colors">
+                    <td className="px-4 py-3 text-[11px] font-mono text-slate-400 whitespace-nowrap tabular-nums">
+                      {log.timestamp}
                     </td>
-                    <td className="py-2.5 text-slate-200 whitespace-nowrap">{log.target}</td>
-                    <td className="py-2.5 text-slate-400 max-w-sm truncate">
-                      {log.command ? (
-                        <code className="text-emerald-300 font-bold bg-black/40 px-1.5 py-0.5 rounded mr-1.5">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="font-semibold text-white">{log.actor}</div>
+                      <div className="text-[10px] font-mono text-slate-400">
+                        {log.actorEmail ? `${log.actorEmail} · ` : ''}
+                        {log.actorDepartment || log.role}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap font-mono text-[11px]">
+                      <span
+                        className={`font-semibold ${
+                          log.category === 'exports'
+                            ? 'text-amber-300'
+                            : log.category === 'router_adoption' || log.category === 'router_config'
+                              ? 'text-cyan-300'
+                              : log.category === 'router_reboot' || log.severity === 'critical'
+                                ? 'text-rose-400'
+                                : log.category === 'team'
+                                  ? 'text-emerald-300'
+                                  : 'text-[#f05e17]'
+                        }`}
+                      >
+                        {log.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-200 whitespace-nowrap font-mono text-[11px]">
+                      {log.target}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 text-xs max-w-md">
+                      {log.command && (
+                        <code className="text-emerald-300 font-mono text-[11px] bg-[#0a0f1d] px-1.5 py-0.5 rounded mr-1.5">
                           {log.command}
                         </code>
-                      ) : null}
+                      )}
                       <span>{log.details}</span>
                     </td>
-                    <td className="py-2.5 text-right text-slate-500">{log.ipAddress}</td>
                   </tr>
                 ))}
+
+                {filteredAuditLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-10 text-center text-slate-400 text-xs">
+                      No activity records match your filters yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Invite Member Modal */}
+      {/* INVITE TEAMMATE MODAL (Department + Custom Tab Checkboxes) */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
-              <h3 className="text-base font-extrabold text-white">Invite Team Member</h3>
-              <button onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-white">✕</button>
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0e1322] border border-[#232d42] rounded-2xl w-full max-w-2xl p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f283d]">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-4 h-4 text-[#f05e17]" />
+                <h3 className="text-base font-extrabold text-white">
+                  Invite Teammate (@{TOWER_DOMAIN})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInviteModal(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
-            <form onSubmit={handleInviteSubmit} className="space-y-3.5 text-xs font-mono">
-              <div>
-                <label className="text-slate-400 block mb-1">Full Name</label>
+            <form onSubmit={handleCreateInvite} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-200 block">
+                  Teammate Name (Reference)
+                </label>
                 <input
                   type="text"
                   required
                   value={inviteName}
                   onChange={(e) => setInviteName(e.target.value)}
-                  placeholder="e.g. Lineo Letsie"
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
+                  placeholder="e.g. Thabo Mokoena"
+                  className="w-full px-3 py-2 bg-[#141b2e] border border-[#26324d] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
                 />
+                <p className="text-[11px] text-slate-400">
+                  When they open your invite link, they will see <span className="font-mono text-[#f05e17]">@{TOWER_DOMAIN}</span> pre-filled, choose their own handle prefix and password, and receive the exact tabs you tick below.
+                </p>
               </div>
 
-              <div>
-                <label className="text-slate-400 block mb-1">Email Address</label>
-                <input
-                  type="email"
-                  required
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="colleague@domain.ls"
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                />
-              </div>
+              <TabPermissionsSelector
+                department={inviteDepartment}
+                onDepartmentChange={setInviteDepartment}
+                allowedTabs={inviteAllowedTabs}
+                onAllowedTabsChange={setInviteAllowedTabs}
+              />
 
-              <div>
-                <label className="text-slate-400 block mb-1">Role Assignment</label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as TeamMember['role'])}
-                  className="w-full px-3 py-2 bg-[#161d31] border border-[#232d42] rounded-lg text-white focus:outline-none focus:border-[#f05e17]"
-                >
-                  <option value="Super Admin">Super Admin (Full Access: Code, Adoption, Billing &amp; Gateways)</option>
-                  <option value="Collaborator">Collaborator (Captive Portal, Image Uploads &amp; Ads)</option>
-                  <option value="Management">Management (Fleet Overview Dashboard Only)</option>
-                  <option value="Admin">Admin (Site Admin)</option>
-                  <option value="Technical">Technical (Network Engineer)</option>
-                  <option value="Viewer">Viewer (Read-Only)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Site Scoping (Leave unselected for All)</label>
-                <div className="space-y-1 max-h-32 overflow-y-auto p-2 bg-[#161d31] rounded-lg border border-[#232d42]">
-                  {uniqueSites.map((site) => (
-                    <label key={site} className="flex items-center gap-2 cursor-pointer text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={selectedSites.includes(site)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedSites([...selectedSites, site]);
-                          } else {
-                            setSelectedSites(selectedSites.filter(s => s !== site));
-                          }
-                        }}
-                        className="rounded accent-[#f05e17] w-3 h-3"
-                      />
-                      <span>{site}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#1f283d] flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
+                  className="px-3.5 py-2 bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-slate-300 text-xs font-semibold rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm"
+                  disabled={isCreatingInvite}
+                  className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer"
                 >
-                  Send Single-Use Invite
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>{isCreatingInvite ? 'Generating Invite...' : 'Generate Single-Use Invite Link'}</span>
                 </button>
               </div>
             </form>
@@ -575,370 +919,203 @@ export const TeamRbacView: React.FC<TeamRbacViewProps> = ({
         </div>
       )}
 
-      {/* Admin Issue Temporary Password Modal */}
-      {passwordModalMember && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl font-mono text-xs">
-            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
-              <div className="flex items-center gap-2 text-white font-bold">
-                <Key className="w-4 h-4 text-[#f05e17]" />
-                <span>Issue Temporary Password</span>
-              </div>
-              <button 
-                onClick={() => setPasswordModalMember(null)}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Target Member Info */}
-            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] flex items-center justify-between">
-              <div>
-                <div className="font-bold text-white text-sm">{passwordModalMember.name}</div>
-                <div className="text-[11px] text-slate-400">{passwordModalMember.email}</div>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/10 text-[#f05e17] border border-[#f05e17]/30">
-                {passwordModalMember.role}
-              </span>
-            </div>
-
-            {passwordModalMember.hasPendingReset && (
-              <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-300 text-[11px]">
-                This user requested a password reset on the login screen. Issuing a new password fulfills this request.
-              </div>
-            )}
-
-            {/* Temporary Password Field & Copy */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-400">Temporary Authentication Password</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={issuedTempPass}
-                  onChange={(e) => setIssuedTempPass(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#232d42] rounded-lg text-[#f05e17] font-bold tracking-wider text-sm focus:outline-none focus:border-[#f05e17]"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = `TC-${Math.floor(1000 + Math.random() * 9000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}!`;
-                    setIssuedTempPass(next);
-                  }}
-                  className="px-2.5 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg text-xs"
-                  title="Generate another password"
-                >
-                  Regen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    copyToClipboard(issuedTempPass);
-                    setCopiedTempPass(true);
-                    setTimeout(() => setCopiedTempPass(false), 2000);
-                  }}
-                  className="px-3 py-2 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 rounded-lg text-xs flex items-center gap-1"
-                >
-                  {copiedTempPass ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedTempPass ? 'Copied' : 'Copy'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Direct Email Link */}
-            <div className="pt-1">
-              <a
-                href={`mailto:${passwordModalMember.email}?subject=Your%20T-Connect%20Controller%20Temporary%20Password&body=Hi%20${encodeURIComponent(passwordModalMember.name)},%0A%0AYour%20temporary%20password%20for%20the%20T-Connect%20Cloud%20Controller%20is:%0A%0A${encodeURIComponent(issuedTempPass)}%0A%0APlease%20sign%20in%20with%20your%20email%20and%20this%20temporary%20password.%0A%0ARegards,%0ARaphooko%20Phooko`}
-                className="text-[11px] text-[#f05e17] hover:underline flex items-center gap-1.5"
-              >
-                <span>Compose Email Dispatch to User</span>
-                <span className="text-slate-500">({passwordModalMember.email})</span>
-              </a>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPasswordModalMember(null)}
-                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onIssuePassword) {
-                    onIssuePassword(passwordModalMember.id, issuedTempPass);
-                  }
-                  setPasswordModalMember(null);
-                }}
-                className="px-4 py-1.5 bg-[#f05e17] hover:bg-[#d94c0b] text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Save &amp; Activate Password</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Admin Upgrade Role & Scopes Modal */}
-      {upgradeRoleModalMember && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
-              <div className="flex items-center gap-2 text-white font-bold text-sm">
-                <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                <span>Upgrade Teammate Role &amp; Scopes</span>
-              </div>
-              <button 
-                onClick={() => setUpgradeRoleModalMember(null)}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Editable Member Name & Email */}
-            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-300">Member Profile Details</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                  Current: {upgradeRoleModalMember.role}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={editMemberName}
-                    onChange={(e) => setEditMemberName(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-[#090d16] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    value={editMemberEmail}
-                    onChange={(e) => setEditMemberEmail(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-[#090d16] border border-[#232d42] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Select Target Role */}
-            <div className="space-y-2">
-              <label className="text-slate-300 font-bold block">
-                Select Elevated Target Role
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {[
-                  {
-                    role: 'Owner' as const,
-                    title: 'Owner',
-                    desc: 'Full root authority. Hardware, billing, keys & team admin.',
-                    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  },
-                  {
-                    role: 'Admin' as const,
-                    title: 'Site Admin',
-                    desc: 'Fleet configs, captive portals, plans, vouchers & gateways.',
-                    badge: 'bg-[#f05e17]/10 text-[#f05e17] border-[#f05e17]/30'
-                  },
-                  {
-                    role: 'Technical' as const,
-                    title: 'Technical Engineer',
-                    desc: 'MikroTik WireGuard, DNS content filters. No billing access.',
-                    badge: 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                  },
-                  {
-                    role: 'Collaborator' as const,
-                    title: 'Collaborator',
-                    desc: 'Vouchers & plans only. Router credentials hidden.',
-                    badge: 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                  },
-                  {
-                    role: 'Viewer' as const,
-                    title: 'Read-Only Viewer',
-                    desc: 'Auditor inspection mode. All mutations & deletes blocked.',
-                    badge: 'bg-slate-700/50 text-slate-300 border-slate-600'
-                  }
-                ].map((item) => (
-                  <button
-                    key={item.role}
-                    type="button"
-                    onClick={() => setTargetUpgradeRole(item.role)}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                      targetUpgradeRole === item.role
-                        ? 'bg-[#182138] border-[#f05e17] ring-1 ring-[#f05e17] shadow-sm'
-                        : 'bg-[#121829] border-[#1f283d] hover:bg-[#161d31]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-bold text-white text-xs">{item.title}</span>
-                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${item.badge}`}>
-                        {item.role}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 leading-tight">
-                      {item.desc}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Site Scoping */}
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block">
-                Location Scoping (Leave unchecked for All Locations)
-              </label>
-              <div className="space-y-1 max-h-28 overflow-y-auto p-2 bg-[#161d31] rounded-lg border border-[#232d42]">
-                {uniqueSites.map((site) => (
-                  <label key={site} className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={targetUpgradeSites.includes(site)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setTargetUpgradeSites([...targetUpgradeSites, site]);
-                        } else {
-                          setTargetUpgradeSites(targetUpgradeSites.filter(s => s !== site));
-                        }
-                      }}
-                      className="rounded accent-[#f05e17] w-3 h-3"
-                    />
-                    <span>{site}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Immediate Effect Notice */}
-            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/25 rounded-lg flex items-start gap-2 text-emerald-300 text-[11px]">
-              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              <span>
-                Upgrading <strong>{upgradeRoleModalMember.name}</strong> from <strong>{upgradeRoleModalMember.role}</strong> to <strong className="text-white">{targetUpgradeRole}</strong> takes effect immediately across all active controller sessions without requiring re-invitation.
-              </span>
-            </div>
-
-            {/* Actions */}
-            <div className="pt-3 border-t border-[#232d42] flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setUpgradeRoleModalMember(null)}
-                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-300 rounded-lg cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  storage.updateTeamMember(upgradeRoleModalMember.id, {
-                    name: editMemberName.trim() || upgradeRoleModalMember.name,
-                    email: editMemberEmail.trim() || upgradeRoleModalMember.email,
-                    role: targetUpgradeRole,
-                    scopedSites: targetUpgradeSites
-                  });
-                  onUpdateRole(upgradeRoleModalMember.id, targetUpgradeRole, targetUpgradeSites);
-                  setUpgradeRoleModalMember(null);
-                }}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Save Member &amp; Role &rarr;</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recently Invited Teammate Modal */}
-      {recentlyInvited && (
-        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#0f1422] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-[#232d42]">
+      {/* INVITE GENERATED SUCCESS MODAL */}
+      {createdInvite && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0e1322] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f283d]">
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                <span>Teammate Invitation Generated &amp; Active!</span>
+                <span>Single-Use Invite Link Ready</span>
               </div>
-              <button 
-                onClick={() => setRecentlyInvited(null)}
-                className="text-slate-400 hover:text-white"
+              <button
+                type="button"
+                onClick={() => setCreatedInvite(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            {/* Invitee Summary */}
-            <div className="p-3 bg-[#161d31] rounded-xl border border-[#232d42] space-y-1.5">
+            <div className="p-3.5 rounded-xl bg-[#131a2d] border border-[#232d42] space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
-                <div className="font-bold text-white text-sm">{recentlyInvited.member.name}</div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  {recentlyInvited.member.role}
-                </span>
+                <span className="text-slate-400">Invited For</span>
+                <span className="font-bold text-white">{createdInvite.member.name}</span>
               </div>
-              <div className="text-[11px] text-slate-400">{recentlyInvited.member.email}</div>
-              <div className="text-[10px] text-slate-500 pt-1 border-t border-[#1f283d] flex items-center justify-between">
-                <span>Scope: {recentlyInvited.member.scopedSites.length ? recentlyInvited.member.scopedSites.join(', ') : 'All Sites'}</span>
-                <span className="text-emerald-400 font-bold">Instant Email Authentication Ready</span>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Department</span>
+                <span className="font-semibold text-[#f05e17]">{createdInvite.member.department}</span>
+              </div>
+              <div className="pt-1.5 border-t border-[#1f283d] text-[11px] text-slate-300">
+                <span className="text-slate-400">Allowed Tabs: </span>
+                {(createdInvite.member.allowedTabs || []).map((t) => getTabLabel(t)).join(' · ')}
               </div>
             </div>
 
-            {/* Magic Link */}
             <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block flex items-center justify-between">
-                <span>Instant Authentication Magic Link</span>
-                <span className="text-[10px] text-emerald-400 font-normal">Single-click sign in (No password needed)</span>
+              <label className="text-xs font-semibold text-slate-200 block">
+                Share This Link With Your Teammate
               </label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   readOnly
-                  value={recentlyInvited.inviteUrl}
-                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#232d42] rounded-lg text-slate-300 font-mono text-xs select-all focus:outline-none"
+                  value={createdInvite.inviteUrl}
+                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#26324d] rounded-lg text-slate-200 font-mono text-xs select-all"
                 />
                 <button
                   type="button"
-                  onClick={() => {
-                    copyToClipboard(recentlyInvited.inviteUrl);
-                    setCopiedRecentlyInvitedUrl(true);
-                    setTimeout(() => setCopiedRecentlyInvitedUrl(false), 2000);
-                  }}
+                  onClick={() => handleCopyText('modal_invite', createdInvite.inviteUrl)}
                   className="px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                 >
-                  {copiedRecentlyInvitedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedRecentlyInvitedUrl ? 'Copied' : 'Copy'}</span>
+                  {copiedId === 'modal_invite' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedId === 'modal_invite' ? 'Copied' : 'Copy'}</span>
                 </button>
               </div>
+              <p className="text-[11px] text-slate-400">
+                Single-use link valid for 7 days. They will pick their own <span className="font-mono">@{TOWER_DOMAIN}</span> handle and private password when opening it.
+              </p>
             </div>
 
-            {/* Email Dispatch Action */}
-            <div className="p-3 bg-[#121829] rounded-xl border border-[#1f283d] flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-bold text-white text-xs">Dispatch Welcome Email to Teammate</div>
-                <div className="text-[10px] text-slate-400 truncate">
-                  Sends invite magic link directly from Raphooko Phooko (rphooko@tconnect.africa)
-                </div>
-              </div>
-              <a
-                href={`mailto:${recentlyInvited.member.email}?subject=Invitation%20to%20join%20T-Connect%20Controller%20as%20${recentlyInvited.member.role}&body=Hi%20${encodeURIComponent(recentlyInvited.member.name)},%0A%0AYou've%20been%20invited%20by%20Administrator%20Raphooko%20Phooko%20to%20join%20the%20T-Connect%20Cloud%20Controller%20team%20as%20${recentlyInvited.member.role}.%0A%0AClick%20this%20instant%20access%20link%20to%20sign%20in%20immediately:%0A${encodeURIComponent(recentlyInvited.inviteUrl)}%0A%0AWelcome%20aboard!%0ARaphooko%20Phooko`}
-                className="px-3 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-slate-200 hover:text-white rounded-lg font-bold flex items-center gap-1.5 shrink-0"
-              >
-                <Mail className="w-3.5 h-3.5 text-[#f05e17]" />
-                <span>Open Email</span>
-              </a>
-            </div>
-
-            {/* Close */}
-            <div className="pt-2 border-t border-[#232d42] flex justify-end">
+            <div className="pt-2 border-t border-[#1f283d] flex justify-end">
               <button
                 type="button"
-                onClick={() => setRecentlyInvited(null)}
-                className="px-4 py-1.5 bg-[#161d31] hover:bg-[#202942] border border-[#232d42] text-white font-bold rounded-lg cursor-pointer"
+                onClick={() => setCreatedInvite(null)}
+                className="px-4 py-2 bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-white text-xs font-semibold rounded-lg cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MEMBER PERMISSIONS MODAL */}
+      {editingMember && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0e1322] border border-[#232d42] rounded-2xl w-full max-w-2xl p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f283d]">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#f05e17]" />
+                <h3 className="text-base font-extrabold text-white">
+                  Edit Member Department &amp; Tab Access
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingMember(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMember} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-200 block">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#141b2e] border border-[#26324d] rounded-lg text-white text-xs focus:outline-none focus:border-[#f05e17]"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-200 block">Login Handle</label>
+                  <input
+                    type="text"
+                    disabled
+                    value={editingMember.email || `Pending @${TOWER_DOMAIN}`}
+                    className="w-full px-3 py-2 bg-[#0b101d] border border-[#1f283d] rounded-lg text-slate-400 font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <TabPermissionsSelector
+                department={editDepartment}
+                onDepartmentChange={setEditDepartment}
+                allowedTabs={editAllowedTabs}
+                onAllowedTabsChange={setEditAllowedTabs}
+              />
+
+              <div className="pt-3 border-t border-[#1f283d] flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  className="px-3.5 py-2 bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-slate-300 text-xs font-semibold rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingMember}
+                  className="px-4 py-2 bg-[#f05e17] hover:bg-[#d94c0b] disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{isSavingMember ? 'Saving...' : 'Save Changes'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PASSWORD RESET LINK MODAL (Never exposes plaintext passwords) */}
+      {resetLinkModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0e1322] border border-[#232d42] rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f283d]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <KeyRound className="w-4 h-4 text-[#f05e17]" />
+                <span>Single-Use Password Reset Link</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetLinkModal(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-[#131a2d] border border-[#232d42] text-xs space-y-1">
+              <div className="font-bold text-white">{resetLinkModal.member.name}</div>
+              <div className="font-mono text-slate-400">{resetLinkModal.member.email}</div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-200 block">
+                Send This One-Time Reset Link (Valid 24 Hours)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={resetLinkModal.resetUrl}
+                  className="flex-1 px-3 py-2 bg-[#090d16] border border-[#26324d] rounded-lg text-slate-200 font-mono text-xs select-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopyText('modal_reset', resetLinkModal.resetUrl)}
+                  className="px-3 py-2 bg-[#f05e17] hover:bg-[#d94c0b] text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  {copiedId === 'modal_reset' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedId === 'modal_reset' ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span>They will set their own new password privately; passwords are never stored in plain text.</span>
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-[#1f283d] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setResetLinkModal(null)}
+                className="px-4 py-2 bg-[#141b2e] hover:bg-[#1e2944] border border-[#26324d] text-white text-xs font-semibold rounded-lg cursor-pointer"
               >
                 Done
               </button>

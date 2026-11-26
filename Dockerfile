@@ -35,6 +35,7 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/USER_JOURNEY.md ./USER_JOURNEY.md
+COPY --from=builder ["/app/T-Connect Control Tower - REST API Documentation.md", "./T-Connect Control Tower - REST API Documentation.md"]
 
 EXPOSE 3000
 

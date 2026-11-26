@@ -1,4 +1,5 @@
 import { PaymentTransaction, Voucher, RouterDevice } from '../types';
+import { auditService } from './audit';
 
 export class ExportService {
   /**
@@ -34,7 +35,9 @@ export class ExportService {
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    this.downloadFile(csvContent, `tconnect_transactions_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+    const fileName = `tconnect_transactions_${Date.now()}.csv`;
+    this.downloadFile(csvContent, fileName, 'text/csv;charset=utf-8;');
+    auditService.logCsvExport('Transactions Ledger', fileName, transactions.length);
   }
 
   static exportVouchersToCsv(vouchers: Voucher[]) {
@@ -65,7 +68,9 @@ export class ExportService {
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    this.downloadFile(csvContent, `tconnect_vouchers_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+    const fileName = `tconnect_vouchers_${Date.now()}.csv`;
+    this.downloadFile(csvContent, fileName, 'text/csv;charset=utf-8;');
+    auditService.logCsvExport('Vouchers Inventory', fileName, vouchers.length);
   }
 
   static exportRoutersToCsv(routers: RouterDevice[]) {
@@ -98,7 +103,9 @@ export class ExportService {
     ]);
 
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    this.downloadFile(csvContent, `tconnect_routers_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
+    const fileName = `tconnect_routers_${Date.now()}.csv`;
+    this.downloadFile(csvContent, fileName, 'text/csv;charset=utf-8;');
+    auditService.logCsvExport('Routers Fleet', fileName, routers.length);
   }
 
   /**

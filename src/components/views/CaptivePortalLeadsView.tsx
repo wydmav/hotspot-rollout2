@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { CaptivePortalLead, VerticalType } from '../../types';
 import { storage } from '../../services/storage';
+import { auditService } from '../../services/audit';
 import { copyToClipboard } from '../../utils/clipboard';
 
 interface PartnerApiKeyItem {
@@ -984,11 +985,22 @@ export const CaptivePortalLeadsView: React.FC<CaptivePortalLeadsViewProps> = ({
         : targetMode === 'paid'
         ? 'tconnect_paid_finance_transactions'
         : 'tconnect_commercial_leads_ledger';
+    const filename = `${slug}_${new Date().toISOString().slice(0, 10)}.csv`;
     link.setAttribute('href', url);
-    link.setAttribute('download', `${slug}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    auditService.logCsvExport(
+      targetMode === 'free'
+        ? 'Free Mode Guest Leads'
+        : targetMode === 'paid'
+          ? 'Paid Finance Ledger'
+          : 'Commercial Leads Ledger',
+      filename,
+      sourceRows.length
+    );
     showToast(
       targetMode === 'free'
         ? `Exported ${sourceRows.length} Free Mode leads to CSV`

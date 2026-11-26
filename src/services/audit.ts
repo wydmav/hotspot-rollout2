@@ -50,19 +50,21 @@ class AuditService {
   /**
    * Retrieves the current authenticated user context from storage
    */
-  private getAuthContext(): { actor: string; role: string } {
+  private getAuthContext(): { actor: string; actorEmail?: string; actorDepartment?: string; role: string } {
     try {
       const session = storage.getAuthSession();
       if (session && session.user) {
         return {
-          actor: session.user.name || 'Admin',
-          role: session.effectiveRole || session.user.role || 'Owner'
+          actor: session.user.name || 'Super Admin',
+          actorEmail: session.user.email,
+          actorDepartment: session.user.department || session.user.role,
+          role: session.effectiveRole || session.user.role || 'Super Admin'
         };
       }
     } catch {}
     return {
-      actor: 'Admin',
-      role: 'Owner'
+      actor: 'System',
+      role: 'Super Admin'
     };
   }
 
@@ -74,26 +76,37 @@ class AuditService {
     const actor = entry.actor || defaultAuth.actor;
     const role = entry.role || defaultAuth.role;
 
+    // storage.logAudit already mirrors to POST /api/audit-logs when authenticated
     const recorded = storage.logAudit({
       ...entry,
       actor,
+      actorEmail: entry.actorEmail || defaultAuth.actorEmail,
+      actorDepartment: entry.actorDepartment || defaultAuth.actorDepartment,
       role,
       ipAddress: entry.ipAddress || (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1')
     });
 
-    // Mirror to backend API if reachable (fire and forget)
-    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetch('/api/audit-logs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recorded)
-      }).catch(() => {
-        // quiet catch - offline/standalone safety
-      });
-    }
-
     this.notify();
     return recorded;
+  }
+
+  /**
+   * Records every CSV export downloaded by any authenticated team member for Super Admin audit visibility
+   */
+  public logCsvExport(exportType: string, filename: string, rowCount: number): AuditLogEntry {
+    return this.log({
+      category: 'exports',
+      action: 'exports.csv_download',
+      target: filename,
+      details: `Exported ${rowCount} ${exportType} row${rowCount === 1 ? '' : 's'} to CSV (${filename}).`,
+      severity: 'info',
+      status: 'success',
+      metadata: {
+        exportType,
+        filename,
+        rowCount
+      }
+    });
   }
 
   /**
@@ -327,13 +340,16 @@ class AuditService {
    */
   public exportToCsv(logs?: AuditLogEntry[], filename?: string): void {
     const targetLogs = logs || storage.getState().auditLogs || [];
+    const resolvedFilename = filename || `tconnect_audit_trail_${Date.now()}.csv`;
     const headers = [
       'Timestamp',
       'Actor',
+      'Handle / Email',
+      'Department',
       'Role',
       'Category',
       'Action',
-      'Target Router',
+      'Target',
       'Router ID',
       'Command Executed',
       'Details',
@@ -351,6 +367,8 @@ class AuditService {
     const rows = targetLogs.map((log) => [
       escapeCsv(log.timestamp),
       escapeCsv(log.actor),
+      escapeCsv(log.actorEmail || ''),
+      escapeCsv(log.actorDepartment || log.role),
       escapeCsv(log.role),
       escapeCsv(log.category || 'general'),
       escapeCsv(log.action),
@@ -368,11 +386,13 @@ class AuditService {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = filename || `tconnect_audit_trail_${Date.now()}.csv`;
+    link.download = resolvedFilename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    this.logCsvExport('Audit Trail', resolvedFilename, targetLogs.length);
   }
 
   /**

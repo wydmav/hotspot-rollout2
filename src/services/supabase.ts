@@ -315,7 +315,16 @@ BEGIN
   ]
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS tconnect_rw_%I ON public.%I;', tbl, tbl);
-    EXECUTE format('CREATE POLICY tconnect_rw_%I ON public.%I FOR ALL TO anon, authenticated, service_role USING (true) WITH CHECK (true);', tbl, tbl);
+    EXECUTE format('DROP POLICY IF EXISTS tconnect_service_%I ON public.%I;', tbl, tbl);
+    EXECUTE format('DROP POLICY IF EXISTS tconnect_auth_read_%I ON public.%I;', tbl, tbl);
+    -- Server backend (service_role) retains full operational sync access; anon has ZERO access to sensitive tables
+    EXECUTE format('CREATE POLICY tconnect_service_%I ON public.%I FOR ALL TO service_role USING (true) WITH CHECK (true);', tbl, tbl);
+  END LOOP;
+
+  -- Authenticated operators may read non-secret operational tables scoped to their auth context
+  FOREACH tbl IN ARRAY ARRAY['plans', 'portal_configs', 'routers', 'partner_groups']
+  LOOP
+    EXECUTE format('CREATE POLICY tconnect_auth_read_%I ON public.%I FOR SELECT TO authenticated USING (auth.role() = ''authenticated'');', tbl, tbl);
   END LOOP;
 END $$;
 `;

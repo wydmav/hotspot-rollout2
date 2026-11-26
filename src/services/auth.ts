@@ -35,15 +35,37 @@ export interface ForgotPasswordResponse {
   message: string;
 }
 
+function secureRandomInt(maxExclusive: number): number {
+  if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+    let val = 0;
+    do {
+      globalThis.crypto.getRandomValues(arr);
+      val = arr[0];
+    } while (val >= limit);
+    return val % maxExclusive;
+  }
+  return Math.floor(Date.now() % maxExclusive);
+}
+
 /**
- * Generates a high-entropy, randomized secure string for temporary authentication.
+ * Generates a high-entropy, cryptographically random string for temporary authentication.
  * Example format: "TC-8492-X9FA!"
  */
 export function generateSecureTemporaryPassword(): string {
-  const numericCode = Math.floor(1000 + Math.random() * 9000);
-  const alphaCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const symbols = ['!', '@', '#', '$', '%', '*'];
-  const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+  const digits = '0123456789';
+  const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const symbols = '!@#$%*';
+  let numericCode = '';
+  for (let i = 0; i < 4; i++) {
+    numericCode += digits[secureRandomInt(digits.length)];
+  }
+  let alphaCode = '';
+  for (let i = 0; i < 6; i++) {
+    alphaCode += alpha[secureRandomInt(alpha.length)];
+  }
+  const symbol = symbols[secureRandomInt(symbols.length)];
   return `TC-${numericCode}-${alphaCode}${symbol}`;
 }
 
@@ -56,7 +78,8 @@ export async function simulateEmailAlert(
   tempPassword: string
 ): Promise<SimulatedEmailDispatch> {
   const timestamp = new Date().toISOString();
-  const messageId = `msg_pwd_reset_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const randHex = Array.from({ length: 8 }, () => '0123456789abcdef'[secureRandomInt(16)]).join('');
+  const messageId = `msg_pwd_reset_${Date.now()}_${randHex}`;
 
   const subject = `[T-Connect Security] Password Reset Alert for ${userEmail}`;
   const plainTextBody = `

@@ -401,20 +401,43 @@ export interface SponsorAdConfig {
   videoLibrary?: VideoAdItem[];
 }
 
+export type PermissionTabId =
+  | 'dashboard'
+  | 'fleet'
+  | 'billing'
+  | 'portal'
+  | 'terminal'
+  | 'roaming'
+  | 'sessions'
+  | 'leads';
+
+export type DepartmentName =
+  | 'Super Admin'
+  | 'Finance'
+  | 'Technical'
+  | 'Marketing & Portal'
+  | 'Management'
+  | 'Operations';
+
 export interface TeamMember {
   id: string;
   name: string;
+  username?: string;
   email: string;
+  department?: DepartmentName | string;
   role: 'Owner' | 'Super Admin' | 'Collaborator' | 'Finance' | 'Tech' | 'Management' | 'Admin' | 'Technical' | 'Viewer' | 'Custom';
+  isSuperAdmin?: boolean;
+  allowedTabs?: PermissionTabId[];
   customPermissions?: string[];
   scopedSites: string[]; // empty for all sites
   mfaEnabled: boolean;
-  status: 'active' | 'invited' | 'expired';
+  status: 'active' | 'invited' | 'expired' | 'suspended';
   invitedAt: string;
   inviteToken?: string;
   inviteTokenExpiresAt?: string;
   invitedBy?: string;
   lastLoginAt?: string;
+  hasPasswordConfigured?: boolean;
   tempPassword?: string;
   tempPasswordIssuedAt?: string;
   password?: string;
@@ -427,6 +450,8 @@ export interface AuthSession {
   token: string;
   loggedInAt: string;
   effectiveRole: TeamMember['role'];
+  expiresAt?: string;
+  idleTimeoutMs?: number;
 }
 
 export type AuditLogCategory = 
@@ -442,6 +467,7 @@ export type AuditLogCategory =
   | 'connection_attempt'
   | 'captive_redirect'
   | 'billing' 
+  | 'exports'
   | 'team'
   | 'system';
 
@@ -466,6 +492,8 @@ export interface ConnectionAttemptLog {
 export interface AuditLogEntry {
   id: string;
   actor: string;
+  actorEmail?: string;
+  actorDepartment?: string;
   role: string;
   action: string;
   target: string;

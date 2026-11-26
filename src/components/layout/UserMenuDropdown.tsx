@@ -23,12 +23,14 @@ import {
   X
 } from 'lucide-react';
 import { TeamMember } from '../../types';
+import { isTrueSuperAdminAccount, formatLastLogin } from '../../utils/permissions';
 
 interface UserMenuDropdownProps {
   currentUser: TeamMember;
   effectiveRole: TeamMember['role'];
   onRolePreviewChange: (role: TeamMember['role']) => void;
   onNavigateTab: (tab: string) => void;
+  onOpenTeamDashboard?: () => void;
   onSignOut: () => void;
   teamMembersCount: number;
   pendingResetCount: number;
@@ -42,6 +44,7 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
   effectiveRole,
   onRolePreviewChange,
   onNavigateTab,
+  onOpenTeamDashboard,
   onSignOut,
   teamMembersCount,
   pendingResetCount,
@@ -49,6 +52,7 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
   onOpenBiometrics,
   onOpenInviteTeammates,
 }) => {
+  const isBoss = isTrueSuperAdminAccount(currentUser);
   const [isOpen, setIsOpen] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
@@ -182,12 +186,12 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
             {currentUser.name}
           </div>
           <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-            <span className="truncate">{currentUser.role}</span>
+            <span className="truncate">{currentUser.department || currentUser.role}</span>
           </div>
         </div>
 
-        {/* Pending Password Reset Indicator Badge */}
-        {pendingResetCount > 0 && (
+        {/* Pending Password Reset Indicator Badge (Super Admin only) */}
+        {isBoss && pendingResetCount > 0 && (
           <span className="w-2 h-2 rounded-full bg-[#f05e17] animate-ping absolute top-1 right-2" />
         )}
 
@@ -228,7 +232,7 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
               </div>
 
               <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                {currentUser.role}
+                {currentUser.department || currentUser.role}
               </span>
             </div>
 
@@ -263,62 +267,72 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
               <ChevronDown className="w-3.5 h-3.5 text-slate-500 -rotate-90 group-hover:text-white transition-colors" />
             </button>
 
-            {/* 2. Team Dashboard (links to Network tab) */}
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setIsOpen(false);
-                onNavigateTab('network');
-              }}
-              className="w-full px-3 py-2 rounded-lg bg-[#121829] hover:bg-[#1a233a] border border-[#1f283d] text-left flex items-center justify-between text-slate-200 hover:text-white transition-colors group cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5">
-                <Users className="w-4 h-4 text-[#f05e17]" />
-                <div>
-                  <span className="font-bold block">Team Dashboard</span>
-                  <span className="text-[10px] text-slate-400 block font-normal">Network &amp; RBAC console</span>
+            {/* 2. Team Dashboard (Super Admin Exclusive — jumps straight to Team Dashboard) */}
+            {isBoss && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsOpen(false);
+                  if (onOpenTeamDashboard) {
+                    onOpenTeamDashboard();
+                  } else {
+                    onNavigateTab('network');
+                  }
+                }}
+                className="w-full px-3 py-2 rounded-lg bg-[#121829] hover:bg-[#1a233a] border border-[#1f283d] text-left flex items-center justify-between text-slate-200 hover:text-white transition-colors group cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Users className="w-4 h-4 text-[#f05e17]" />
+                  <div>
+                    <span className="font-bold block">Team Dashboard</span>
+                    <span className="text-[10px] text-slate-400 block font-normal">Staff, permissions &amp; activity log</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                <span className="px-1.5 py-0.5 rounded bg-[#1c2438] text-slate-300">
-                  {teamMembersCount}
-                </span>
-                {pendingResetCount > 0 && (
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
-                    {pendingResetCount} alert
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                  <span className="px-1.5 py-0.5 rounded bg-[#1c2438] text-slate-300 tabular-nums">
+                    {teamMembersCount}
                   </span>
-                )}
-              </div>
-            </button>
+                  {pendingResetCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                      {pendingResetCount} alert
+                    </span>
+                  )}
+                </div>
+              </button>
+            )}
 
-            {/* 3. Invite Teammates (instant onboarding & role assignment) */}
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setIsOpen(false);
-                if (onOpenInviteTeammates) {
-                  onOpenInviteTeammates();
-                } else {
-                  onNavigateTab('network');
-                }
-              }}
-              className="w-full px-3 py-2 rounded-lg bg-[#121829] hover:bg-[#1a233a] border border-[#1f283d] text-left flex items-center justify-between text-slate-200 hover:text-white transition-colors group cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5">
-                <UserPlus className="w-4 h-4 text-[#f05e17] group-hover:scale-110 transition-transform" />
-                <div>
-                  <span className="font-bold block text-white flex items-center gap-1.5">
-                    Invite Teammates
-                  </span>
-                  <span className="text-[10px] text-slate-400 block font-normal">Instant link &amp; role dispatch</span>
+            {/* 3. Invite Teammates (Super Admin Exclusive) */}
+            {isBoss && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsOpen(false);
+                  if (onOpenInviteTeammates) {
+                    onOpenInviteTeammates();
+                  } else if (onOpenTeamDashboard) {
+                    onOpenTeamDashboard();
+                  } else {
+                    onNavigateTab('network');
+                  }
+                }}
+                className="w-full px-3 py-2 rounded-lg bg-[#121829] hover:bg-[#1a233a] border border-[#1f283d] text-left flex items-center justify-between text-slate-200 hover:text-white transition-colors group cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <UserPlus className="w-4 h-4 text-[#f05e17] group-hover:scale-110 transition-transform" />
+                  <div>
+                    <span className="font-bold block text-white flex items-center gap-1.5">
+                      Invite Teammates
+                    </span>
+                    <span className="text-[10px] text-slate-400 block font-normal">Department &amp; tab permissions</span>
+                  </div>
                 </div>
-              </div>
-              <span className="text-[10px] text-[#f05e17] font-bold px-1.5 py-0.5 rounded bg-[#f05e17]/10 border border-[#f05e17]/25 flex items-center gap-1">
-                + Invite
-              </span>
-            </button>
+                <span className="text-[10px] text-[#f05e17] font-bold px-1.5 py-0.5 rounded bg-[#f05e17]/10 border border-[#f05e17]/25 flex items-center gap-1">
+                  + Invite
+                </span>
+              </button>
+            )}
 
             {/* Hardware Biometrics / Passkey Item (if handler provided) */}
             {onOpenBiometrics && (
@@ -345,13 +359,13 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
             )}
           </div>
 
-          {/* Owner Role Impersonator / Active Role Switcher */}
-          {currentUser.role === 'Owner' && (
+          {/* Super Admin Role Preview Switcher */}
+          {isBoss && (
             <div className="pt-2 border-t border-[#1f283d] space-y-2">
               <div className="flex items-center justify-between text-[11px] text-slate-300 font-bold px-1">
                 <span className="flex items-center gap-1.5 text-[#f05e17]">
                   <Eye className="w-3.5 h-3.5" />
-                  <span>Switch Role (Owner Master)</span>
+                  <span>Preview Department View</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-normal">Active: {effectiveRole}</span>
               </div>
@@ -481,16 +495,16 @@ export const UserMenuDropdown: React.FC<UserMenuDropdownProps> = ({
 
               <div className="p-3 bg-[#111728] rounded-xl border border-[#1f283d] space-y-1.5 text-[11px] text-slate-300">
                 <div className="flex items-center justify-between text-slate-400">
-                  <span>Last Authenticated:</span>
-                  <span className="text-slate-200">{currentUser.lastLoginAt || 'Just now'}</span>
+                  <span>Last Login:</span>
+                  <span className="text-slate-200">{formatLastLogin(currentUser.lastLoginAt).relative}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-400">
-                  <span>Authentication Method:</span>
-                  <span className="text-[#f05e17] font-bold">Master Password &amp; Passkey</span>
+                  <span>Department:</span>
+                  <span className="text-[#f05e17] font-bold">{currentUser.department || currentUser.role}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-400">
-                  <span>Controller Node:</span>
-                  <span className="text-slate-200">hub.tconnect.co.ls</span>
+                  <span>Session Timeout:</span>
+                  <span className="text-slate-200">2 hours idle</span>
                 </div>
               </div>
             </div>

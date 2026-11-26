@@ -23,6 +23,7 @@ import {
 import { SystemAlert, PaymentTransaction, TeamMember } from '../../types';
 import { ExportService } from '../../services/exportService';
 import { UserMenuDropdown } from './UserMenuDropdown';
+import { SUPER_ADMIN_EMAIL, SUPER_ADMIN_NAME, isTrueSuperAdminAccount } from '../../utils/permissions';
 
 interface HeaderProps {
   currentTab: string;
@@ -43,6 +44,7 @@ interface HeaderProps {
   isSupabaseConnected: boolean;
   onOpenDatabaseModal: () => void;
   onNavigateTab?: (tab: string) => void;
+  onOpenTeamDashboard?: () => void;
   unusedVoucherCount?: number;
   voucherThreshold?: number;
   onUpdateVoucherThreshold?: (threshold: number) => void;
@@ -78,16 +80,20 @@ export const Header: React.FC<HeaderProps> = ({
   isSupabaseConnected,
   onOpenDatabaseModal,
   onNavigateTab,
+  onOpenTeamDashboard,
   unusedVoucherCount,
   voucherThreshold = 5,
   onUpdateVoucherThreshold,
   onTriggerBackgroundCheck,
   onQuickRestock,
   currentUser = {
-    id: 'tm_owner',
-    name: 'Raphooko Phooko',
-    email: 'rphooko@tconnect.africa',
+    id: 'tm_super_admin_boss',
+    name: SUPER_ADMIN_NAME,
+    username: 'phelane',
+    email: SUPER_ADMIN_EMAIL,
+    department: 'Super Admin',
     role: 'Super Admin',
+    isSuperAdmin: true,
     scopedSites: [],
     mfaEnabled: true,
     status: 'active',
@@ -103,6 +109,7 @@ export const Header: React.FC<HeaderProps> = ({
   adminTheme = 'dark',
   onToggleTheme,
 }) => {
+  const isBoss = isTrueSuperAdminAccount(currentUser);
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
   const [showVoucherPopover, setShowVoucherPopover] = useState(false);
   const [thresholdInput, setThresholdInput] = useState<number>(voucherThreshold);
@@ -216,19 +223,21 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {/* Supabase Connection Status */}
-        <button
-          onClick={onOpenDatabaseModal}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
-            isSupabaseConnected
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-              : 'bg-[#161d31] border-[#232d42] text-slate-300 hover:border-slate-500'
-          }`}
-          title="Supabase PostgreSQL Integration"
-        >
-          <Database className="w-3.5 h-3.5 text-current" />
-          <span className="hidden md:inline">{isSupabaseConnected ? 'Supabase Connected' : 'Connect Supabase'}</span>
-        </button>
+        {/* Supabase Connection Status (Super Admin Exclusive) */}
+        {isBoss && (
+          <button
+            onClick={onOpenDatabaseModal}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono transition-colors ${
+              isSupabaseConnected
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                : 'bg-[#161d31] border-[#232d42] text-slate-300 hover:border-slate-500'
+            }`}
+            title="Supabase PostgreSQL Integration"
+          >
+            <Database className="w-3.5 h-3.5 text-current" />
+            <span className="hidden md:inline">{isSupabaseConnected ? 'Supabase Connected' : 'Connect Supabase'}</span>
+          </button>
+        )}
 
         {/* Biometrics Authenticator Status */}
         <button
@@ -378,6 +387,7 @@ export const Header: React.FC<HeaderProps> = ({
             effectiveRole={effectiveRole}
             onRolePreviewChange={onRolePreviewChange}
             onNavigateTab={onNavigateTab || (() => {})}
+            onOpenTeamDashboard={onOpenTeamDashboard}
             onSignOut={onSignOut}
             teamMembersCount={teamMembersCount}
             pendingResetCount={pendingResetCount}

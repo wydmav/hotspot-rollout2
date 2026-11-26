@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { VerticalType, TeamMember } from '../../types';
 import { TConnectLogo } from '../common/TConnectLogo';
+import { canAccessSidebarTab, isUserSuperAdmin } from '../../utils/permissions';
 
 interface SidebarProps {
   currentTab: string;
@@ -23,6 +24,7 @@ interface SidebarProps {
   totalRouterCount: number;
   isSupabaseConnected: boolean;
   onOpenDatabaseModal: () => void;
+  currentUser?: TeamMember;
   effectiveRole?: TeamMember['role'];
   isOpen?: boolean;
   onClose?: () => void;
@@ -37,12 +39,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalRouterCount,
   isSupabaseConnected,
   onOpenDatabaseModal,
+  currentUser,
   effectiveRole = 'Super Admin',
   isOpen = true,
   onClose
 }) => {
   // Streamlined 4 Core Navigation Items
-  const allNavItems = [
+  const allNavItems: Array<{
+    id: 'dashboard' | 'fleet' | 'billing' | 'network';
+    label: string;
+    description: string;
+    icon: typeof LayoutDashboard;
+  }> = [
     { 
       id: 'dashboard', 
       label: 'Fleet Overview', 
@@ -64,54 +72,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { 
       id: 'network', 
       label: 'Network & Security', 
-      description: 'Captive Portal, QoS & DB',
+      description: 'Portal, Terminal, Leads & Team',
       icon: Sliders 
     },
   ];
 
-  const isSuperAdmin = !effectiveRole || effectiveRole === 'Super Admin' || effectiveRole === 'Owner' || effectiveRole === 'Admin';
-  const isCollaborator = effectiveRole === 'Collaborator';
-  const isFinance = effectiveRole === 'Finance';
-  const isTech = effectiveRole === 'Tech';
-  const isManagement = effectiveRole === 'Management' || effectiveRole === 'Viewer';
+  const isSuperAdmin = isUserSuperAdmin(currentUser, effectiveRole);
 
-  // Strict role-based navigation filtering:
-  // - Super Admins & Owner: all 4 items
-  // - Collaborators: just captive portal (network tab)
-  // - Finance: just billing & vouchers (billing tab)
-  // - Tech: just routers & adoption (fleet tab)
-  // - Management: just fleet overview (dashboard tab)
-  const navItems = allNavItems.filter((item) => {
-    if (isSuperAdmin) return true;
-    if (isCollaborator) return item.id === 'network';
-    if (isFinance) return item.id === 'dashboard' || item.id === 'billing';
-    if (isTech) return item.id === 'fleet';
-    if (isManagement) return item.id === 'dashboard';
-    return item.id === 'dashboard';
-  }).map((item) => {
-    if (isCollaborator && item.id === 'network') {
-      return {
-        ...item,
-        label: 'Captive Portal & Ads',
-        description: 'Design, Uploads & Ads'
-      };
-    }
-    if (isFinance && item.id === 'billing') {
-      return {
-        ...item,
-        label: 'Financial & Billing',
-        description: 'Vouchers, Gateways & Revenue'
-      };
-    }
-    if (isTech && item.id === 'fleet') {
-      return {
-        ...item,
-        label: 'Routers & Topology',
-        description: 'MikroTik Fleets & Provisioning'
-      };
-    }
-    return item;
-  });
+  // Per-member ticked tab permissions (Super Admin always sees all tabs)
+  const navItems = allNavItems.filter((item) =>
+    canAccessSidebarTab(currentUser, item.id, effectiveRole)
+  );
 
   const verticals: Array<{ id: VerticalType | 'all'; label: string; icon: string }> = [
     { id: 'all', label: 'All 5', icon: '🌐' },
@@ -256,9 +227,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         ) : (
           <div className="p-2 rounded-xl border border-[#1f283d] bg-[#121829] flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Access Tier</span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30">
-              {effectiveRole}
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Department</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#f05e17]/15 text-[#f05e17] border border-[#f05e17]/30 truncate max-w-[115px]">
+              {currentUser?.department || effectiveRole}
             </span>
           </div>
         )}
