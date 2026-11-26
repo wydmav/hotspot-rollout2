@@ -1455,8 +1455,9 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
   const brandTitle = cfg.brandTitle !== undefined ? String(cfg.brandTitle) : 'T-CONNECT';
   const tagline = cfg.tagline !== undefined ? String(cfg.tagline) : 'HOTSPOT';
   const welcomeHeadline = cfg.welcomeHeadline !== undefined ? String(cfg.welcomeHeadline) : 'GET CONNECTED THIS SUMMER.';
-  const accentColor = sanitizeHexColor(cfg.accentColor, '#f05e17');
-  const freeButtonColor = sanitizeHexColor(cfg.freeButtonColor || accentColor, '#f05e17');
+  const primaryButtonColor = sanitizeHexColor(cfg.freeButtonColor || cfg.accentColor, '#f05e17');
+  const accentColor = primaryButtonColor;
+  const freeButtonColor = primaryButtonColor;
   const freeButtonTextColor = sanitizeHexColor(cfg.freeButtonTextColor, '#ffffff');
   const bgDarken = typeof cfg.bgDarken === 'number' && Number.isFinite(cfg.bgDarken) ? Math.min(100, Math.max(0, cfg.bgDarken)) : 25;
   const scopeAllowFree = cfg.allowFreeAccess !== undefined ? Boolean(cfg.allowFreeAccess) : false;
@@ -1749,12 +1750,12 @@ function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspo
     padding: 12px 16px;
     border-radius: 999px;
     border: none;
-    background: ${accentColor};
-    color: #ffffff;
+    background: ${freeButtonColor};
+    color: ${freeButtonTextColor};
     font-size: 14px;
     font-weight: 900;
     cursor: pointer;
-    box-shadow: 0 8px 20px rgba(240, 94, 23, 0.32);
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
     transition: transform 0.15s ease, opacity 0.15s ease;
   }
   .btn-orange:active { transform: scale(0.99); }
@@ -2675,6 +2676,12 @@ app.get('/api/portal/cna-close', (req: Request, res: Response) => {
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
 
+  const scopeKey = String(req.query.scope || 'hotspot').toLowerCase();
+  const savedCfgs = loadSavedPortalConfigs();
+  const scopeCfg = savedCfgs[scopeKey] || savedCfgs.hotspot || {};
+  const cnaBtnBg = sanitizeHexColor(scopeCfg.freeButtonColor || scopeCfg.accentColor, '#f05e17');
+  const cnaBtnFg = sanitizeHexColor(scopeCfg.freeButtonTextColor, '#ffffff');
+
   const closeHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2689,8 +2696,8 @@ app.get('/api/portal/cna-close', (req: Request, res: Response) => {
   .dot{width:8px;height:8px;border-radius:50%;background:#10b981}
   h1{font-size:18px;font-weight:800;margin-bottom:6px;color:#fff}
   p{font-size:13px;color:#94a3b8;line-height:1.45;margin-bottom:18px}
-  .btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 20px;border-radius:14px;border:none;background:#f05e17;color:#fff;font-weight:800;font-size:15px;cursor:pointer;text-decoration:none;touch-action:manipulation;box-shadow:0 8px 20px rgba(240,94,23,0.35)}
-  .btn:active{transform:scale(0.98);background:#d94e0f}
+  .btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;padding:12px 20px;border-radius:14px;border:none;background:${cnaBtnBg};color:${cnaBtnFg};font-weight:800;font-size:15px;cursor:pointer;text-decoration:none;touch-action:manipulation;box-shadow:0 8px 20px rgba(15,23,42,0.35)}
+  .btn:active{transform:scale(0.98);opacity:0.9}
 </style>
 <script>
   function dismissCaptiveSheet() {
@@ -2729,6 +2736,10 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
   const baseUrl = resolveControllerBaseUrl(host, protocol);
   const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}&dest=${encodeURIComponent('https://www.google.com')}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
+  const savedCfgs = loadSavedPortalConfigs();
+  const scopeCfg = savedCfgs[String(scope || 'hotspot').toLowerCase()] || savedCfgs.hotspot || {};
+  const adBtnBg = sanitizeHexColor(scopeCfg.freeButtonColor || scopeCfg.accentColor, '#f05e17');
+  const adBtnFg = sanitizeHexColor(scopeCfg.freeButtonTextColor, '#ffffff');
   const proceedActionMode = sponsorCfg.proceedActionMode || 'close_portal';
   const randomizeSlides = sponsorCfg.randomizeSlides !== false;
 
@@ -2822,15 +2833,15 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
   .top-safe-bar{flex-shrink:0;z-index:80;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:max(10px,env(safe-area-inset-top,10px)) 14px 10px 14px;background:rgba(5,8,17,0.94);border-bottom:1px solid rgba(255,255,255,0.12)}
   .status-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#e2e8f0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .status-dot{width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0}
-  .top-proceed-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:38px;padding:8px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.25);background:#f05e17;color:#ffffff;font-size:12px;font-weight:800;text-decoration:none;cursor:pointer;touch-action:manipulation;flex-shrink:0;box-shadow:0 4px 14px rgba(240,94,23,0.4)}
-  .top-proceed-btn:active{transform:scale(0.97);background:#d94e0f}
+  .top-proceed-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:38px;padding:8px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.25);background:${adBtnBg};color:${adBtnFg};font-size:12px;font-weight:800;text-decoration:none;cursor:pointer;touch-action:manipulation;flex-shrink:0;box-shadow:0 4px 14px rgba(15,23,42,0.4)}
+  .top-proceed-btn:active{transform:scale(0.97);opacity:0.9}
   .ad-stage{position:relative;flex:1;min-height:0;width:100%;background:#050811;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:8px}
   .carousel-track{display:flex;width:100%;height:100%;transition:transform 0.28s ease-out}
   .slide-frame{width:100%;height:100%;flex-shrink:0;position:relative;background:#050811;display:flex;align-items:center;justify-content:center;padding:4px}
   .slide-img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;border-radius:10px;background:#050811;margin:auto}
   .bottom-proceed-bar{flex-shrink:0;z-index:80;background:rgba(5,8,17,0.96);border-top:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;padding:10px 16px max(20px,calc(env(safe-area-inset-bottom,14px) + 10px)) 16px}
-  .proceed-bottom-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;max-width:360px;min-height:46px;padding:11px 20px;border-radius:14px;border:1px solid rgba(255,255,255,0.22);background:#f05e17;color:#ffffff;font-size:14px;font-weight:800;letter-spacing:0.2px;text-decoration:none;cursor:pointer;touch-action:manipulation;box-shadow:0 8px 24px rgba(240,94,23,0.35)}
-  .proceed-bottom-btn:active{transform:scale(0.98);background:#d94e0f}
+  .proceed-bottom-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;max-width:360px;min-height:46px;padding:11px 20px;border-radius:14px;border:1px solid rgba(255,255,255,0.22);background:${adBtnBg};color:${adBtnFg};font-size:14px;font-weight:800;letter-spacing:0.2px;text-decoration:none;cursor:pointer;touch-action:manipulation;box-shadow:0 8px 24px rgba(15,23,42,0.35)}
+  .proceed-bottom-btn:active{transform:scale(0.98);opacity:0.9}
 </style>
 </head>
 <body>

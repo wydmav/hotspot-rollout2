@@ -2388,64 +2388,109 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                         />
                       </div>
 
-                      <div className="sm:col-span-3 pt-2 border-t border-[#1b233a] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <label className="text-[10px] text-slate-200 font-extrabold uppercase tracking-wider block">
-                            &quot;Login for free&quot; Button Color &amp; Text Color
-                          </label>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {[
-                              { label: 'T-Connect Orange', bg: '#f05e17', fg: '#ffffff' },
-                              { label: 'Emerald Green', bg: '#10b981', fg: '#ffffff' },
-                              { label: 'Royal Blue', bg: '#2563eb', fg: '#ffffff' },
-                              { label: 'Vibrant Purple', bg: '#7c3aed', fg: '#ffffff' },
-                              { label: 'Crimson Red', bg: '#e11d48', fg: '#ffffff' },
-                              { label: 'Dark Slate', bg: '#0f172a', fg: '#ffffff' },
-                              { label: 'Clean White', bg: '#ffffff', fg: '#0f172a' }
-                            ].map((sw) => {
-                              const activeBg = (currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17').toLowerCase();
-                              const isSelected = activeBg === sw.bg.toLowerCase();
-                              return (
-                                <button
-                                  key={sw.bg}
-                                  type="button"
-                                  onClick={() => handleUpdateCurrent({ freeButtonColor: sw.bg, freeButtonTextColor: sw.fg })}
-                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border cursor-pointer transition-all ${
-                                    isSelected ? 'border-white ring-2 ring-cyan-400/50 scale-105' : 'border-white/20 opacity-85 hover:opacity-100'
-                                  }`}
-                                  style={{ backgroundColor: sw.bg, color: sw.fg }}
-                                >
-                                  <span>{sw.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
+                    </div>
+                  </div>
+                )}
 
-                        <div className="flex items-center gap-3 shrink-0">
-                          <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
-                            <span className="text-[10px] text-slate-300 font-bold">Button Fill:</span>
-                            <input
-                              type="color"
-                              value={currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17'}
-                              onChange={(e) => handleUpdateCurrent({ freeButtonColor: e.target.value })}
-                              className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
-                            />
-                          </div>
-                          <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
-                            <span className="text-[10px] text-slate-300 font-bold">Text:</span>
-                            <input
-                              type="color"
-                              value={currentConfig.freeButtonTextColor || '#ffffff'}
-                              onChange={(e) => handleUpdateCurrent({ freeButtonTextColor: e.target.value })}
-                              className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
-                            />
-                          </div>
+                {/* PORTAL BUTTON COLOR & TEXT COLOR (APPLIES TO ALL BUTTONS: CONTINUE, LOGIN, PAY, PROCEED) */}
+                <div className="pt-3 border-t border-[#1b233a]">
+                  <div className="p-3.5 rounded-xl bg-[#0e1526] border border-[#232d42] space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="text-[11px] text-white font-extrabold uppercase tracking-wider block">
+                          Portal Button Color &amp; Text Color (All Buttons)
+                        </label>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Controls <strong className="text-slate-200">Continue &rarr;</strong>, <strong className="text-slate-200">Login for free</strong>, <strong className="text-slate-200">Pay / Redeem &amp; Connect</strong>, <strong className="text-slate-200">Agree &amp; Continue</strong>, and <strong className="text-slate-200">Proceed to internet</strong> across every screen.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className="px-2.5 py-1 rounded-full text-[10px] font-extrabold shadow"
+                          style={{
+                            backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                            color: currentConfig.freeButtonTextColor || '#ffffff'
+                          }}
+                        >
+                          Continue &rarr;
+                        </span>
+                        <span
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold shadow"
+                          style={{
+                            backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                            color: currentConfig.freeButtonTextColor || '#ffffff'
+                          }}
+                        >
+                          {currentConfig.freeButtonText || 'Login for free'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { label: 'T-Connect Orange', bg: '#f05e17', fg: '#ffffff' },
+                          { label: 'Emerald Green', bg: '#10b981', fg: '#ffffff' },
+                          { label: 'Royal Blue', bg: '#2563eb', fg: '#ffffff' },
+                          { label: 'Cyan Teal', bg: '#0891b2', fg: '#ffffff' },
+                          { label: 'Vibrant Purple', bg: '#7c3aed', fg: '#ffffff' },
+                          { label: 'Crimson Red', bg: '#e11d48', fg: '#ffffff' },
+                          { label: 'Gold Amber', bg: '#f59e0b', fg: '#0f172a' },
+                          { label: 'Dark Slate', bg: '#0f172a', fg: '#ffffff' },
+                          { label: 'Clean White', bg: '#ffffff', fg: '#0f172a' }
+                        ].map((sw) => {
+                          const activeBg = (currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17').toLowerCase();
+                          const isSelected = activeBg === sw.bg.toLowerCase();
+                          return (
+                            <button
+                              key={sw.bg}
+                              type="button"
+                              onClick={() =>
+                                handleUpdateCurrent({
+                                  accentColor: sw.bg,
+                                  freeButtonColor: sw.bg,
+                                  freeButtonTextColor: sw.fg
+                                })
+                              }
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border cursor-pointer transition-all ${
+                                isSelected ? 'border-white ring-2 ring-cyan-400/60 scale-105' : 'border-white/20 opacity-85 hover:opacity-100'
+                              }`}
+                              style={{ backgroundColor: sw.bg, color: sw.fg }}
+                            >
+                              <span>{sw.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
+                          <span className="text-[10px] text-slate-300 font-bold">Button Fill:</span>
+                          <input
+                            type="color"
+                            value={currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17'}
+                            onChange={(e) =>
+                              handleUpdateCurrent({
+                                accentColor: e.target.value,
+                                freeButtonColor: e.target.value
+                              })
+                            }
+                            className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-[#0b0f19] px-2.5 py-1.5 rounded-lg border border-[#232d42]">
+                          <span className="text-[10px] text-slate-300 font-bold">Text:</span>
+                          <input
+                            type="color"
+                            value={currentConfig.freeButtonTextColor || '#ffffff'}
+                            onChange={(e) => handleUpdateCurrent({ freeButtonTextColor: e.target.value })}
+                            className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                          />
                         </div>
                       </div>
                     </div>
                   </div>
-                )}
+                </div>
 
                 {/* LIVE ROUTER CLIENT CAPACITY ENFORCER (1,012 SIMULTANEOUS USERS · ZERO DISRUPTION) */}
                 <div className="pt-3 border-t border-[#1b233a] space-y-2.5">
@@ -3666,7 +3711,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <button
                         type="button"
                         onClick={handlePreviewProceed}
-                        className="px-2.5 py-1 rounded-full bg-[#f05e17] hover:bg-[#d94e0f] text-white text-[10px] font-extrabold flex items-center gap-1 shrink-0 cursor-pointer shadow"
+                        style={{
+                          backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                          color: currentConfig.freeButtonTextColor || '#ffffff'
+                        }}
+                        className="px-2.5 py-1 rounded-full hover:brightness-110 text-[10px] font-extrabold flex items-center gap-1 shrink-0 cursor-pointer shadow"
                       >
                         <span>Proceed to internet</span>
                         <span>&rarr;</span>
@@ -3727,7 +3776,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                       <button
                         type="button"
                         onClick={handlePreviewProceed}
-                        className="w-full py-2 px-4 rounded-xl bg-[#f05e17] hover:bg-[#d94e0f] text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-lg border border-white/20"
+                        style={{
+                          backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                          color: currentConfig.freeButtonTextColor || '#ffffff'
+                        }}
+                        className="w-full py-2 px-4 rounded-xl hover:brightness-110 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer shadow-lg border border-white/20"
                       >
                         <span>Proceed to internet</span>
                         <span>&rarr;</span>
@@ -3928,8 +3981,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
 
                     <button
                       type="submit"
-                      style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                      className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 transition-all"
+                      style={{
+                        backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                        color: currentConfig.freeButtonTextColor || '#ffffff'
+                      }}
+                      className="w-full py-2 font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 transition-all"
                     >
                       Continue &rarr;
                     </button>
@@ -3981,9 +4037,17 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                                 setSelectedPlanId(plan.id);
                                 setPaymentError(null);
                               }}
+                              style={
+                                isSelected
+                                  ? {
+                                      borderColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                                      backgroundColor: '#f8fafc'
+                                    }
+                                  : undefined
+                              }
                               className={`p-2 rounded-xl border text-center cursor-pointer transition-all ${
                                 isSelected
-                                  ? 'bg-[#fffaf5] border-2 border-[#f05e17] shadow-sm'
+                                  ? 'border-2 shadow-sm'
                                   : 'bg-white border-slate-200 hover:border-slate-300'
                               }`}
                             >
@@ -4231,8 +4295,11 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
                           }
                         }}
                         disabled={isVerifyingPayment}
-                        style={{ backgroundColor: currentConfig.accentColor || '#f05e17' }}
-                        className="w-full py-2 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
+                        style={{
+                          backgroundColor: currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17',
+                          color: currentConfig.freeButtonTextColor || '#ffffff'
+                        }}
+                        className="w-full py-2 font-extrabold text-xs rounded-xl shadow-md cursor-pointer hover:brightness-105 disabled:opacity-50 transition-all"
                       >
                         {isVerifyingPayment
                           ? `Waiting for ${previewPayMethod === 'ecocash' ? 'EcoCash' : 'M-Pesa'} PIN...`

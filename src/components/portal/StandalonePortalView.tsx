@@ -132,7 +132,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
   const currentConfig = scopeConfigs[activeScope] || DEFAULT_SCOPE_CONFIGS.hotspot;
   const isFreeAccessAllowed = Boolean(currentConfig.allowFreeAccess);
   const isTermsRequired = currentConfig.termsEnabled !== false;
-  const accentColor = currentConfig.accentColor || '#f05e17';
+  const accentColor = currentConfig.freeButtonColor || currentConfig.accentColor || '#f05e17';
+  const buttonTextColor = currentConfig.freeButtonTextColor || '#ffffff';
 
   // MikroTik Hotspot URL Parameters passed from hotspot/login.html redirect
   const [clientMac, setClientMac] = useState('');
@@ -1256,8 +1257,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                   setPaymentError(null);
                   setIsTermsModalOpen(false);
                 }}
-                style={{ backgroundColor: accentColor }}
-                className="flex-1 py-2 text-white font-bold text-xs rounded-xl cursor-pointer transition-opacity hover:opacity-95"
+                style={{ backgroundColor: accentColor, color: buttonTextColor }}
+                className="flex-1 py-2 font-bold text-xs rounded-xl cursor-pointer transition-opacity hover:opacity-95"
               >
                 Agree &amp; Continue
               </button>
@@ -1659,8 +1660,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
 
                     <button
                       type="submit"
-                      style={{ backgroundColor: accentColor }}
-                      className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      style={{ backgroundColor: accentColor, color: buttonTextColor }}
+                      className="w-full py-2.5 font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>Continue</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -1854,8 +1855,8 @@ export const StandalonePortalView: React.FC<StandalonePortalViewProps> = ({
                     <button
                       type="submit"
                       disabled={isConnecting}
-                      style={{ backgroundColor: accentColor }}
-                      className="w-full py-2.5 text-white font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      style={{ backgroundColor: accentColor, color: buttonTextColor }}
+                      className="w-full py-2.5 font-extrabold text-xs rounded-xl shadow-md hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <span>
                         {isConnecting
