@@ -89,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser = {
     id: 'tm_super_admin_boss',
     name: SUPER_ADMIN_NAME,
-    username: 'phelane',
+    username: 'pphomane',
     email: SUPER_ADMIN_EMAIL,
     department: 'Super Admin',
     role: 'Super Admin',

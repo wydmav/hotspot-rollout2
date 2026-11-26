@@ -12473,7 +12473,7 @@ app.post('/api/devices/:routerId/terminal', requireAdminAuth(['Owner', 'Super Ad
 // -----------------------------------------------------------------------------
 // SUPER ADMIN TEAM RBAC, @tconnect.tower ONBOARDING & 2-HOUR SESSION AUTH
 // Persists hashed staff credentials (scrypt) in private /data/auth-users.json
-// with Phelane Phoma as primary Super Admin and per-tab checkbox permissions.
+// with Phelane Phomane (pphomane@tconnect.tower) as primary Super Admin and per-tab checkbox permissions.
 // -----------------------------------------------------------------------------
 const TOWER_DOMAIN = 'tconnect.tower';
 const VALID_PERMISSION_TABS = ['dashboard', 'fleet', 'billing', 'portal', 'terminal', 'roaming', 'sessions', 'leads'] as const;
@@ -12503,9 +12503,9 @@ interface ServerTeamMember {
   hasPendingReset?: boolean;
 }
 
-const SUPER_ADMIN_USERNAME = String(process.env.SUPER_ADMIN_USERNAME || 'phelane').trim().toLowerCase();
+const SUPER_ADMIN_USERNAME = String(process.env.SUPER_ADMIN_USERNAME || 'pphomane').trim().toLowerCase();
 const SUPER_ADMIN_EMAIL = String(process.env.SUPER_ADMIN_EMAIL || `${SUPER_ADMIN_USERNAME}@${TOWER_DOMAIN}`).trim().toLowerCase();
-const SUPER_ADMIN_NAME = String(process.env.SUPER_ADMIN_NAME || 'Phelane Phoma').trim();
+const SUPER_ADMIN_NAME = String(process.env.SUPER_ADMIN_NAME || 'Phelane Phomane').trim();
 const authUsersFilePath = path.resolve(persistentDataDir, 'auth-users.json');
 const serverTeamStore = new Map<string, ServerTeamMember>();
 
@@ -12583,6 +12583,7 @@ function saveAuthUsersToDisk(): void {
 
 function loadAuthUsersFromDisk(): void {
   serverTeamStore.set(DEFAULT_SUPER_ADMIN_RECORD.id, { ...DEFAULT_SUPER_ADMIN_RECORD });
+  let migratedPrimarySuperAdmin = false;
   try {
     if (fs.existsSync(authUsersFilePath)) {
       const parsed = JSON.parse(fs.readFileSync(authUsersFilePath, 'utf-8'));
@@ -12608,11 +12609,39 @@ function loadAuthUsersFromDisk(): void {
         const id = String(u.id || `tm_${crypto.randomBytes(6).toString('hex')}`);
         const { tempPassword: _dropLegacy, ...cleanUser } = u;
         const resolved = resolveDepartmentRoleAndTabs(cleanUser.department || cleanUser.role, cleanUser.allowedTabs);
+        let normalizedName = cleanUser.name || 'Team Member';
+        let normalizedUsername = cleanUser.username;
+        let normalizedEmail = String(cleanUser.email || '').trim().toLowerCase();
+
+        // Seamlessly migrate existing primary Super Admin from legacy handle (phelane@tconnect.tower)
+        // to pphomane@tconnect.tower while preserving passwordHash and login history intact.
+        if (id === DEFAULT_SUPER_ADMIN_RECORD.id) {
+          const legacySuperEmails = new Set([
+            '',
+            `phelane@${TOWER_DOMAIN}`,
+            `superadmin@${TOWER_DOMAIN}`,
+            'superadmin@tconnect.africa'
+          ]);
+          if (legacySuperEmails.has(normalizedEmail) && normalizedEmail !== SUPER_ADMIN_EMAIL) {
+            normalizedEmail = SUPER_ADMIN_EMAIL;
+            normalizedUsername = SUPER_ADMIN_USERNAME;
+            migratedPrimarySuperAdmin = true;
+          }
+          if (normalizedUsername === 'phelane' && SUPER_ADMIN_USERNAME !== 'phelane') {
+            normalizedUsername = SUPER_ADMIN_USERNAME;
+            migratedPrimarySuperAdmin = true;
+          }
+          if (normalizedName === 'Phelane Phoma' && SUPER_ADMIN_NAME !== 'Phelane Phoma') {
+            normalizedName = SUPER_ADMIN_NAME;
+            migratedPrimarySuperAdmin = true;
+          }
+        }
+
         const normalized: ServerTeamMember = {
           id,
-          name: cleanUser.name || 'Team Member',
-          username: cleanUser.username,
-          email: String(cleanUser.email || '').trim().toLowerCase(),
+          name: normalizedName,
+          username: normalizedUsername,
+          email: normalizedEmail,
           department: resolved.department,
           role: cleanUser.isSuperAdmin || cleanUser.role === 'Super Admin' || cleanUser.role === 'Owner' ? 'Super Admin' : resolved.role,
           isSuperAdmin: Boolean(cleanUser.isSuperAdmin || cleanUser.role === 'Super Admin' || cleanUser.role === 'Owner' || id === DEFAULT_SUPER_ADMIN_RECORD.id),
@@ -12634,6 +12663,9 @@ function loadAuthUsersFromDisk(): void {
         };
         serverTeamStore.set(id, normalized);
       }
+      if (migratedPrimarySuperAdmin) {
+        saveAuthUsersToDisk();
+      }
     }
   } catch (err) {
     console.warn('[Auth Store] Could not read auth-users.json, using defaults:', err);
@@ -12645,10 +12677,14 @@ function findMemberByIdentifier(identifier: string): ServerTeamMember | undefine
   const clean = String(identifier || '').trim().toLowerCase();
   if (!clean) return undefined;
 
-  // Accept Phelane's primary Super Admin aliases seamlessly
+  // Accept primary Super Admin handle + backward-compatible legacy aliases seamlessly
   const superAliases = new Set([
     SUPER_ADMIN_EMAIL,
     SUPER_ADMIN_USERNAME,
+    `pphomane@${TOWER_DOMAIN}`,
+    'pphomane',
+    `phelane@${TOWER_DOMAIN}`,
+    'phelane',
     `superadmin@${TOWER_DOMAIN}`,
     'superadmin@tconnect.africa',
     'superadmin'
@@ -12714,7 +12750,10 @@ function isHandlePrefixValid(prefix: string): boolean {
 function isHandleTaken(prefix: string, excludeMemberId?: string): boolean {
   const clean = prefix.trim().toLowerCase();
   const fullEmail = `${clean}@${TOWER_DOMAIN}`;
-  if (clean === 'superadmin' || clean === 'system' || clean === 'root') return true;
+  const reservedSuperPrefixes = new Set(['superadmin', 'system', 'root', 'pphomane', 'phelane', SUPER_ADMIN_USERNAME]);
+  if (excludeMemberId !== DEFAULT_SUPER_ADMIN_RECORD.id && reservedSuperPrefixes.has(clean)) {
+    return true;
+  }
   for (const m of serverTeamStore.values()) {
     if (excludeMemberId && m.id === excludeMemberId) continue;
     if ((m.username && m.username.toLowerCase() === clean) || (m.email && m.email.toLowerCase() === fullEmail)) {
@@ -12746,14 +12785,18 @@ const inviteRedeemRateLimiter = createRateLimiter({
 
 app.get('/api/auth/status', (_req: Request, res: Response) => {
   const needsSetup = isSuperAdminSetupRequired();
+  const boss = serverTeamStore.get(DEFAULT_SUPER_ADMIN_RECORD.id);
+  const liveEmail = boss?.email || SUPER_ADMIN_EMAIL;
+  const liveUsername = boss?.username || SUPER_ADMIN_USERNAME;
+  const liveName = boss?.name || SUPER_ADMIN_NAME;
   res.json({
     success: true,
     needsOwnerSetup: needsSetup,
     needsSuperAdminSetup: needsSetup,
-    ownerEmail: SUPER_ADMIN_EMAIL,
-    superAdminEmail: SUPER_ADMIN_EMAIL,
-    superAdminUsername: SUPER_ADMIN_USERNAME,
-    superAdminName: SUPER_ADMIN_NAME,
+    ownerEmail: liveEmail,
+    superAdminEmail: liveEmail,
+    superAdminUsername: liveUsername,
+    superAdminName: liveName,
     towerDomain: TOWER_DOMAIN,
     idleTimeoutMs: SESSION_IDLE_TIMEOUT_MS
   });

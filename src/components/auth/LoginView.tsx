@@ -570,7 +570,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     autoComplete="username"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder={`phelane@${towerDomain}`}
+                    placeholder={`pphomane@${towerDomain}`}
                     className="w-full px-3.5 py-2.5 bg-[#141b2e] border border-[#26324d] rounded-xl text-white font-mono text-sm focus:outline-none focus:border-[#f05e17] transition-colors"
                   />
                   <div className="text-[11px] text-slate-500">

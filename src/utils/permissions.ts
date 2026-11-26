@@ -1,9 +1,9 @@
 import type { DepartmentName, PermissionTabId, TeamMember } from '../types';
 
 export const TOWER_DOMAIN = 'tconnect.tower';
-export const SUPER_ADMIN_NAME = 'Phelane Phoma';
-export const SUPER_ADMIN_USERNAME = 'phelane';
-export const SUPER_ADMIN_EMAIL = `phelane@${TOWER_DOMAIN}`;
+export const SUPER_ADMIN_NAME = 'Phelane Phomane';
+export const SUPER_ADMIN_USERNAME = 'pphomane';
+export const SUPER_ADMIN_EMAIL = `pphomane@${TOWER_DOMAIN}`;
 export const SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours strict inactivity timeout
 
 export interface PermissionTabDefinition {
