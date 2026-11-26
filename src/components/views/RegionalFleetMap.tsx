@@ -80,9 +80,13 @@ function resolveRouterDistrict(r: RouterDevice): LesothoDistrict {
   if (r.district && LESOTHO_DISTRICTS.includes(r.district)) {
     return r.district;
   }
-  const haystack = `${r.siteName || ''} ${r.physicalAddress || ''} ${r.name || ''}`.toLowerCase();
+  const haystack = `${r.siteName || ''} ${r.physicalAddress || ''} ${r.name || ''}`
+    .toLowerCase()
+    .replace(/[-']/g, ' ')
+    .replace(/\s+/g, ' ');
   for (const dist of LESOTHO_DISTRICTS) {
-    if (haystack.includes(dist.toLowerCase())) {
+    const normDist = dist.toLowerCase().replace(/[-']/g, ' ').replace(/\s+/g, ' ');
+    if (haystack.includes(normDist)) {
       return dist;
     }
   }
@@ -99,13 +103,16 @@ function resolveVenueCoordinates(
 ): { lat: number; lng: number } {
   const gpsLat = Number(r.gpsTelemetry?.latitude);
   const gpsLng = Number(r.gpsTelemetry?.longitude);
+  const isDefaultMaseruSeed =
+    Math.abs(gpsLat - -29.3151) < 0.0005 && Math.abs(gpsLng - 27.4869) < 0.0005;
   const isValidLesothoGps =
     Number.isFinite(gpsLat) &&
     Number.isFinite(gpsLng) &&
     gpsLat <= -28.4 &&
     gpsLat >= -30.8 &&
     gpsLng >= 26.8 &&
-    gpsLng <= 29.7;
+    gpsLng <= 29.7 &&
+    !(isDefaultMaseruSeed && district !== 'Maseru');
 
   if (isValidLesothoGps) {
     return { lat: gpsLat, lng: gpsLng };
@@ -113,27 +120,35 @@ function resolveVenueCoordinates(
 
   const haystack = `${r.siteName || ''} ${r.physicalAddress || ''} ${r.name || ''}`.toLowerCase();
 
-  // Accurate known Lesotho landmarks
+  // Start at the router's actual Lesotho district center
   let baseLat = DISTRICT_COORDS[district].lat;
   let baseLng = DISTRICT_COORDS[district].lng;
 
-  if (haystack.includes('golf') || haystack.includes('maseru gc') || haystack.includes('clubhouse')) {
-    // Maseru Golf Course Clubhouse
-    baseLat = -29.3182;
-    baseLng = 27.4786;
-  } else if (haystack.includes('setsoto') || haystack.includes('stadium')) {
-    baseLat = -29.3195;
-    baseLng = 27.4981;
-  } else if (haystack.includes('pionier') || haystack.includes('pioneer')) {
-    baseLat = -29.3147;
-    baseLng = 27.4754;
-  } else if (haystack.includes('mall')) {
-    baseLat = -29.314;
-    baseLng = 27.4865;
-  } else if (haystack.includes('bus') || haystack.includes('terminal')) {
-    baseLat = -29.3133;
-    baseLng = 27.4938;
-  } else if (haystack.includes('maputsoe')) {
+  // Apply Maseru-specific landmark anchors ONLY when the router is actually in Maseru
+  if (district === 'Maseru') {
+    if (haystack.includes('golf') || haystack.includes('maseru gc') || haystack.includes('clubhouse')) {
+      baseLat = -29.3182;
+      baseLng = 27.4786;
+    } else if (haystack.includes('setsoto') || haystack.includes('stadium')) {
+      baseLat = -29.3195;
+      baseLng = 27.4981;
+    } else if (haystack.includes('pionier') || haystack.includes('pioneer')) {
+      baseLat = -29.3147;
+      baseLng = 27.4754;
+    } else if (haystack.includes('mall')) {
+      baseLat = -29.314;
+      baseLng = 27.4865;
+    } else if (haystack.includes('bus') || haystack.includes('terminal')) {
+      baseLat = -29.3133;
+      baseLng = 27.4938;
+    }
+  } else if (district === 'Butha-Buthe') {
+    if (haystack.includes('bus') || haystack.includes('stop') || haystack.includes('sss')) {
+      // Butha-Buthe Town / Bus Stop area
+      baseLat = -28.7666;
+      baseLng = 28.2494;
+    }
+  } else if (district === 'Leribe' && haystack.includes('maputsoe')) {
     baseLat = -28.8866;
     baseLng = 27.8992;
   }

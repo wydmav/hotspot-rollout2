@@ -1622,6 +1622,15 @@ class StorageService {
     });
 
     this.saveState();
+
+    // Persist vertical scope change to the live Control Tower backend so Splash Sync uses the new scope
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      fetch(`/api/devices/${encodeURIComponent(routerId)}/vertical`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vertical })
+      }).catch(() => {});
+    }
   }
 
   // ---------------------------------------------------------------------------

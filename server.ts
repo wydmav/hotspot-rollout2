@@ -1440,9 +1440,17 @@ function resolveControllerBaseUrl(host?: string, protocol?: string): string {
   return `${cleanProto}://${rawHost}`;
 }
 
+function resolveScopedPortalConfig(allConfigs: Record<string, any>, rawScope?: string): any {
+  const key = String(rawScope || 'hotspot').trim().toLowerCase();
+  if (allConfigs[key]) return allConfigs[key];
+  if (key === 'village' && allConfigs.community) return allConfigs.community;
+  if (key === 'community' && allConfigs.village) return allConfigs.village;
+  return allConfigs.hotspot || {};
+}
+
 function compileRouterSplashHtml(host: string, protocol: string, scope = 'hotspot', routerId?: string): string {
   const allConfigs = loadSavedPortalConfigs();
-  const cfg = allConfigs[scope] || allConfigs['hotspot'] || {};
+  const cfg = resolveScopedPortalConfig(allConfigs, scope);
   const baseUrl = resolveControllerBaseUrl(host, protocol);
 
   const matchedRouter = routerId
@@ -2678,7 +2686,7 @@ app.get('/api/portal/cna-close', (req: Request, res: Response) => {
 
   const scopeKey = String(req.query.scope || 'hotspot').toLowerCase();
   const savedCfgs = loadSavedPortalConfigs();
-  const scopeCfg = savedCfgs[scopeKey] || savedCfgs.hotspot || {};
+  const scopeCfg = resolveScopedPortalConfig(savedCfgs, scopeKey);
   const cnaBtnBg = sanitizeHexColor(scopeCfg.freeButtonColor || scopeCfg.accentColor, '#f05e17');
   const cnaBtnFg = sanitizeHexColor(scopeCfg.freeButtonTextColor, '#ffffff');
 
@@ -2737,7 +2745,7 @@ function compileVideoAdHtml(host: string, protocol: string, scope = 'hotspot', _
   const cnaCloseUrl = `${baseUrl}/api/portal/cna-close?scope=${encodeURIComponent(scope)}&dest=${encodeURIComponent('https://www.google.com')}`;
   const sponsorCfg: any = serverStore.sponsorAd || {};
   const savedCfgs = loadSavedPortalConfigs();
-  const scopeCfg = savedCfgs[String(scope || 'hotspot').toLowerCase()] || savedCfgs.hotspot || {};
+  const scopeCfg = resolveScopedPortalConfig(savedCfgs, scope);
   const adBtnBg = sanitizeHexColor(scopeCfg.freeButtonColor || scopeCfg.accentColor, '#f05e17');
   const adBtnFg = sanitizeHexColor(scopeCfg.freeButtonTextColor, '#ffffff');
   const proceedActionMode = sponsorCfg.proceedActionMode || 'close_portal';
@@ -7424,7 +7432,7 @@ app.post('/api/portal/config', requireAdminAuth(['Owner', 'Super Admin', 'Admin'
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
       const shouldSyncRouter = Boolean(applyToAllRouters || syncPlansAcrossAllScopes || !scope || isSameScope(rScope, targetScope));
       if (shouldSyncRouter) {
-        const scopedCfg = existing[rScope] || activeCfg;
+        const scopedCfg = resolveScopedPortalConfig(existing, rScope) || activeCfg;
         // Preserve each router's individual mode when modeOverride is true or when only syncing plans across all scopes
         const hasOverride = Boolean((router as any).modeOverride);
         const keepRouterMode =
@@ -7517,7 +7525,7 @@ app.post('/api/portal/sync-splash-safe', requireAdminAuth(['Owner', 'Super Admin
 
     for (const router of monitoredRouters.values()) {
       const rScope = String(router.vertical || 'hotspot').toLowerCase();
-      const scopeCfg = savedConfigs[rScope] || savedConfigs.hotspot || {};
+      const scopeCfg = resolveScopedPortalConfig(savedConfigs, rScope);
       const isRouterFree = router.accessMode
         ? router.accessMode !== 'PAID_ONLY'
         : Boolean(scopeCfg.allowFreeAccess);
@@ -10265,6 +10273,63 @@ app.get('/api/devices/:routerId/access-policy', (req: Request, res: Response) =>
   });
 });
 
+app.post('/api/devices/:routerId/vertical', requireAdminAuth(['Owner', 'Super Admin', 'Admin', 'Tech', 'Technical'], 'fleet'), (req: Request, res: Response) => {
+  const routerId = req.params.routerId;
+  const rawVertical = String(req.body?.vertical || '').trim().toLowerCase();
+  const allowedVerticals = ['hotspot', 'community', 'village', 'bus', 'stadium', 'park'];
+  if (!allowedVerticals.includes(rawVertical)) {
+    return res.status(400).json({ success: false, message: 'Invalid vertical scope.' });
+  }
+  const normalizedVertical = rawVertical === 'village' ? 'village' : rawVertical;
+  const router = monitoredRouters.get(routerId);
+  if (!router) {
+    return res.status(404).json({ success: false, message: 'Router not found on server.' });
+  }
+  const oldVertical = router.vertical || 'hotspot';
+  router.vertical = normalizedVertical as any;
+
+  // Queue zero-disconnect splash HTML refresh for the new vertical scope
+  const host = req.get('host') || '169.58.98.92:3000';
+  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const portalBaseUrl = resolveControllerBaseUrl(host, protocol);
+  const loginUrl = `${portalBaseUrl}/api/portal/router-login/${encodeURIComponent(normalizedVertical)}/${encodeURIComponent(router.id)}.html`;
+  const aloginUrl = `${portalBaseUrl}/api/portal/router-alogin/${encodeURIComponent(normalizedVertical)}.html`;
+  const splashRefreshCmds = [
+    `:do { /tool fetch url="${loginUrl}" dst-path="hotspot/login.html" mode=http check-certificate=no } on-error={}`,
+    `:do { /tool fetch url="${loginUrl}" dst-path="flash/hotspot/login.html" mode=http check-certificate=no } on-error={}`,
+    `:do { /tool fetch url="${aloginUrl}" dst-path="hotspot/alogin.html" mode=http check-certificate=no } on-error={}`,
+    `:do { /tool fetch url="${aloginUrl}" dst-path="flash/hotspot/alogin.html" mode=http check-certificate=no } on-error={}`
+  ];
+  router.pendingCommands = Array.isArray(router.pendingCommands)
+    ? [...router.pendingCommands, ...splashRefreshCmds]
+    : splashRefreshCmds;
+  router.policyLastSyncedAt = new Date().toISOString();
+  persistMonitoredRoutersToStore();
+
+  const adminUser = (req as any).adminUser as AdminSessionPayload | undefined;
+  recordServerAudit({
+    actor: adminUser?.name || 'Admin',
+    actorEmail: adminUser?.email || '',
+    actorDepartment: adminUser?.department || adminUser?.role || '',
+    role: adminUser?.role || 'Admin',
+    category: 'router_config',
+    action: 'router.vertical_update',
+    target: router.name,
+    routerId: router.id,
+    routerName: router.name,
+    details: `Updated router vertical scope from "${oldVertical}" to "${normalizedVertical}" and queued zero-disconnect splash refresh.`,
+    severity: 'info',
+    ipAddress: req.ip || '127.0.0.1'
+  });
+
+  return res.json({
+    success: true,
+    routerId: router.id,
+    vertical: router.vertical,
+    message: `Updated "${router.name}" vertical scope to "${normalizedVertical}" and queued safe splash refresh.`
+  });
+});
+
 app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, next) => {
   const routerId = req.params.routerId;
   if (routerId === 'fleet') return next();
@@ -10309,7 +10374,7 @@ app.post('/api/devices/:routerId/access-policy', (req: Request, res: Response, n
 
   const savedConfigs = loadSavedPortalConfigs();
   const routerScope = String(router?.vertical || clientRouter?.vertical || 'hotspot').toLowerCase();
-  const scopedCfg = savedConfigs[routerScope] || savedConfigs.hotspot || {};
+  const scopedCfg = resolveScopedPortalConfig(savedConfigs, routerScope);
   const rawMode = accessMode || accessPolicy || (typeof freeModeEnabled === 'boolean' ? (freeModeEnabled ? 'COMPLETELY_FREE' : 'PAID_ONLY') : undefined);
   const validMode = rawMode === 'COMPLETELY_FREE' || rawMode === 'FREE_TRIAL_AND_PAID' ? 'COMPLETELY_FREE' : 'PAID_ONLY';
   const duration = Number(freeDurationMinutes) || 30;

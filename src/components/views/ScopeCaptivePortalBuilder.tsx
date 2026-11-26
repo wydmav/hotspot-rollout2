@@ -1003,7 +1003,9 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
       const rid = previewClientGroupId.replace('router:', '');
       return routers.find((r) => r.id === rid);
     }
-    return routers.find((r) => r.vertical === selectedScope) || routers[0];
+    const matchesScope = (v: string, sc: string) =>
+      v === sc || ((v === 'village' || v === 'community') && (sc === 'village' || sc === 'community'));
+    return routers.find((r) => matchesScope(String(r.vertical || ''), String(selectedScope))) || routers[0];
   }, [previewClientGroupId, routers, selectedScope]);
 
   // Strictly Binary Mode Flags: Either FREE MODE or PAID MODE
@@ -1920,8 +1922,10 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
     enterPostAuthAdOrUsage();
   };
 
-  // Router count for this scope
-  const scopeRouters = routers.filter((r) => r.vertical === selectedScope);
+  // Router count for this scope (treats 'village' and 'community' identically)
+  const matchesVerticalScope = (v: string | undefined, sc: string) =>
+    v === sc || ((v === 'village' || v === 'community') && (sc === 'village' || sc === 'community'));
+  const scopeRouters = routers.filter((r) => matchesVerticalScope(r.vertical, selectedScope));
 
   const activeMeta = SCOPE_LIST.find((s) => s.id === selectedScope)!;
   const currentWallpapers = SCOPE_WALLPAPERS[selectedScope];
@@ -1984,7 +1988,7 @@ export const ScopeCaptivePortalBuilder: React.FC<ScopeCaptivePortalBuilderProps>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 font-mono text-xs">
           {SCOPE_LIST.map((scope) => {
             const isSelected = selectedScope === scope.id;
-            const rCount = routers.filter((r) => r.vertical === scope.id).length;
+            const rCount = routers.filter((r) => matchesVerticalScope(r.vertical, scope.id)).length;
             const scopeConf = scopeConfigs[scope.id];
             const activePlansCount = scopeConf.plans.filter((p) => p.enabled).length;
 
